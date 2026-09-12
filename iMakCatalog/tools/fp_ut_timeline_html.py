@@ -80,9 +80,19 @@ def build() -> tuple[str, int]:
         for a in by_year[year]:
             d = a.get("detail") or {}
             items = d.get("アイテム例") or d.get("価格") or ""
+            # 写真1枚ごとの説明文 (`fashion_press_gallery.py` が取ったもの)。
+            # 本文の写真より数が多く、古い記事でも「メンズ Tシャツ 1,990円」まで分かる
+            caps = {v.get("img"): v.get("caption", "")
+                    for v in (a.get("photo_captions") or {}).values() if v.get("img")}
             figs = a.get("figures") or []
-            if not figs:   # 本文に写真が無い古い記事は写真一覧から
-                figs = [{"url": u, "caption": ""} for u in (a.get("photos") or [])[:12]]
+            seen = {f["url"] for f in figs}
+            for u in (a.get("photos") or []):
+                if u not in seen:
+                    figs.append({"url": u, "caption": caps.get(u, "")})
+                    seen.add(u)
+            for f in figs:                     # 本文側に説明文が無ければ写真ページの物を使う
+                if not f.get("caption"):
+                    f["caption"] = caps.get(f["url"], "")
             local = a.get("images_local") or {}
 
             def src(u: str) -> str:
