@@ -258,3 +258,13 @@
 - 決定: ① 重複くんに append_row(s) 皆無・書込は単一セル(D4/AI35/AJ36/ヘッダ)のみで N(14)跨ぎ無し=事故経路なし。② HQ の源流test を worktree用に移植し将来混入を防止
 - 変更: tests/test_no_wide_write_over_n_column.py 新規 (HIGH19kj8Nq/LOW1jF9vgg 走査、N跨ぎliteralレンジ+append_row(s)を落とす、自己テスト付)。回答 2026-09-09_sheet_append_must_not_touch_n_column_response.md
 - 検証: grep で append 0件・書込全て rowcol_to_a1 単一セル確認。新規test 3 passed (現状違反ゼロ=preventive)
+
+---
+
+## 2026-09-12
+
+### UT (UNIQLO/GU Tシャツ) を入稿CSV 3列から KEY 化 (依頼 [IMPLEMENT-GO])
+
+- 決定: UT は1点もので catalog product_id 無しだが、入稿CSV の C:Model/C:Color/C:Size から出品くんと同一 KEY を生成できる。eBay category 15687/53159 の行を short-circuit で uniqlo_ut:<6桁>:<COLOR>:<SIZE> 化
+- 変更: dedupe/resolver_io.py (_ut_key_from_csv_row + resolve_csv_row/_with_category 短絡) / tests/test_ut_key_from_csv.py 新規13件 (実例 480691:BLUE:2XL / 486159:WHITE:L pin)。commit 3992e2b
+- 検証: UT13 + 全 476 passed。3列揃わない/対象外カテゴリは "" で素通り (fail-closed)。KEY形は出品くん ut_catalog_values と同形を複製 (越境importでなくpin test)。回答2件 + HQ skip gate撤去の合図済
