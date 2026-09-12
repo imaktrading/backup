@@ -1111,6 +1111,40 @@ def _select_stale_scraper_pids(procs, profile_dirs, self_pid: int = 0) -> list:
     return out
 
 
+def _parse_process_json(text: str) -> list:
+    """PowerShell の ConvertTo-Json (プロセス一覧) を読む。
+
+    ★ 2026-09-13: 他のプロセス 1 つのコマンドラインに不正なエスケープが混じっただけで
+      json.loads が失敗し、orphan chrome の掃除が丸ごと skip されていた
+      (09-12 19:44 の HIGH 巡回: 掃除 skip → Mercari driver が起動直後から繋がらず
+      タイムアウト連発 → 2,776 行中 2,195 行で 6h の実行上限に達して記録なしで消滅、
+      取下げ 9 件が eBay で最大 11h 買える状態のまま残った)。
+      不正なエスケープは「バックスラッシュという文字」として読む (= その 1 件の表記が崩れるだけで、一覧全体は捨てない)。
+    """
+    text = (text or "").strip() or "[]"
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        bs = chr(92)
+        valid_next = set('"/bfnrtu') | {bs}
+        out, i, n = [], 0, len(text)
+        while i < n:
+            ch = text[i]
+            if ch == bs:
+                nxt = text[i + 1] if i + 1 < n else ""
+                if nxt and nxt in valid_next:
+                    out.append(ch + nxt)
+                    i += 2
+                    continue
+                out.append(bs + bs)          # 不正なエスケープ → バックスラッシュ文字として読む
+                i += 1
+                continue
+            out.append(ch)
+            i += 1
+        data = json.loads("".join(out))
+    return [data] if isinstance(data, dict) else list(data)
+
+
 def _kill_stale_scraper_chrome(log=print) -> None:
     """自分の scraper が残した orphan chrome / driver だけを kill (clean slate).
 
@@ -1128,9 +1162,7 @@ def _kill_stale_scraper_chrome(log=print) -> None:
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        procs = json.loads((r.stdout or "").strip() or "[]")
-        if isinstance(procs, dict):
-            procs = [procs]
+        procs = _parse_process_json(r.stdout)
         pids = _select_stale_scraper_pids(procs, _own_profile_dirs(), self_pid=os.getpid())
         if not pids:
             log("  [cleanup] orphan chrome/driver なし (自分の profile 配下のみ対象)")

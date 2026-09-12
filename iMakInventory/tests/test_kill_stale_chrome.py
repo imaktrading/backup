@@ -138,3 +138,26 @@ def test_exception_is_swallowed(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", boom)
     ml._kill_stale_scraper_chrome(log=lambda *a: None)
+
+
+def test_process_list_survives_one_bad_escape():
+    """★ 2026-09-13: 他プロセス 1 件の不正エスケープで 一覧全体を捨てない.
+
+    実害: 09-12 19:44 の HIGH 巡回で JSONDecodeError → orphan chrome の掃除が skip →
+    Mercari driver が繋がらずタイムアウト連発 → 6h 上限で記録なしに消滅。
+    """
+    import monitor_listings as m
+    bs = chr(92)
+    good = '{"ProcessId":10,"ParentProcessId":1,"Name":"chrome.exe","CommandLine":"chrome --x"}'
+    bad = ('{"ProcessId":11,"ParentProcessId":1,"Name":"other.exe","CommandLine":"C:'
+           + bs + 'q' + bs + 'data"}')                      # \q は JSON として不正
+    text = "[" + good + "," + bad + "]"
+    procs = m._parse_process_json(text)
+    assert [p["ProcessId"] for p in procs] == [10, 11]
+    assert procs[0]["Name"] == "chrome.exe"
+
+
+def test_process_list_single_object_and_empty():
+    import monitor_listings as m
+    assert m._parse_process_json('{"ProcessId": 5}') == [{"ProcessId": 5}]
+    assert m._parse_process_json("") == []
