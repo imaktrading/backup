@@ -369,7 +369,12 @@ def search(limit=None, sold_out=False):
             drv.quit()
         except Exception:                                      # noqa: BLE001
             pass
-    save_cache(cache)
+    # ★2026-09-13: ここは `save_cache(cache)` で **置き場を指定していなかった**。
+    #   既定は補URL用なので、再仕入れの探索 (sold_out=True) を回すたびに
+    #   **補URL用のキャッシュが丸ごと上書き**され、中身が全部「売り切れた行」になっていた。
+    #   補URL の目視 (`confirm`) は出品中の行しか見ないので、**毎回 0件**。
+    #   実測 2026-09-13: 補URL用 36件が全部 売切の行 / 目視できる UT 0件。
+    save_cache(cache, _cache_path(sold_out))
     print(f"\n✅ 候補 {found}本 をキャッシュに貯めました → 目視は `confirm`")
     return found
 
