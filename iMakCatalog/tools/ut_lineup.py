@@ -107,6 +107,35 @@ def main() -> None:
               f"→ 網羅 {(stat['catalog_full'] + stat['catalog_images']) / ut_total:.0%}")
         print(f"  (中身まである物だけなら {stat['catalog_full'] / ut_total:.0%})")
     print(f"\n  {OUT}")
+    # ---- 柄の段: 品番が残っていない物も分母に入れる (Fashion Press / ブログの記事 = その時のラインナップ)
+    coll = {}
+    gap = DATA / "fashion_press/ut_gap.json"
+    if gap.exists():
+        for nid, v in json.loads(gap.read_text(encoding="utf-8")).items():
+            coll[f"FP{nid}"] = {"source": "Fashion Press", "title": v.get("title", ""),
+                                "date": v.get("published", ""), "designs": v.get("article_patterns"),
+                                "in_catalog": v.get("catalog_count", 0),
+                                "pids": v.get("catalog_pids", [])}
+    blog = DATA / "uniqlo_blog_lineup.json"
+    if blog.exists():
+        for nid, v in json.loads(blog.read_text(encoding="utf-8")).items():
+            if v.get("ut"):
+                coll[f"BLOG{nid}"] = {"source": "ブログ", "title": v.get("title", ""), "date": "",
+                                      "designs": len(v["ut"]), "in_catalog": len(v["in_catalog"]),
+                                      "pids": v["in_catalog"]}
+    (DATA / "ut_lineup_collabs.json").write_text(
+        json.dumps(coll, ensure_ascii=False, indent=1), encoding="utf-8")
+    known = [v for v in coll.values() if v["designs"]]
+    d_have = sum(min(v["in_catalog"], v["designs"]) for v in known)
+    d_want = sum(v["designs"] for v in known)
+    print(f"\n=== 柄の段 (品番が無い物も含む) — 記事 {len(coll)}本 ===")
+    if d_want:
+        print(f"  柄数が分かる {len(known)}本: {d_want}柄 中 catalog {d_have}柄 → 網羅 {d_have / d_want:.0%}")
+    zero = [v for v in coll.values() if v["in_catalog"] == 0]
+    print(f"  catalog 0件の記事 {len(zero)}本 (= 丸ごと抜けているコラボ)")
+    for v in sorted(zero, key=lambda v: v["date"], reverse=True)[:10]:
+        print(f"    {v['date'] or '     '}  {v['title'][:44]}")
+
     miss = [(p, v) for p, v in out.items() if v["status"] == "no_material"]
     print(f"\n[材料が残っていない {len(miss)}件 の出所内訳]")
     c2 = Counter(tuple(v["sources"]) for _, v in miss)
