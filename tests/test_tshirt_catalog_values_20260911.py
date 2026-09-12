@@ -257,6 +257,23 @@ class TestGraniphTitle:
             B.build_title(self._p(ip="架空の作品"))
 
 
+class TestDecisionStopsListing:
+    """★2026-09-12: 目視で「対象外」「一致・見送り」にした行は出さない
+    (まとめ売り・中古・今回は買わない と決めた物を AI の推測で出さない)."""
+
+    def test_decision_for(self):
+        led = {"https://a": {"decision": "out"}, "https://b": {"decision": "go"}}
+        assert V.decision_for("https://a", led) == "out"
+        assert V.decision_for("https://b", led) == "go"
+        assert V.decision_for("https://zzz", led) == ""
+
+    def test_listing_skips_them(self):
+        src = (_ROOT / "iMakMercari" / "tshirt_listing.py").read_text(encoding="utf-8")
+        i = src.index("_dec = UCV.decision_for(")
+        body = src[i:i + 300]
+        assert '("skip", "out")' in body and "continue" in body
+
+
 class TestNoDuplicateListing:
     """★2026-09-12「補の概念とか重複出品とか PSA と同じ運用にするんだよ」(設計 iMakHQ/UT_FLOW.md).
 

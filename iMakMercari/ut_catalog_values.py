@@ -335,6 +335,12 @@ def load_product(product_id, db=DB_PATH):
     return {"category": r[0], "product_id": r[1], "name": r[2] or "", "specs": specs}
 
 
+def decision_for(url, ledger=None):
+    """その仕入元URLの目視の結論 ("go"/"skip"/"out"/"nocat")。まだなら ""。純関数寄り。"""
+    led = ledger if ledger is not None else load_ledger()
+    return ((led.get((url or "").strip()) or {}).get("decision") or "")
+
+
 def values_for_url(url, size_text, ledger=None, title=""):
     """その仕入元URLが目視で特定済みなら、写す値 (dict)。特定されていなければ None。
 

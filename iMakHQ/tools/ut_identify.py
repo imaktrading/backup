@@ -333,6 +333,31 @@ def pending_rows(src, decided, in_high, today=None):
     return out
 
 
+def sheet_pending_rows(rows2d, decided, today=None):
+    """商品管理シートの **まだ出していない Tシャツ行** → 目視に出す行 [(行番号, row)]。純関数。
+
+    ★2026-09-12 ユーザー「残36件も目視を終えたいね」。中間タブに来る前から
+      シートに入っている行 (前の運用で入れた分) も、同じ画面で特定する。
+      **仕入元が売り切れた行も出す**: 何の商品かが分かれば資産になり、仕入元は後で探し直せる
+      (PSA の「ページが消えていてもカードが分かるなら候補にする」と同じ)。
+      出さない: B列に itemID (出品済み) / 台帳で決着済み。
+    """
+    out = []
+    for i, r in enumerate(rows2d[1:], start=2):
+        r = list(r) + [""] * (_WIDTH - len(r))
+        if (r[C_CAT] or "").strip() != SHEET_CATEGORY:
+            continue
+        if (r[1] or "").strip():
+            continue                      # 出品済み
+        url = (r[C_URL] or "").strip()
+        if not url.startswith("http"):
+            continue
+        if url in decided and not _retry_nocat(decided.get(url), today):
+            continue
+        out.append((i, r))
+    return out
+
+
 def high_row(r, color_jp=""):
     """中間タブの行 → 商品管理シートに足す行 (A..T)。純関数。
 
@@ -636,6 +661,9 @@ def build_html(items, catalog):
             f"<div class='t'>{_html.escape((r[C_TITLE] or '')[:110])}</div>"
             f"<div class='meta'>{_html.escape(price)} ｜ 色 {_html.escape(r[C_COLOR] or '?')} ｜ "
             f"サイズ {_html.escape(r[C_SIZE] or '?')}"
+            + (" ｜ <b>出品待ちの行</b>" if it.get("src") == "sheet" else "")
+            + (" ｜ <b style='color:#a40'>仕入元は売り切れ済み</b> (商品が分かれば後で探し直せる)"
+               if (r[C_SOLD] or "").strip() else "")
             + (f" ｜ 見つけた語 <b>{_html.escape(r[C_KW])}</b>" if r[C_KW] else "")
             + (f" ｜ タグの番号 <b>{_html.escape(r[C_TAG])}</b>" if r[C_TAG] else "")
             + f" ｜ {_html.escape((r[C_DESC] or '')[:80])}</div>"
@@ -761,17 +789,29 @@ def _read_src():
     return sheet_io.read_tab(SRC_TAB, sheet_id=MID_SHEET)
 
 
-def _high_urls():
+SHEET_IDX_BASE = 1000000     # 画面の通し番号: 中間タブ = 行番号 / 商品管理シート = これ + 行番号
+
+
+def _product_values():
     import sheet_io
-    return {u.strip() for u in sheet_io._product_ws().col_values(C_URL + 1)[1:] if u.strip()}
+    return sheet_io._product_ws().get_all_values()
+
+
+def _high_urls(rows2d=None):
+    rows2d = rows2d if rows2d is not None else _product_values()
+    return {(r[C_URL] or "").strip() for r in rows2d[1:] if (r[C_URL] or "").strip()}
 
 
 def load_items(limit=DEFAULT_LIMIT):
-    src = _read_src()
-    rows = pending_rows(src, load_ledger(), _high_urls())
+    led = load_ledger()
+    prod = _product_values()
+    # ★2026-09-12: 中間タブ (抽出くんが集めた分) と 商品管理シートの **まだ出していない Tシャツ行**
+    #   (前の運用で入った分) の両方を目視に出す
+    rows = [(i, r, "tab") for i, r in pending_rows(_read_src(), led, _high_urls(prod))]
+    rows += [(SHEET_IDX_BASE + i, r, "sheet") for i, r in sheet_pending_rows(prod, led)]
     catalog = load_catalog()
     items = []
-    for i, r in rows[:limit] if limit else rows:
+    for i, r, _src in rows[:limit] if limit else rows:
         text = " ".join([r[C_TITLE], r[C_DESC]])
         allc = rank_candidates(text, r[C_COLOR], catalog, hint_kw=r[C_KW], tag_no=r[C_TAG],
                                limit=0)
@@ -780,7 +820,7 @@ def load_items(limit=DEFAULT_LIMIT):
         # ★2026-09-12 ユーザー「公式で買えないものだけに対象を絞ってほしい」:
         #   公式で今買える商品は、メルカリから仕入れて出す物ではない (目的は「公式では買えない物」)
         oos = [p for p in keep if p.get("sold_out")]
-        items.append({"idx": i, "row": r, "cands": oos[:MAX_CANDS],
+        items.append({"idx": i, "row": r, "src": _src, "cands": oos[:MAX_CANDS],
                       "hidden_color": len(allc) - len(keep),
                       "hidden_instock": len(keep) - len(oos),
                       "warn": tag_conflict(r[C_TAG], r[C_KW], catalog)})
@@ -790,7 +830,9 @@ def load_items(limit=DEFAULT_LIMIT):
 def count_workload():
     """パネルの残件 (出品くんは叩かない。スプシ2つとローカルの台帳だけ)。"""
     try:
-        return {"pending": len(pending_rows(_read_src(), load_ledger(), _high_urls())), "error": ""}
+        led, prod = load_ledger(), _product_values()
+        n = len(pending_rows(_read_src(), led, _high_urls(prod))) + len(sheet_pending_rows(prod, led))
+        return {"pending": n, "error": ""}
     except Exception as e:                                         # noqa: BLE001
         return {"pending": 0, "error": f"{type(e).__name__}: {e}"[:60]}
 
@@ -814,7 +856,8 @@ def save(items, res, now=None):
             continue                                   # 画面に無い行 / カタログに無い pid は書かない
         r = it["row"]
         url = r[C_URL].strip()
-        if url not in in_high:
+        # 商品管理シートから出した行は、もうシートに在る = 足さない (二重行を作らない)
+        if it.get("src") != "sheet" and url not in in_high:
             add_rows.append(high_row(r))
             in_high.add(url)
         # サイズ欄が空の出品はタイトルから読む (決められない時は空のまま = 出品側で止まる)

@@ -700,6 +700,13 @@ def main():
         print(f"[{idx+1}/{len(targets)}] {title_jp[:50]}")
         print(f"    URL: {target['url']}")
 
+        # ★2026-09-12: 目視で「対象外」「一致・見送り」にした行は出さない
+        #   (まとめ売り・中古・今回は買わない と決めた物を、AI の推測で出してしまわないため)
+        _dec = UCV.decision_for(target["url"], ut_ledger)
+        if _dec in ("skip", "out"):
+            print(f"    ⏸ 目視で{'見送り' if _dec == 'skip' else '対象外'}にした行 → スキップ")
+            continue
+
         cat_v = None
         try:
             cat_v = UCV.values_for_url(target["url"], target.get("size_text", ""), ut_ledger,

@@ -130,6 +130,39 @@ class TestPending:
         assert got[0][0] == 2                       # シートの行番号
 
 
+class TestSheetRows:
+    """★2026-09-12「残36件も目視を終えたいね」— 商品管理シートの未出品行も目視に出す."""
+
+    def _rows(self):
+        def row(url, itemid="", sold="", cat="Tシャツ"):
+            r = [""] * 36
+            r[0], r[1], r[3], r[17] = url, itemid, sold, cat
+            return r
+        return [[""] * 36,
+                row("https://a"),                       # 出す
+                row("https://b", sold="売り切れ"),        # 出す (商品が分かれば後で探し直せる)
+                row("https://c", itemid="35890000"),     # 出品済み → 出さない
+                row("https://d", cat="PSA TCG"),         # 別商材 → 出さない
+                row("https://e")]                        # 台帳で決着済み → 出さない
+
+    def test_unlisted_rows_are_reviewed(self):
+        got = U.sheet_pending_rows(self._rows(), decided={"https://e": {"decision": "out"}})
+        assert [r[0] for _i, r in got] == ["https://a", "https://b"]
+
+    def test_row_numbers_are_the_sheet_rows(self):
+        got = U.sheet_pending_rows(self._rows(), decided={})
+        assert got[0][0] == 2
+
+    def test_sheet_rows_do_not_create_a_second_row(self, tmp_path, monkeypatch):
+        """既にシートに在る行なので、確定しても行を足さない (二重行を作らない)."""
+        led, sent = TestSave()._setup(tmp_path, monkeypatch)
+        items = [{"idx": U.SHEET_IDX_BASE + 5, "row": _row("https://a"), "src": "sheet", "cands": []}]
+        res = {"picks": [{"idx": U.SHEET_IDX_BASE + 5, "pid": "E1", "color": "WHITE"}],
+               "skips": [], "nocat": [], "outs": [], "holds": []}
+        assert U.save(items, res, now="T") == (0, 1) and sent == []
+        assert json.loads(led.read_text(encoding="utf-8"))["https://a"]["product_id"] == "E1"
+
+
 class TestHighRow:
     def test_copies_only_safe_columns(self):
         """N (数式) / M (監視くんの列) / KEY は書かない。仕入値は F だけ."""
