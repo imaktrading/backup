@@ -67,16 +67,30 @@ def drop_known_dead(urls):
     return keep, drop
 
 
-def verify_alive(urls, verbose=True):
+# ★2026-09-12 ユーザーGO: この確認に **時間の上限**を付ける。
+#   9/08 にこの確認を入れて以降、出品くんの「補URL 自動追記」が **毎回 打ち切られていた**。
+#   外側 (control_panel) の待ち時間は 120秒 のままなのに、中は 1URL あたり 3秒 待って
+#   全件開く作り。9/12 実測で対象 74本 = 5〜8分 かかるので、構造的に終われない。
+#   → 1本も足されないまま「失敗(続行)」で流れていた (仕入元が今ゼロの出品への補充
+#     11本 を含む)。2026-08-19 の「外側が先に殺す」と同じ形。
+#   上限に達したら、残りは **確認せずに通す** (driver が起きない時と同じ fail-open)。
+#   確認できた分だけ得をする形にして、全部を落とさない。
+VERIFY_BUDGET_SEC = 300
+
+
+def verify_alive(urls, verbose=True, budget_sec=VERIFY_BUDGET_SEC, now=None):
     """詳細ページを開いて **今そのまま買えるか**を確かめる (I/O)。
 
     戻り: (生きている, 死んでいる[(url, 理由)])。
-    driver を起こせない / 例外は **落とさない** (fail-open。書込み自体は今までどおり)。
+    driver を起こせない / 例外 / **時間切れ** は落とさない (fail-open。書込みは今までどおり)。
     買えないと分かったURLは台帳に覚えるので、次回は無料で落ちる。
     """
+    import time as _t
+    now = now or _t.monotonic
     urls = list(urls or [])
     if not urls:
         return [], []
+    _t0 = now()
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import mercari_psa_resource as mp
@@ -87,10 +101,16 @@ def verify_alive(urls, verbose=True):
         return urls, []
     alive, dead = [], []
     try:
-        for u in urls:
+        for n, u in enumerate(urls):
+            if now() - _t0 > budget_sec:
+                rest = urls[n:]
+                if verbose:
+                    print(f"  ⏱ 時間切れ ({budget_sec}秒) — 残り {len(rest)}本 は確認せず通します "
+                          f"(確認済 {n}本)。落とすより、補URLが1本も入らない方が危険")
+                alive.extend(rest)
+                break
             try:
                 drv.get(u)
-                import time as _t
                 _t.sleep(3)
                 ok = mp.buyable_from_detail(drv.page_source)
             except Exception as e:                             # noqa: BLE001
@@ -354,7 +374,10 @@ def main():
     # ★2026-09-08: 書く直前に「今 買えるか」を確かめる (死んだURLを補URLに入れない)。
     #   ① 台帳で無料で落とす → ② 残りを詳細ページで確認 (--no-verify で②を無効化)
     if do_write and plan:
-        _cands = sorted({u for v in plan.values() for u in v["add"]})
+        # ★2026-09-12: 時間の上限があるので **危ない順**に確かめる。
+        #   仕入元が今ゼロの出品に足す URL を先に見る (そこが死んでいると、売れても買えない)。
+        _urgent = {u for v in plan.values() if v.get("supply_dead") for u in v["add"]}
+        _cands = sorted(_urgent) + sorted({u for v in plan.values() for u in v["add"]} - _urgent)
         _keep, _known = drop_known_dead(_cands)
         _dead = list(_known)
         if "--no-verify" not in sys.argv:

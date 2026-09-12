@@ -754,10 +754,16 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
     append_log_func("======================================================================\n")
     try:
         hoju = os.path.join(WORKSPACE, "iMakHQ", "tools", "hoju_url_from_dupes.py")
+        # ★2026-09-12 ユーザーGO: ここは timeout=120 だった。9/08 に「書く直前に在庫を確かめる」を
+        #   入れて以降、中は 1URL あたり 3秒 待って全件開くので (9/12 実測 74本 = 5〜8分)、
+        #   **毎回 120秒で打ち切られ、補URLが1本も足されていなかった**。
+        #   仕入元が今ゼロの出品への補充 11本 もまとめて消えていた。
+        #   内側に 300秒 の上限を付けた (`hoju_url_from_dupes.VERIFY_BUDGET_SEC`) ので、
+        #   外はその分 + シート読み書き。8/19 の「売り切れ除外」と同じ直し方。
         r = _run_step(
             [sys.executable, hoju, "--write"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=120, env=env,
+            timeout=420, env=env,
         )
         if r.stdout:
             append_log_func(r.stdout)
