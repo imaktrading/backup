@@ -243,14 +243,58 @@ COL_URL, COL_ITEMID = 0, 1
 COL_AUX_START, AUX_MAX = 28, 5          # AC..AG = 補URL 1..5
 
 
-def identity_key(pid, color_name, size_jp):
+def l1_of(pid):
+    """カタログの商品ID → 公式の商品番号6桁 (E486159-000 → 486159)。純関数。"""
+    m = re.search(r"(\d{6})", pid or "")
+    return m.group(1) if m else ""
+
+
+def identity_key(pid, color_name, size_jp, size_us=""):
     """canonical KEY。**1出品 = 1色1サイズ** なので色とサイズまで入れる (純関数)。
 
-    例: uniqlo_ut:E480691-000:BLUE:3XL
+    例: `uniqlo_ut:486159:WHITE:L`
+
+    ★2026-09-12 ユーザー「仕入元URLの下何桁かと商品番号の組み合わせにするなり、作り出せばいいやろ」:
+      重複くんが **入稿CSVから同じ値を作れる**形にした。CSV には
+      `C:Model`=商品番号6桁 / `C:Color`=色 / `C:Size`=USサイズ が既に入っている。
+      カタログ側 (商品ID・カタログの色名・JPサイズ) から作っても同じ文字列になる。
     """
-    if not (pid and color_name and size_jp):
+    l1 = l1_of(pid) or (pid or "").strip()
+    us = (size_us or JP_TO_US.get((size_jp or "").upper(), "")).upper()
+    if not (l1 and color_name and us):
         return ""
-    return f"uniqlo_ut:{pid}:{color_name.upper()}:{size_jp.upper()}"
+    return f"uniqlo_ut:{l1}:{color_name.upper()}:{us}"
+
+
+def key_from_csv_row(model, color, size):
+    """入稿CSV の1行 (C:Model / C:Color / C:Size) → KEY。重複くんが使うのと同じ作り (純関数)。"""
+    return identity_key(model, color, "", size_us=size)
+
+
+_EBAY_COLOR_CACHE = {}
+
+
+def ebay_color_of(pid, color_name, load=None):
+    """カタログの色名 → 出品に出す色 (eBay の値)。分からなければ元の名前。
+
+    ★カタログは "LIGHT BLUE"、出品に出すのは "Blue" のことがある。KEY は **出品に出す色**で
+      揃える (入稿CSV の C:Color と同じ値でないと、重複くんが同じ KEY を作れない)。
+    """
+    k = (pid, color_name)
+    if k not in _EBAY_COLOR_CACHE:
+        p = (load or load_product)(pid)
+        cv = next((c for c in ((p or {}).get("specs") or {}).get("color_variants") or []
+                   if c.get("name") == color_name), None)
+        _EBAY_COLOR_CACHE[k] = (cv or {}).get("ebay_color") or color_name
+    return _EBAY_COLOR_CACHE[k]
+
+
+def identity_key_of(entry, size_jp="", load=None):
+    """台帳の1件 (商品番号・カタログの色名・サイズ) → KEY。色は出品に出す値に直す。"""
+    e = entry or {}
+    pid = e.get("product_id") or ""
+    color = ebay_color_of(pid, e.get("color") or "", load=load)
+    return identity_key(pid, color, size_jp or jp_size(e.get("size") or ""))
 
 
 def listed_identities(rows2d, ledger):
@@ -265,7 +309,7 @@ def listed_identities(rows2d, ledger):
         e = (ledger or {}).get((r[COL_URL] or "").strip())
         if not e or e.get("decision") != "go":
             continue
-        key = identity_key(e.get("product_id"), e.get("color"), jp_size(e.get("size") or ""))
+        key = identity_key_of(e, jp_size(e.get("size") or ""))
         if not key:
             continue
         aux = [u.strip() for u in r[COL_AUX_START:COL_AUX_START + AUX_MAX] if u.strip()] \

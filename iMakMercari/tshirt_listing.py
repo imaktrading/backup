@@ -717,7 +717,8 @@ def main():
             continue
         if cat_v:
             print(f"    📚 目視で特定済み {cat_v['product_id']} → 色/素材/原産国/サイズ表をカタログから写す")
-            _key = UCV.identity_key(cat_v["product_id"], cat_v["color_name"], cat_v["size_jp"])
+            # KEY は出品に出す値 (CSV の C:Model / C:Color / C:Size) と同じ材料で作る
+            _key = UCV.identity_key(cat_v["product_id"], cat_v["specs"]["Color"], cat_v["size_jp"])
             _live = ut_listed.get(_key) or ut_run.get(_key)
             if _live:
                 # 二重出品にしない。この仕入元は既存の出品の補URLに回す

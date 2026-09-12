@@ -18,9 +18,10 @@ sys.path.insert(0, os.path.join(_HQ, "tools"))
 sys.path.insert(0, r"C:\dev\iMak\iMakMercari")
 import ut_key_backfill as B  # noqa: E402
 
-LED = {"https://a": {"decision": "go", "product_id": "E1", "color": "BLUE", "size": "3XL(4L)"},
-       "https://b": {"decision": "go", "product_id": "E2", "color": "WHITE", "size": ""},
-       "https://c": {"decision": "skip", "product_id": "E3", "color": "WHITE", "size": "M"}}
+# KEY は 商品番号6桁 : 出品に出す色 : US サイズ (入稿CSV の C:Model / C:Color / C:Size と同じ材料)
+LED = {"https://a": {"decision": "go", "product_id": "E480691-000", "color": "BLUE", "size": "3XL(4L)"},
+       "https://b": {"decision": "go", "product_id": "E480692-000", "color": "WHITE", "size": ""},
+       "https://c": {"decision": "skip", "product_id": "E480693-000", "color": "WHITE", "size": "M"}}
 
 
 def _row(url, itemid="", cat="Tシャツ", size="", key="", title="UNIQLO UT"):
@@ -33,7 +34,7 @@ class TestPlan:
     def test_listed_and_identified_gets_a_key(self):
         got = B.plan([[], _row("https://a", "358900000001", size="3XL(4L)")], LED)
         assert got == [{"row": 2, "item_id": "358900000001",
-                        "key": "uniqlo_ut:E1:BLUE:3XL", "title": "UNIQLO UT"}]
+                        "key": "uniqlo_ut:480691:BLUE:2XL", "title": "UNIQLO UT"}]   # JP 3XL = US 2XL
 
     def test_not_listed_yet_is_skipped(self):
         """★出品前の行に KEY を書くと「出品済み」と読まれて二度と出せない (orphan KEY)."""
@@ -45,8 +46,9 @@ class TestPlan:
 
     def test_size_from_title_when_the_column_is_empty(self):
         got = B.plan([[], _row("https://a", "1", size="", title="UNIQLO UT ONE PIECE Tシャツ Mサイズ")],
-                     {"https://a": {"decision": "go", "product_id": "E1", "color": "BLUE", "size": ""}})
-        assert got and got[0]["key"] == "uniqlo_ut:E1:BLUE:M"
+                     {"https://a": {"decision": "go", "product_id": "E480691-000", "color": "BLUE",
+                                    "size": ""}})
+        assert got and got[0]["key"] == "uniqlo_ut:480691:BLUE:S"   # JP M = US S
 
     def test_undecided_size_writes_nothing(self):
         """色・サイズが決まらない行は書かない (重複くんの申し送り)."""

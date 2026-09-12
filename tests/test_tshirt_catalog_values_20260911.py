@@ -279,9 +279,10 @@ class TestNoDuplicateListing:
 
     UT は 1出品 = 1色1サイズ。同じ商品・色・サイズが出品中なら出さず、補URLに回す。
     """
-    LED = {"https://live": {"decision": "go", "product_id": "E1", "color": "BLUE", "size": "3XL(4L)"},
-           "https://new": {"decision": "go", "product_id": "E1", "color": "BLUE", "size": "3XL"},
-           "https://other": {"decision": "go", "product_id": "E1", "color": "BLUE", "size": "M"}}
+    LED = {"https://live": {"decision": "go", "product_id": "E480691-000", "color": "BLUE",
+                            "size": "3XL(4L)"},
+           "https://new": {"decision": "go", "product_id": "E480691-000", "color": "BLUE", "size": "3XL"},
+           "https://other": {"decision": "go", "product_id": "E480691-000", "color": "BLUE", "size": "M"}}
 
     def _rows(self, aux=()):
         hdr = [""] * 33
@@ -294,13 +295,27 @@ class TestNoDuplicateListing:
         return [hdr, live, unlisted]
 
     def test_key_has_color_and_size(self):
-        assert V.identity_key("E1", "blue", "3XL") == "uniqlo_ut:E1:BLUE:3XL"
-        assert V.identity_key("E1", "", "3XL") == ""
+        # ★KEY は入稿CSV から作れる形: 商品番号6桁 / 出品に出す色 / US サイズ
+        assert V.identity_key("E480691-000", "blue", "3XL") == "uniqlo_ut:480691:BLUE:2XL"
+        assert V.identity_key("E480691-000", "", "3XL") == ""
+
+    def test_same_key_from_the_upload_csv(self):
+        """★2026-09-12: 重複くんが CSV の C:Model / C:Color / C:Size から同じ値を作れる."""
+        assert V.key_from_csv_row("480691", "Blue", "2XL") == "uniqlo_ut:480691:BLUE:2XL"
+        assert V.key_from_csv_row("", "Blue", "2XL") == ""
+        assert V.key_from_csv_row("480691", "Blue", "") == ""
+
+    def test_catalog_color_is_converted_to_the_listed_color(self):
+        """カタログは LIGHT BLUE、出品に出すのは Blue。KEY は出品側に揃える."""
+        p = {"specs": {"color_variants": [{"name": "LIGHT BLUE", "ebay_color": "Blue"}]}}
+        got = V.identity_key_of({"product_id": "E480691-000", "color": "LIGHT BLUE", "size": "3XL"},
+                                load=lambda pid, db=None: p)
+        assert got == "uniqlo_ut:480691:BLUE:2XL"
 
     def test_listed_identity_is_found(self):
         got = V.listed_identities(self._rows(), self.LED)
-        assert list(got) == ["uniqlo_ut:E1:BLUE:3XL"]
-        assert got["uniqlo_ut:E1:BLUE:3XL"]["row"] == 2      # シートの行番号
+        assert list(got) == ["uniqlo_ut:480691:BLUE:2XL"]
+        assert got["uniqlo_ut:480691:BLUE:2XL"]["row"] == 2      # シートの行番号
 
     def test_unlisted_rows_are_not_counted(self):
         """B列が空 = まだ出していない → 止める相手にしない."""

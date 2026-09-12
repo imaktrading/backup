@@ -51,7 +51,7 @@ def plan(rows2d, ledger):
             continue
         size = V.jp_size((r[COL_SIZE] if len(r) > COL_SIZE else "") or e.get("size") or
                          (r[2] if len(r) > 2 else ""))
-        key = V.identity_key(e.get("product_id"), e.get("color"), size)
+        key = V.identity_key_of(e, size)
         if not key:
             continue                                   # 色・サイズが決まらない = 書かない
         out.append({"row": i, "item_id": iid, "key": key,
