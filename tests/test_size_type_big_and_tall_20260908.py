@@ -27,9 +27,25 @@ def test_smaller_sizes_stay_regular():
         assert L.size_type_for(s, "Men") == "Regular", s
 
 
-def test_non_men_is_regular():
-    assert L.size_type_for("3XL", "Women") == "Regular"
-    assert L.size_type_for("3XL", "Unisex Adults") == "Regular"
+def test_department_does_not_change_it():
+    """★2026-09-12 修正: Size Type は **eBay のカテゴリ側の決まり**で Department は関係ない。
+
+    eBay Taxonomy API を実取得して確認 (cat 15687 / 57988 の Size の valueConstraints):
+    3XL は `applicableForLocalizedAspectValues = ["Big & Tall"]`。Department 別の分岐は無い。
+    9/08 の実装は Department=="Men" だけ直していたため、Department="Unisex Adults" の
+    3XL (UT に多い) が "Regular" のまま出ていた。
+    """
+    for dept in ("Men", "Women", "Unisex Adults", "Teens", "", None):
+        assert L.size_type_for("3XL", dept) == "Big & Tall", dept
+        assert L.size_type_for("L", dept) == "Regular", dept
+
+
+def test_numeric_and_tall_sizes_are_big_and_tall():
+    """アウター (cat 57988) の数字サイズと Tall 表記も Big & Tall 限定 (eBay の実値)."""
+    for s in ("52", "62", "68", "XLT", "3XLT", "Big 3X"):
+        assert L.size_type_for(s, "Men") == "Big & Tall", s
+    for s in ("50", "48"):
+        assert L.size_type_for(s, "Men") == "Regular", s
 
 
 def test_blank_is_regular():
@@ -42,3 +58,5 @@ def test_generators_do_not_hardcode_regular_for_sized_rows():
     import tshirt_listing, montbell_listing
     assert tshirt_listing._size_type("3XL", "Men") == "Big & Tall"
     assert montbell_listing._size_type("3XL", "Men") == "Big & Tall"
+    # ★2026-09-12: UT は Department="Unisex Adults" で出る行が多い
+    assert tshirt_listing._size_type("3XL", "Unisex Adults") == "Big & Tall"

@@ -85,21 +85,33 @@ SKU_PREFIX_BY_CATEGORY = {
 #   `"Regular" is not a valid Size Type for the Size "3XL"` で Revise を弾き、
 #   日次の値段更新がその1件だけ毎日 失敗していた (9/01・9/02・9/08 とも同じ出品)。
 #   原因は **Size Type を "Regular" 固定で出していた**こと (= ②出品くん側)。
-#   eBay の Men's トップスは 3XL 以上を Big & Tall 扱いにしないと組合せが通らない
-#   (実測: itemID 356740464473 を Big & Tall に直したら通った)。
-#   2XL は "Regular" のまま通っている実績があるので触らない (推測で広げない)。
-_BIG_AND_TALL_SIZES = ("3XL", "4XL", "5XL", "6XL", "7XL", "8XL",
-                       "XXXL", "XXXXL", "3L", "4L")
+#
+# ★2026-09-12 修正: これは **カタログ (eBay のカテゴリ) 側の決まり**で、Department は関係ない。
+#   eBay Taxonomy API を実取得して確認した (Size の valueConstraints):
+#     cat 15687 (Men's T-Shirts) / cat 57988 (Men's Coats) とも、下記のサイズは
+#     `applicableForLocalizedAspectValues = ["Big & Tall"]` = Size Type が Big & Tall の時だけ選べる。
+#     2XL は ["Big & Tall", "Regular"] の両方にあるので Regular のままでよい。
+#   9/08 の実装は Department が "Men" の行だけ直していたため、同じ 3XL でも
+#   Department="Unisex Adults" の行 (UT に多い) が素通りしていた。
+_BIG_AND_TALL_SIZES = (
+    # 文字サイズ
+    "3XL", "4XL", "5XL", "6XL", "7XL", "8XL", "XXXL", "XXXXL", "3L", "4L",
+    # 数字サイズ (アウター)
+    "52", "54", "56", "58", "60", "62", "64", "66", "68",
+    # Big / Tall 表記
+    "BIG1X", "BIG2X", "BIG3X", "BIG4X", "BIG5X", "BIG6X",
+    "ST", "MT", "LT", "XLT", "2XLT", "3XLT", "4XLT", "5XLT", "6XLT",
+)
 
 
 def size_type_for(size: str, department: str = "Men") -> str:
     """その Size に対して eBay が受け付ける Size Type (純関数, test可)。
 
-    Men の 3XL 以上だけ "Big & Tall"。それ以外は "Regular"。
+    3XL 以上 (と数字 52 以上・Tall 表記) は "Big & Tall"。それ以外は "Regular"。
+    **Department では変えない** — これは eBay のカテゴリ側の決まりだから (上のコメント参照)。
+    `department` は呼び出し側の互換のために残してある。
     """
     s = (size or "").strip().upper().replace(" ", "")
-    if (department or "").strip().lower() not in ("men", "men's", "mens"):
-        return "Regular"
     return "Big & Tall" if s in _BIG_AND_TALL_SIZES else "Regular"
 
 
