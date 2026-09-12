@@ -135,12 +135,46 @@ def _build_csv_context(row: dict, purpose: str = "dedup") -> dict:
     return context
 
 
+# UNIQLO/GU UT (Tシャツ) の eBay カテゴリ (2026-09-12)。
+# UT は1点もので catalog canonical product_id を持たないが、入稿CSV の 3列から
+# 出品くんと同一の KEY を作れる (= 目視特定済み行のみ C:Model が入る)。
+_UT_EBAY_CATEGORIES = frozenset({"15687", "53159"})
+
+
+def _ut_key_from_csv_row(row: dict) -> str:
+    """UT 入稿CSV 1行 → canonical KEY `uniqlo_ut:<6桁>:<COLOR>:<SIZE>` (2026-09-12).
+
+    出品くん `iMakMercari/ut_catalog_values.identity_key` / `key_from_csv_row` と
+    **同一形** (SSOT。 diverg したら test_ut_key_from_csv が落ちる)。
+    - eBay category が 15687/53159 以外 → "" (= 対象外、 従来経路へ)
+    - C:Model(6桁) / C:Color / C:Size の3つが揃わない → "" (= 素通り。 目視未特定 UT や
+      porter/montbell/reel 等は KEY を作らず解決不能のまま = fail-closed)
+    シート側 (AI列, ut_key_backfill.py) も同じ文字列を書くので突合できる。
+    """
+    import re
+    cat = (row.get("*Category") or row.get("Category") or "").strip()
+    if cat not in _UT_EBAY_CATEGORIES:
+        return ""
+    model = (row.get("C:Model") or "").strip()
+    color = (row.get("C:Color") or "").strip()
+    size = (row.get("C:Size") or "").strip()
+    m = re.search(r"(\d{6})", model)
+    l1 = m.group(1) if m else model
+    if not (l1 and color and size):
+        return ""
+    return f"uniqlo_ut:{l1}:{color.upper()}:{size.upper()}"
+
+
 def resolve_csv_row(row: dict, purpose: str = "dedup") -> str:
     """CSV row dict から context を組立 → resolve() 呼出 (= 重複くん側 convenience).
 
     eBay File Exchange CSV の主要列 を signals に mapping。
     cert → iMakeBayAPI cache 経由 brand/subject 取得 も内部で実施。
+    UT (Tシャツ) 行は catalog resolve でなく CSV 3列から直接 KEY を作る。
     """
+    ut = _ut_key_from_csv_row(row)
+    if ut:
+        return ut
     return resolve(_build_csv_context(row, purpose))
 
 
@@ -149,7 +183,11 @@ def resolve_csv_row_with_category(row: dict, purpose: str = "dedup") -> dict:
 
     resolve_csv_row と同一 context を使い resolve_with_category を呼ぶ
     (= product_id は resolve_csv_row と同値、 category を同梱)。
+    UT 行は `uniqlo_ut:...` を product_id にそのまま返す (category="")。
     """
+    ut = _ut_key_from_csv_row(row)
+    if ut:
+        return {"product_id": ut, "category": ""}
     return resolve_with_category(_build_csv_context(row, purpose))
 
 
