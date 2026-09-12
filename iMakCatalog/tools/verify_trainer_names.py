@@ -104,6 +104,16 @@ def main() -> None:
         if len(jps) >= 2:
             for jp in jps:
                 pairs[(jp, en)].add("DB重複")
+    # ★衝突していない機械翻訳の人物名も全部見る (2026-09-13)。
+    #   衝突検査だけだと「ある日本語名の全行が同じ誤り」の型は原理的に捕まらない
+    #   (ミクリ=Juan / チリ=Chili がこの型で、入稿CSVまで届いた)。
+    #   判定 (英語名ページの jname == 日本語名) は衝突の有無に関係なく使える
+    for jp, en in db.execute(
+            "SELECT DISTINCT name_jp, name_en FROM products WHERE category='pokemon_tcg' "
+            "AND name_en <> '' AND name_jp <> '' "
+            "AND name_en_source IN ('claude_api','rule_trainer_dict') "
+            "AND specs LIKE '%\"card_type\": \"Trainer\"%'"):
+        pairs[(jp, en)].add("機械翻訳のトレーナー名")
     print(f"=== トレーナー名の突き合わせ — {len(pairs)}組 (表 {len(TRAINER_NAME_MAP)} / DB重複) ===",
           flush=True)
     out, bad = [], 0
