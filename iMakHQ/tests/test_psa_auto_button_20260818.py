@@ -14,14 +14,27 @@ import re
 CP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "control_panel.py")
 
 
+BLOCK_OPEN = "    {" + chr(10)
+BLOCK_CLOSE = "    }," + chr(10)
+
+
 def _src():
     return io.open(CP, encoding="utf-8").read()
 
 
-def _entry():
+def _entry(category="PSA TCG"):
+    """その商材の 🤖自動 の定義ブロックを返す。
+
+    ★2026-09-12: 🤖自動 が **Tシャツにも付いた** (残務 №177)。先頭の1個を取る書き方だと
+      Tシャツの定義を PSA のものとして読んでしまうので、カテゴリで選ぶ。
+    """
     s = _src()
-    i = s.index('"label": "🤖自動"')
-    return s[s.rindex("    {\n", 0, i):s.index("    },\n", i)]
+    for m in re.finditer(r'"label": "🤖自動"', s):
+        i = m.start()
+        blk = s[s.rindex(BLOCK_OPEN, 0, i):s.index(BLOCK_CLOSE, i)]
+        if f'"category": "{category}"' in blk:
+            return blk
+    raise AssertionError(f"{category} の 🤖自動 が無い")
 
 
 def test_PSA_TCGの行にある():
@@ -139,3 +152,22 @@ def test_生成側は環境変数で上限を読む():
         os.path.abspath(__file__)))), "iMakTCG", "psa_to_csv.py")
     s = io.open(gen, encoding="utf-8").read()
     assert 'os.environ.get("PSA_BATCH_LIMIT") or 15' in s, "既定は 15 のまま"
+
+
+# ── 🤖自動 が他商材にも付いた後の性質 (2026-09-12・残務 №177) ────────────────
+def test_商材ごとの違いは定義の値で表す():
+    """締めのチェーンに「PSA なら〜」「Tシャツなら〜」の分岐を書かない (共通化に if を入れない)。"""
+    s = _src()
+    i = s.index("def _run_auto_full_tail")
+    body = s[i:s.index(chr(10) + "def ", i + 1)]
+    q = chr(34) * 3
+    code = body[body.index(q, body.index(q) + 3) + 3:]          # 説明文は読み飛ばす
+    code = chr(10).join(ln for ln in code.split(chr(10)) if not ln.strip().startswith("#"))
+    for ng in ("PSA TCG", "Tシャツ", "tcg_upload_", "tshirt_upload_"):
+        assert ng not in code, "締めのチェーンに商材名/決め打ちが混ざっている: " + ng
+
+
+def test_Tシャツにも自動がある():
+    e = _entry("Tシャツ")
+    assert '"auto_full": True' in e
+    assert '"auto_csv_prefix": "tshirt_upload_"' in e

@@ -343,8 +343,8 @@ def _needs_key(r):
       KEY が無いと重複くんも二重出品ガードも効かない。目視で商品を決めれば KEY が入る
       (`ut_key_backfill`)。`item:` / `shops:` で始まる KEY は仕入元URL由来で、カタログの KEY ではない。
     """
-    k = (r[C_KEY] if len(r) > C_KEY else "" or "").strip()
-    return not k or k.startswith("item:") or k.startswith("shops:")
+    from ut_catalog_values import needs_catalog_key
+    return needs_catalog_key(r[C_KEY] if len(r) > C_KEY else "")
 
 
 def sheet_pending_rows(rows2d, decided, today=None):
@@ -819,6 +819,26 @@ def _high_urls(rows2d=None):
     return {(r[C_URL] or "").strip() for r in rows2d[1:] if (r[C_URL] or "").strip()}
 
 
+def order_rows(rows):
+    """目視に出す順番 (純関数・test 可)。
+
+    ★2026-09-12 ユーザー「既存へのKEYは、全て完了したの？」→ 実測 **0件 / 出品済み79行**。
+      原因は順番。画面は中間タブ (集めた新しい行) を先に出しており、そこに98件 溜まっているので
+      **出品済みの行が一度も画面に出てこなかった**。
+
+      出品済みで KEY が無い行を先に出す。理由は「まだ出していない行」より危ないから:
+        - 既に売れる状態で出ている。KEY が無い = 重複くんから見えない = 同じ物をもう一度
+          出してしまう (fail-OPEN)
+        - 目視すれば KEY が入り、補URL・再仕入れ・監視の対象にもなる (資産になる)
+      まだ出していない行は、遅れても「出品が1日後になる」だけで、危険側には倒れない。
+    """
+    def rank(t):
+        _i, r, src = t
+        listed = len(r) > 1 and (r[1] or "").strip()
+        return 0 if (src == "sheet" and listed) else 1
+    return sorted(rows, key=rank)
+
+
 def load_items(limit=DEFAULT_LIMIT):
     led = load_ledger()
     prod = _product_values()
@@ -826,6 +846,7 @@ def load_items(limit=DEFAULT_LIMIT):
     #   (前の運用で入った分) の両方を目視に出す
     rows = [(i, r, "tab") for i, r in pending_rows(_read_src(), led, _high_urls(prod))]
     rows += [(SHEET_IDX_BASE + i, r, "sheet") for i, r in sheet_pending_rows(prod, led)]
+    rows = order_rows(rows)
     catalog = load_catalog()
     items = []
     for i, r, _src in rows[:limit] if limit else rows:
@@ -924,7 +945,12 @@ def main():
     ap.add_argument("--timeout", type=int, default=10800)
     a = ap.parse_args()
     items, n_all = load_items(a.limit)
+    n_listed = sum(1 for it in items
+                   if it.get("src") == "sheet" and (it["row"][1] or "").strip())
     print(f"目視に出す UT: {len(items)}件 (残り全部で {n_all}件)")
+    if n_listed:
+        print(f"  うち **出品済みなのに KEY が無い行** {n_listed}件 (先に出しています。"
+              f"KEY が無いと重複くんが二重出品を止められません)")
     if not items:
         print("→ 0件。抽出くんの収集 (mercari_uniqlo_ut タブ) に新しい行が入ったらまた出ます")
         return 0

@@ -249,6 +249,27 @@ def l1_of(pid):
     return m.group(1) if m else ""
 
 
+KEY_PREFIX = "uniqlo_ut:"
+# 仕入元URL から作った古い値。カタログの KEY ではないので、上から書いてよい
+_SUPPLY_KEY_PREFIXES = ("item:", "shops:")
+
+
+def needs_catalog_key(key_value):
+    """その AI列の値は **カタログの KEY に入れ替えるべきか** (純関数・test 可)。
+
+    ★2026-09-12: 目視の画面と KEY を書く道具で判定が食い違っていた。
+      画面は `item:` / `shops:` の行を「KEY が無い」として出していたのに、書く側は
+      「値が入っているから触らない」で飛ばしていた。目視しても何も書かれない = 徒労。
+      判定はここ1か所に置く。
+
+    True になるのは 空 と 仕入元URL由来の古い値だけ。`uniqlo_ut:` や人が入れた値は触らない。
+    """
+    k = (key_value or "").strip()
+    if not k:
+        return True
+    return k.startswith(_SUPPLY_KEY_PREFIXES)
+
+
 def identity_key(pid, color_name, size_jp, size_us=""):
     """canonical KEY。**1出品 = 1色1サイズ** なので色とサイズまで入れる (純関数)。
 

@@ -10,7 +10,10 @@
     - **出品してから書く**。B列 (itemID) が空の行には書かない
       (出品前の行に KEY があると「出品済み」と読まれ、その商品を二度と出せなくなる = orphan KEY 事故)
     - 色・サイズが決まっていない行には書かない (重複くんの申し送り。空 KEY を作らない)
-    - 既に KEY がある行は触らない (人が入れた値を上書きしない)
+    - 既に **カタログの** KEY がある行は触らない (人が入れた値を上書きしない)。
+      ただし `item:` / `shops:` で始まる値は仕入元URL由来で、カタログの KEY ではないので
+      入れ替える (2026-09-12: ここを「値が入っている」で飛ばしていたため、目視しても
+      出品済み57行に KEY が入らなかった)
     - KEY = `uniqlo_ut:<商品番号>:<色>:<サイズ>` (UT は 1出品 = 1色1サイズ)
 
 使い方:
@@ -44,8 +47,8 @@ def plan(rows2d, ledger):
         iid = (r[COL_ITEMID] or "").strip()
         if not iid:
             continue                                   # 出品してから書く
-        if len(r) > COL_KEY and (r[COL_KEY] or "").strip():
-            continue                                   # 既にある値は触らない
+        if not V.needs_catalog_key(r[COL_KEY] if len(r) > COL_KEY else ""):
+            continue                                   # 既にカタログの KEY / 人が入れた値 = 触らない
         e = (ledger or {}).get((r[COL_URL] or "").strip())
         if not e or e.get("decision") != "go":
             continue

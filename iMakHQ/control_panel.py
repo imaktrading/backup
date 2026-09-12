@@ -863,8 +863,30 @@ def unlisted_from_result(result, started_ts=None, file_mtime=None):
     return [str(x) for x in (result.get("unlisted") or []) if str(x).strip()]
 
 
-def _run_auto_full_tail(append_log_func, env):
-    """🤖PSA自動 の締め: 前回入稿分の後始末 → CSV監査くん (2026-08-18)。
+def auto_csv_prefix_of(entry):
+    """🤖自動 が入稿する CSV の名前の頭 (純関数・test 可)。
+
+    ★ここに商材の分岐を書かない。ボタンの定義 (SCRIPTS) が値を持つ。
+    """
+    return (entry or {}).get("auto_csv_prefix") or "tcg_upload_"
+
+
+def latest_csv_with_prefix(csv_dir, prefix):
+    """その頭で始まる一番新しい CSV のフルパス。無ければ空 (I/O 失敗も空)。
+
+    ★2026-09-12: 以前は `tcg_upload_` 決め打ちだったので、Tシャツの CSV を作っても
+      締めのチェーンが拾えなかった (= Tシャツだけ手上げが残っていた原因)。
+    """
+    try:
+        cands = [os.path.join(csv_dir, f) for f in os.listdir(csv_dir)
+                 if f.startswith(prefix) and f.endswith(".csv")]
+        return max(cands, key=os.path.getmtime) if cands else ""
+    except Exception:                                          # noqa: BLE001
+        return ""
+
+
+def _run_auto_full_tail(append_log_func, env, entry=None):
+    """🤖自動 の締め: 前回入稿分の後始末 → CSV監査くん (2026-08-18)。
 
     人が毎回やっていた手順のうち、機械にできる分をこの1押しに畳む。
     ① itemID をスプシに書込   ② 新規分を広告8%に   ③ CSV監査くん
@@ -875,16 +897,19 @@ def _run_auto_full_tail(append_log_func, env):
     (itemID が無い行は監視くんが取り下げられない = 売り切れても売れる状態で残るため、
      放置が一番危ない)
     ③ は最後。①②はシートと広告しか触らないので CSV の監査結果に影響しない。
+
+    ★2026-09-12: **商材ごとの違いは entry (ボタンの定義) から渡す**。
+      ここに「PSA なら〜」「Tシャツなら〜」の分岐は書かない (共通化に if を入れない)。
+        auto_csv_prefix      … 入稿する CSV の名前の頭 (既定 tcg_upload_)
+        auto_after_writeback … itemID を書いた後に足す手 [[表示名, [script, 引数…]], …]
     """
+    entry = entry or {}
+    prefix = auto_csv_prefix_of(entry)
+    upload_write = entry.get("auto_upload_write", True)
+    after_writeback = entry.get("auto_after_writeback") or []
     tools = os.path.join(WORKSPACE, "iMakHQ", "tools")
     csv_dir = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
-    latest = ""
-    try:
-        cands = [os.path.join(csv_dir, f) for f in os.listdir(csv_dir)
-                 if f.startswith("tcg_upload_") and f.endswith(".csv")]
-        latest = max(cands, key=os.path.getmtime) if cands else ""
-    except Exception:
-        latest = ""
+    latest = latest_csv_with_prefix(csv_dir, prefix)
     result_json = os.path.join(csv_dir, "last_upload_result.json")
     # ★前回の結果を先に消す。残っていると、今回の入稿が結果を残さずに終わった時に
     #   **前回の出品を今回の結果としてメールしてしまう** (古い成功で失敗が隠れる)。
@@ -896,9 +921,15 @@ def _run_auto_full_tail(append_log_func, env):
         # ★順番が意味を持つ: 監査 → 入稿 → 書戻し → 広告 → メール。
         #   監査は **入稿前の関所**なので必ず先。itemID は入稿しないと出ないので書戻しは後。
         ("CSV監査くん (入稿前チェック)", [sys.executable, "csv_auditor.py"]),
-        ("eBay へ出品 (API)", [sys.executable, "ebay_upload_csv.py", latest, "--write",
-                                "--result-json", result_json] if latest else []),
+        # ★2026-09-12: 新しい商材は **検証のみ (eBay が受理するか確かめるだけ・出品しない)** から始める。
+        #   ボタンの定義で `auto_upload_write: True` にした時だけ本当に出す。
+        ("eBay へ出品 (API)" if upload_write else "eBay で検証のみ (出品しない)",
+         [sys.executable, "ebay_upload_csv.py", latest,
+          *(["--write"] if upload_write else []),
+          "--result-json", result_json] if latest else []),
         ("itemID をスプシに書込", [sys.executable, "itemid_writeback_audit.py", "--apply"]),
+        # 商材ごとの追加の手 (例: UT は itemID が入った行に KEY を書く = 重複くんが二重出品を止められる)
+        *[(str(lb), [sys.executable, *cmd]) for lb, cmd in after_writeback],
         ("新規分を広告8%に", [sys.executable, "ads_add_new_listings.py", "--write"]),
     ]
     for label, cmd in steps:
@@ -1231,6 +1262,27 @@ SCRIPTS = [
         "params": [],
     },
     {
+        # ★2026-09-12 ユーザー「まず、仕組み作らないと意味ない」(残務 №177)。
+        #   Tシャツだけ **CSV を人が FileExchange に上げて、itemID を人が打つ** 運用が残っており、
+        #   その2手があるせいで ⑥KEY を書く段 (itemID が要る) まで一度も届いていなかった
+        #   (実測 2026-09-12: 出品済み Tシャツ 79行の UT KEY = 0件)。PSA と同じ1押しにする。
+        #   中身は 新規 と同じ生成 + 締めのチェーン (監査 → API出品 → itemID書戻し →
+        #   KEY書込 → 広告8% → メール)。商材の違いは下の2つの値だけで表す (分岐は書かない)。
+        "category": "Tシャツ", "type": "auto", "label": "🤖自動",
+        "verified": False,        # 実戦未検証 (初回は 1件で試すこと)
+        "double_check": True,     # 入稿前の人手ダブルチェック必須
+        "cwd": f"{WORKSPACE}/iMakMercari",
+        "cmd": ["python", "tshirt_listing.py"],
+        "params": [],
+        "auto_full": True,
+        "auto_csv_prefix": "tshirt_upload_",
+        # ★TEST段階 (2026-09-12 ユーザー「まだ、TEST段階だから、UPはやめておく」)。
+        #   eBay が受理するかを確かめるだけで **出品はしない**。本番に切り替える時は True にする。
+        "auto_upload_write": False,
+        # itemID が入った直後に KEY を書く。順番が逆だと orphan KEY (出品前の行に KEY) になる
+        "auto_after_writeback": [["KEY を書く (重複くん用)", ["ut_key_backfill.py", "--write"]]],
+    },
+    {
         "category": "Montbell", "type": "new", "label": "新規",
         "verified": True,  # 2026-05-05 ユーザーチェック合格
         "cwd": f"{WORKSPACE}/iMakMercari",
@@ -1283,6 +1335,7 @@ SCRIPTS = [
                 "PSA_BATCH_LIMIT": "20", "PSA_REVIEW_ALL": "1"},
         "params": [],
         "auto_full": True,
+        "auto_csv_prefix": "tcg_upload_",
     },
     {
         "category": "リール", "type": "new", "label": "新規",
@@ -4679,7 +4732,7 @@ class ListingPanel:
                                 _envf = os.environ.copy()
                                 _envf["PYTHONIOENCODING"] = "utf-8"
                                 _envf["PYTHONUNBUFFERED"] = "1"
-                                _run_auto_full_tail(self.append_log, _envf)
+                                _run_auto_full_tail(self.append_log, _envf, _entry_now)
                             except Exception as _e:
                                 self.append_log(f"\n⚠️ PSA自動の締め 失敗: {_e}\n")
                     elif _entry_now.get("restock_revise"):
