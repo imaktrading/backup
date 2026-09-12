@@ -70,8 +70,9 @@ def main(argv=None) -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--label", default="uniqlo_ut", help="中間スプシ tab (= mercari_<label>)")
     ap.add_argument("--from-catalog", type=int, default=0, metavar="N",
-                    help="カタログの公式売り切れ UT のコラボ名から N 語を作って検索する "
-                         "(2026-09-11 Advisor POC)")
+                    help="カタログの『公式で買えない UT』のコラボ名から N 語を作って検索する")
+    ap.add_argument("--anime-only", action="store_true",
+                    help="アニメ・漫画のコラボだけにする (2026-09-13 user 確定)")
     ap.add_argument("--max-keep", type=int, default=0,
                     help="この件数を集めたら止める (POC 用。0=止めない)")
     ap.add_argument("--no-tag-read", action="store_true",
@@ -83,7 +84,8 @@ def main(argv=None) -> int:
     if args.from_catalog:
         import uniqlo_catalog_terms as T  # noqa: PLC0415
         from scrapers.rakuten_search import is_excluded_category  # noqa: PLC0415
-        terms = T.build_terms(args.from_catalog, excluded=is_excluded_category)
+        terms = T.build_terms(args.from_catalog, excluded=is_excluded_category,
+                              only_anime=args.anime_only)
         keywords = [T.query_for(t["term"]) for t in terms]
         term_of = {T.query_for(t["term"]): t["term"] for t in terms}
         _log(f"カタログの売り切れ UT から {len(keywords)} 語")
