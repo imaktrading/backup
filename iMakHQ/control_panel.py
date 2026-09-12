@@ -583,12 +583,18 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
         append_log_func(f"\n⚠️ dedupe hook CSV 探索失敗: {type(e).__name__}: {e}\n")
         return
 
-    # Mercari 系(porter/montbell/tshirt/reel)は1点もの = catalog canonical KEY を持たない。
+    # Mercari 系(porter/montbell/reel)は1点もの = catalog canonical KEY を持たない。
     # KEY-based dedupe では全件「解決不能」となり destructive に全除外される
     # (2026-06-16 Porter 10件全消し事故)。catalog-keyed (tcg/gshock/ichibankuji) のみ dedupe 実行。
     # 「判定不能は破壊的動作に倒さない」(failclosed_must_skip) に従い Mercari 系は skip。
+    #
+    # ★2026-09-12: **Tシャツ (tshirt_) は外した** = 重複くんに通す。
+    #   目視で特定した UT の行は入稿CSV の C:Model / C:Color / C:Size から
+    #   `uniqlo_ut:480691:BLUE:2XL` を作れるようになり、重複くん側も同じ作りを実装済
+    #   (dedupe commit 3992e2b / 回答 dedupe/requests/2026-09-12_ut_key_from_csv_columns_response.md)。
+    #   目視していない Tシャツ行は C:Model が空 → KEY を作らず素通り (解決不能は除外しない)。
     _base = os.path.basename(latest_csv).lower()
-    if any(_base.startswith(p) for p in ("porter_", "montbell_", "tshirt_", "reel_", "mercari")):
+    if any(_base.startswith(p) for p in ("porter_", "montbell_", "reel_", "mercari")):
         append_log_func(
             f"\n(重複くん: {os.path.basename(latest_csv)} は1点もの(catalog KEY無)"
             f" → KEY-based dedupe skip)\n"

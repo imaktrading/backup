@@ -134,20 +134,31 @@ class TestSheetRows:
     """★2026-09-12「残36件も目視を終えたいね」— 商品管理シートの未出品行も目視に出す."""
 
     def _rows(self):
-        def row(url, itemid="", sold="", cat="Tシャツ"):
+        def row(url, itemid="", sold="", cat="Tシャツ", key=""):
             r = [""] * 36
-            r[0], r[1], r[3], r[17] = url, itemid, sold, cat
+            r[0], r[1], r[3], r[17], r[34] = url, itemid, sold, cat, key
             return r
         return [[""] * 36,
-                row("https://a"),                       # 出す
-                row("https://b", sold="売り切れ"),        # 出す (商品が分かれば後で探し直せる)
-                row("https://c", itemid="35890000"),     # 出品済み → 出さない
-                row("https://d", cat="PSA TCG"),         # 別商材 → 出さない
-                row("https://e")]                        # 台帳で決着済み → 出さない
+                row("https://a"),                        # 出す
+                row("https://b", sold="売り切れ"),         # 出す (商品が分かれば後で探し直せる)
+                row("https://c", itemid="35890000", key="uniqlo_ut:480691:BLUE:2XL"),  # KEY あり → 出さない
+                row("https://d", cat="PSA TCG"),          # 別商材 → 出さない
+                row("https://e"),                         # 台帳で決着済み → 出さない
+                row("https://f", itemid="35890001"),      # 出品中で KEY 無し → 出す
+                row("https://g", itemid="35890002", key="item:m12345")]  # 仕入元URL由来 → 出す
 
     def test_unlisted_rows_are_reviewed(self):
         got = U.sheet_pending_rows(self._rows(), decided={"https://e": {"decision": "out"}})
-        assert [r[0] for _i, r in got] == ["https://a", "https://b"]
+        assert [r[0] for _i, r in got] == ["https://a", "https://b", "https://f", "https://g"]
+
+    def test_listed_rows_without_a_catalog_key_are_reviewed(self):
+        """★2026-09-12「既存出品分にKEYを入れないとね」— KEY が無い出品中の行も特定する."""
+        assert U._needs_key([""] * 36) is True
+        r = [""] * 36
+        r[34] = "uniqlo_ut:480691:BLUE:2XL"
+        assert U._needs_key(r) is False
+        r[34] = "item:m12345"          # 仕入元URL由来 = カタログの KEY ではない
+        assert U._needs_key(r) is True
 
     def test_row_numbers_are_the_sheet_rows(self):
         got = U.sheet_pending_rows(self._rows(), decided={})

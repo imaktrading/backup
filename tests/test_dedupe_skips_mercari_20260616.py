@@ -18,7 +18,11 @@ _SRC = (Path(__file__).resolve().parent.parent / "iMakHQ" / "control_panel.py").
 
 def test_dedupe_has_mercari_skip_gate():
     # _run_dedupe_for_latest_csv に Mercari系 skip gate がある
-    assert "porter_" in _SRC and "montbell_" in _SRC and "tshirt_" in _SRC and "reel_" in _SRC, \
+    # ★2026-09-12: tshirt_ は skip 対象から外した。UT は目視で商品を特定するようになり、
+    #   入稿CSV の C:Model / C:Color / C:Size から KEY を作れる (重複くん側も実装済 3992e2b)。
+    #   目視していない行は C:Model が空 → KEY を作らず素通り (解決不能は除外しない) ので
+    #   2026-06-16 の「全除外」事故は再発しない。
+    assert "porter_" in _SRC and "montbell_" in _SRC and "reel_" in _SRC, \
         "Mercari系プレフィックスの skip gate が見当たらない"
     assert "KEY-based dedupe skip" in _SRC, "dedupe skip のログ/gate が見当たらない"
 

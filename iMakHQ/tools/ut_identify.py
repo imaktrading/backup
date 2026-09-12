@@ -333,6 +333,20 @@ def pending_rows(src, decided, in_high, today=None):
     return out
 
 
+C_KEY = 34          # AI列 (canonical KEY)
+
+
+def _needs_key(r):
+    """出品済みだが **カタログの KEY が無い** 行か (純関数)。
+
+    ★2026-09-12 ユーザー「既存出品分にKEY入れないとね」。
+      KEY が無いと重複くんも二重出品ガードも効かない。目視で商品を決めれば KEY が入る
+      (`ut_key_backfill`)。`item:` / `shops:` で始まる KEY は仕入元URL由来で、カタログの KEY ではない。
+    """
+    k = (r[C_KEY] if len(r) > C_KEY else "" or "").strip()
+    return not k or k.startswith("item:") or k.startswith("shops:")
+
+
 def sheet_pending_rows(rows2d, decided, today=None):
     """商品管理シートの **まだ出していない Tシャツ行** → 目視に出す行 [(行番号, row)]。純関数。
 
@@ -347,8 +361,8 @@ def sheet_pending_rows(rows2d, decided, today=None):
         r = list(r) + [""] * (_WIDTH - len(r))
         if (r[C_CAT] or "").strip() != SHEET_CATEGORY:
             continue
-        if (r[1] or "").strip():
-            continue                      # 出品済み
+        if (r[1] or "").strip() and not _needs_key(r):
+            continue                      # 出品済みで KEY もある = もう見なくてよい
         url = (r[C_URL] or "").strip()
         if not url.startswith("http"):
             continue
@@ -661,7 +675,10 @@ def build_html(items, catalog):
             f"<div class='t'>{_html.escape((r[C_TITLE] or '')[:110])}</div>"
             f"<div class='meta'>{_html.escape(price)} ｜ 色 {_html.escape(r[C_COLOR] or '?')} ｜ "
             f"サイズ {_html.escape(r[C_SIZE] or '?')}"
-            + (" ｜ <b>出品待ちの行</b>" if it.get("src") == "sheet" else "")
+            + (" ｜ <b>出品待ちの行</b>" if it.get("src") == "sheet" and not (r[1] or "").strip()
+               else "")
+            + (f" ｜ <b style='color:#06a'>出品中 ({_html.escape((r[1] or '').strip())}) "
+               "— KEY を入れるための特定</b>" if (r[1] or "").strip() else "")
             + (" ｜ <b style='color:#a40'>仕入元は売り切れ済み</b> (商品が分かれば後で探し直せる)"
                if (r[C_SOLD] or "").strip() else "")
             + (f" ｜ 見つけた語 <b>{_html.escape(r[C_KW])}</b>" if r[C_KW] else "")
