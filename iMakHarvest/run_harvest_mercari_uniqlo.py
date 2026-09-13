@@ -55,7 +55,8 @@ def _log(m: str) -> None:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--price-min", type=int, default=1500)
+    # ★UT の価格帯は 500〜12,000円 (2026-09-13 user 確定)。 既定にしておく = 付け忘れても効く
+    ap.add_argument("--price-min", type=int, default=500)
     ap.add_argument("--price-max", type=int, default=12000)
     ap.add_argument("--min-rating", type=int, default=100, help="セラー評価数の下限")
     ap.add_argument("--no-identity", action="store_true", help="本人確認済 要件を外す")

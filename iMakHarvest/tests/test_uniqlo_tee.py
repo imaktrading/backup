@@ -61,3 +61,12 @@ def test_collab_alone_is_not_enough():
 ])
 def test_is_new_condition(cond, ok):
     assert is_new_condition(cond) is ok
+
+
+def test_price_range_default_is_500_to_12000():
+    """★UT の価格帯は 500〜12,000円 (2026-09-13 user 確定)。付け忘れても効くよう既定で持つ."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1]
+           / "run_harvest_mercari_uniqlo.py").read_text(encoding="utf-8")
+    assert '"--price-min", type=int, default=500' in src
+    assert '"--price-max", type=int, default=12000' in src
