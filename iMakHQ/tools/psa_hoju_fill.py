@@ -2041,13 +2041,28 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
 
     # --- 見送り/違う を台帳へ(次回再表示しない)+ 違う=検索精度事故アラート ---
     diffs = {d.get("idx") for d in (res.get("diffs") or []) if d.get("idx") is not None}
+    # ★2026-09-13 ユーザー指摘「売り切れの可能性の場合、外す理由に仕入元売り切れがない」。
+    #   売り切れを押された URL は「買えない URL」台帳へ = **どの出品の候補画面にも二度と出ない**
+    #   (`_build_visual_candidates` が既に読んでいる台帳)。出品側は「見送り」ではなく
+    #   「売り切れ」で記録し、新しい供給が出た時だけ戻す (9/06 からの既存の戻し方と同じ)。
+    solds = {d.get("idx") for d in (res.get("sold") or []) if d.get("idx") is not None}
+    _sold_urls = [(d.get("url") or "").strip() for d in (res.get("sold") or [])
+                  if (d.get("url") or "").strip()]
+    if _sold_urls:
+        try:
+            import mercari_psa_resource as _mpr
+            for _su in _sold_urls:
+                _mpr.remember_not_buyable(_su, "仕入元が売り切れ (補URL③ 目視)")
+            print(f"  🚫 仕入元が売り切れ: {len(_sold_urls)}本 → 以後どの候補画面にも出しません")
+        except Exception as _e_sold:                            # noqa: BLE001
+            print(f"  ⚠ 売り切れの記録skip ({type(_e_sold).__name__})")
     shown = set(range(len(items)))
     not_confirmed = shown - set(confirmed.keys())
     if not_confirmed:
         new_skip = []
         for idx in sorted(not_confirmed):
             t = item_targets[idx]
-            reason = "違う" if idx in diffs else "見送り"
+            reason = "違う" if idx in diffs else ("売り切れ" if idx in solds else "見送り")
             # ★その時に見せた候補URLを残す。次回「新しい供給が出たか」を判定する唯一の材料。
             # これが無いと cooldown 明けに同じ候補をまた見せることになる。
             _shown = " | ".join(c.get("url", "") for c in (items[idx].get("candidates") or [])

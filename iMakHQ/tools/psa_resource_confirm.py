@@ -664,7 +664,7 @@ function setRsn(btn){var cand=btn.closest('.cand'); var ck=cand.querySelector('.
   ck.dataset.rsn=btn.dataset.r;
   cand.querySelectorAll('.rb').forEach(function(b){b.classList.toggle('sel', b.dataset.r===btn.dataset.r);});}
 function go(){
-  var conf=[]; var diffs=[]; var probes=[]; var notpsa=[]; var skip=0; var unset=0;
+  var conf=[]; var diffs=[]; var probes=[]; var notpsa=[]; var solds=[]; var skip=0; var unset=0;
   document.querySelectorAll('.card').forEach(function(c){
     var idx=parseInt(c.dataset.idx); var urls=[];
     c.querySelectorAll('.ck').forEach(function(ck){
@@ -674,6 +674,8 @@ function go(){
       else if(ck.dataset.rsn==='probe'){probes.push({idx:idx, url:ck.dataset.url});}
       /* ★PSA10でない = グレード対象外。見送りにも「違う」にも混ぜない (2026-09-06) */
       else if(ck.dataset.rsn==='notpsa'){notpsa.push({idx:idx, url:ck.dataset.url});}
+      /* ★仕入元が売り切れ = この仕入元はもう買えない。見送りにも「違う」にも混ぜない (2026-09-13) */
+      else if(ck.dataset.rsn==='sold'){solds.push({idx:idx, url:ck.dataset.url});}
       else{skip++; if(!ck.dataset.rsn) unset++;}});
     if(urls.length) conf.push({idx:idx, urls:urls});
   });
@@ -683,13 +685,14 @@ function go(){
   if(diffs.length) msg.push('違う(別商品)が'+diffs.length+'件 — 検索の精度事故=即対応対象です。');
   if(probes.length) msg.push('要調査(同じかも)が'+probes.length+'件 — 台帳に記録します。補URLには書きません。');
   if(notpsa.length) msg.push('PSA10でないが'+notpsa.length+'件 — 対象外として記録します。新規出品の種にも出ません。');
+  if(solds.length) msg.push('仕入元が売り切れが'+solds.length+'件 — この仕入元は二度と候補に出しません。');
   if(unset) msg.push('理由未選択が'+unset+'件 — 見送りとして記録します。別商品なら「違う」を押してください。');
   /* ★2026-08-01: ここは Python の**非 raw** 文字列なので \n と書くと本物の改行が埋まり、
      JS の文字列リテラルが行途中で切れて SyntaxError → この script ブロックの関数が
      **全部未定義**になる (zoom/upd/setAll/setRsn/go/imgFail が丸ごと死ぬ)。必ず \\n と書く。 */
   if(msg.length && !confirm(msg.join('\\n')+'\\n\\n確定しますか?')) return;
   fetch('/confirm',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({confirmed:conf, diffs:diffs, probes:probes, notpsa:notpsa, skip:skip})}).then(function(){
+    body:JSON.stringify({confirmed:conf, diffs:diffs, probes:probes, notpsa:notpsa, sold:solds, skip:skip})}).then(function(){
     document.getElementById('main').style.display='none';
     var d=document.getElementById('done'); d.style.display='block';
     d.textContent='✅ RESTOCK確定 '+conf.length+'件。ターミナルに戻ってください。';});
@@ -860,6 +863,13 @@ def build_restock_html(items):
                 f"<button type='button' class='rb notpsa' data-r='notpsa' onclick='setRsn(this)'"
                 f" title='カードは合っているがグレードが対象外。PSA9以下 / CGC・BGS 等の別鑑定 / 未鑑定'>"
                 f"PSA10でない</button>"
+                # ★2026-09-13 ユーザー指摘「売り切れの可能性の場合、外す理由に仕入元売り切れがない」。
+                #   売り切れを「見送り」(= 商品は合っているが買わない business 判断) に入れると理由が
+                #   濁り、「違う」(検索の精度事故) に入れるとセンサーが壊れる。専用の理由にし、
+                #   URL は「買えない URL」台帳に入れて **全ての候補画面から二度と出さない**。
+                f"<button type='button' class='rb sold' data-r='sold' onclick='setRsn(this)'"
+                f" title='出品ページを開いたら売り切れ / 取り下げ済み。この仕入元はもう買えない'>"
+                f"仕入元が売り切れ</button>"
                 f"</span></span></label>")
         if not cand_html:
             cand_html = ["<div class='cph'>仕入候補なし</div>"]
@@ -983,7 +993,11 @@ def parse_restock_result(data):
     #   diffs(検索の精度事故) にも skip(business判断) にも入れない。
     notpsa = [{"idx": int(d["idx"]), "url": d.get("url", "")}
               for d in (data.get("notpsa") or []) if d.get("idx") is not None]
-    return {"confirmed": out, "diffs": diffs, "probes": probes, "notpsa": notpsa,
+    # ★2026-09-13: 「仕入元が売り切れ」= この URL はもう買えない。
+    #   skip(見送り = business 判断) にも diffs(違う = 検索の精度事故) にも入れない。
+    sold = [{"idx": int(d["idx"]), "url": d.get("url", "")}
+            for d in (data.get("sold") or []) if d.get("idx") is not None]
+    return {"confirmed": out, "diffs": diffs, "probes": probes, "notpsa": notpsa, "sold": sold,
             "skip": int(data.get("skip") or 0)}
 
 

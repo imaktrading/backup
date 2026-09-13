@@ -1401,7 +1401,7 @@ def count_workload(today=None):
 
 
 def _build_review_skip_rows(restock_cands, shown_idxs, confirmed_idxs, diff_idxs, today,
-                            notpsa_idxs=None):
+                            notpsa_idxs=None, sold_idxs=None):
     """視覚確証でレビュー済だが未確定(違う/見送り/PSA10でない)の行を作る(純関数)。
 
     shown - confirmed = 違う + 見送り + PSA10でない。次回から視覚確証に出さないため記録する。
@@ -1411,13 +1411,15 @@ def _build_review_skip_rows(restock_cands, shown_idxs, confirmed_idxs, diff_idxs
     """
     out = []
     notpsa_idxs = notpsa_idxs or set()
+    # ★2026-09-13: 「仕入元が売り切れ」も「見送り」に化けさせない (理由が後から読めなくなる)
+    sold_idxs = sold_idxs or set()
     for n in sorted(shown_idxs - confirmed_idxs):
         rc = restock_cands[n] if isinstance(n, int) and 0 <= n < len(restock_cands) else {}
         iid = (rc.get("itemID") or "").strip()
         if not iid:
             continue
         reason = ("違う" if n in diff_idxs
-                  else "PSA10でない" if n in notpsa_idxs else "見送り")
+                  else "PSA10でない" if n in notpsa_idxs else "売り切れ" if n in sold_idxs else "見送り")
         out.append([iid, rc.get("card_no", ""), rc.get("title", ""), reason, today, rc.get("ebay_url", "")])
     return out
 
@@ -1574,8 +1576,9 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
         shown_idxs = {it["idx"] for it in items}
         diff_idxs = {d.get("idx") for d in (res.get("diffs") or []) if d.get("idx") is not None}
         notpsa_idxs = {d.get("idx") for d in (res.get("notpsa") or []) if d.get("idx") is not None}
+        sold_idxs = {d.get("idx") for d in (res.get("sold") or []) if d.get("idx") is not None}
         new_skip = _build_review_skip_rows(restock_cands, shown_idxs, set(sel.keys()), diff_idxs,
-                                           today, notpsa_idxs)
+                                           today, notpsa_idxs, sold_idxs)
         if new_skip:
             skip_out = _merge_skip_rows(_skip_existing, new_skip, REVIEW_SKIP_HEADER)
             _wt2(REVIEW_SKIP_TAB, skip_out)
@@ -1598,6 +1601,18 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
             _hf3.record_not_psa10(_np, today)
         except Exception as e:
             print(f"  ⚠ PSA10でない の記録skip ({type(e).__name__}: {e})")
+
+    # ★2026-09-13: 「仕入元が売り切れ」= URL そのものがもう買えない。補URL③ と同じ台帳に入れる
+    #   (`_build_visual_candidates` が読む = 再仕入れ照合にも補URLにも二度と出ない)。
+    _sold_urls = [(d.get("url") or "").strip() for d in (res.get("sold") or [])
+                  if (d.get("url") or "").strip()]
+    if _sold_urls:
+        try:
+            for _su in _sold_urls:
+                mp.remember_not_buyable(_su, "仕入元が売り切れ (再仕入れ照合 目視)")
+            print(f"  🚫 仕入元が売り切れ: {len(_sold_urls)}本 → 以後どの候補画面にも出しません")
+        except Exception as e:                                # noqa: BLE001
+            print(f"  ⚠ 売り切れの記録skip ({type(e).__name__})")
 
     _alert_restock_diffs(res.get("diffs") or [], res.get("skip") or 0, restock_cands, today)
 
