@@ -55,9 +55,17 @@ class TestRateAndSafety:
         assert 10 <= DEFAULT_LIMIT <= 60
 
     def test_stops_on_cloudflare(self):
+        """Cloudflare (と見分けがつかない時) は止める。
+
+        ★2026-09-13: None を全部 Cloudflare 扱いにしていたので、PSA にページが無い cert で毎晩止まっていた。
+          今は「ページが無い」だけ次へ進み、それ以外は今までどおり止める。
+        """
         s = _src()
-        assert 'stopped = "cloudflare"' in s and "break" in s, \
-            "Cloudflare で止めないと夜通し叩き続ける (BAN が一番高くつく)"
+        i = s.index("kind = failure_kind(driver.page_source)")
+        block = s[i:i + 900]
+        assert 'if kind == "not_found":' in block
+        assert "stopped = kind" in block and "break" in block, (
+            "Cloudflare で止めないと夜通し叩き続ける (BAN が一番高くつく)")
 
     def test_does_not_steal_the_profile(self):
         s = _src()

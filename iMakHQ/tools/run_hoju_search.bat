@@ -111,9 +111,15 @@ REM         --nightly opens no browser, writes no catalog request and no RESTOCK
 REM         confirmation; it only re-checks stock and updates the ledger.
 REM         Unconfirmed variants are left alone (a wrong variant must not be revived).
 echo [restock-recheck] %date% %time% >> "%LOG%"
+REM         2026-09-13: the mercari re-check used the default batch of 10 per night,
+REM         so 34-41 cards were carried over EVERY night and "restockable" stayed at
+REM         14-16 of 68 for a week (never converged). Raise the nightly batch to 40
+REM         (the per-run safety cap in psa_resource_gate is 60, so this stays inside it).
 set RESTOCK_TARGET_NEW=0
+set RESTOCK_SCRAPE_BATCH=40
 python -u psa_resource_gate.py --nightly >> "%LOG%" 2>&1
 set RESTOCK_TARGET_NEW=
+set RESTOCK_SCRAPE_BATCH=
 
 REM --- 3c) move the spare supply URLs that a human already identified (the tab
 REM         "new listing candidates", rows marked as aux use) into the aux columns

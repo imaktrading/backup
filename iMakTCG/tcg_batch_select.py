@@ -394,12 +394,48 @@ def _sample_with_share(groups, limit, share):
 FUNNEL_GLOB = r"C:/dev/iMak/iMakHQ/funnel_output/funnel_*.csv"
 
 
-def build_demand_of(certs, funnel_glob=None, key_map=None):
+def _pid_from_psa_cache(certs):
+    """cert → catalog の product_id を **PSA データの手元キャッシュ** から引く (I/O・失敗は空)。
+
+    出品くんの前段 (psa_preflight.classify) と同じ解決を使う。解決できない物は入れない。
+    """
+    out = {}
+    try:
+        import json as _json
+        import sqlite3 as _sq3
+        import sys as _sys
+        _sys.path.insert(0, r"C:/dev/iMak/iMakHQ/tools")
+        import psa_preflight as _pf
+        con = _sq3.connect(_pf.CATALOG_DB)
+    except Exception:                                          # noqa: BLE001
+        return out
+    try:
+        for c in certs:
+            f = _pf.PSA_CERTS_DIR / f"{c}.json"
+            if not f.exists():
+                continue
+            try:
+                r = _pf.classify(str(c), _json.loads(f.read_text(encoding="utf-8")), con)
+            except Exception:                                  # noqa: BLE001
+                continue
+            if r.get("status") == "RESOLVED" and r.get("product_id"):
+                out[c] = r["product_id"]
+    finally:
+        con.close()
+    return out
+
+
+def build_demand_of(certs, funnel_glob=None, key_map=None, fallback_key_of=None):
     """cert → 売れ筋スコア を返す関数を作る (I/O。材料が無ければ全部 None = 従来の順)。
 
     ★2026-09-08 ユーザー確定「ポケモン70%、売れ筋優先。それ以外は適当でいい」。
       鍵 (商品管理シート AI列) からセット記号を取り、ファネルのセット別スコアを引く。
       点が付くのは実測でプールの44% (2026-09-08: 1,172件中513件)。残りは None。
+    ★2026-09-13: **219件中0件** に点が付いていた。鍵 (AI列) は出品した後に入る物で、
+      「既出品の2枚目」を前段で落とすようになってから、残る候補は全部 鍵が無い = 構造的に0件。
+      鍵が無い候補は **PSA データの手元キャッシュから product_id を引いて** セット記号を取る
+      (出品くんの前段と同じ解決)。キャッシュは夜間 iMakHQ_PsaCacheWarm_0130 が貯める
+      (このタスクが 8/19 から一度も動いていなかったのも同日に発覚・有効化)。
     """
     import csv as _csv
     import glob as _glob
@@ -423,6 +459,16 @@ def build_demand_of(certs, funnel_glob=None, key_map=None):
     except Exception as e:                                     # noqa: BLE001
         print(f"  ⚠ 売れ筋の点を作れませんでした ({type(e).__name__}) → 従来の順で選びます")
         return lambda c: None
-    n = sum(1 for c in certs if score.get(set_of_key(key_map.get(c, ""))) is not None)
-    print(f"  🔥 売れ筋順: {n}/{len(certs)}件に点が付きます (残りは点なし=後ろ・順不同)")
-    return lambda c: score.get(set_of_key(key_map.get(c, "")))
+    if fallback_key_of is None:
+        _need = [c for c in certs if not (key_map.get(c) or "").strip()]
+        _pids = _pid_from_psa_cache(_need)
+        fallback_key_of = _pids.get
+
+    def key_of(c):
+        return (key_map.get(c) or "").strip() or (fallback_key_of(c) or "")
+    n = sum(1 for c in certs if score.get(set_of_key(key_of(c))) is not None)
+    n_fb = sum(1 for c in certs if not (key_map.get(c) or "").strip()
+               and score.get(set_of_key(fallback_key_of(c) or "")) is not None)
+    print(f"  🔥 売れ筋順: {n}/{len(certs)}件に点が付きます (うち PSAデータから {n_fb}件 / "
+          f"残りは点なし=後ろ・順不同)")
+    return lambda c: score.get(set_of_key(key_of(c)))

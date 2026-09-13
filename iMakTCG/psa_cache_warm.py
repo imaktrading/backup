@@ -39,6 +39,60 @@ sys.path.insert(0, r"C:\dev\iMak\iMakeBayAPI")
 RESULT_PATH = r"C:\dev\iMak\iMakHQ\review_logs\psa_cache_warm_last.json"
 DEFAULT_LIMIT = 40
 
+# ★2026-09-13: get_psa_data は「Cloudflare を抜けられない」と「PSA にその cert のページが無い」の
+#   **どちらでも None を返す**。ここは None を全部 Cloudflare とみなして打ち切っていたため、
+#   ページの無い cert (例 936643273) が候補の3件目にあるだけで **毎晩2件で終わる** 所だった
+#   (8/19 に作られてから一度も動いていなかったタスクを有効化した直後の試走で発覚)。
+#   → ページを見て見分ける。ページが無い cert は記録して **次の晩から飛ばす** (毎晩叩かない)。
+#     見分けがつかない時は今までどおり止める (叩き続けない = BAN が一番高くつく)。
+NOT_FOUND_PATH = r"C:\dev\iMak\iMakeBayAPI\cache\psa_cert_not_found.json"
+NOT_FOUND_DAYS = 30
+_CF_MARKERS = ("Cloudflare", "セキュリティ検証", "Ray ID", "challenge-platform")
+_NOT_FOUND_MARKERS = ("リクエストされたページが見つかりませんでした", "お探しのページが見つかりませんでした",
+                      "page you requested could not be found")
+
+
+def failure_kind(page_source):
+    """取れなかった時のページ → "not_found" / "cloudflare" / "unknown" (純関数)。"""
+    s = page_source or ""
+    if any(m in s for m in _NOT_FOUND_MARKERS):
+        return "not_found"
+    if any(m in s for m in _CF_MARKERS):
+        return "cloudflare"
+    return "unknown"
+
+
+def recently_not_found(cert, ledger, today=None, days=NOT_FOUND_DAYS):
+    """`days` 日以内に「ページが無い」と記録した cert か (純関数)。"""
+    at = (ledger or {}).get(str(cert))
+    if not at:
+        return False
+    try:
+        d = datetime.fromisoformat(at[:10])
+    except ValueError:
+        return False
+    return ((today or datetime.now()) - d).days < days
+
+
+def _load_not_found():
+    try:
+        with open(NOT_FOUND_PATH, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _remember_not_found(cert):
+    d = _load_not_found()
+    d[str(cert)] = datetime.now().isoformat(timespec="seconds")
+    try:
+        os.makedirs(os.path.dirname(NOT_FOUND_PATH), exist_ok=True)
+        with open(NOT_FOUND_PATH, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1)
+    except OSError:
+        pass
+
 
 def pending_certs(all_certs, is_cached):
     """まだ PSA データが揃っていない cert (順序は入力のまま = 再現可能)。純関数・test 可.
@@ -93,10 +147,15 @@ def main() -> int:
     import psa_to_csv as P
 
     certs, _cost, _url, _title = P.load_targets_from_sheet_psa()
-    todo = pending_certs(certs, lambda c: has_everything_we_need(psa_api.get_cached(c)))
+    _nf = _load_not_found()
+    todo = pending_certs(certs, lambda c: has_everything_we_need(psa_api.get_cached(c))
+                         or recently_not_found(c, _nf))
+    _n_nf = sum(1 for c in set(map(str, certs)) if recently_not_found(c, _nf))
     print(f"=== PSA データの先貯め ===")
-    print(f"出品候補 {len(certs)}件 / データ揃い {len(certs) - len(todo)}件 "
-          f"/ 無 {len(todo)}件 → 今回 {min(a.limit, len(todo))}件")
+    # ★飛ばした分 (PSA にページが無い) を「データ揃い」に混ぜない (揃っていないのに揃ったと読める)
+    print(f"出品候補 {len(certs)}件 / データ揃い {len(certs) - len(todo) - _n_nf}件 "
+          f"/ 無 {len(todo)}件 → 今回 {min(a.limit, len(todo))}件"
+          + (f" / PSA にページが無い {_n_nf}件は{NOT_FOUND_DAYS}日飛ばす" if _n_nf else ""))
     if a.dry_run or not todo:
         _record({"mode": "dry-run" if a.dry_run else "empty",
                  "candidates": len(certs), "pending": len(todo), "fetched": 0})
@@ -133,11 +192,20 @@ def main() -> int:
             else:
                 fail += 1
                 print(f"  [{i}] {cert} ✗ 取れず")
-                # get_psa_data は Cloudflare を3回 retry して None を返す。
-                # 夜間は人が突破できないので、そこで**やめる**。叩き続けない。
+                # get_psa_data は Cloudflare でも「ページが無い」でも None を返す。ページで見分ける
                 if data is None:
-                    stopped = "cloudflare"
-                    print("  🛡️ Cloudflare を抜けられない → 今夜はここで終了 (次の晩に続きから)")
+                    try:
+                        kind = failure_kind(driver.page_source)
+                    except Exception:                          # noqa: BLE001
+                        kind = "unknown"
+                    if kind == "not_found":
+                        _remember_not_found(cert)
+                        print(f"      PSA にページが無い → 記録して次へ ({NOT_FOUND_DAYS}日は取りに行かない)")
+                        continue
+                    # 夜間は人が突破できないので、Cloudflare / 見分けがつかない時は**やめる**。叩き続けない
+                    stopped = kind
+                    print(f"  🛡️ {'Cloudflare を抜けられない' if kind == 'cloudflare' else '取れない理由が分からない'}"
+                          " → 今夜はここで終了 (次の晩に続きから)")
                     break
     finally:
         try:
