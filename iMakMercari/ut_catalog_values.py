@@ -483,6 +483,7 @@ def values_for_url(url, size_text, ledger=None, title=""):
                         (p["specs"].get("color_variants") or []) if c.get("name")}
     v["l1"] = str(p["specs"].get("l1_id") or "")
     v["img_drop"] = list(e.get("img_drop") or [])
+    v["img_main"] = (e.get("img_main") or "").strip()
     return v
 
 
@@ -497,8 +498,13 @@ _RE_GOODS = re.compile(r"goods_(\d{2})_(\d{6})")
 
 
 def listing_images(catalog_images, color_code="", l1="", other_codes=(), seller_urls=(),
-                   drop=(), max_n=MAX_PICTURES):
-    """出品に使う画像 URL の並び (純関数)。"""
+                   drop=(), max_n=MAX_PICTURES, first=""):
+    """出品に使う画像 URL の並び (純関数)。
+
+    ★2026-09-13 ユーザー「画像の順番を指定するところだけど、1枚目だけ指定させて」:
+      `first` (目視で「1枚目」に選んだ画像) があれば先頭に置く。残りはルールの順のまま。
+      外した画像・候補に無い URL は 1枚目にしない (外したのに1枚目に来る事故を作らない)。
+    """
     dropped = {(u or "").strip() for u in (drop or ()) if u}
     others = {c for c in (other_codes or ()) if c and c != color_code}
     main, sub = [], []
@@ -519,6 +525,10 @@ def listing_images(catalog_images, color_code="", l1="", other_codes=(), seller_
         if u and u not in seen and u not in dropped:
             seen.add(u)
             out.append(u)
+    first = (first or "").strip()
+    if first and first in out:
+        out.remove(first)
+        out.insert(0, first)
     return out[:max_n]
 
 
@@ -527,7 +537,7 @@ def images_for_listing(v, seller_urls=()):
     codes = v.get("color_codes") or {}
     return listing_images(v.get("catalog_images") or [], codes.get(v.get("color_name")) or "",
                           v.get("l1") or "", list(codes.values()), seller_urls,
-                          v.get("img_drop") or [])
+                          v.get("img_drop") or [], first=v.get("img_main") or "")
 
 
 def apply_to_specs(specs, v, validate):

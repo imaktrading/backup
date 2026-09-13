@@ -107,3 +107,50 @@ def test_image_picker_is_big_enough_to_judge():
     m = re.search(r"\.imgpick img\{width:(\d+)px;height:(\d+)px", src)
     assert m and int(m.group(1)) >= 100 and int(m.group(2)) >= 130, m and m.groups()
     assert "function zoomPick(" in src and "zoomPick(event,this)" in src
+
+
+# ── 1枚目だけ人が指定する (2026-09-13 試走) ──────────────────────────────
+# ユーザー「画像の順番を指定するところだけど、1枚目だけ指定させて」。
+# 押した画像を先頭に置き、残りはルールの順のまま。押さなければ今までどおりカタログの表が先頭。
+
+def test_first_image_moves_to_the_front_rest_keep_rule_order():
+    got = V.listing_images([MAIN_BLUE, SUB1, SUB2], "65", "480691", ["65"], [M1, M2], first=SUB2)
+    assert got == [SUB2, MAIN_BLUE, SUB1, M1, M2]
+
+
+def test_seller_photo_can_be_first():
+    got = V.listing_images([MAIN_BLUE, SUB1], "65", "480691", ["65"], [M1, M2], first=M2)
+    assert got[0] == M2 and got[1:] == [MAIN_BLUE, SUB1, M1]
+
+
+def test_dropped_or_unknown_first_is_ignored():
+    """外した画像や候補に無い URL を1枚目にしない (外したのに先頭に来る事故を作らない)。"""
+    base = V.listing_images([MAIN_BLUE, SUB1], "65", "480691", ["65"], [M1])
+    assert V.listing_images([MAIN_BLUE, SUB1], "65", "480691", ["65"], [M1],
+                            drop=[SUB1], first=SUB1)[0] == MAIN_BLUE
+    assert V.listing_images([MAIN_BLUE, SUB1], "65", "480691", ["65"], [M1],
+                            first="https://example.com/x.jpg") == base
+
+
+def test_first_survives_the_twelve_cap():
+    subs = [f"{B}/sub/goods_480691_sub{i}_3x4.jpg" for i in range(20)]
+    got = V.listing_images(subs, "65", "480691", ["65"], [M1], first=M1)
+    assert got[0] == M1 and len(got) == 12
+
+
+def test_screen_posts_main_and_parse_keeps_only_valid():
+    import ut_identify as U
+    res = U.parse_result({"picks": [
+        {"idx": 1, "pid": "E1", "color": "BLUE", "drop": [], "main": M1},
+        {"idx": 2, "pid": "E1", "color": "BLUE", "drop": [M1], "main": M1},   # 外した物は1枚目にしない
+        {"idx": 3, "pid": "E1", "color": "BLUE", "main": "not a url"}]})
+    by = {p["idx"]: p for p in res["picks"]}
+    assert by[1]["main"] == M1 and "main" not in by[2] and "main" not in by[3]
+
+
+def test_values_and_screen_carry_img_main():
+    import io
+    src = io.open(ROOT / "iMakMercari" / "ut_catalog_values.py", encoding="utf-8").read()
+    assert 'v["img_main"]' in src and 'first=v.get("img_main")' in src
+    ui = io.open(ROOT / "iMakHQ" / "tools" / "ut_identify.py", encoding="utf-8").read()
+    assert "function setFirst(" in ui and '"img_main": p["main"]' in ui

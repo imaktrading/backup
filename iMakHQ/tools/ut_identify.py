@@ -439,10 +439,13 @@ def parse_result(data):
             pid, color = (p.get("pid") or "").strip(), (p.get("color") or "").strip()
             reason = (p.get("reason") or "").strip()
             drop = [u.strip() for u in (p.get("drop") or []) if isinstance(u, str) and u.strip()]
+            main = p.get("main") if isinstance(p.get("main"), str) else ""
+            main = main.strip() if re.match(r"^https?://\S+$", (main or "").strip()) else ""
             if pid and color and (reason or not need_reason):
                 out.append({"idx": idx, "pid": pid, "color": color,
                             **({"reason": reason} if need_reason else {}),
-                            **({"drop": drop} if drop else {})})
+                            **({"drop": drop} if drop else {}),
+                            **({"main": main} if main and main not in drop else {})})
         return out
     picks = _picks("picks")
     skips = _picks("skips", need_reason=True)
@@ -601,6 +604,11 @@ input.q{font-size:12px;width:170px}select{font-size:12px}
 .imgpick img.off{opacity:.25;border-color:#c33}
 .imgpick .sep{width:3px;height:160px;background:#999;margin:0 4px}
 .imgpick .zp{font-size:12px;padding:4px 10px}
+.imgpick .tw{display:inline-flex;flex-direction:column;align-items:center;gap:2px}
+.imgpick .f1,#zov .f1{font-size:11px;padding:1px 8px}
+.imgpick img.first{border-color:#e0a800;box-shadow:0 0 0 3px #e0a800}
+#zov .zcol .zw{position:relative}#zov .zcol .zw .f1{position:absolute;top:6px;left:6px;font-size:14px}
+#zov .zcol img.first{outline:6px solid #e0a800}
 #zov .zcol img.off{opacity:.25;outline:6px solid #c33}
 #zov .zcol img.pk{cursor:pointer}
 #go{position:fixed;right:14px;bottom:14px;font-size:15px;padding:10px 20px;background:#0a7;color:#fff;border:none;border-radius:6px}
@@ -640,22 +648,38 @@ function showImgs(box){var v=box.querySelector('.v.sel');var s=box.querySelector
   if(!s||!v){return;}var cr=[],pr=[];
   try{cr=JSON.parse(v.dataset.raw||'[]');}catch(e){}try{pr=JSON.parse(box.dataset.rawphotos||'[]');}catch(e){}
   var ca=[],ph=[];try{ca=JSON.parse(v.dataset.imgs||'[]');}catch(e){}try{ph=JSON.parse(box.dataset.photos||'[]');}catch(e){}
-  function tile(u,raw,src){return "<img src='"+u+"' data-src='"+src+"' data-raw='"+(raw||'').replace(/'/g,'%27')+"' onclick='togImg(event,this)' onerror='this.remove()' title='押すと 使わない/使う'>";}
+  function tile(u,raw,src){return "<span class='tw'><img src='"+u+"' data-src='"+src+"' data-raw='"+(raw||'').replace(/'/g,'%27')+"' onclick='togImg(event,this)' onerror='this.parentNode.remove()' title='押すと 使わない/使う'>"
+    +"<button class='f1' onclick='setFirst(event,this)'>1枚目</button></span>";}
   var h="<div style='width:100%'><span class='nm'>出品に使う画像 (カタログ → 仕入元・最大12枚) — 使わない物を押す</span> "
-    +"<button class='zp' onclick='zoomPick(event,this)'>🔍 大きくして選ぶ</button></div>";
+    +"<button class='zp' onclick='zoomPick(event,this)'>🔍 大きくして選ぶ</button>"
+    +" <span class='nm'>「1枚目」を押した画像が先頭 (押さなければ カタログの表が先頭)</span></div>";
   ca.forEach(function(u,i){h+=tile(u,cr[i],'cat');});h+="<span class='sep'></span>";
   ph.forEach(function(u,i){h+=tile(u,pr[i],'sel');});s.innerHTML=h;}
-function togImg(ev,el){ev.stopPropagation();el.classList.toggle('off');}
+function togImg(ev,el){ev.stopPropagation();el.classList.toggle('off');if(el.classList.contains('off'))el.classList.remove('first');}
+/* ★2026-09-13 ユーザー「1枚目だけ指定させて」: 押した画像を先頭に。もう一度押すと解除。
+   外していた画像を1枚目にしたら、使う側に戻す */
+function _first(box,img){var on=!img.classList.contains('first');
+  box.querySelectorAll('.imgpick img').forEach(function(i){i.classList.remove('first');});
+  if(on){img.classList.add('first');img.classList.remove('off');}return on;}
+function setFirst(ev,btn){ev.preventDefault();ev.stopPropagation();
+  _first(btn.closest('.it'),btn.parentNode.querySelector('img'));}
 /* ★2026-09-13 ユーザー「画像が小さすぎて判断しづらい」: 画面いっぱいに並べ、そこで押しても外せる
    (押した結果は下の小さい画像と連動する) */
 function zoomPick(ev,btn){ev.preventDefault();ev.stopPropagation();var box=btn.closest('.it');
   var ts=[].slice.call(box.querySelectorAll('.imgpick img'));
   function col(id,cap,list){var c=document.getElementById(id);
     c.innerHTML="<div class='zcap'>"+cap+" ("+list.length+"枚) — 押すと 使わない / 使う</div>";
-    list.forEach(function(t){var im=document.createElement('img');im.src=t.src;im.className='pk';
+    list.forEach(function(t){var w=document.createElement('div');w.className='zw';
+      var im=document.createElement('img');im.src=t.src;im.className='pk';
       if(t.classList.contains('off'))im.classList.add('off');
-      im.onclick=function(e){e.stopPropagation();t.classList.toggle('off');im.classList.toggle('off');};
-      c.appendChild(im);});}
+      if(t.classList.contains('first'))im.classList.add('first');
+      im.onclick=function(e){e.stopPropagation();t.classList.toggle('off');im.classList.toggle('off');
+        if(im.classList.contains('off')){t.classList.remove('first');im.classList.remove('first');}};
+      var b=document.createElement('button');b.className='f1';b.textContent='1枚目にする';
+      b.onclick=function(e){e.stopPropagation();var on=_first(box,t);
+        document.querySelectorAll('#zov img.first').forEach(function(x){x.classList.remove('first');});
+        if(on){im.classList.add('first');im.classList.remove('off');}};
+      w.appendChild(im);w.appendChild(b);c.appendChild(w);});}
   col('zl','カタログ',ts.filter(function(t){return t.dataset.src==='cat';}));
   col('zr','仕入元の写真',ts.filter(function(t){return t.dataset.src==='sel';}));
   document.getElementById('zov').classList.add('on');}
@@ -688,7 +712,8 @@ function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason
     var c=(b.querySelector('select.col')||{}).value||'';var r=(b.querySelector('select.rsn')||{}).value||'';
     if(a==='go'){
       var drop=[];b.querySelectorAll('.imgpick img.off').forEach(function(i){if(i.dataset.raw)drop.push(decodeURIComponent(i.dataset.raw));});
-      if(!b.dataset.pid||!c){nocolor++;holds.push(idx);}else{picks.push({idx:idx,pid:b.dataset.pid,color:c,drop:drop});}}
+      var f1=b.querySelector('.imgpick img.first');var main=f1&&f1.dataset.raw?decodeURIComponent(f1.dataset.raw):'';
+      if(!b.dataset.pid||!c){nocolor++;holds.push(idx);}else{picks.push({idx:idx,pid:b.dataset.pid,color:c,drop:drop,main:main});}}
     else if(a==='skip'){
       if(!b.dataset.pid||!c){nocolor++;holds.push(idx);}
       else if(r.indexOf('skip_')!==0){noreason++;holds.push(idx);}
@@ -1052,7 +1077,8 @@ def save(items, res, now=None):
         # サイズ欄が空の出品はタイトルから読む (決められない時は空のまま = 出品側で止まる)
         add_led[url] = {"decision": "go", "product_id": p["pid"], "color": p["color"],
                         "title": r[C_TITLE], "size": r[C_SIZE] or _size_from(r[C_TITLE]),
-                        "at": now, **({"img_drop": p["drop"]} if p.get("drop") else {})}
+                        "at": now, **({"img_drop": p["drop"]} if p.get("drop") else {}),
+                        **({"img_main": p["main"]} if p.get("main") else {})}
     for p in res.get("skips") or []:
         it = by_idx.get(p["idx"])
         if not it or p["pid"] not in catalog:
