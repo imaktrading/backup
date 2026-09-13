@@ -95,7 +95,10 @@ def collect() -> list[dict]:
             out.append({
                 "p": r["product_id"], "n": r["name"] or "", "b": brand,
                 "g": str(s.get("gender") or "").upper() or "—",
-                "s": "現役" if live else "廃盤",
+                # ★「柄の記録」は公式の品番が無い (Fashion Press の写真で当てる用)。
+                #   状態で区別して、出品の KEY と取り違えないようにする (2026-09-13)
+                "s": ("柄の記録 (品番なし)" if s.get("data_level") == "fp_design"
+                      else "現役" if live else "廃盤"),
                 "i": imgs, "t": _thumb(imgs[0]) if imgs else "",
                 "pr": s.get("price_jpy_base") or "",
                 "c": [x.get("name") for x in (s.get("color_variants") or [])
@@ -118,7 +121,8 @@ def collect() -> list[dict]:
                 "st": s.get("stock_total") or 0,
                 "ss": s.get("stock_by_size") or {},
                 "so": (s.get("sold_out_since") or "")[:10],
-                "u": PDP[brand].format(pid=r["product_id"]),
+                "u": (s.get("article_url") or "") if s.get("data_level") == "fp_design"
+                     else PDP[brand].format(pid=r["product_id"]),
                 "k": _initial(r["name"] or ""),
             })
     db.close()

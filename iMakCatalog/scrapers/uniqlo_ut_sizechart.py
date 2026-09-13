@@ -241,7 +241,8 @@ def targets(db, include_kids: bool) -> list[sqlite3.Row]:
         if not include_kids and str(s.get("gender") or "").upper() in KID_GENDERS:
             kids += 1
             continue
-        if s.get("is_collab_overview") or s.get("not_tee"):
+        if (s.get("is_collab_overview") or s.get("not_tee")
+                or s.get("data_level") == "fp_design"):   # 柄の記録 (公式の品番でない)
             # ★商品でない行 (コラボの紹介記事) / Tシャツでない物 (手袋・リラコ等)。
             #   実寸表は存在しないか形が違う (2026-09-10 / 09-11)
             gone += 1

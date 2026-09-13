@@ -163,7 +163,7 @@ def targets(db, include_kids: bool) -> list[sqlite3.Row]:
         # ★商品でない行は叩かない (2026-09-10)。コラボの紹介記事を丸ごと1行として
         #   持っている分 (`FP-*`) は商品番号ではないので、公式 API が毎回 400 を返す。
         #   欠落ではないので、対象から外す。
-        if s.get("is_collab_overview"):
+        if s.get("is_collab_overview") or s.get("data_level") == "fp_design":
             notprod += 1
             continue
         if s.get("enriched_at") or s.get("official_gone_at"):
