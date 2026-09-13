@@ -41,6 +41,14 @@ def _log(m: str) -> None:
     print(f"[{datetime.now():%H:%M:%S}] {m}", flush=True)
 
 
+def to_sheet_item(k: dict) -> dict:
+    """keep した item -> スプシ書込用 (純関数)."""
+    return {"url": k["url"], "title": k.get("title"), "condition": k.get("condition"),
+            "price_jpy": k.get("price_jpy"), "image_urls": k.get("image_urls"),
+            "description": k.get("description"), "size": k.get("size"),
+            "color": k.get("color")}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--price-min", type=int, default=10000)
@@ -67,6 +75,19 @@ def main(argv=None) -> int:
     if args.manual:
         _log("★手動モード: 各キーワードの検索画面でフリマアシスト「もっと見る」を click してください")
 
+    # ★途中で保存する (2026-09-13 user「なんでまめな保存をしないの？」)。
+    #   最後だけ書く作りだと、 ドライバが1回落ちるだけで それまでの収集が全部消える。
+    from incremental_writer import PendingWriter  # noqa: PLC0415
+    DUMP_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%dT%H%M%S")
+    dump = DUMP_DIR / f"mercari_porter_{ts}.json"
+
+    def _write(rows):
+        from sheet_writer_mercari_search import append_mercari_search_items  # noqa: PLC0415
+        _log(f"  [SHEET] {append_mercari_search_items([to_sheet_item(k) for k in rows], label=args.label)}")
+
+    writer = PendingWriter(write_fn=_write, every=5, dump_path=dump, log=_log,
+                           enabled=not args.dry_run)
     driver = MS.create_anonymous_driver(headless=headless)
     kept, rej = [], {"sold": 0, "not_tanker": 0, "not_target_bag": 0,
                      "seller_rating": 0, "no_identity": 0, "fetch_fail": 0}
@@ -84,7 +105,11 @@ def main(argv=None) -> int:
             _log(f"詳細フェッチ上限 {args.max_details} 件に制限 (POC)")
 
         for i, url in enumerate(urls, 1):
-            detail = mercari_item_detail.fetch_detail(driver, url)
+            try:
+                detail = mercari_item_detail.fetch_detail(driver, url)
+            except Exception as e:  # noqa: BLE001 - ドライバが固まった等。 1件の失敗として数える
+                _log(f"  ⚠️ 詳細取得で例外 ({type(e).__name__}) {url}")
+                detail = None
             if not detail:
                 rej["fetch_fail"] += 1
                 continue
@@ -100,7 +125,12 @@ def main(argv=None) -> int:
             if not MSch.is_target_bag(title):
                 rej["not_target_bag"] += 1
                 continue
-            q = MSch.extract_seller_quality(driver)  # 直前に開いた商品ページから
+            try:
+                q = MSch.extract_seller_quality(driver)  # 直前に開いた商品ページから
+            except Exception as e:  # noqa: BLE001
+                _log(f"  ⚠️ セラー情報で例外 ({type(e).__name__}) {url}")
+                rej["fetch_fail"] += 1
+                continue
             if not MSch.passes_seller_filter(
                 q, min_rating_count=args.min_rating,
                 require_identity=not args.no_identity,
@@ -118,6 +148,7 @@ def main(argv=None) -> int:
             item["seller_star"] = q.get("star")
             item["identity_verified"] = q.get("identity_verified")
             kept.append(item)
+            writer.add(item)
             if i % 10 == 0 or i == len(urls):
                 _log(f"  詳細 {i}/{len(urls)} (keep={len(kept)} rej={rej})")
             time.sleep(1.0)
@@ -126,6 +157,7 @@ def main(argv=None) -> int:
             driver.quit()
         except Exception:
             pass
+        writer.close()      # 残りを書く。 書けなければ _unwritten.json に退避
 
     _log(f"完了: 収集{len(collected['urls'])} → keep={len(kept)} / reject={rej}")
     if desc_missing:
@@ -134,29 +166,10 @@ def main(argv=None) -> int:
         for u in desc_missing[:10]:
             _log(f"    {u}")
 
-    DUMP_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%dT%H%M%S")
-    dump = DUMP_DIR / f"mercari_porter_{ts}.json"
-    dump.write_text(json.dumps({"kept": kept, "reject": rej,
-                                "by_keyword": collected["by_keyword"]},
-                               ensure_ascii=False, indent=2), encoding="utf-8")
-    _log(f"[FILE] JSON dump: {dump}")
-
+    status = "正常" if rej["fetch_fail"] == 0 else f"⚠️要対応 (取得失敗 {rej['fetch_fail']}件)"
+    _log(f"スプシに書いた {writer.written} 件 / {status} / [FILE] JSON dump: {dump}")
     if args.dry_run:
         _log("dry-run → 中間スプシ書込なし")
-        return 0
-    if not kept:
-        _log("keep 0 件 → 書込なし")
-        return 0
-    from sheet_writer_mercari_search import append_mercari_search_items  # noqa: PLC0415
-    items = [{
-        "url": k["url"], "title": k.get("title"), "condition": k.get("condition"),
-        "price_jpy": k.get("price_jpy"), "image_urls": k.get("image_urls"),
-        "description": k.get("description"), "size": k.get("size"),
-        "color": k.get("color"),
-    } for k in kept]
-    res = append_mercari_search_items(items, label=args.label)
-    _log(f"[SHEET] {res}")
     return 0
 
 

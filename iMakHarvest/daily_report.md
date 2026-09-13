@@ -1,5 +1,21 @@
 # iMakHarvest daily_report
 
+## 2026-09-13 (続) — 収集が最後だけ書く作りで 140件消失 → 全 runner を洗った
+
+メルカリUT収集が 140件 keep した後に chromedriver の ReadTimeout で落ち、書込が最後だけだったため
+**140件が丸ごと消えた**。8/20 に楽天で同じ指示 (途中で保存) を受けて入れたが、**その1本にしか入れず
+ルールにしなかった**のが原因。user「なんでまめな保存をしないの？学習機能ないの？」。
+
+- 共通部品 `incremental_writer.PendingWriter` を新設 (5件ごと書込 / 失敗は持ち越し / 最後は退避ファイル)
+- 全 `run_harvest_*.py` を走査する守り `tests/test_harvest_runners_save_incrementally.py` を追加
+- 直した: メルカリUT / モンベル / ポーター (ドライバ例外で止まらない形も入れた)
+- ★未対応 (理由付きで ALLOWLIST。要設計):
+  - `run_harvest_yodobashi.py` … cron。完走スタンプと Amazon 差分が最後の書込に依存
+  - `run_harvest_amazon_search.py` … 詳細ループが `_fetch_details` の中。CAPTCHA に敏感
+  - 失わない形になっているので対象外: restock_psa10 (カード1枚ごと JSON + 再開) /
+    amazon いいね・メルショいいね (ループが scrapers 側、件数少、凍結対象)
+- メモリ `save_incrementally_always` に「1本直すだけでなく全 runner を洗う」まで残した
+
 ## 2026-09-13 — UT はメルカリだけ / 検索語はカタログの「公式で買えない」から
 
 - **仕入先はメルカリだけ** (user 確定)。仕入れが芳しくなければラクマを追加。
