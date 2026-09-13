@@ -438,8 +438,11 @@ def parse_result(data):
                 continue
             pid, color = (p.get("pid") or "").strip(), (p.get("color") or "").strip()
             reason = (p.get("reason") or "").strip()
+            drop = [u.strip() for u in (p.get("drop") or []) if isinstance(u, str) and u.strip()]
             if pid and color and (reason or not need_reason):
-                out.append({"idx": idx, "pid": pid, "color": color, **({"reason": reason} if need_reason else {})})
+                out.append({"idx": idx, "pid": pid, "color": color,
+                            **({"reason": reason} if need_reason else {}),
+                            **({"drop": drop} if drop else {})})
         return out
     picks = _picks("picks")
     skips = _picks("skips", need_reason=True)
@@ -523,6 +526,7 @@ def _cards_html(cands, color_jp=""):
             f"<div class='v' data-pid=\"{_html.escape(p['pid'])}\" "
             f"data-colors=\"{_html.escape(json.dumps([c['name'] for c in p['colors']], ensure_ascii=False))}\" "
             f"data-imgs=\"{_html.escape(json.dumps(gal))}\" "
+            f"data-raw=\"{_html.escape(json.dumps(gallery(p, dc)))}\" "
             f"data-defcolor=\"{_html.escape(dc)}\" onclick='pickV(this)'>"
             + (f"<img class='main' src='{_html.escape(prc._proxied(img))}' loading='lazy' onerror='imgFail(this)'>"
                if img else "<div class='noimg'>画像なし</div>")
@@ -577,6 +581,10 @@ input.q{font-size:12px;width:170px}select{font-size:12px}
 #zov .zcol img{width:100%;object-fit:contain;background:#fff}
 #zov .zx{position:fixed;top:8px;right:12px;font-size:14px;z-index:100}
 .ph .zall{font-size:11px}
+.imgpick{margin-top:6px;display:flex;flex-wrap:wrap;gap:3px;align-items:center}
+.imgpick img{width:42px;height:56px;object-fit:cover;border:2px solid #0a7;cursor:pointer}
+.imgpick img.off{opacity:.2;border-color:#c33}
+.imgpick .sep{width:2px;height:56px;background:#999;margin:0 3px}
 #go{position:fixed;right:14px;bottom:14px;font-size:15px;padding:10px 20px;background:#0a7;color:#fff;border:none;border-radius:6px}
 """
 
@@ -607,9 +615,21 @@ function fillColors(box,v){var sel=box.querySelector('select.col');var wrap=box.
   sel.innerHTML="<option value=''>色を選ぶ</option>"+cs.map(function(c){
     return "<option"+(c===v.dataset.defcolor?" selected":"")+">"+c+"</option>";}).join('');
   wrap.style.display=cs.length>1?'':'none';}
+/* ★2026-09-13 ユーザー確定「メインはカタログ画像。出品者の画像は使うなら最後」。
+   並びは固定 (カタログ → 仕入元・最大12枚)。ここでは **使わない画像を押して外すだけ**。
+   他の色の表は出品側で自動で外すので、ここに出す必要はない */
+function showImgs(box){var v=box.querySelector('.v.sel');var s=box.querySelector('.imgpick');
+  if(!s||!v){return;}var cr=[],pr=[];
+  try{cr=JSON.parse(v.dataset.raw||'[]');}catch(e){}try{pr=JSON.parse(box.dataset.rawphotos||'[]');}catch(e){}
+  var ca=[],ph=[];try{ca=JSON.parse(v.dataset.imgs||'[]');}catch(e){}try{ph=JSON.parse(box.dataset.photos||'[]');}catch(e){}
+  function tile(u,raw){return "<img src='"+u+"' data-raw='"+(raw||'').replace(/'/g,'%27')+"' onclick='togImg(event,this)' onerror='this.remove()' title='押すと 使わない/使う'>";}
+  var h="<span class='nm'>出品に使う画像 (カタログ → 仕入元・最大12枚) — 使わない物を押す:</span>";
+  ca.forEach(function(u,i){h+=tile(u,cr[i]);});h+="<span class='sep'></span>";
+  ph.forEach(function(u,i){h+=tile(u,pr[i]);});s.innerHTML=h;}
+function togImg(ev,el){ev.stopPropagation();el.classList.toggle('off');}
 function pickV(el){var box=el.closest('.it');
   box.querySelectorAll('.v').forEach(function(v){v.classList.remove('sel');});
-  el.classList.add('sel');box.dataset.pid=el.dataset.pid;fillColors(box,el);
+  el.classList.add('sel');box.dataset.pid=el.dataset.pid;fillColors(box,el);showImgs(box);
   setAct(box.querySelector('button.go'));}
 function lookup(inp){var box=inp.closest('.it');var q=inp.value.trim();
   if(!q||q===inp.dataset.asked)return;inp.dataset.asked=q;var slot=box.querySelector('.vslot');
@@ -634,7 +654,8 @@ function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason
   document.querySelectorAll('.it').forEach(function(b){var a=b.dataset.act||'';var idx=parseInt(b.dataset.idx,10);
     var c=(b.querySelector('select.col')||{}).value||'';var r=(b.querySelector('select.rsn')||{}).value||'';
     if(a==='go'){
-      if(!b.dataset.pid||!c){nocolor++;holds.push(idx);}else{picks.push({idx:idx,pid:b.dataset.pid,color:c});}}
+      var drop=[];b.querySelectorAll('.imgpick img.off').forEach(function(i){if(i.dataset.raw)drop.push(decodeURIComponent(i.dataset.raw));});
+      if(!b.dataset.pid||!c){nocolor++;holds.push(idx);}else{picks.push({idx:idx,pid:b.dataset.pid,color:c,drop:drop});}}
     else if(a==='skip'){
       if(!b.dataset.pid||!c){nocolor++;holds.push(idx);}
       else if(r.indexOf('skip_')!==0){noreason++;holds.push(idx);}
@@ -681,7 +702,8 @@ def build_html(items, catalog):
         price = f"¥{int(r[C_PRICE]):,}" if str(r[C_PRICE]).isdigit() else (r[C_PRICE] or "")
         parts.append(
             f"<div class='it' data-idx='{it['idx']}' data-pid='' data-color=\"{_html.escape(r[C_COLOR])}\" "
-            f"data-photo=\"{_html.escape(main)}\" data-photos=\"{_html.escape(photos_json)}\">"
+            f"data-photo=\"{_html.escape(main)}\" data-photos=\"{_html.escape(photos_json)}\" "
+            f"data-rawphotos=\"{_html.escape(json.dumps(photos[:10]))}\">"
             f"{ph}<div class='body'>"
             f"<div class='t'>{_html.escape((r[C_TITLE] or '')[:110])}</div>"
             f"<div class='meta'>{_html.escape(price)} ｜ 色 {_html.escape(r[C_COLOR] or '?')} ｜ "
@@ -703,6 +725,7 @@ def build_html(items, catalog):
                f"{it['hidden_instock']}件を隠しました (公式で買えない物だけが対象)</div>"
                if it.get("hidden_instock") else "")
             + f"<div class='vslot'>{_cards_html(it['cands'], r[C_COLOR])}</div>"
+            "<div class='imgpick'></div>"
             "<div class='act'>検索 <input class='q' placeholder='作品名 / キャラ / 6桁番号' "
             "onchange='lookup(this)'>"
             "<span class='colwrap' style='display:none'>色違いあり → 色 "
@@ -967,7 +990,7 @@ def save(items, res, now=None):
         # サイズ欄が空の出品はタイトルから読む (決められない時は空のまま = 出品側で止まる)
         add_led[url] = {"decision": "go", "product_id": p["pid"], "color": p["color"],
                         "title": r[C_TITLE], "size": r[C_SIZE] or _size_from(r[C_TITLE]),
-                        "at": now}
+                        "at": now, **({"img_drop": p["drop"]} if p.get("drop") else {})}
     for p in res.get("skips") or []:
         it = by_idx.get(p["idx"])
         if not it or p["pid"] not in catalog:

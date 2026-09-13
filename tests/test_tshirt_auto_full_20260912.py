@@ -62,13 +62,41 @@ def test_prefix_default_and_picking(tmp_path):
     assert CP.latest_csv_with_prefix(str(tmp_path / "no-such-dir"), "tcg_upload_") == ""
 
 
-def test_tshirt_auto_starts_in_verify_only():
-    """★TEST段階 (2026-09-12 ユーザー「まだ、TEST段階だから、UPはやめておく」)。
-
-    新しい商材は eBay が受理するか確かめるだけ = 出品しない。本番は True にして切り替える。
+def test_tshirt_auto_never_publishes_immediately():
+    """★2026-09-12 は TEST段階で「検証のみ」だった。
+    ★2026-09-13 ユーザー「最初はスケジュールで出品して。そこで内容を確認するから」で
+      **予約出品**に切り替えた。本当に出すなら、必ず予約 (公開前に eBay で中身を見られる)。
     """
     e = [x for x in _auto_entries() if x.get("category") == "Tシャツ"][0]
-    assert e["auto_upload_write"] is False
+    if e.get("auto_upload_write", True):
+        assert e.get("auto_upload_schedule") is True, "即時公開になっている (中身を確認する場が無い)"
+
+
+def test_old_csv_is_never_picked_up(tmp_path):
+    """今回の生成が0件で CSV を作らなかった時、**前の走行の CSV** を出品しないこと。
+
+    実害になりかけた例 (2026-09-13): 前日の tshirt_upload_*.csv は仕入元の画像1枚だけの
+    古い形。🤖自動 が0件で終わると、締めがそれを拾って予約出品するところだった。
+    """
+    import os
+    import time
+    old = tmp_path / "tshirt_upload_old.csv"
+    old.write_text("x", encoding="utf-8")
+    past = time.time() - 3600
+    os.utime(old, (past, past))
+    start = time.time() - 60
+    assert CP.latest_csv_with_prefix(str(tmp_path), "tshirt_upload_", since_ts=start) == ""
+    new = tmp_path / "tshirt_upload_new.csv"
+    new.write_text("x", encoding="utf-8")
+    got = CP.latest_csv_with_prefix(str(tmp_path), "tshirt_upload_", since_ts=start)
+    assert os.path.basename(got) == "tshirt_upload_new.csv"
+
+
+def test_auto_tail_is_given_the_run_start():
+    import io
+    src = io.open(ROOT / "iMakHQ" / "control_panel.py", encoding="utf-8").read()
+    i = src.index("_run_auto_full_tail(self.append_log")
+    assert "since_ts=" in src[i:i + 200]
 
 
 def test_psa_still_uploads_for_real():

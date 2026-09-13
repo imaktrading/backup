@@ -877,21 +877,26 @@ def auto_csv_prefix_of(entry):
     return (entry or {}).get("auto_csv_prefix") or "tcg_upload_"
 
 
-def latest_csv_with_prefix(csv_dir, prefix):
+def latest_csv_with_prefix(csv_dir, prefix, since_ts=None):
     """その頭で始まる一番新しい CSV のフルパス。無ければ空 (I/O 失敗も空)。
 
     ★2026-09-12: 以前は `tcg_upload_` 決め打ちだったので、Tシャツの CSV を作っても
       締めのチェーンが拾えなかった (= Tシャツだけ手上げが残っていた原因)。
+    ★2026-09-13: `since_ts` より古い CSV は **拾わない**。今回の生成が0件で CSV を
+      作らなかった時に、前の走行の CSV (中身も画像も古い) を出品してしまうため。
+      重複くんの hook (`_run_dedupe_for_latest_csv`) が既に同じ門を持っている。
     """
     try:
         cands = [os.path.join(csv_dir, f) for f in os.listdir(csv_dir)
                  if f.startswith(prefix) and f.endswith(".csv")]
+        if since_ts is not None:
+            cands = [c for c in cands if os.path.getmtime(c) >= since_ts]
         return max(cands, key=os.path.getmtime) if cands else ""
     except Exception:                                          # noqa: BLE001
         return ""
 
 
-def _run_auto_full_tail(append_log_func, env, entry=None):
+def _run_auto_full_tail(append_log_func, env, entry=None, since_ts=None):
     """🤖自動 の締め: 前回入稿分の後始末 → CSV監査くん (2026-08-18)。
 
     人が毎回やっていた手順のうち、機械にできる分をこの1押しに畳む。
@@ -912,10 +917,13 @@ def _run_auto_full_tail(append_log_func, env, entry=None):
     entry = entry or {}
     prefix = auto_csv_prefix_of(entry)
     upload_write = entry.get("auto_upload_write", True)
+    # ★2026-09-13 ユーザー「最初はスケジュールで出品して。そこで内容を確認するから」:
+    #   予約出品にすると eBay の「予約」一覧で中身を見てから公開できる (CSV の ScheduleTime)
+    upload_schedule = bool(entry.get("auto_upload_schedule"))
     after_writeback = entry.get("auto_after_writeback") or []
     tools = os.path.join(WORKSPACE, "iMakHQ", "tools")
     csv_dir = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
-    latest = latest_csv_with_prefix(csv_dir, prefix)
+    latest = latest_csv_with_prefix(csv_dir, prefix, since_ts=since_ts)
     result_json = os.path.join(csv_dir, "last_upload_result.json")
     # ★前回の結果を先に消す。残っていると、今回の入稿が結果を残さずに終わった時に
     #   **前回の出品を今回の結果としてメールしてしまう** (古い成功で失敗が隠れる)。
@@ -929,9 +937,11 @@ def _run_auto_full_tail(append_log_func, env, entry=None):
         ("CSV監査くん (入稿前チェック)", [sys.executable, "csv_auditor.py"]),
         # ★2026-09-12: 新しい商材は **検証のみ (eBay が受理するか確かめるだけ・出品しない)** から始める。
         #   ボタンの定義で `auto_upload_write: True` にした時だけ本当に出す。
-        ("eBay へ出品 (API)" if upload_write else "eBay で検証のみ (出品しない)",
+        (("eBay へ予約出品 (API・公開前に確認)" if upload_schedule else "eBay へ出品 (API)")
+         if upload_write else "eBay で検証のみ (出品しない)",
          [sys.executable, "ebay_upload_csv.py", latest,
           *(["--write"] if upload_write else []),
+          *(["--schedule"] if upload_schedule else []),
           "--result-json", result_json] if latest else []),
         ("itemID をスプシに書込", [sys.executable, "itemid_writeback_audit.py", "--apply"]),
         # 商材ごとの追加の手 (例: UT は itemID が入った行に KEY を書く = 重複くんが二重出品を止められる)
@@ -1286,9 +1296,12 @@ SCRIPTS = [
         "params": [],
         "auto_full": True,
         "auto_csv_prefix": "tshirt_upload_",
-        # ★TEST段階 (2026-09-12 ユーザー「まだ、TEST段階だから、UPはやめておく」)。
-        #   eBay が受理するかを確かめるだけで **出品はしない**。本番に切り替える時は True にする。
-        "auto_upload_write": False,
+        # ★2026-09-12 は TEST段階で「検証のみ」だった。
+        # ★2026-09-13 ユーザー「最初はスケジュールで出品して。そこで内容を確認するから」:
+        #   本当に出すが **予約出品**。eBay の予約一覧で中身を確かめてから公開される。
+        #   即時公開に切り替える時は auto_upload_schedule を消す。
+        "auto_upload_write": True,
+        "auto_upload_schedule": True,
         # itemID が入った直後に KEY を書く。順番が逆だと orphan KEY (出品前の行に KEY) になる
         "auto_after_writeback": [["KEY を書く (重複くん用)", ["ut_key_backfill.py", "--write"]]],
     },
@@ -4789,7 +4802,8 @@ class ListingPanel:
                                 _envf = os.environ.copy()
                                 _envf["PYTHONIOENCODING"] = "utf-8"
                                 _envf["PYTHONUNBUFFERED"] = "1"
-                                _run_auto_full_tail(self.append_log, _envf, _entry_now)
+                                _run_auto_full_tail(self.append_log, _envf, _entry_now,
+                                                    since_ts=getattr(self, '_listing_start_ts', None))
                             except Exception as _e:
                                 self.append_log(f"\n⚠️ PSA自動の締め 失敗: {_e}\n")
                     elif _entry_now.get("restock_revise"):

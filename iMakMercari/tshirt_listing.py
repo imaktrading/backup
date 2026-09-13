@@ -849,6 +849,16 @@ def main():
             time.sleep(0.5)
 
         pic_url = build_pic_url(photo_urls)
+        # ★2026-09-13 ユーザー確定「メインはカタログ画像。出品者の画像は使うなら最後」:
+        #   目視で特定した行は カタログ (選んだ色の表 → サブ) → メルカリの写真 の順・最大12枚。
+        #   目視で「使わない」と外した画像は入れない。特定していない行は今までどおり
+        if cat_v:
+            _imgs = UCV.images_for_listing(
+                cat_v, [u.strip() for u in (photo_urls or "").split("|") if u.strip()])
+            if _imgs:
+                pic_url = "|".join(_imgs)
+                print(f"    🖼 画像 {len(_imgs)}枚 (カタログ {len(_imgs) - len([u for u in _imgs if 'mercdn' in u])}"
+                      f" + 仕入元 {len([u for u in _imgs if 'mercdn' in u])})")
 
         # 出品価格（SSOT: pricing_engine = cost-plus + tier判定 + gap_limit）
         price_str = re.sub(r"[^0-9]", "", target["price_jpy"])
@@ -879,7 +889,7 @@ def main():
         model_for_check = specs.get("Model", "") or result.get("model_number", "")
         if not validate_and_report(
             idx + 1, title_en, specs, model_for_check, 15687, 1000,
-            price, build_pic_url(photo_urls)
+            price, pic_url
         ):
             continue
 

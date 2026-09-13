@@ -437,7 +437,7 @@ def load_ledger(path=LEDGER):
 def load_product(product_id, db=DB_PATH):
     con = sqlite3.connect(db)
     try:
-        r = con.execute("select category, product_id, name, specs from products "
+        r = con.execute("select category, product_id, name, specs, images from products "
                         "where product_id=? and category in ('uniqlo_ut','gu')", (product_id,)).fetchone()
     finally:
         con.close()
@@ -447,7 +447,12 @@ def load_product(product_id, db=DB_PATH):
         specs = json.loads(r[3] or "{}")
     except ValueError:
         specs = {}
-    return {"category": r[0], "product_id": r[1], "name": r[2] or "", "specs": specs}
+    try:
+        images = json.loads(r[4] or "[]") or specs.get("image_urls") or []
+    except ValueError:
+        images = specs.get("image_urls") or []
+    return {"category": r[0], "product_id": r[1], "name": r[2] or "", "specs": specs,
+            "images": [u for u in images if isinstance(u, str) and u.strip()]}
 
 
 def decision_for(url, ledger=None):
@@ -472,7 +477,57 @@ def values_for_url(url, size_text, ledger=None, title=""):
     size = next((s for s in (size_text, e.get("size"), title) if jp_size(s or "")), "")
     v = build_values(p, e.get("color") or "", size)
     v["product_id"] = p["product_id"]
+    # ★2026-09-13: 画像は **カタログが主役**。目視で「使わない」と外した画像も一緒に持つ
+    v["catalog_images"] = p.get("images") or []
+    v["color_codes"] = {c.get("name"): c.get("displayCode") for c in
+                        (p["specs"].get("color_variants") or []) if c.get("name")}
+    v["l1"] = str(p["specs"].get("l1_id") or "")
+    v["img_drop"] = list(e.get("img_drop") or [])
     return v
+
+
+# ★2026-09-13 ユーザー確定: 「出品者の画像は、使うなら最後の方で使う。メインはカタログ画像を」。
+#   並びはルールで固定し、目視では **使わない画像を外すだけ** (毎回 順番を選ばせると目視が重くなる)。
+#     1. 目視で選んだ色の、カタログの表 (メイン)
+#     2. カタログのサブ画像 (背面・着用)。**他の色の表は入れない** (別の色が届くと思われる)
+#     3. 仕入元 (メルカリ) の写真 — タグ・現物
+#   eBay の上限に合わせて最大12枚。色見本 (chip) は画像ではないので入れない。
+MAX_PICTURES = 12
+_RE_GOODS = re.compile(r"goods_(\d{2})_(\d{6})")
+
+
+def listing_images(catalog_images, color_code="", l1="", other_codes=(), seller_urls=(),
+                   drop=(), max_n=MAX_PICTURES):
+    """出品に使う画像 URL の並び (純関数)。"""
+    dropped = {(u or "").strip() for u in (drop or ()) if u}
+    others = {c for c in (other_codes or ()) if c and c != color_code}
+    main, sub = [], []
+    for u in catalog_images or ():
+        u = (u or "").strip()
+        if not u or "chip" in u.lower():
+            continue
+        m = _RE_GOODS.search(u)
+        if m and (not l1 or m.group(2) == l1) and color_code:
+            if m.group(1) == color_code:
+                main.append(u)
+                continue
+            if m.group(1) in others:
+                continue                    # 他の色の表
+        sub.append(u)
+    out, seen = [], set()
+    for u in main + sub + [(x or "").strip() for x in (seller_urls or ())]:
+        if u and u not in seen and u not in dropped:
+            seen.add(u)
+            out.append(u)
+    return out[:max_n]
+
+
+def images_for_listing(v, seller_urls=()):
+    """目視で特定した行の値 (values_for_url) → 出品に使う画像の並び。"""
+    codes = v.get("color_codes") or {}
+    return listing_images(v.get("catalog_images") or [], codes.get(v.get("color_name")) or "",
+                          v.get("l1") or "", list(codes.values()), seller_urls,
+                          v.get("img_drop") or [])
 
 
 def apply_to_specs(specs, v, validate):
