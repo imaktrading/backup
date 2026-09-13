@@ -1665,6 +1665,22 @@ SCRIPTS = [
                      "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk/edit#gid=851100680"),
     },
     {
+        # ★2026-09-13 ユーザー「枠組みだけ作っておいて」: PSA と同じ4ボタン構成に揃えた。
+        #   PSA の 🆕当日分 と同じで、**入稿して itemID を書き終えた直後に押す**。
+        #   補URL の探索対象は「itemID が入っている行」なので、夜 (23:30) を待つと
+        #   その日 出した分は丸1日 予備ゼロで放置される。
+        "category": None, "type": "utility",
+        "label": "🆕 UT 補URL ① 当日分",
+        "badge": "ut_search_now",
+        "tip": "Tシャツを出した直後に押す。夜を待たずに、今出した分の予備の仕入元を探す。"
+               "補URLが薄い順に15件。中身は ② と同じで、溜めるだけ・補URL欄には書かない。",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ut_hoju_fill.py", "search", "--limit=15"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
         # ★2026-09-03: UT (ユニクロ/GUコラボT) の補URL。中古アパレルの出品が止まった原因は
         #   「仕入元がすぐ売り切れて出品作業が無駄になる」ことだった (ユーザー談)。
         #   PSA と同じ仕組みを持ち込む。検索は貯めるだけで、書くのは目視の後。
@@ -1681,13 +1697,31 @@ SCRIPTS = [
     },
     {
         "category": None, "type": "utility",
-        "label": "🩹 UT 補URL ③ 目視",
+        "label": "🩹 UT 補URL ③ 補充",
         "badge": "ut_confirm",
         "tip": "溜めた UT の候補を現物と見比べて、同じ物だけ補URL欄に書く。"
-               "作品・柄・サイズが揃って初めて同じ商品なので、最後は目で見て決める。",
+               "作品・柄・サイズが揃って初めて同じ商品なので、最後は目で見て決める。"
+               "ここは予備が薄い方 (補0〜3本)。切れたら出品が死ぬので急ぐ。",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "ut_hoju_fill.py", "confirm"],
+        # ★2026-09-13: PSA と同じく **補充 (補0〜3本) と 入れ替え (補4〜5本)** を分けた。
+        #   混ざると、仕入元が1本も無い出品の補充が「もう足りている出品の値下げ」に埋もれる。
+        "cmd": ["python", "ut_hoju_fill.py", "confirm", "--max-backups=4"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
+        # ★2026-09-13 ユーザー「枠組みだけ作っておいて」: PSA の 💱入れ替え と同じ枠。
+        #   ★今は対象0件 (出品中の Tシャツ35件は全部 補URL 0本)。先に ①② で溜まってから効く。
+        "category": None, "type": "utility",
+        "label": "💱 UT 補URL ③ 入れ替え",
+        "badge": "ut_swap_confirm",
+        "tip": "予備が足りている Tシャツ (補4〜5本) を、もっと安い仕入元に入れ替える。"
+               "急ぎではない方。補充が終わってから押す。",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ut_hoju_fill.py", "confirm",
+                "--min-backups=4", "--max-backups=6"],
         "params": [],
         "skip_postprocess": True,
     },
@@ -3665,7 +3699,9 @@ class ListingPanel:
     STEP_FLOWS = (
         ("hoju_search", "hoju_confirm"),                          # 補URL ①探す→②目視
         ("psa_gate", "restock_build", "restock_wb"),               # PSA再仕入れ ①→②→③
-        ("ut_search", "ut_confirm"),                              # UT補URL ①→②
+        ("ut_search", "ut_confirm"),                              # UT補URL ②探す→③補充
+        ("ut_search_now", "ut_confirm"),                          # UT補URL ①当日分→③補充
+        ("ut_search", "ut_swap_confirm"),                         # UT補URL ②探す→③入れ替え
         ("ut_restock_search", "ut_restock_confirm", "ut_restore"),  # UT再仕入れ ①→②→③
         ("kuji_search", "kuji_confirm"),                           # 一番くじ 探す→目視
         ("kuji_supply", "kuji_refresh"),                           # 一番くじ 補充①→②
@@ -3684,7 +3720,9 @@ class ListingPanel:
     #   1回で全部 終わらないボタンがあるのに「押すと44件」とだけ出していたので、
     #   押した後に減っていないように見えた。**残り** と **今回** を分けて出す。
     #   数字は SCRIPTS の cmd (--limit) と各モジュールの CAP が正。ここに写さない。
+    # ★2026-09-13: UT も PSA と同じ4ボタンにしたので、1回で押せる上限も同じ形に持つ
     PRESS_CAP = {"hoju_search_now": 15, "hoju_confirm": 15, "hoju_swap": 15,
+                 "ut_search_now": 15,
                  "newcand": 20, "ut_identify": 20}
 
     @classmethod
@@ -4288,6 +4326,12 @@ class ListingPanel:
                 ut_c_txt = self.todo_line("ut_confirm", _ut.get("confirm", 0), "目視します")
                 if not _ut.get("confirm"):
                     ut_c_txt += " (先に ② 夜に探す を押す)"
+                # ★2026-09-13: PSA と同じ4ボタン構成 (①当日分 / ②夜に探す / ③補充 / ③入れ替え)
+                ut_sn_txt = ut_s_txt + chr(10) + "(出した直後に押す分)"
+                ut_sw_txt = self.todo_line("ut_swap_confirm",
+                                           _ut.get("swap_confirm", 0), "目視します")
+                if not _ut.get("swap_search"):
+                    ut_sw_txt += " (予備が5本まで埋まった出品が出てから効く)"
                 ut_rs_txt = (self.todo_line("ut_restock_search",
                                             _ut.get("restock_search", 0), "探します")
                              + "\n(売り切れた出品の仕入れ直し)")
@@ -4320,6 +4364,7 @@ class ListingPanel:
                        "hoju_confirm": c_txt, "hoju_swap": sw_txt, "newcand": n_txt,
                        "newcand_high": nh_txt,
                        "ut_search": ut_s_txt, "ut_confirm": ut_c_txt,
+                       "ut_search_now": ut_sn_txt, "ut_swap_confirm": ut_sw_txt,
                        "ut_restock_search": ut_rs_txt,
                        "ut_restock_confirm": ut_rc_txt,
                        "ut_restore": ut_rq_txt, "ut_identify": ui_txt,
@@ -4346,6 +4391,8 @@ class ListingPanel:
                         #   なので、夜間が動いていても残っていれば青にする (2026-09-06)。
                         "hoju_search_now": bool(s.get("today_can")),
                         "ut_search": bool(_ut.get("search")) and not _auto,
+                        "ut_search_now": bool(_ut.get("search")),
+                        "ut_swap_confirm": bool(_ut.get("swap_confirm")),
                         "ut_restock_search": bool(_ut.get("restock_search")) and not _auto,
                         "kuji_search": bool((kj.get("search") or {}).get("can")) and not _auto,
                         # ── ここから下は **人が押さないと永遠に減らない**。残件があれば青

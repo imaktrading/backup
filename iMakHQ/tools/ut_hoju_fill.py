@@ -211,12 +211,17 @@ def usable_candidate(cond, ship, reviews, is_shops, min_reviews=MIN_REVIEWS,
     return True
 
 
-def select_targets(rows2d, max_backups=AUX_MAX, category=CATEGORY, sold_out=False, hints=None):
+def select_targets(rows2d, max_backups=AUX_MAX, category=CATEGORY, sold_out=False, hints=None,
+                   min_backups=0):
     """探す対象の UT 行 → [{row, itemID, title, size, have}] (純関数)。
 
     sold_out=False (既定) … **出品中**で補URL が max_backups 未満の行 = 予備を足す
     sold_out=True         … **売り切れた**行 = また買える仕入元を探す (再仕入れ)
     hints … 目視で特定した行の {仕入元URL: {kw, size}} (identity_hints)。あればそちらを使う。
+
+    ★2026-09-13 `min_backups`: PSA と同じく **補充 (薄い札) と 入れ替え (足りている札)** を
+      分ける。補充は 0〜3本、入れ替えは 4〜5本。混ざると、丸腰の補充が入れ替えに埋もれる
+      (PSA で 2026-09-09 に分けたのと同じ理由)。
     """
     import sheet_io
     B, SOLD, TITLE, URL = sheet_io.PRODUCT_COL_ITEMID, 3, 2, 0
@@ -237,7 +242,7 @@ def select_targets(rows2d, max_backups=AUX_MAX, category=CATEGORY, sold_out=Fals
             if cell(r, SOLD):
                 continue              # 売り切れ = 補URL の対象ではない
         have = [cell(r, AUX + k) for k in range(AUX_MAX) if cell(r, AUX + k)]
-        if not sold_out and len(have) >= max_backups:
+        if not sold_out and not (min_backups <= len(have) < max_backups):
             continue
         title = cell(r, TITLE)
         hint = (hints or {}).get(cell(r, URL)) or {}
@@ -297,7 +302,7 @@ def _cache_path(sold_out):
     return RESTOCK_CACHE_PATH if sold_out else CACHE_PATH
 
 
-def search(limit=None, sold_out=False):
+def search(limit=None, sold_out=False, min_backups=0, max_backups=AUX_MAX):
     """候補を集めてキャッシュに貯める。スプシには書かない (書くのは目視の後)。"""
     import datetime
     import mercari_psa_resource as mp
@@ -313,7 +318,7 @@ def search(limit=None, sold_out=False):
         print(f"  (特定済みの検索語を読めず、タイトルから作ります: {type(e).__name__})")
         hints = {}
     targets = select_targets(sheet_io._product_ws().get_all_values(), sold_out=sold_out,
-                             hints=hints)
+                             hints=hints, min_backups=min_backups, max_backups=max_backups)
     targets = [t for t in targets if t["keyword"] and t["size"] and t["size"] != "KIDS"]
     if limit:
         targets = targets[:limit]
@@ -424,15 +429,20 @@ def drop_ng_candidates(cands, ng_urls):
     return [c for c in (cands or []) if (c.get("url") or "") not in ng]
 
 
-def confirm(dry_run=False):
-    """当日キャッシュの候補を目視で選び、補URL(AC-AG) に **既存を残して**書く。"""
+def confirm(dry_run=False, min_backups=0, max_backups=AUX_MAX):
+    """当日キャッシュの候補を目視で選び、補URL(AC-AG) に **既存を残して**書く。
+
+    ★2026-09-13: PSA と同じく **補充 (補0〜3本) と 入れ替え (補4〜5本)** を分けられる形にした。
+      混ざると、仕入元が1本も無い出品の補充が「もう足りている出品の値下げ」に埋もれる。
+    """
     import datetime
     import psa_resource_confirm as prc
     import sheet_io
 
     today = datetime.date.today().isoformat()
     vals = sheet_io._product_ws().get_all_values()
-    targets = {t["itemID"]: t for t in select_targets(vals)}
+    targets = {t["itemID"]: t for t in select_targets(vals, min_backups=min_backups,
+                                                     max_backups=max_backups)}
     cache = load_cache()
     ng = load_cand_ng()
 
@@ -652,9 +662,14 @@ def _price_of(cache_entry, url):
 def main():
     args = sys.argv[1:]
     limit = None
+    lo, hi = 0, AUX_MAX          # 補URLの本数の範囲 (PSA と同じ考え方)
     for a in args:
         if a.startswith("--limit="):
             limit = int(a.split("=", 1)[1])
+        elif a.startswith("--min-backups="):
+            lo = int(a.split("=", 1)[1])
+        elif a.startswith("--max-backups="):
+            hi = int(a.split("=", 1)[1])
     dry = "--dry-run" in args
     if "restock-search" in args:
         search(limit=limit, sold_out=True)
@@ -663,9 +678,9 @@ def main():
     elif "restore-qty" in args:
         restore_qty(dry_run=dry)
     elif "search" in args:
-        search(limit=limit)
+        search(limit=limit, min_backups=lo, max_backups=hi)
     elif "confirm" in args:
-        confirm(dry_run=dry)
+        confirm(dry_run=dry, min_backups=lo, max_backups=hi)
     else:
         print(__doc__)
 
@@ -681,15 +696,19 @@ def count_workload(today=None):
     戻り: {"search", "confirm", "restock_search", "restock_confirm", "error"}
     """
     import datetime
-    out = {"search": 0, "confirm": 0, "restock_search": 0, "restock_confirm": 0,
-           "restore": 0, "error": ""}
+    out = {"search": 0, "confirm": 0, "swap_search": 0, "swap_confirm": 0,
+           "restock_search": 0, "restock_confirm": 0, "restore": 0, "error": ""}
     try:
         import sheet_io
         today = (today or datetime.date.today()).isoformat()
         vals = sheet_io._product_ws().get_all_values()
-        for key, sold, path in (("", False, CACHE_PATH),
-                                ("restock_", True, RESTOCK_CACHE_PATH)):
-            targets = select_targets(vals, sold_out=sold)
+        # ★2026-09-13: PSA と同じ 4ボタン構成にしたので、数え方も同じに分ける。
+        #     ""        … 補充 (補0〜3本)  / "swap_"   … 入れ替え (補4〜5本)
+        #     "restock_"… 再仕入れ (売り切れた行)
+        for key, sold, path, lo, hi in (("", False, CACHE_PATH, 0, AUX_MAX - 1),
+                                        ("swap_", False, CACHE_PATH, AUX_MAX - 1, AUX_MAX + 1),
+                                        ("restock_", True, RESTOCK_CACHE_PATH, 0, AUX_MAX)):
+            targets = select_targets(vals, sold_out=sold, min_backups=lo, max_backups=hi)
             out[key + "search"] = sum(1 for t in targets
                                       if t["keyword"] and t["size"] and t["size"] != "KIDS")
             ids = {t["itemID"] for t in targets}

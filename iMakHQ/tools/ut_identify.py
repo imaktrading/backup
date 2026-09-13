@@ -473,6 +473,12 @@ def load_catalog(db=DB_PATH):
         #   抽出くんもキッズは集めない (skill harvest-targeting)。候補に出すと取り違えの元
         if (s.get("gender") or "").strip().upper() in KIDS_GENDERS:
             continue
+        # ★2026-09-13 (catalog 依頼 hq/requests/2026-09-13_ut_overseas_official_and_english_name):
+        #   その国でしか売っていない品 (米国限定の37件など) は **候補に出さない**。
+        #   仕入れは「メルカリ日本の新品未使用」が前提なので、日本の店に並んでいない物は
+        #   国内に新品が出てくる経路が無い。候補に混ぜると取り違えの元にしかならない。
+        if s.get("region_only") is True:
+            continue
         try:
             imgs = json.loads(images or "[]") or s.get("image_urls") or []
         except ValueError:

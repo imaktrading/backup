@@ -27,7 +27,7 @@ def test_every_aux_button_says_which_product_line():
 
 def test_ut_has_both_search_and_confirm():
     assert '"label": "🔎 UT 補URL ② 夜に探す"' in _SRC
-    assert '"label": "🩹 UT 補URL ③ 目視"' in _SRC
+    assert '"label": "🩹 UT 補URL ③ 補充"' in _SRC
 
 
 def test_ut_search_does_not_write_to_the_sheet():
@@ -72,7 +72,8 @@ def test_ut_buttons_show_counts():
 
 
 def test_every_ut_button_has_a_hint():
-    for lab in ('🔎 UT 補URL ② 夜に探す', '🩹 UT 補URL ③ 目視'):
+    for lab in ('🆕 UT 補URL ① 当日分', '🔎 UT 補URL ② 夜に探す',
+                '🩹 UT 補URL ③ 補充', '💱 UT 補URL ③ 入れ替え'):
         i = _SRC.index('"label": "%s"' % lab)
         assert '"tip"' in _SRC[i:i + 800], lab
 
