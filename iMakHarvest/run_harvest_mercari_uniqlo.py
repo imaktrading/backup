@@ -53,6 +53,16 @@ def _log(m: str) -> None:
     print(f"[{datetime.now():%H:%M:%S}] {m}", flush=True)
 
 
+def to_sheet_item(k: dict) -> dict:
+    """keep した item -> スプシ書込用 (純関数). X=見つけた語 / Y=タグの番号."""
+    return {"url": k["url"], "title": k.get("title"), "condition": k.get("condition"),
+            "price_jpy": k.get("price_jpy"), "image_urls": k.get("image_urls"),
+            "description": k.get("description"), "size": k.get("size"),
+            "color": k.get("color"),
+            "found_by_term": k.get("found_by_term"),     # X
+            "tag_number": k.get("tag_number")}           # Y
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     # ★UT の価格帯は 500〜12,000円 (2026-09-13 user 確定)。 既定にしておく = 付け忘れても効く
@@ -102,11 +112,61 @@ def main(argv=None) -> int:
     if killed:
         _log(f"前回の残留 chrome を {killed} 個 片付けました")
 
+    # ★落ちても途中まで残す (2026-09-13 実害: 140件 keep した後に chromedriver が
+    #   ReadTimeout で落ち、 書込が最後だけだったため **140件が丸ごと消えた**)。
+    #   user 指示「途中で保存するようにしてね / 途中で落ちてやり直しはやめろよ」を
+    #   楽天側にしか入れていなかった。 ここにも同じ守りを入れる:
+    #     1) 5件ごとにスプシへ書く (書けなければ持ち越し、 最後まで駄目ならファイルに退避)
+    #     2) 1件ごとに JSON を書く
+    #     3) ドライバの例外は1件の失敗として数え、 連続3件で再起動 (最大3回)
+    #     4) 既にスプシにある出品は 詳細を開かない (回し直しても Vision を二重に払わない)
+    DUMP_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%dT%H%M%S")
+    dump = DUMP_DIR / f"mercari_uniqlo_{ts}.json"
+    known: set = set()
+    if not args.dry_run:
+        try:
+            from sheet_writer_mercari_seller import open_seller_staging_sheet  # noqa: PLC0415
+            from sheet_writer_mercari_search import load_keys_all_tabs  # noqa: PLC0415
+            known = load_keys_all_tabs(open_seller_staging_sheet())
+            _log(f"中間スプシに既にあるメルカリ出品: {len(known)} 件 (詳細を開かない)")
+        except Exception as e:  # noqa: BLE001
+            _log(f"⚠️ 既存キーを読めず: {type(e).__name__} (重複は書込時に弾く)")
+    from sheet_writer_mercari_search import dedupe_key  # noqa: PLC0415
+
+    def _new_driver():
+        kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
+        return MS.create_anonymous_driver(headless=headless)
+
     driver = MS.create_anonymous_driver(headless=headless)
     kept: list[dict] = []
+    pending: list[dict] = []
+    written = 0
+    restarts = 0
     rej = {"sold": 0, "not_uniqlo_tee": 0, "not_collab": 0, "not_new": 0,
-           "seller_rating": 0, "no_identity": 0, "fetch_fail": 0}
+           "seller_rating": 0, "no_identity": 0, "fetch_fail": 0, "already_in_sheet": 0}
     collected = {"urls": [], "by_keyword": {}}
+
+    def _flush(rows: list[dict]) -> bool:
+        nonlocal written
+        if args.dry_run or not rows:
+            return True
+        from sheet_writer_mercari_search import append_mercari_search_items  # noqa: PLC0415
+        try:
+            res = append_mercari_search_items([to_sheet_item(k) for k in rows],
+                                              label=args.label, known_keys=known)
+            written += res.get("appended", 0)
+            _log(f"  [SHEET] {res}")
+            return True
+        except Exception as e:  # noqa: BLE001 - 書込失敗で走行を殺さない
+            _log(f"  ⚠️ スプシ書込に失敗 ({type(e).__name__}) → 持ち越し ({len(rows)}件)")
+            return False
+
+    def _dump():
+        dump.write_text(json.dumps({"kept": kept, "reject": rej,
+                                    "by_keyword": collected["by_keyword"]},
+                                   ensure_ascii=False, indent=2), encoding="utf-8")
+
     try:
         # 語ごとに集める = 各URLを **どの語で見つけたか** を覚えておける (X列の材料)
         found_by: dict[str, str] = {}
@@ -114,11 +174,21 @@ def main(argv=None) -> int:
         for idx, kw in enumerate(keywords):
             if idx:
                 time.sleep(8.0)
-            r = MSch.collect_search_listing_urls(
-                kw, driver, price_min=args.price_min, price_max=args.price_max,
-                cap=args.cap_per_keyword, manual=args.manual,
-                item_condition_ids=conds,
-                progress_callback=lambda n, m: _log(f"  収集 {m}"))
+            try:
+                r = MSch.collect_search_listing_urls(
+                    kw, driver, price_min=args.price_min, price_max=args.price_max,
+                    cap=args.cap_per_keyword, manual=args.manual,
+                    item_condition_ids=conds,
+                    progress_callback=lambda n, m: _log(f"  収集 {m}"))
+            except Exception as e:  # noqa: BLE001 - 1語の失敗で全体を止めない
+                _log(f"  ⚠️ '{kw}' 検索失敗 ({type(e).__name__}) → ドライバを作り直して次の語へ")
+                try:
+                    driver.quit()
+                except Exception:  # noqa: BLE001
+                    pass
+                driver = _new_driver()
+                by_kw[kw] = 0
+                continue
             added = 0
             for u in r["urls"]:
                 if u in found_by:
@@ -134,11 +204,35 @@ def main(argv=None) -> int:
             urls = urls[:args.max_details]
             _log(f"詳細 {args.max_details} 件に制限")
 
-        for i, url in enumerate(urls, 1):
-            detail = mercari_item_detail.fetch_detail(driver, url)
+        consecutive_fail = 0
+        for url in urls:
+            if dedupe_key(url) in known:
+                rej["already_in_sheet"] += 1
+                continue
+            try:
+                detail = mercari_item_detail.fetch_detail(driver, url)
+            except Exception as e:  # noqa: BLE001 - ドライバが固まった等
+                _log(f"  ⚠️ 詳細取得で例外 ({type(e).__name__}) {url}")
+                detail = None
             if not detail:
                 rej["fetch_fail"] += 1
+                consecutive_fail += 1
+                if consecutive_fail >= 3:
+                    if pending and _flush(pending):
+                        pending = []
+                    if restarts >= 3:
+                        _log("  ⚠️ 再起動しても直らないので中断します (ここまでは保存済)")
+                        break
+                    restarts += 1
+                    _log(f"  ⚠️ 連続 {consecutive_fail} 件失敗 → ドライバを再起動 ({restarts}回目)")
+                    try:
+                        driver.quit()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    driver = _new_driver()
+                    consecutive_fail = 0
                 continue
+            consecutive_fail = 0
             if not detail.get("in_stock"):
                 rej["sold"] += 1
                 continue
@@ -158,7 +252,12 @@ def main(argv=None) -> int:
                     detail.get("condition") or ""):
                 rej["not_new"] += 1
                 continue
-            q = MSch.extract_seller_quality(driver)
+            try:
+                q = MSch.extract_seller_quality(driver)
+            except Exception as e:  # noqa: BLE001
+                _log(f"  ⚠️ セラー情報で例外 ({type(e).__name__}) {url}")
+                rej["fetch_fail"] += 1
+                continue
             if not MSch.passes_seller_filter(
                     q, min_rating_count=args.min_rating,
                     require_identity=not args.no_identity):
@@ -178,9 +277,13 @@ def main(argv=None) -> int:
                 if tag["error"]:
                     rej["tag_read_error"] = rej.get("tag_read_error", 0) + 1
             kept.append(item)
+            pending.append(item)
+            _dump()
             _log(f"  keep {len(kept)}件目 ¥{detail.get('price_jpy')} "
                  f"[{item.get('found_by_term') or '-'}] tag={item.get('tag_number') or '-'} "
                  f"{title[:32]}")
+            if len(pending) >= 5 and _flush(pending):
+                pending = []
             if args.max_keep and len(kept) >= args.max_keep:
                 _log(f"{args.max_keep}件に達したので止めます")
                 break
@@ -190,29 +293,19 @@ def main(argv=None) -> int:
             driver.quit()
         except Exception:  # noqa: BLE001
             pass
+        _dump()
+        if pending and not _flush(pending):
+            left = DUMP_DIR / f"mercari_uniqlo_unwritten_{ts}.json"
+            left.write_text(json.dumps({"unwritten": pending}, ensure_ascii=False, indent=2),
+                            encoding="utf-8")
+            _log(f"  ⚠️ 書けなかった {len(pending)}件を {left.name} に退避 (要再投入)")
 
-    _log(f"完了: 収集{len(collected['urls'])} → keep={len(kept)} / 落とした内訳={rej}")
-    DUMP_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%dT%H%M%S")
-    dump = DUMP_DIR / f"mercari_uniqlo_{ts}.json"
-    dump.write_text(json.dumps({"kept": kept, "reject": rej,
-                                "by_keyword": collected["by_keyword"]},
-                               ensure_ascii=False, indent=2), encoding="utf-8")
+    status = "正常" if rej["fetch_fail"] == 0 else f"⚠️要対応 (取得失敗 {rej['fetch_fail']}件)"
+    _log(f"完了: 収集{len(collected['urls'])} → keep={len(kept)} / スプシに書いた {written} "
+         f"/ 落とした内訳={rej} / {status}")
     _log(f"[FILE] {dump}")
-
     if args.dry_run:
         _log("dry-run → 書込なし")
-        return 0
-    if not kept:
-        return 0
-    from sheet_writer_mercari_search import append_mercari_search_items  # noqa: PLC0415
-    items = [{"url": k["url"], "title": k.get("title"), "condition": k.get("condition"),
-              "price_jpy": k.get("price_jpy"), "image_urls": k.get("image_urls"),
-              "description": k.get("description"), "size": k.get("size"),
-              "color": k.get("color"),
-              "found_by_term": k.get("found_by_term"),     # X
-              "tag_number": k.get("tag_number")} for k in kept]    # Y
-    _log(f"[SHEET] {append_mercari_search_items(items, label=args.label)}")
     return 0
 
 
