@@ -635,9 +635,30 @@ def main():
         print("エラー: API key.txt が見つかりません")
         return
 
+    # ★2026-09-13 ユーザー「目視が入るから、自動で動かそう」: PSA の 🤖自動
+    #   (PSA_VERIFY_BEFORE_BUILD=1 / PSA_BATCH_LIMIT=20) と同じ形。**先に目視** → 人が選んだ行
+    #   だけが商品管理シートに入る → それを生成する。目視を閉じた / 時間切れでも止めない
+    #   (選ばれなかった行はシートに入らないので、生成に紛れ込む経路が無い)。
+    _batch = 0
+    try:
+        _batch = max(0, int(os.environ.get("UT_BATCH_LIMIT") or 0))
+    except ValueError:
+        _batch = 0
+    if os.environ.get("UT_IDENTIFY_BEFORE_BUILD") == "1":
+        import subprocess
+        _tools = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "iMakHQ", "tools"))
+        _cmd = [sys.executable, "ut_identify.py", "--new-only", f"--limit={_batch or 20}"]
+        print(f"🔎 先に目視 (売れ筋順・新しく出す候補だけ {_batch or 20}件) …")
+        _r = subprocess.run(_cmd, cwd=_tools)
+        if _r.returncode != 0:
+            print("⚠ 目視が確定されませんでした。シートに既にある分だけ生成します")
+
     # スプシからリスティング対象を取得
     print("スプシ読み込み中...")
     targets, ws, all_values = get_listing_targets()
+    if _batch and len(targets) > _batch:
+        print(f"⚠️ {len(targets)}件中 {_batch}件を処理 (残 {len(targets) - _batch}件は次回)")
+        targets = targets[:_batch]
     print(f"リスティング対象: {len(targets)}件\n")
 
     if not targets:

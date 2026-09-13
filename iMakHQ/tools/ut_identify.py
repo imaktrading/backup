@@ -892,13 +892,26 @@ def order_rows(rows, demand=None):
     return sorted(rows, key=rank)
 
 
-def load_items(limit=DEFAULT_LIMIT):
+def only_new(rows):
+    """出品済みの行 (KEY 埋め) を外し、**新しく出す候補だけ**にする (純関数)。
+
+    ★2026-09-13 ユーザー「目視が入るから、自動で動かそう」: 🤖自動 は出品のためのボタン。
+      KEY 埋め (出品済み79件) が先頭に並ぶので、そのままだと最初の数回は出品0件になる。
+      KEY 埋めは手動の 🩹 UT 新品 目視特定 に残す。
+    """
+    return [t for t in rows
+            if not (t[2] == "sheet" and len(t[1]) > 1 and (t[1][1] or "").strip())]
+
+
+def load_items(limit=DEFAULT_LIMIT, new_only=False):
     led = load_ledger()
     prod = _product_values()
     # ★2026-09-12: 中間タブ (抽出くんが集めた分) と 商品管理シートの **まだ出していない Tシャツ行**
     #   (前の運用で入った分) の両方を目視に出す
     rows = [(i, r, "tab") for i, r in pending_rows(_read_src(), led, _high_urls(prod))]
     rows += [(SHEET_IDX_BASE + i, r, "sheet") for i, r in sheet_pending_rows(prod, led)]
+    if new_only:
+        rows = only_new(rows)
     rows = order_rows(rows, load_demand())
     catalog = load_catalog()
     items = []
@@ -996,8 +1009,10 @@ def main():
     ap.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--timeout", type=int, default=10800)
+    ap.add_argument("--new-only", action="store_true",
+                    help="出品済みの行 (KEY 埋め) を出さない。🤖自動 から呼ぶ時に使う")
     a = ap.parse_args()
-    items, n_all = load_items(a.limit)
+    items, n_all = load_items(a.limit, new_only=a.new_only)
     n_listed = sum(1 for it in items
                    if it.get("src") == "sheet" and (it["row"][1] or "").strip())
     print(f"目視に出す UT: {len(items)}件 (残り全部で {n_all}件)")
@@ -1008,7 +1023,8 @@ def main():
     n_hot = sum(1 for it in items if not (it.get("src") == "sheet" and (it["row"][1] or "").strip())
                 and demand_rank(it["row"], _dem) < len(_dem))
     if n_hot:
-        print(f"  うち **売れ筋の作品** {n_hot}件 (その次に出しています)")
+        print(f"  うち **売れ筋の作品** {n_hot}件 ("
+              + ("先に出しています)" if a.new_only or not n_listed else "その次に出しています)"))
     if not items:
         print("→ 0件。抽出くんの収集 (mercari_uniqlo_ut タブ) に新しい行が入ったらまた出ます")
         return 0

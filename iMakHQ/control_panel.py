@@ -1279,6 +1279,10 @@ SCRIPTS = [
         "double_check": True,     # 入稿前の人手ダブルチェック必須
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "tshirt_listing.py"],
+        # ★2026-09-13 ユーザー「目視が入るから、自動で動かそう。件数CAPは？」→ PSA と同じ20件。
+        #   先に目視 (売れ筋順・新しく出す候補だけ) → 選んだ行だけ生成。値は env で注入 =
+        #   生成側に「自動なら〜」の分岐を作らない (PSA_VERIFY_BEFORE_BUILD と同じ形)。
+        "env": {"UT_IDENTIFY_BEFORE_BUILD": "1", "UT_BATCH_LIMIT": "20"},
         "params": [],
         "auto_full": True,
         "auto_csv_prefix": "tshirt_upload_",
