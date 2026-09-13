@@ -44,6 +44,11 @@ except Exception:
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
+# ★2026-09-13: `ut_catalog_values` (iMakMercari) を関数の中で import していたが、
+#   読み込み先を足していたのは1か所だけだった。cf303e8 で KEY の判定を共通化した時に
+#   足し忘れ、**画面を単体で起動すると ModuleNotFoundError で落ちていた**
+#   (テストは読み込み先を足して走るので気づけなかった)。最初に1回だけ足す。
+sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "..", "iMakMercari")))
 
 MID_SHEET = "1hTdFVGkni4Ih4kZGsBgiCKxpTlOeoO_wJdk8Ek5n41Q"     # 抽出くんの中間スプシ
 SRC_TAB = "mercari_uniqlo_ut"
@@ -825,7 +830,44 @@ def _high_urls(rows2d=None):
     return {(r[C_URL] or "").strip() for r in rows2d[1:] if (r[C_URL] or "").strip()}
 
 
-def order_rows(rows):
+# ★2026-09-13 ユーザー「中間スプシから売れ筋をピックアップして HIGHT に転記し、出品に乗せる」。
+#   売れ筋の順位は既に毎晩作っている (`ut_demand_words.py` → 抽出くんの検索順)。
+#   目視の画面はそれを見ておらず、中間スプシの行順のままだった。同じ順位を使って並べる。
+DEMAND_PATH = r"C:/dev/iMak_data/harvest/ut_demand_words.json"
+
+
+def load_demand(path=DEMAND_PATH):
+    """売れ筋の作品 → [[名前, …], …] 点数の高い順 (I/O。読めなければ空 = 今までの順)。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:                                          # noqa: BLE001
+        return []
+    works = (d.get("works") if isinstance(d, dict) else d) or []
+    works = sorted(works, key=lambda w: -(w.get("score") or 0))
+    out = []
+    for w in works:
+        names = [n for n in (w.get("collab_jp"), w.get("work_en")) if norm(n or "")]
+        if names and (w.get("score") or 0) > 0:
+            out.append(names)
+    return out
+
+
+def demand_rank(r, demand):
+    """その行が売れ筋の何位の作品か (純関数)。当たらなければ末尾 = len(demand)。
+
+    見るのは X列 (見つけた検索語) とタイトル。**並べる順番にしか使わない**
+    (作品を決めるのは人。ここで商品を確定しない)。
+    """
+    text = norm(" ".join([(r[C_KW] if len(r) > C_KW else "") or "",
+                          (r[C_TITLE] if len(r) > C_TITLE else "") or ""]))
+    for n, names in enumerate(demand or []):
+        if any(norm(x) in text for x in names):
+            return n
+    return len(demand or [])
+
+
+def order_rows(rows, demand=None):
     """目視に出す順番 (純関数・test 可)。
 
     ★2026-09-12 ユーザー「既存へのKEYは、全て完了したの？」→ 実測 **0件 / 出品済み79行**。
@@ -837,11 +879,16 @@ def order_rows(rows):
           出してしまう (fail-OPEN)
         - 目視すれば KEY が入り、補URL・再仕入れ・監視の対象にもなる (資産になる)
       まだ出していない行は、遅れても「出品が1日後になる」だけで、危険側には倒れない。
+
+    ★2026-09-13: その次は **売れ筋の作品から** (demand = load_demand())。
+      順番: ①出品済みで KEY が無い行 → ②売れ筋の作品 (点数順) → ③それ以外 (元の順)
     """
     def rank(t):
         _i, r, src = t
         listed = len(r) > 1 and (r[1] or "").strip()
-        return 0 if (src == "sheet" and listed) else 1
+        if src == "sheet" and listed:
+            return (0, 0)
+        return (1, demand_rank(r, demand))
     return sorted(rows, key=rank)
 
 
@@ -852,7 +899,7 @@ def load_items(limit=DEFAULT_LIMIT):
     #   (前の運用で入った分) の両方を目視に出す
     rows = [(i, r, "tab") for i, r in pending_rows(_read_src(), led, _high_urls(prod))]
     rows += [(SHEET_IDX_BASE + i, r, "sheet") for i, r in sheet_pending_rows(prod, led)]
-    rows = order_rows(rows)
+    rows = order_rows(rows, load_demand())
     catalog = load_catalog()
     items = []
     for i, r, _src in rows[:limit] if limit else rows:
@@ -957,6 +1004,11 @@ def main():
     if n_listed:
         print(f"  うち **出品済みなのに KEY が無い行** {n_listed}件 (先に出しています。"
               f"KEY が無いと重複くんが二重出品を止められません)")
+    _dem = load_demand()
+    n_hot = sum(1 for it in items if not (it.get("src") == "sheet" and (it["row"][1] or "").strip())
+                and demand_rank(it["row"], _dem) < len(_dem))
+    if n_hot:
+        print(f"  うち **売れ筋の作品** {n_hot}件 (その次に出しています)")
     if not items:
         print("→ 0件。抽出くんの収集 (mercari_uniqlo_ut タブ) に新しい行が入ったらまた出ます")
         return 0

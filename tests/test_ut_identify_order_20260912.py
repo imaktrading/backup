@@ -50,3 +50,46 @@ def test_unlisted_sheet_row_is_not_prioritized():
     # どちらでもよいが、**出品済み**より先には来ない
     rows2 = [(1000009, _row(), "sheet"), (1000010, _row("358000000002"), "sheet")]
     assert U.order_rows(rows2)[0][0] == 1000010
+
+
+# ── 売れ筋の順 (2026-09-13) ─────────────────────────────────────────────
+# ユーザー「中間スプシから売れ筋をピックアップして HIGHT に転記し、出品に乗せる」。
+# 売れ筋の順位は毎晩作っている (ut_demand_words.json)。目視の画面もそれで並べる。
+DEMAND = [["ワンピース", "One Piece"], ["呪術廻戦", "Jujutsu Kaisen"]]
+
+
+def _tab(title, kw=""):
+    r = [""] * 40
+    r[0] = "https://jp.mercari.com/item/m12345678901"
+    r[U.C_TITLE] = title
+    r[U.C_KW] = kw
+    return r
+
+
+def test_hot_works_come_before_the_rest():
+    rows = [
+        (2, _tab("UNIQLO UT ピーナッツ L"), "tab"),
+        (3, _tab("ユニクロ 呪術廻戦 Tシャツ M"), "tab"),
+        (4, _tab("UNIQLO UT ONE PIECE XL"), "tab"),
+    ]
+    assert [t[0] for t in U.order_rows(rows, DEMAND)] == [4, 3, 2]
+
+
+def test_listed_rows_still_come_first():
+    rows = [
+        (2, _tab("UNIQLO UT ONE PIECE XL"), "tab"),
+        (1000005, _row("358000000001"), "sheet"),
+    ]
+    assert U.order_rows(rows, DEMAND)[0][0] == 1000005
+
+
+def test_search_word_column_counts_too():
+    """X列 (抽出くんが見つけた検索語) だけに作品名がある行も拾う。"""
+    r = _tab("ユニクロ Tシャツ 新品 L", kw="呪術廻戦")
+    assert U.demand_rank(r, DEMAND) == 1
+
+
+def test_no_demand_file_keeps_the_old_order(tmp_path):
+    assert U.load_demand(str(tmp_path / "none.json")) == []
+    rows = [(2, _tab("A"), "tab"), (3, _tab("B"), "tab")]
+    assert [t[0] for t in U.order_rows(rows, [])] == [2, 3]
