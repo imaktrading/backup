@@ -63,7 +63,10 @@ def main() -> None:
         s = json.loads(specs or "{}")
         rows[pid] = (s_src, s)
         src[pid].add({"uniqlo_official_api": "公式在庫", "uniqlo_official_api_sweep": "公式在庫",
-                      "uniqlo_discover": "Wayback/前後の番号"}.get(
+                      "uniqlo_discover": "Wayback/前後の番号",
+                      "uniqlo_official_us": "米国の公式", "uniqlo_official_kr": "韓国の公式",
+                      "uniqlo_official_tw": "台湾の公式", "uniqlo_official_sg": "シンガポールの公式",
+                      "uniqlo_reviews_cdn": "画像だけ"}.get(
                           s_src, "起こした" if s_src.startswith("uniqlo_revive") else s_src))
         if s.get("collab"):
             collab[pid] = s["collab"]
@@ -84,6 +87,7 @@ def main() -> None:
         if pid in rows:
             s = rows[pid][1]
             st = ("catalog_images" if s.get("data_level") == "images_only"
+                  else "catalog_overseas" if s.get("region_only")
                   else "catalog_full")
         else:
             v = ver.get(pid)
@@ -94,6 +98,7 @@ def main() -> None:
     OUT.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
 
     LABEL = {"catalog_full": "catalog に在る (中身あり)",
+             "catalog_overseas": "catalog に在る (海外の公式。日本に無い)",
              "catalog_images": "catalog に在る (画像とコラボ名だけ)",
              "no_material": "UT だが材料が残っていない",
              "kids": "キッズ (対象外)", "not_ut": "UT でない", "unknown": "未判定"}
