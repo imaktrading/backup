@@ -62,6 +62,10 @@ STEPS = [
     ("中身の無い廃盤 UT を画像だけで", ["scrapers/uniqlo_ut_images_only.py", "--commit",
                               "--pids-file", "C:/dev/iMak_data/catalog/_ut_gone_candidates.txt",
                               "--pids-file", "C:/dev/iMak_data/catalog/_ut_gone_neighbor_candidates.txt"]),
+    # ★米国の公式にある **公式の英語名** を取る (2026-09-13 出品くん [IMPLEMENT-GO])。
+    #   日本に無い UT (region_only) も台帳として拾う。出品側は region_only を出さない
+    ("米国の公式の英語名",    ["scrapers/uniqlo_ut_region.py", "--enrich", "us", "--commit"]),
+    ("米国だけの UT",       ["scrapers/uniqlo_ut_region.py", "--list", "us", "--commit"]),
     # Fashion Press (記事と写真を倉庫へ。済みは飛ばす)
     ("Fashion Press の記事", ["scrapers/fashion_press_uniqlo.py", "--commit"]),
     ("Fashion Press の写真", ["scrapers/fashion_press_images.py"]),
