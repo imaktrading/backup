@@ -93,3 +93,17 @@ def test_ut_auto_is_scheduled_listing():
     j = src.index("def _run_auto_full_tail")
     tail = src[j:src.index("\ndef ", j + 1)]
     assert '"--schedule"' in tail
+
+
+def test_image_picker_is_big_enough_to_judge():
+    """ユーザー「出品に使う画像を選ぶとき、画像が小さすぎて判断しづらい」(2026-09-13 試走)。
+
+    初版は 42x56px で、柄も背面も判別できなかった。並びの小さい画像を大きくし、
+    画面いっぱいに並べてそこで外せる (下の画像と連動する) ボタンを付けた。
+    """
+    import io
+    import re
+    src = io.open(ROOT / "iMakHQ" / "tools" / "ut_identify.py", encoding="utf-8").read()
+    m = re.search(r"\.imgpick img\{width:(\d+)px;height:(\d+)px", src)
+    assert m and int(m.group(1)) >= 100 and int(m.group(2)) >= 130, m and m.groups()
+    assert "function zoomPick(" in src and "zoomPick(event,this)" in src

@@ -582,9 +582,13 @@ input.q{font-size:12px;width:170px}select{font-size:12px}
 #zov .zx{position:fixed;top:8px;right:12px;font-size:14px;z-index:100}
 .ph .zall{font-size:11px}
 .imgpick{margin-top:6px;display:flex;flex-wrap:wrap;gap:3px;align-items:center}
-.imgpick img{width:42px;height:56px;object-fit:cover;border:2px solid #0a7;cursor:pointer}
-.imgpick img.off{opacity:.2;border-color:#c33}
-.imgpick .sep{width:2px;height:56px;background:#999;margin:0 3px}
+.imgpick{gap:6px}
+.imgpick img{width:120px;height:160px;object-fit:contain;background:#fff;border:3px solid #0a7;cursor:pointer}
+.imgpick img.off{opacity:.25;border-color:#c33}
+.imgpick .sep{width:3px;height:160px;background:#999;margin:0 4px}
+.imgpick .zp{font-size:12px;padding:4px 10px}
+#zov .zcol img.off{opacity:.25;outline:6px solid #c33}
+#zov .zcol img.pk{cursor:pointer}
 #go{position:fixed;right:14px;bottom:14px;font-size:15px;padding:10px 20px;background:#0a7;color:#fff;border:none;border-radius:6px}
 """
 
@@ -622,11 +626,25 @@ function showImgs(box){var v=box.querySelector('.v.sel');var s=box.querySelector
   if(!s||!v){return;}var cr=[],pr=[];
   try{cr=JSON.parse(v.dataset.raw||'[]');}catch(e){}try{pr=JSON.parse(box.dataset.rawphotos||'[]');}catch(e){}
   var ca=[],ph=[];try{ca=JSON.parse(v.dataset.imgs||'[]');}catch(e){}try{ph=JSON.parse(box.dataset.photos||'[]');}catch(e){}
-  function tile(u,raw){return "<img src='"+u+"' data-raw='"+(raw||'').replace(/'/g,'%27')+"' onclick='togImg(event,this)' onerror='this.remove()' title='押すと 使わない/使う'>";}
-  var h="<span class='nm'>出品に使う画像 (カタログ → 仕入元・最大12枚) — 使わない物を押す:</span>";
-  ca.forEach(function(u,i){h+=tile(u,cr[i]);});h+="<span class='sep'></span>";
-  ph.forEach(function(u,i){h+=tile(u,pr[i]);});s.innerHTML=h;}
+  function tile(u,raw,src){return "<img src='"+u+"' data-src='"+src+"' data-raw='"+(raw||'').replace(/'/g,'%27')+"' onclick='togImg(event,this)' onerror='this.remove()' title='押すと 使わない/使う'>";}
+  var h="<div style='width:100%'><span class='nm'>出品に使う画像 (カタログ → 仕入元・最大12枚) — 使わない物を押す</span> "
+    +"<button class='zp' onclick='zoomPick(event,this)'>🔍 大きくして選ぶ</button></div>";
+  ca.forEach(function(u,i){h+=tile(u,cr[i],'cat');});h+="<span class='sep'></span>";
+  ph.forEach(function(u,i){h+=tile(u,pr[i],'sel');});s.innerHTML=h;}
 function togImg(ev,el){ev.stopPropagation();el.classList.toggle('off');}
+/* ★2026-09-13 ユーザー「画像が小さすぎて判断しづらい」: 画面いっぱいに並べ、そこで押しても外せる
+   (押した結果は下の小さい画像と連動する) */
+function zoomPick(ev,btn){ev.preventDefault();ev.stopPropagation();var box=btn.closest('.it');
+  var ts=[].slice.call(box.querySelectorAll('.imgpick img'));
+  function col(id,cap,list){var c=document.getElementById(id);
+    c.innerHTML="<div class='zcap'>"+cap+" ("+list.length+"枚) — 押すと 使わない / 使う</div>";
+    list.forEach(function(t){var im=document.createElement('img');im.src=t.src;im.className='pk';
+      if(t.classList.contains('off'))im.classList.add('off');
+      im.onclick=function(e){e.stopPropagation();t.classList.toggle('off');im.classList.toggle('off');};
+      c.appendChild(im);});}
+  col('zl','カタログ',ts.filter(function(t){return t.dataset.src==='cat';}));
+  col('zr','仕入元の写真',ts.filter(function(t){return t.dataset.src==='sel';}));
+  document.getElementById('zov').classList.add('on');}
 function pickV(el){var box=el.closest('.it');
   box.querySelectorAll('.v').forEach(function(v){v.classList.remove('sel');});
   el.classList.add('sel');box.dataset.pid=el.dataset.pid;fillColors(box,el);showImgs(box);
