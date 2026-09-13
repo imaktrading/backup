@@ -232,6 +232,13 @@ def _fetch_og_image(url):
             h = urllib.request.urlopen(req, timeout=15).read().decode("utf-8", "replace")
             m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', h)
             img = m.group(1) if m else ""
+            # ★2026-09-13: スニダンの出品ページの og:image は **全ページ共通のサイトロゴ**
+            #   (`cdn.snkrdunk.com/images/ogp/og-image.png`)。実測6本すべて同じ。
+            #   これを「画像あり」として返すと、補URL③ に **全候補同じロゴ**が並び
+            #   絵柄の見比べが成立しない。本物の画像ではないので「無い」と返す
+            #   (画面は「画像なし」を出す = 嘘の画像を見せない)。
+            if "snkrdunk.com/images/ogp/" in img:
+                img = ""
             break
         except Exception as e:
             if "getaddrinfo" in str(e) and a < 2:

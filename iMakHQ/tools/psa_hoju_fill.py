@@ -1754,6 +1754,22 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             _price_of = {}
         # ★2026-09-13: itemID が空の行が 886本 溜まっていた (夜間の書き手が入れていなかった)。
         #   捨てずに **行番号からシートの B列を引いて**拾う。積んだ物を必ず人に見せる。
+        # ★2026-09-13 ユーザー報告「補URL③ のスニダンの分が画像が出ない / 価格が出ない」。
+        #   目視待ちの候補は url/site/price(float)/note だけで画面に混ぜていた。通常の候補
+        #   (`_build_visual_candidates`) が持つ channel / image / 整数の price が無く、
+        #   画面は image が空だと出品ページの og:image を取りに行く → スニダンは **全ページ共通の
+        #   サイトロゴ** (実測6本とも同じ) / ラベルは channel が空 / 値段は int しか ¥ 表記しない。
+        #   → スニダンは **通常の候補と同じ出どころ** (探索キャッシュの psa10_listings) から
+        #     値段と実カードの画像を取る。キャッシュに無い = 最新の検索に居ない = 売り切れが大半
+        #     (実測: 値段が引けない21本のうち先頭8本中7本が売り切れ)。黙って消さず、その旨を出す。
+        _sd_info = {}
+        try:
+            for _e in (cache or {}).values():
+                for _l in (((_e or {}).get("snkrdunk") or {}).get("psa10_listings") or []):
+                    if (_l or {}).get("url"):
+                        _sd_info[_norm_url(_l["url"])] = (_l.get("price"), _l.get("image") or "")
+        except Exception:                                      # noqa: BLE001
+            _sd_info = {}
         for _r in aux_pending.load():
             _iid = (_r.get("itemID") or "").strip()
             if not _iid:
@@ -1762,10 +1778,20 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
                     _iid = _cell(vals[_row - 1], B)
             if not _iid:
                 continue
+            _u = _r["url"]
+            _is_sd = "snkrdunk.com" in _u
+            _sdp, _sdi = _sd_info.get(_norm_url(_u), (None, ""))
+            _pp = _sdp if _is_sd else _price_of.get(_norm_url(_u))
+            try:
+                _pp = int(round(float(_pp))) if _pp not in (None, "") else None
+            except (TypeError, ValueError):
+                _pp = None
             _pending_by_iid.setdefault(_iid, []).append(
-                {"url": _r["url"], "source": _r.get("source", ""),
-                 "price": _price_of.get(_norm_url(_r["url"])),
-                 "site": "mercari" if "mercari" in _r["url"] else ""})
+                {"url": _u, "source": _r.get("source", ""), "price": _pp,
+                 "channel": "snkrdunk" if _is_sd else ("mercari" if "mercari" in _u else ""),
+                 "image": _sdi if _is_sd else "",
+                 "name": ("最新の検索に無い (売り切れの可能性)" if _is_sd and _sdp is None else ""),
+                 "site": "mercari" if "mercari" in _u else ""})
         if _pending_by_iid:
             print(f"  ＋目視待ちの補URL {sum(len(v) for v in _pending_by_iid.values())}本 "
                   f"({len(_pending_by_iid)}出品) を候補に混ぜます")
@@ -1838,6 +1864,9 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
                 if _norm_url(_p["url"]) in _have:
                     continue
                 cands = list(cands) + [{"url": _p["url"], "site": _p.get("site") or "",
+                                        "channel": _p.get("channel") or "",
+                                        "image": _p.get("image") or "",
+                                        "name": _p.get("name") or "",
                                         "price": _p.get("price"),
                                         "note": f"目視待ち ({_p.get('source','')})"}]
                 _shown_pending.append((iid, _p["url"]))
