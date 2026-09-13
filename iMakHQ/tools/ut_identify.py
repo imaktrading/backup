@@ -452,7 +452,21 @@ def parse_result(data):
             outs.append({"idx": int(o.get("idx")), "reason": (o.get("reason") or "").strip()})
         except (TypeError, ValueError, AttributeError):
             continue
+    info = {}
+    raw_info = data.get("nocat_info") if isinstance(data.get("nocat_info"), dict) else {}
+    for k, v in raw_info.items():
+        try:
+            idx = int(k)
+        except (TypeError, ValueError):
+            continue
+        v = v if isinstance(v, dict) else {}
+        work = " ".join(str(v.get("work") or "").split())[:60]
+        ref = str(v.get("ref") or "").strip()
+        ref = ref if re.match(r"^https?://\S+$", ref) else ""      # URL でない物は捨てる
+        if work or ref:
+            info[idx] = {"work": work, "ref": ref}
     return {"picks": picks, "skips": skips, "nocat": _ints(data.get("nocat")),
+            "nocat_info": info,
             "outs": [o for o in outs if o["reason"]], "holds": _ints(data.get("holds"))}
 
 
@@ -667,8 +681,9 @@ function setAct(btn){var box=btn.closest('.it');
     if(btn.dataset.a==='out'&&isSkip)s.value='';
     if(btn.dataset.a==='skip'&&s.value&&!isSkip)s.value='';
     if(btn.dataset.a!=='out'&&btn.dataset.a!=='skip')s.value='';}
+  var ci=box.querySelector('.catinfo');if(ci)ci.style.display=btn.dataset.a==='cat'?'':'none';
   box.classList.toggle('done',btn.dataset.a!=='go');}
-function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason=0;
+function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason=0,nocatInfo={};
   document.querySelectorAll('.it').forEach(function(b){var a=b.dataset.act||'';var idx=parseInt(b.dataset.idx,10);
     var c=(b.querySelector('select.col')||{}).value||'';var r=(b.querySelector('select.rsn')||{}).value||'';
     if(a==='go'){
@@ -678,7 +693,9 @@ function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason
       if(!b.dataset.pid||!c){nocolor++;holds.push(idx);}
       else if(r.indexOf('skip_')!==0){noreason++;holds.push(idx);}
       else{skips.push({idx:idx,pid:b.dataset.pid,color:c,reason:r});}}
-    else if(a==='cat'){nocat.push(idx);}
+    else if(a==='cat'){nocat.push(idx);
+      var w=((b.querySelector('input.cw')||{}).value||'').trim(),u=((b.querySelector('input.cu')||{}).value||'').trim();
+      if(w||u)nocatInfo[idx]={work:w,ref:u};}
     else if(a==='out'){
       if(!r||r.indexOf('skip_')===0){noreason++;holds.push(idx);}else{outs.push({idx:idx,reason:r});}}
     else{holds.push(idx);}});
@@ -687,7 +704,7 @@ function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason
   if(nocolor)msg+='\\n\\n商品か色が未選択 '+nocolor+'件 — 未結論に戻します';
   if(noreason)msg+='\\n\\n対象外/見送りなのに理由が未選択 '+noreason+'件 — 未結論に戻します';
   if(!confirm(msg+'\\n\\nこの内容で確定しますか?'))return;
-  _send({picks:picks,skips:skips,nocat:nocat,outs:outs,holds:holds},
+  _send({picks:picks,skips:skips,nocat:nocat,nocat_info:nocatInfo,outs:outs,holds:holds},
         '<h1>確定しました。ウィンドウを閉じてください。</h1>');}
 """
 
@@ -754,6 +771,10 @@ def build_html(items, catalog):
             "<button class='cat' data-a='cat' onclick='setAct(this)' "
             "title='カタログに追加依頼を出す。追加されたら1週間後にまたこの画面に出ます'>"
             "カタログに無い→追加依頼</button>"
+            "<span class='catinfo' style='display:none'>"
+            "作品名 <input class='cw' placeholder='任意: 分かれば' style='width:120px'> "
+            "参考URL <input class='cu' placeholder='任意: 公式ページ等' style='width:200px'>"
+            "</span>"
             "<button class='ng' data-a='out' onclick='setAct(this)'>対象外</button>"
             "<select class='rsn' onchange='pickRsn(this)'><option value=''>理由を選ぶ</option>"
             "<optgroup label='対象外 (商品が決まらない・材料にならない)'>"
@@ -782,6 +803,20 @@ def lookup_api(path, query, catalog=None):
 CATALOG_REQ_DIR = r"C:/dev/iMak_data/catalog/requests"
 
 
+# ★2026-09-13: catalog の回答 (catalog/requests/2026-09-12_ut_not_in_catalog_response.md)
+#   「特定できなかった理由は『カタログに無い』ではなく『手がかりが足りない』。品番 (E+9桁) か
+#    公式ページの URL が1つあれば引ける。写真だけでは品番に辿り着けない」。
+#   → 目視した人の **作品名の見当** と **参考URL** (どちらも任意) を載せ、写真は全部渡す
+#     (1枚目だけだった。タグは2枚目以降に写っていることが多い)。
+TABLE_HEAD = ("| メルカリのタイトル | 色 | サイズ | タグの番号 | 作品名 (目視) | 参考URL | 見つけた語 | 仕入元 | 写真 |\n"
+              "|---|---|---|---|---|---|---|---|---|\n")
+
+
+def _cell_md(v):
+    """表の1セルに入れてよい形 (純関数)。縦棒と改行を潰す。"""
+    return " ".join(str(v or "").replace("|", "／").split())
+
+
 def request_md(rows, today=None, existing=""):
     """「カタログに無い」行 → カタログへの追加依頼書 (純関数)。
 
@@ -803,15 +838,24 @@ def request_md(rows, today=None, existing=""):
         "メルカリの新品 UT を目視でカタログの商品に当てる画面 (`iMakHQ/tools/ut_identify.py`) で、\n"
         "**カタログに候補が無かった**行です。海外限定・旧作・GU など、公式の検索に出ない物が多いはずです。\n"
         "**分かる範囲で構いません。** 無い物は「無い」と返してください (出品側はその行を出しません)。\n\n"
+        "- **作品名 (目視)** … 目視した人の見当 (任意・空のことがある)\n"
+        "- **参考URL** … 目視した人が見つけた公式ページ等 (任意)。あれば品番はここから引けるはず\n"
+        "- **写真** … メルカリの写真を全部 (タグは2枚目以降に写っていることが多い)\n\n"
         "## 見つからなかった商品\n\n"
-        "| メルカリのタイトル | 色 | サイズ | タグの番号 | 見つけた語 | 仕入元 | 写真 |\n"
-        "|---|---|---|---|---|---|---|\n")
+        + TABLE_HEAD)
+    # ★同じ日の依頼書が旧い表 (列が少ない) なら、表を分けて足す (列がずれて読めなくなるため)
+    if existing and TABLE_HEAD.splitlines()[0] not in existing:
+        head = existing.rstrip("\n") + "\n\n## 追加分\n\n" + TABLE_HEAD
     body = "".join(
-        "| {title} | {color} | {size} | {tag} | {kw} | {url} | {photo} |\n".format(
-            title=(r.get("title") or "").replace("|", "／")[:60],
-            color=r.get("color") or "", size=r.get("size") or "",
-            tag=r.get("tag") or "-", kw=r.get("kw") or "-",
-            url=r.get("url") or "", photo=r.get("photo") or "-")
+        "| {title} | {color} | {size} | {tag} | {work} | {ref} | {kw} | {url} | {photos} |\n".format(
+            title=_cell_md(r.get("title"))[:60],
+            color=_cell_md(r.get("color")), size=_cell_md(r.get("size")),
+            tag=_cell_md(r.get("tag")) or "-", work=_cell_md(r.get("work")) or "-",
+            ref=_cell_md(r.get("ref")) or "-", kw=_cell_md(r.get("kw")) or "-",
+            url=r.get("url") or "",
+            photos=" ".join(f"[{n}]({u})" for n, u in
+                            enumerate(r.get("photos") or ([r["photo"]] if r.get("photo") else []), 1))
+            or "-")
         for r in new)
     return head + body
 
@@ -1024,11 +1068,14 @@ def save(items, res, now=None):
         if not it:
             continue
         r = it["row"]
-        photos = [u for u in (r[C_PHOTOS] or "").split("|") if u.strip()]
+        photos = [u.strip() for u in (r[C_PHOTOS] or "").split("|") if u.strip()]
+        _info = (res.get("nocat_info") or {}).get(idx) or {}
         req_rows.append({"url": r[C_URL].strip(), "title": r[C_TITLE], "color": r[C_COLOR],
                          "size": r[C_SIZE], "tag": r[C_TAG], "kw": r[C_KW],
-                         "photo": photos[0] if photos else ""})
-        add_led[r[C_URL].strip()] = {"decision": "nocat", "title": r[C_TITLE], "at": now}
+                         "photo": photos[0] if photos else "", "photos": photos[:10],
+                         "work": _info.get("work", ""), "ref": _info.get("ref", "")})
+        add_led[r[C_URL].strip()] = {"decision": "nocat", "title": r[C_TITLE], "at": now,
+                                     **{k: v for k, v in _info.items() if v}}
     for o in res["outs"]:
         it = by_idx.get(o["idx"])
         if it:
