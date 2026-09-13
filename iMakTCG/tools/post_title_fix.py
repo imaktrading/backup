@@ -105,8 +105,12 @@ def remove_redundant_pokemon(title):
     """
     if 'Pokémon' not in title:
         return title, False
-    # アクセント付 Pokémon を削除 (前後スペースも含めて)
-    new = re.sub(r'\s+Pokémon\s+', ' ', title).strip()
+    # ★2026-09-13: **セット名の中の Pokémon は消さない**。以前は前後にスペースのある
+    #   Pokémon を全部消していたので、セット名 `S10b: Pokémon GO` が `S10b: GO` になり、
+    #   live 出品3件 (820121669220 / 820104169624 / 820110211694) のタイトルが崩れていた。
+    #   One Piece Day (2026-08-28) と同じ「セット名をまとまりとして守る」形の4回目。
+    #   消すのは カード種別の `Pokémon Card` (後ろが 151 / Game でない) だけ。
+    new = re.sub(r'\s+Pokémon\s+(?=Card\b(?!\s+(?:151|Game)\b))', ' ', title).strip()
     new = re.sub(r'\s+', ' ', new)
     return new, new != title
 
