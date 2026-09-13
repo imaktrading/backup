@@ -66,7 +66,12 @@ def main() -> None:
     ap.add_argument("--limit", type=int, help="記事の数を絞る (動作確認用)")
     ap.add_argument("--only-missing", action="store_true", default=True,
                     help="catalog に品番で入っていないコラボの記事だけ (既定)")
+    ap.add_argument("--articles", help="記事IDをカンマ区切りで指定 (突き合わせに関係なく作る)")
     a = ap.parse_args()
+    # ★突き合わせは名前だけで当てるので外れることがある。2026-09-14 実測: 河村康輔×ドラゴンボール 2019
+    #   (記事 53723) が「ドラゴンボール」の語だけで 2023年・DAIMA の行 13件に当たり、
+    #   「catalog に在る」扱いで柄の記録が作られていなかった。記事を指定して作れるようにする
+    forced = set((a.articles or "").split(",")) - {""}
 
     arts = json.loads(F.OUT.read_text(encoding="utf-8"))["articles"]
     gap = json.loads(GAP.read_text(encoding="utf-8")) if GAP.exists() else {}
@@ -79,7 +84,10 @@ def main() -> None:
         if not F.is_ut_article(a_.get("title") or "", a_.get("detail_text") or ""):
             continue
         g = gap.get(nid) or {}
-        if a.only_missing and g.get("catalog_count"):
+        if forced:
+            if nid not in forced:
+                continue
+        elif a.only_missing and g.get("catalog_count"):
             continue                      # 品番で入っているコラボは対象外
         targets.append((nid, a_, g))
     targets.sort(key=lambda x: x[1].get("published") or "", reverse=True)
