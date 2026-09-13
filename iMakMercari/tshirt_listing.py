@@ -326,6 +326,7 @@ Return ONLY valid JSON:
   "country_of_origin": "Bangladesh/Vietnam/China/Indonesia if readable from tag, else 'Does not apply'",
   "year_range": "2020-2029 (recent) or 2010-2019 (older collab) - guess from collab era",
   "condition_description": "Brand new with tags. Shipped directly from Japan.",
+  "about_collab": "1-3 English sentences translating the official collaboration text if one is given in the catalog facts, else empty",
   "item_specifics": {
     "Brand": "Uniqlo",
     "Type": "T-Shirt",
@@ -385,12 +386,19 @@ def load_description():
         return "Brand new item shipped from Japan."
 
 
-def build_description(template, collab, color, size_jp, size_us, cat=None):
+def build_description(template, collab, color, size_jp, size_us, cat=None, about_en=""):
     """NEW.txtテンプレートにスペックブロックを挿入
 
     cat: 目視で特定した行のカタログの値 (ut_catalog_values.build_values)。
          ★2026-09-11: ある時は素材・原産国・実寸を **カタログから** 出す (無い時は従来どおり)。
+         ★2026-09-13: ある時は **スキルの形** (コラボ紹介 / Specs / 全サイズ実測表 / Fit note / 透け感)。
+           サイズ表記は US が先 (ユーザー「タイトルと逆。タイトルに合わせて」)
     """
+    marker = '<p><span style="text-decoration: underline;"><strong>Shipping'
+    if cat:
+        import ut_catalog_values as _UCV
+        block = _UCV.description_html(cat, collab_en=cat.get("work_en") or collab, about_en=about_en)
+        return template.replace(marker, block + marker) if marker in template else template + block
     material = (cat or {}).get("material_line") or "100% Cotton"
     origin = (cat or {}).get("origin_line") or ""
     chart = (cat or {}).get("chart_html") or ""
@@ -806,6 +814,10 @@ def main():
         if cat_v:
             try:
                 specs = UCV.apply_to_specs(specs, cat_v, _wl_validate)
+                # ★2026-09-13 ユーザー「除外したらあかんやん」: 実測表がカタログに無くても出品は止めない。
+                #   表が無い時は説明文に表を出さない (嘘の案内も出さない)。表はカタログに依頼して後で差し替える
+                if not UCV.has_size_chart(cat_v):
+                    print("    ⚠ サイズ表 (実測) がカタログに無い → 表なしで出す (カタログに依頼済み)")
             except UCV.NotListable as e:
                 print(f"    ⏸ スキップ: {e}")
                 continue
@@ -822,10 +834,21 @@ def main():
 
         # === Title整合性 + 70字パディング (listing_common.normalize_title) ===
         # Tシャツは UNIQLO UT 主軸で全件新品扱い (NWT = New With Tags)
-        title_en = normalize_title(
-            title_en, is_new=True, item_specifics=specs,
-            category="tshirt", target_min=70, max_chars=80,
-        )
+        if cat_v:
+            # ★2026-09-13 ユーザー「これまでのスキルも使ってる？」: 目視で特定した行は
+            #   スキルの形 `[作品] [キャラ] Anime Graphic Tee UNIQLO UT Japan Exclusive [色] US M (JP L) NWT`
+            #   をカタログの値で組み立てる。normalize_title を通すと末尾に「New」が足されて
+            #   「NWT Japan New」になっていた (スキルにも既存出品にも無い形)
+            try:
+                title_en = UCV.title_for(cat_v, character=specs.get("Character") or result.get("character", ""))
+            except UCV.NotListable as e:
+                print(f"    ⏸ スキップ: {e}")
+                continue
+        else:
+            title_en = normalize_title(
+                title_en, is_new=True, item_specifics=specs,
+                category="tshirt", target_min=70, max_chars=80,
+            )
         print(f"    ✨ {title_en} ({len(title_en)}字)")
         # ★№138: 目視で特定した行は、作品名が対応表の英語表記どおりタイトルに入っていること
         #   (AI が別の綴りに言い換えると、買い手の検索語と一致しない)。入っていなければ出さない
@@ -940,7 +963,7 @@ def main():
                 specs.get("Color", ""),
                 result.get("size_jp", ""),
                 result.get("size_us", specs.get("Size", "")),
-                cat=cat_v,
+                cat=cat_v, about_en=result.get("about_collab", ""),
             ), "FixedPrice", "GTC", 1, LOCATION,
             1, shipping, RETURN_POLICY, PAYMENT_POLICY,
             "", store_cat,  # ConditionDescription空（新品には不要）

@@ -235,7 +235,13 @@ def build_values(product, color_name, size_text):
             "material_line": mat_line, "origin_line": coo_line,
             "chart_html": chart_html(chart_row(s.get("size_chart_inch"), size), size),
             "collab_jp": s.get("collab") or product.get("name") or "", "is_gu": is_gu,
-            "work_en": work}
+            "work_en": work,
+            # ★2026-09-13 スキル (apparel-tee-listing / RUNBOOK §4 §6) の形で組み立てる材料
+            "size_chart": list(s.get("size_chart_inch") or []),
+            "fit": s.get("fit") or "Regular",
+            "themes": list(s.get("themes") or []),
+            "sheerness": sheerness_of(s.get("design_detail")),
+            "about_jp": _plain(s.get("collab_official_text") or s.get("long_description") or "")}
 
 
 # ── 二重出品を止める (PSA と同じ運用。設計: iMakHQ/UT_FLOW.md) ──────
@@ -411,6 +417,155 @@ def write_aux(row_to_urls):
         return 0
 
 
+# ── スキルの形 (apparel-tee-listing / UNIQLO_GU_LISTING_RUNBOOK §4 §6) ──────
+# ★2026-09-13 ユーザー「これまでのスキルも使ってる？」→ 使っていなかった。
+#   Tシャツ新規 (tshirt_listing.py) は 2026-04 の古い作りのままで、タイトルはブランド先頭 +
+#   「Japan New」、説明文は 1サイズ分の寸法だけ / サイズ表記は JP が先 だった。
+#   ここでスキルの形を **カタログの値から決まった形で** 組み立てる (AI に書かせない)。
+JP_ORDER = ["XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL"]
+_US_LABEL = dict(JP_TO_US, XS="XXS")      # 表の行見出し (参照出品 358764670607 と同じ: US XXS (JP XS))
+_CHART_COLS = [("length", "Length"), ("shoulder", "Shoulder"), ("chest", "Chest"), ("sleeve", "Sleeve")]
+_TD = "border:1px solid #bbb;padding:6px;text-align:center;"
+_TH = "border:1px solid #bbb;padding:6px;"
+MAX_TITLE = 80
+
+
+def _plain(html_text):
+    """カタログの説明文 (HTML まじり) → 平文 (純関数)。"""
+    t = re.sub(r"<br\s*/?>", "\n", html_text or "", flags=re.I)
+    t = re.sub(r"<[^>]+>", "", t)
+    return re.sub(r"[ \t]+", " ", t).strip()
+
+
+def sheerness_of(design_detail):
+    """公式 designDetail の「透け感: 〇〇」→ None / Slight / Yes。書いていなければ "" (推測しない)。"""
+    m = re.search(r"透け感\s*[:：]\s*(なし|ややあり|あり)", _plain(design_detail or ""))
+    return {"なし": "None", "ややあり": "Slight", "あり": "Yes"}[m.group(1)] if m else ""
+
+
+def size_label(size_jp):
+    """`US M (JP L)` (純関数)。US が先 = タイトルと同じ並び。"""
+    us = _US_LABEL.get(size_jp, "")
+    return f"US {us} (JP {size_jp})" if us else f"JP {size_jp}"
+
+
+def title_for(v, character=""):
+    """スキルの形のタイトル (純関数)。80字に収まらなければ NotListable。
+
+    形: [作品] [キャラ] Anime Graphic Tee UNIQLO UT Japan Exclusive [色] US M (JP L) NWT
+      - スキルの例はバリエーション出品なのでサイズが無い。メルカリ仕入れは 1出品1サイズなので
+        色の後ろに入れる (2026-09-13 ユーザー確定)
+      - 80字を超えたら スキルの取捨どおり 「Exclusive」→ キャラ名 (後ろの語から) の順に削る
+      - 「Anime」はカタログのテーマが Anime の時だけ (アート・音楽のコラボに付けない)
+    """
+    work = (v.get("work_en") or "").strip()
+    color = " ".join(w.capitalize() for w in (v.get("color_name") or "").split())
+    brand = "UNIQLO GU" if v.get("is_gu") else "UNIQLO UT"
+    kind = "Anime Graphic Tee" if "Anime" in (v.get("themes") or []) else "Graphic Tee"
+    size = size_label(v.get("size_jp") or "")
+    ch = (character or "").strip()
+
+    def _fold(x):                                 # Pokémon と Pokemon を同じに見る
+        import unicodedata
+        return _nk(unicodedata.normalize("NFKD", x).encode("ascii", "ignore").decode())
+    if ch and _fold(ch) in _fold(work):
+        ch = ""                                   # 作品名と同じなら重ねない
+    words = ch.split()
+    # 削る順 = 「Exclusive」が先、キャラ名は後 (キャラ名の方が検索に効く)
+    for n in range(len(words), -1, -1):
+        for exclusive in (True, False):
+            parts = [work, " ".join(words[:n]), kind, brand,
+                     "Japan Exclusive" if exclusive else "Japan", color, size, "NWT"]
+            t = " ".join(x for x in parts if x)
+            if len(t) <= MAX_TITLE:
+                return t
+    raise NotListable(f"タイトルが{MAX_TITLE}字に収まらない: {work} / {color} / {size}")
+
+
+def has_size_chart(v):
+    """その出品のサイズの行を含む実測表があるか (純関数)。"""
+    rows = {(r.get("size") or "").upper() for r in v.get("size_chart") or []}
+    return bool(rows) and (v.get("size_jp") or "") in rows
+
+
+def size_chart_table_html(v):
+    """全サイズの実測表 (参照出品 358764670607 と同じ見た目)。その出品のサイズの行を強調。
+
+    ★2026-09-13 ユーザー「除外したらあかんやん」: 表が無い商品も **出品は止めない**。
+      表が無い時は空文字 (「サイズ表の画像を見て」のような嘘の案内は出さない)。
+    """
+    if not has_size_chart(v):
+        return ""
+    rows = sorted((r for r in v.get("size_chart") or [] if (r.get("size") or "").upper() in JP_ORDER),
+                  key=lambda r: JP_ORDER.index(r["size"].upper()))
+    head = "".join(f'<th style="{_TH}">{lab}</th>' for _k, lab in _CHART_COLS)
+    body = ""
+    for r in rows:
+        sz = r["size"].upper()
+        on = sz == v.get("size_jp")
+        tr = ' style="background:#fff8e1;font-weight:bold;"' if on else ""
+        cells = "".join(f'<td style="{_TD}">{r.get(k) or "-"}</td>' for k, _lab in _CHART_COLS)
+        mark = " ← this item" if on else ""
+        body += f'<tr{tr}><td style="{_TD}">{size_label(sz)}{mark}</td>{cells}</tr>'
+    fit = v.get("fit") or "Regular"
+    return ('<p><span style="text-decoration: underline;"><strong>Size Chart — Actual Measurements (inch)'
+            '</strong></span></p>'
+            f'<p>Flat-lay measurements per size ({fit} Fit). Japanese size runs about one '
+            'size smaller than US — please go by the measurements.</p>'
+            '<table style="border-collapse:collapse;width:100%;font-size:16px;margin-bottom:10px;"><tbody>'
+            f'<tr style="background:#f2f2f2;"><th style="{_TH}">Size</th>{head}</tr>{body}</tbody></table>')
+
+
+# ★2026-09-13 ユーザー「せめて、(デスクトップ/86/1.png) これくらいはいるんちゃう」:
+#   実測表がカタログに無い商品にも、**JP と US のサイズ対応表**だけは必ず出す
+#   (画像は iMak が作った汎用の T-SHIRT SIZE CHART。中身は JP S→US XS … JP 4XL→US 3XL)。
+CONVERSION = [("S", "XS"), ("M", "S"), ("L", "M"), ("XL", "L"), ("XXL", "XL"), ("3XL", "2XL"), ("4XL", "3XL")]
+
+
+def size_conversion_table_html(size_jp=""):
+    """JP ⇔ US のサイズ対応表 (実測表が無い時に出す)。その出品のサイズの行を強調。"""
+    body = ""
+    for jp, us in CONVERSION:
+        on = jp == size_jp
+        tr = ' style="background:#fff8e1;font-weight:bold;"' if on else ""
+        mark = " ← this item" if on else ""
+        body += f'<tr{tr}><td style="{_TD}">{jp}</td><td style="{_TD}">{us}{mark}</td></tr>'
+    return ('<p><span style="text-decoration: underline;"><strong>Size Chart — Japan / US</strong></span></p>'
+            '<p>Japanese sizes run about one size smaller than US.</p>'
+            '<table style="border-collapse:collapse;width:100%;max-width:420px;font-size:16px;margin-bottom:10px;">'
+            f'<tbody><tr style="background:#f2f2f2;"><th style="{_TH}">JP</th><th style="{_TH}">US</th></tr>'
+            f'{body}</tbody></table>')
+
+
+def description_html(v, collab_en="", about_en=""):
+    """説明文のスペック部分 (スキルの ①コラボ紹介 ②Product Specifications ③実測表 ④Fit note ⑤透け感)。"""
+    fit = v.get("fit") or "Regular"
+    color = " ".join(w.capitalize() for w in (v.get("color_name") or "").split())
+    label = size_label(v.get("size_jp") or "")
+    about = ""
+    if (about_en or "").strip():
+        about = ('<p><span style="text-decoration: underline;"><strong>About This Collaboration</strong>'
+                 f'</span></p><p>{about_en.strip()}</p>')
+    spec = ('<p><span style="text-decoration: underline;"><strong>Product Specifications</strong></span></p><ul>'
+            f"<li><b>Collaboration:</b> {collab_en or v.get('work_en')}</li>"
+            f"<li><b>Brand:</b> {'UNIQLO GU' if v.get('is_gu') else 'Uniqlo UT'}</li>"
+            f"<li><b>Material:</b> {v.get('material_line') or ''}</li>"
+            + (f"<li><b>Country of Origin:</b> {v['origin_line']}</li>" if v.get("origin_line") else "")
+            + f"<li><b>Color:</b> {color}</li>"
+            + f"<li><b>Size:</b> {label}, {fit} fit</li>"
+            + (f"<li><b>Sheerness:</b> {v['sheerness']}</li>" if v.get("sheerness") else "")
+            + "<li><b>Condition:</b> Brand new with tags</li></ul>")
+    chart = size_chart_table_html(v)
+    tail = ("Please go by the measurements above to choose your size." if chart
+            else "Please check the Japan / US size table above.")
+    if not chart:
+        chart = size_conversion_table_html(v.get("size_jp") or "")
+    note = ('<p style="background:#fff8e1;border:1px solid #ffe082;padding:10px 12px;border-radius:4px;">'
+            f"<strong>⚠ Fit note:</strong> This is a Japanese <b>{fit} Fit</b> tee. This item is "
+            f"<b>{label}</b>. Japanese sizing runs about one size smaller than US. {tail}</p>")
+    return about + spec + chart + note
+
+
 def catalog_facts_text(v):
     """Claude にタイトルを書かせる時に渡す事実 (英語)。純関数。"""
     sp = v["specs"]
@@ -421,7 +576,10 @@ def catalog_facts_text(v):
             + f"- Series / franchise (put this EXACT English name in the title, spelled as given): "
               f"{v['work_en']}\n"
             + (f"- Character: {sp['Character']}\n" if sp.get("Character") else "")
-            + f"- Official Japanese product name (for identifying the work only): {v['collab_jp']}\n")
+            + f"- Official Japanese product name (for identifying the work only): {v['collab_jp']}\n"
+            + (f"- Official collaboration text (Japanese). Translate it into 1-3 natural English sentences "
+               f"and return them in the JSON key \"about_collab\" (no new facts): {v['about_jp'][:600]}\n"
+               if v.get("about_jp") else ""))
 
 
 # ── 読み込み (I/O) ──────────────────────────────────────────────────
