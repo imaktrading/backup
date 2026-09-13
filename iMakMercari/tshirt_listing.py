@@ -656,6 +656,17 @@ def main():
     # スプシからリスティング対象を取得
     print("スプシ読み込み中...")
     targets, ws, all_values = get_listing_targets()
+    # ★2026-09-13: 🤖自動 は **目視で商品を決めた行だけ** 作る (PSA の「確定したカードだけ生成」と同じ)。
+    #   決めていない行は カタログ画像も カタログの値も無く、仕入元の写真1枚 + AI の推測で出てしまう
+    #   (ユーザー確定「メインはカタログ画像」に反する)。その行は目視特定か 新規ボタンで扱う
+    if os.environ.get("UT_IDENTIFY_BEFORE_BUILD") == "1":
+        import ut_catalog_values as _UCV0
+        _led0 = _UCV0.load_ledger()
+        _unid = [t for t in targets if _UCV0.decision_for(t["url"], _led0) != "go"]
+        if _unid:
+            print(f"⏭ 目視で商品を決めていない {len(_unid)}件は自動では出しません "
+                  f"(行 {', '.join(str(t['row']) for t in _unid[:10])})")
+        targets = [t for t in targets if _UCV0.decision_for(t["url"], _led0) == "go"]
     if _batch and len(targets) > _batch:
         print(f"⚠️ {len(targets)}件中 {_batch}件を処理 (残 {len(targets) - _batch}件は次回)")
         targets = targets[:_batch]

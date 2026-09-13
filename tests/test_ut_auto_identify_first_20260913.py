@@ -52,3 +52,17 @@ def test_generator_runs_identify_first_and_caps():
     assert a < b, "目視より先に対象を読んでいる (目視で足した行が今回の生成に入らない)"
     assert '"--new-only"' in body[a:b]
     assert "targets = targets[:_batch]" in body
+
+
+def test_auto_builds_only_rows_identified_by_eye():
+    """🤖自動 は目視で商品を決めた行だけ作る (PSA の「確定したカードだけ生成」と同じ)。
+
+    決めていない行は カタログ画像もカタログの値も無く、仕入元の写真1枚 + AI の推測で出てしまう。
+    2026-09-13 試走直前に、HIGHT の未特定2行 (388 / 612) がそのまま予約出品される所だった。
+    """
+    src = io.open(ROOT / "iMakMercari" / "tshirt_listing.py", encoding="utf-8").read()
+    body = src[src.index("def main():"):]
+    a = body.index("get_listing_targets()")
+    b = body.index("targets = targets[:_batch]")
+    seg = body[a:b]
+    assert 'decision_for(t["url"], _led0) == "go"' in seg
