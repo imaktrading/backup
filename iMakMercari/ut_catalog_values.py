@@ -688,8 +688,21 @@ MAX_PICTURES = 12
 _RE_GOODS = re.compile(r"goods_(\d{2})_(\d{6})")
 
 
+def chart_applies(v):
+    """汎用サイズ表の写真を付けてよい商品か (純関数)。
+
+    ★2026-09-14 ユーザー「そうしよか」: 実寸表がカタログに無い / メンズかユニセックス / レギュラーフィット
+      の時だけ。表の数字はこの種類の実寸の中央値なので、レディース・キッズ・オーバーサイズ等に
+      付けると実物と大きく違ってかえって揉める (その時は説明文の JP/US 対応表だけ)。
+    """
+    if has_size_chart(v):
+        return False
+    dept = ((v.get("specs") or {}).get("Department") or "").strip().lower()
+    return dept in ("men", "unisex adults", "unisex") and (v.get("fit") or "").strip().lower() == "regular"
+
+
 def listing_images(catalog_images, color_code="", l1="", other_codes=(), seller_urls=(),
-                   drop=(), max_n=MAX_PICTURES, first=""):
+                   drop=(), max_n=MAX_PICTURES, first="", second=()):
     """出品に使う画像 URL の並び (純関数)。
 
     ★2026-09-13 ユーザー「画像の順番を指定するところだけど、1枚目だけ指定させて」:
@@ -720,15 +733,23 @@ def listing_images(catalog_images, color_code="", l1="", other_codes=(), seller_
     if first and first in out:
         out.remove(first)
         out.insert(0, first)
-    return out[:max_n]
+    # ★2026-09-14 ユーザー「サイズ表は、２枚目がよくない？」: 1枚目 (商品) の次に置く。その分の枠を先に空ける
+    pin = [(x or "").strip() for x in (second or ()) if (x or "").strip()]
+    out = [u for u in out if u not in pin]
+    out = out[:max(0, max_n - len(pin))]
+    return out[:1] + pin + out[1:]
 
 
-def images_for_listing(v, seller_urls=()):
-    """目視で特定した行の値 (values_for_url) → 出品に使う画像の並び。"""
+def images_for_listing(v, seller_urls=(), chart_url=""):
+    """目視で特定した行の値 (values_for_url) → 出品に使う画像の並び。
+
+    chart_url: 汎用サイズ表の写真。chart_applies(v) の時だけ 2枚目に置く。
+    """
     codes = v.get("color_codes") or {}
+    pin = [chart_url] if chart_url and chart_applies(v) else []
     return listing_images(v.get("catalog_images") or [], codes.get(v.get("color_name")) or "",
                           v.get("l1") or "", list(codes.values()), seller_urls,
-                          v.get("img_drop") or [], first=v.get("img_main") or "")
+                          v.get("img_drop") or [], first=v.get("img_main") or "", second=pin)
 
 
 _RE_MERCARI_ITEM = re.compile(r"jp\.mercari\.com/item/(m\d+)")

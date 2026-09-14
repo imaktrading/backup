@@ -734,6 +734,7 @@ def main():
     ut_official = UCV.load_official_identities()
     ut_aux_add = {}
     ut_run = {}          # この走行で CSV に入れた分 (同じ走行に同じ物が2つある時も1つだけ出す)
+    _chart_url_once = {}  # 汎用サイズ表の写真の URL (1走行で1回だけ用意する)
 
     def _aux_of(sheet_row):
         r = all_values[sheet_row - 1] if len(all_values) >= sheet_row else []
@@ -892,12 +893,21 @@ def main():
         #   目視で特定した行は カタログ (選んだ色の表 → サブ) → メルカリの写真 の順・最大12枚。
         #   目視で「使わない」と外した画像は入れない。特定していない行は今までどおり
         if cat_v:
+            # ★2026-09-14 実寸表が無い メンズ・ユニセックスのレギュラーは、汎用サイズ表の写真を 2枚目に1枚
+            _chart = ""
+            if UCV.chart_applies(cat_v):
+                if "url" not in _chart_url_once:
+                    import ut_sizechart_image as _SC
+                    _chart_url_once["url"] = _SC.ensure_chart_url()
+                _chart = _chart_url_once["url"]
             _imgs = UCV.images_for_listing(
-                cat_v, [u.strip() for u in (photo_urls or "").split("|") if u.strip()])
+                cat_v, [u.strip() for u in (photo_urls or "").split("|") if u.strip()], chart_url=_chart)
             if _imgs:
                 pic_url = "|".join(_imgs)
-                print(f"    🖼 画像 {len(_imgs)}枚 (カタログ {len(_imgs) - len([u for u in _imgs if 'mercdn' in u])}"
-                      f" + 仕入元 {len([u for u in _imgs if 'mercdn' in u])})")
+                _n_sup = len([u for u in _imgs if 'mercdn' in u])
+                _n_chart = 1 if _chart and _chart in _imgs else 0
+                print(f"    🖼 画像 {len(_imgs)}枚 (カタログ {len(_imgs) - _n_sup - _n_chart}"
+                      f" + 仕入元 {_n_sup}" + (" + サイズ表 1" if _n_chart else "") + ")")
 
         # 出品価格（SSOT: pricing_engine = cost-plus + tier判定 + gap_limit）
         price_str = re.sub(r"[^0-9]", "", target["price_jpy"])
