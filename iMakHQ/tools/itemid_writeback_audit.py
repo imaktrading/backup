@@ -343,8 +343,18 @@ def main() -> int:
     print(f"\n合計 {total} 件 (うち販売可能 {sellable} 件 = 取下げ不能だった行)")
     if total and not args.apply:
         print("→ 書き込むには --apply")
-    # 漏れが1件でもあれば非ゼロで返す (silent に正常と言わない)
-    return 1 if total else 0
+    return writeback_exit_code(total, args.apply)
+
+
+def writeback_exit_code(found, applied):
+    """終了コード (純関数)。**書かずに残った漏れ**がある時だけ 1。
+
+    ★2026-09-14: 以前は「見つけたら 1」だったので、--apply で全部書いた後も 1 を返し、
+      🤖自動の締めで毎回『itemID をスプシに書込 returncode=1(続行)』と出ていた
+      (出品直後は新しい itemID が必ず漏れとして見つかる = 毎回失敗表示)。
+      書込が失敗すれば batch_update が例外で落ちるので、ここに来た時点で書けている。
+    """
+    return 1 if found and not applied else 0
 
 
 if __name__ == "__main__":
