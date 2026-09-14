@@ -39,6 +39,15 @@ class TestSizePage(unittest.TestCase):
         self.assertEqual(rows[1], {"size": "S", "length": "65", "shoulder": "43.5",
                                    "chest": "49", "sleeve": "42"})
 
+    def test_old_page_blank_corner_header(self):
+        # Wayback 2021 の実物 (438512_size.html) と同じ形: 左上が空欄
+        old = ('<table><tr><th class="header01"></th><th>XS</th><th>S</th></tr>'
+               '<tr><th>身丈</th><td>55.5</td><td>57</td></tr>'
+               '<tr><th>身幅</th><td>44</td><td>47</td></tr>'
+               '<tr><th>裄丈</th><td>40</td><td>41.5</td></tr></table>')
+        rows = P.parse_size_page(old)
+        self.assertEqual(rows[0], {"size": "XS", "length": "55.5", "chest": "44", "sleeve": "40"})
+
     def test_conflicting_values_rejected(self):
         bad = PAGE + '<table><tr><th>サイズ</th><th>XS</th></tr><tr><th>身丈</th><td>99</td></tr></table>'
         self.assertIsNone(P.parse_size_page(bad))

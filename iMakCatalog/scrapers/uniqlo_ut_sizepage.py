@@ -125,7 +125,9 @@ def parse_size_page(h: str) -> list[dict] | None:
         if not trs:
             continue
         head = _cells(trs[0])
-        if not head or head[0][0] != "サイズ":
+        # ★古いページ (2021〜2023 の Wayback) は左上の見出しが **空欄**。「サイズ」だけを
+        #   見ていたら Wayback 分が 0件になった (2026-09-14)
+        if not head or head[0][0] not in ("サイズ", ""):
             continue
         sizes = [c for c, _ in head[1:]]
         for tr in trs[1:]:
