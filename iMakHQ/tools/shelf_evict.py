@@ -44,6 +44,7 @@ import datetime
 import glob
 import io
 import os
+import json
 import re
 import sys
 
@@ -91,8 +92,80 @@ MIN_AGE_DAYS = 30
 #   落ちている。表示やCTRが低いのは **商品ではなく店の順位** が下がった結果の
 #   可能性が高く、その内部データから閾値を決めると悪循環を固定してしまう。
 #   よって「何日なら売れるか」を自店データで決めるのをやめ、**30日で回す**に統一する。
-STALE_MAX_AGE = {"TCG": 30, "G-shock": 30}
+# ★2026-09-15 ユーザー「Tシャツは自動出品がほぼ完了したので、対象外から外してもいいかなと」→「そだね」:
+#   Tシャツは **仕入元がメルカリ・ラクマ (1点物) の出品だけ** 30日で回す (category_for が "Tシャツ" を返す)。
+#   実測 (9/14 ファネル・在庫あり): メルカリ仕入 23件 中央値204日 売れ0 / ラクマ仕入 12件 150日 売れ0。
+#   公式仕入のバリエーション出品 (64件・売れ7) は取り下げると戻せないので今までどおり落とさない。
+#   **有在庫は全カテゴリ落とさない** (現物がある。動かすなら値下げ・オファー)。
+STALE_MAX_AGE = {"TCG": 30, "G-shock": 30, "Tシャツ": 30}
 STALE_CATEGORIES = tuple(STALE_MAX_AGE)
+
+ONHAND = "有在庫"
+ONHAND_SHEET_ID = "1zbzr1fifHMAcgJ5n_9CcMXzJASxcvk3DutgOQfNElNA"   # 有在庫シート (シート2: B列 出品番号)
+ONHAND_GID = 2025152218
+ONHAND_CACHE = r"C:/dev/iMak_data/hq/shelf_onhand_cache.json"
+ONE_OFF_SUPPLY = re.compile(r"jp\.mercari\.com|fril\.jp", re.I)       # メルカリ・ラクマ = 1点物の仕入元
+
+
+def category_for(item_id, sheet_category, supply_url="", onhand=()):
+    """棚が使うカテゴリ (純関数, test 可)。
+
+    有在庫 → "有在庫" (どの期限にも入らない = 落とさない) /
+    シートのカテゴリが Tシャツ で仕入元がメルカリ・ラクマ → "Tシャツ" (30日で回す) /
+    それ以外の Tシャツ (公式仕入など) → "Tシャツ(公式等)" (落とさない) / 他はシートのカテゴリのまま。
+    """
+    iid = str(item_id or "").strip()
+    if onhand and iid in onhand:
+        return ONHAND
+    if (sheet_category or "").strip() == "Tシャツ":
+        return "Tシャツ" if ONE_OFF_SUPPLY.search(supply_url or "") else "Tシャツ(公式等)"
+    return sheet_category or None
+
+
+def onhand_ids_from(onhand_rows, product_rows_list):
+    """有在庫の出品番号 (純関数, test 可)。
+
+    有在庫シート (1〜3行目は見出し、B列 出品番号) + 商品管理シートで **出品番号があるのに仕入元URL (A列) が空**
+    の行 (= 有在庫。巡回対象外で正常 / onhand_stock_rows_have_no_supply_url)。
+    """
+    out = set()
+    for r in (onhand_rows or [])[3:]:
+        iid = (r[1] if len(r) > 1 else "").strip()
+        if iid.isdigit():
+            out.add(iid)
+    for rows in product_rows_list or []:
+        for r in rows[1:]:
+            iid = (r[1] if len(r) > 1 else "").strip()
+            if iid.isdigit() and not ((r[0] if r else "") or "").strip():
+                out.add(iid)
+    return out
+
+
+def load_onhand_ids(gc=None, product_rows_list=None):
+    """有在庫の出品番号 (I/O)。シートを読めなければ前回の写し。写しも無ければ None。"""
+    try:
+        if gc is None:
+            import gspread
+            from google.oauth2.service_account import Credentials
+            gc = gspread.authorize(Credentials.from_service_account_file(
+                LF.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"]))
+        if product_rows_list is None:
+            product_rows_list = [gc.open_by_key(sid).get_worksheet_by_id(LF.SHEET_GID).get_all_values()
+                                 for sid in LF.SHEET_IDS]
+        oh = gc.open_by_key(ONHAND_SHEET_ID).get_worksheet_by_id(ONHAND_GID).get_all_values()
+        ids = onhand_ids_from(oh, product_rows_list)
+        if ids:
+            os.makedirs(os.path.dirname(ONHAND_CACHE), exist_ok=True)
+            with open(ONHAND_CACHE, "w", encoding="utf-8") as f:
+                json.dump(sorted(ids), f)
+            return ids
+    except Exception as e:                                         # noqa: BLE001
+        print(f"  ⚠ 有在庫の一覧をシートから読めず、前回の写しを使います ({type(e).__name__})")
+    try:
+        with open(ONHAND_CACHE, encoding="utf-8") as f:
+            return set(json.load(f))
+    except (OSError, ValueError):
+        return None
 
 
 def _f(v):
@@ -583,30 +656,39 @@ def _load():
     #   (実測。表示のために毎回シートを叩いている)。取れた分をローカルに残し、
     #   叩けなかった時は前回の写しを使う。カテゴリは日に何度も変わる値ではない。
     by_item = _category_cache_load()
+    supply, onhand = {}, None
     try:
         import gspread
         from google.oauth2.service_account import Credentials
         gc = gspread.authorize(Credentials.from_service_account_file(
             LF.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets",
                                    "https://www.googleapis.com/auth/drive"]))
-        fresh = {}
+        fresh, sheets = {}, []
         for sid in LF.SHEET_IDS:
-            for row in gc.open_by_key(sid).get_worksheet_by_id(
-                    LF.SHEET_GID).get_all_values()[1:]:
+            vals = gc.open_by_key(sid).get_worksheet_by_id(LF.SHEET_GID).get_all_values()
+            sheets.append(vals)
+            for row in vals[1:]:
                 iid = (row[1] if len(row) > 1 else "").strip()
                 c = (row[17] if len(row) > 17 else "").strip()
                 if iid.isdigit() and c:
                     fresh[iid] = c
+                if iid.isdigit():
+                    supply[iid] = ((row[0] if row else "") or "").strip()   # 仕入元URL (Tシャツの1点物判定)
         if fresh:
             by_item = fresh
             _category_cache_save(fresh)
+        onhand = load_onhand_ids(gc, sheets)
     except Exception as e:                                     # noqa: BLE001
         if not by_item:
             raise
         print(f"  ⚠ カテゴリはシートを読めず前回の写しを使います ({type(e).__name__})")
+        onhand = load_onhand_ids()
+    if onhand:
+        print(f"  🛡 有在庫 {len(onhand)}件 は落としません")
 
     def cat_of(row):
-        return by_item.get(row.get("item_id"))
+        iid = str(row.get("item_id") or "")
+        return category_for(iid, by_item.get(iid), supply.get(iid, ""), onhand)
 
     return fr, shelf_of, cat_of
 

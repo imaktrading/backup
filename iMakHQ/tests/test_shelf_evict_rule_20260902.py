@@ -38,7 +38,8 @@ def test_thresholds_are_per_category():
     #   理由: 当店は月間回転率 0.8% まで落ちており、表示やCTRが低いのは
     #   **店の順位が下がった結果**の可能性が高い。その自店データから日数を
     #   決めると悪循環を固定する。詳細は test_shelf_rotate_30days_20260906.py。
-    assert SE.STALE_MAX_AGE == {"TCG": 30, "G-shock": 30}
+    # ★2026-09-15 ユーザー「そだね」: メルカリ・ラクマ仕入の Tシャツも30日で回す (category_for が "Tシャツ" を返す分だけ)
+    assert SE.STALE_MAX_AGE == {"TCG": 30, "G-shock": 30, "Tシャツ": 30}
 
 
 def test_tcg_dies_at_30_days():
@@ -60,8 +61,12 @@ def test_gshock_is_now_dropped_at_30_days():
     assert SE.tier_of(_row(age=31), category="G-shock") == SE.TIER_STALE
 
 def test_other_categories_are_never_dropped_by_age():
-    """線を引けるデータが無いカテゴリは触らない (Tシャツは365日超が最も売れる)。"""
-    for cat in ("Tシャツ", "フィギュア", "モンベル", "バッグ", None):
+    """線を引けるデータが無いカテゴリは触らない。
+
+    ★2026-09-15: Tシャツは **公式仕入 (取り下げると戻せない)** と **有在庫** を落とさない。
+      メルカリ・ラクマ仕入の Tシャツだけ "Tシャツ" として30日で回す (test_shelf_onhand_and_tshirt_20260915)。
+    """
+    for cat in ("Tシャツ(公式等)", SE.ONHAND, "フィギュア", "モンベル", "バッグ", None):
         assert SE.tier_of(_row(age=9999), category=cat) is None
 
 

@@ -71,7 +71,9 @@ def test_earning_categories_are_left_alone_when_supply_alive():
     Tシャツは棚$1,000あたり利益 ¥3,501 で一番稼いでいる (TCG ¥97 / G-SHOCK ¥0 の36倍)。
     そこを減らすのは目的 (棚あたり売上の最大化) に反する。
     """
-    assert SE.tier_of(_row(age=200), category="Tシャツ") is None
+    # ★2026-09-15 ユーザー「そだね」: 稼いでいるのは公式仕入の Tシャツ (9/14 在庫あり64件・売れ7)。
+    #   メルカリ・ラクマ仕入の1点物 (35件・売れ0) だけ "Tシャツ" として30日で回す。公式仕入は今までどおり残す
+    assert SE.tier_of(_row(age=200), category="Tシャツ(公式等)") is None
     assert SE.tier_of(_row(age=200), category="一番くじ") is None
 
 

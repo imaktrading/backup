@@ -621,6 +621,9 @@ FUNNEL_COLS = ["item_id", "title", "site", "category", "price", "trend_price", "
 _EVICT_KEEP_SOLD = "残す (売れた)"
 _EVICT_WAIT = "様子見 (30日未満)"
 _EVICT_OUT = "対象外 (カテゴリ)"
+_EVICT_ONHAND = "対象外 (有在庫)"     # ★2026-09-15 ユーザー「グループ名を対象外 (有在庫)にしておいて」
+# 表を書く時だけ棚と同じ材料 (有在庫の一覧 / シートのカテゴリの写し) を入れる。evict_group(r) だけの呼び方は今までどおり
+_EVICT_CTX = {}
 
 
 def _evict_category(title):
@@ -633,7 +636,7 @@ def _evict_category(title):
     return None
 
 
-def evict_group(r):
+def evict_group(r, onhand=None, sheet_cat=None):
     """在庫ありの行が「落とす候補」のどれに入るか (純関数, test可)。
 
     落とす順そのものを表に出す。並べ替えれば、上から落ちる順になる。
@@ -645,9 +648,15 @@ def evict_group(r):
         return ""                                              # 読めなければ空欄 (表は出す)
     if se._f(r.get("qty")) == 0:
         return ""
+    if onhand and str(r.get("item_id") or "") in onhand:
+        return _EVICT_ONHAND                  # ★2026-09-15 有在庫は全カテゴリ落とさない
     if se._f(r.get("sold_qty")) + se._f(r.get("sales90")) > 0:
         return _EVICT_KEEP_SOLD
     cat = _evict_category(r.get("title"))
+    if cat is None and sheet_cat is not None:
+        _c = se.category_for(r.get("item_id"), sheet_cat, r.get("supply_url") or "")
+        if _c in se.STALE_MAX_AGE:
+            cat = _c                          # ★2026-09-15 メルカリ・ラクマ仕入の Tシャツ (棚と同じ判定)
     if cat is None:
         return _EVICT_OUT
     if se._f(r.get("age_days")) <= se.STALE_MAX_AGE.get(cat, se.MIN_AGE_DAYS):
@@ -663,7 +672,9 @@ def _funnel_vals(r):
             round(r["impr"], 1), round(r["ctr"] * 100, 2),
             round(r.get("impr_total", 0), 1), round(r.get("ctr_total", 0) * 100, 2),
             r.get("photos", 0), r.get("keywords", 0), r.get("relist_status", ""),
-            r.get("age_days", 0), r.get("supply_url", ""), evict_group(r),
+            r.get("age_days", 0), r.get("supply_url", ""),
+            evict_group(r, onhand=_EVICT_CTX.get("onhand"),
+                        sheet_cat=(_EVICT_CTX.get("cats") or {}).get(str(r["item_id"]))),
             r.get("ebay_url") or f"https://www.ebay.com/itm/{r['item_id']}"]
 
 
@@ -762,6 +773,14 @@ def write_funnel_to_sheet(rows, c, summary_lines):
     for name, desc, req in FUNNEL_BUCKETS:
         summ.append([name, len(c.get(name, [])), desc, req])
     write_tab("Summary", summ)
+
+    # ★2026-09-15 「落とすグループ」を棚 (shelf_evict) と同じ材料で出す: 有在庫 / メルカリ・ラクマ仕入の Tシャツ
+    try:
+        import shelf_evict as _se
+        _EVICT_CTX["onhand"] = _se.load_onhand_ids()
+        _EVICT_CTX["cats"] = _se._category_cache_load()
+    except Exception as _e:                                    # noqa: BLE001
+        print(f"  ⚠ 有在庫・カテゴリを読めず、落とすグループは今までの判定で出します: {type(_e).__name__}")
 
     # 在庫あり / 在庫なし
     instock = sorted([r for r in rows if r["qty"] != 0], key=lambda x: (-x["impr"], -x["watch"]))
