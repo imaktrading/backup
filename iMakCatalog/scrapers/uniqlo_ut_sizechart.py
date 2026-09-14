@@ -211,12 +211,19 @@ def fetch_chart(d, pid: str) -> tuple[list[dict] | None, list[dict] | None, str,
         return None, None, opened, True
     _click(d, "仕上がり寸", exact=True)
     time.sleep(3)
+    # ★cm を **明示して押す** (2026-09-14)。公式は単位の選択を覚えていて、同じブラウザで
+    #   2件目以降は inch のまま開く。押さずに読んだ結果、「cm」として保存した 1,609行のうち
+    #   1,521行が inch の値だった。
+    _click(d, "cm", exact=True)
+    time.sleep(3)
     body_cm = d.find_element("tag name", "body").text
     _click(d, "inch", exact=True)
     time.sleep(3)
     body_in = d.find_element("tag name", "body").text
-    return (parse_table(body_cm), parse_table(body_in),
-            body_cm + "\n===INCH===\n" + body_in, False)
+    cm, inch = parse_table(body_cm), parse_table(body_in)
+    if cm and cm == inch:
+        cm = None                       # 切り替わっていない = cm は取れていない。inch だけ残す
+    return cm, inch, body_cm + "\n===INCH===\n" + body_in, False
 
 
 def official_class(pid: str) -> str | None:
