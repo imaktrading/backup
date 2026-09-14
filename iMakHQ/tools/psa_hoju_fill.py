@@ -21,6 +21,7 @@ slice2 = 夜間検索(無人・throttle・キャッシュ書込のみ。補URL�
   - 補URL(AC-AG) 実数 < max_backups
   - KEY(AI) or cert あり = 供給検索の起点が要る
 """
+import io
 import json
 import os
 import re
@@ -93,7 +94,7 @@ def _listed_sort_key(row):
     return v if len(v) >= 10 and v[:4].isdigit() else ""
 
 
-def select_backfill_targets(rows2d, max_backups=1, min_backups=0):
+def select_backfill_targets(rows2d, max_backups=1, min_backups=0, watch=None):
     """HIGH rows2d(header含む) → 補が min_backups以上 max_backups未満 の live PSA 行。純関数。
 
     max_backups=1 → 補 0本のみ(残1件でリフィル=定常の既定)。
@@ -139,11 +140,53 @@ def select_backfill_targets(rows2d, max_backups=1, min_backups=0):
         })
     # 新規優先 (出品日時の降順)。同着は行番号昇順で安定させる。
     out.sort(key=lambda t: (t["listed_at"], -t["row"]), reverse=True)
+    # ★2026-09-15 ユーザー「watchが多いのは、PSA補URL③でより安い仕入値を見つけたら売れそう」→「うん、そうしよう」:
+    #   同じ補の本数の中では **ウォッチの多い出品を先**に出す (新規優先はその次)。
+    #   見つけた安い仕入元は監視くんの最安 (M) に入り、値段が下がる = 欲しい人が居る出品ほど効く。
+    #   実測 (9/15 ファネル): 落とす候補の PSA 177件のうちウォッチ3以上が16件 (最多はブラッキー ex の50)。
+    if watch:
+        for t in out:
+            t["watch"] = watch.get(t["itemID"], 0)
+        out.sort(key=lambda t: -t["watch"])
     # ★2026-09-05: **補が少ない順**を上に置く (安定ソートなので同数の中は新規優先のまま)。
     #   目視の対象を満杯未満まで広げたので、これが無いと 補4本の出品が
     #   丸腰(補0本)より先に出てしまう。丸腰の方が死ぬ。
-    out.sort(key=lambda t: t["n_backups"])
+    # ★2026-09-15: 入れ替え (補4本以上) は本数で並べない。どれも「1本切れても死なない」状態で、
+    #   目的は安い仕入元に替えること = ウォッチの多い出品から見る (実測: ウォッチ10のカビゴンが補5本で後ろに居た)。
+    if min_backups < CONFIRM_MAX_BACKUPS:
+        out.sort(key=lambda t: t["n_backups"])
     return out
+
+
+def watch_by_item_from_rows(rows):
+    """ファネル CSV の行 → {itemID: ウォッチ数} (純関数, test可)。数字でない行は飛ばす。"""
+    out = {}
+    for r in rows or []:
+        iid = (r.get("item_id") or "").strip()
+        try:
+            w = int(float(r.get("watch") or 0))
+        except (TypeError, ValueError):
+            continue
+        if iid.isdigit() and w > 0:
+            out[iid] = w
+    return out
+
+
+def load_watch_by_item(funnel_dir=None):
+    """最新のファネル CSV からウォッチ数を読む (I/O)。読めなければ {} = 今までの並び順のまま。"""
+    import csv
+    import glob
+    d = funnel_dir or os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                    "..", "funnel_output"))
+    hits = sorted(glob.glob(os.path.join(d, "funnel_*.csv")))
+    if not hits:
+        return {}
+    try:
+        with io.open(hits[-1], encoding="utf-8-sig") as f:
+            return watch_by_item_from_rows(csv.DictReader(f))
+    except (OSError, ValueError) as e:
+        print(f"  ⚠ ファネルのウォッチ数を読めず、並び順は今までどおり ({type(e).__name__})")
+        return {}
 
 
 def _read_high():
@@ -699,7 +742,8 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
 
     today = datetime.date.today().isoformat()
     if targets is None:
-        targets = select_backfill_targets(_read_high(), max_backups=max_backups)
+        targets = select_backfill_targets(_read_high(), max_backups=max_backups,
+                                          watch=load_watch_by_item())
         label = f"補<{max_backups}"
     else:
         label = "RESTOCK候補"       # 呼び手が対象を決めた(= 再仕入れ候補の先読み)
@@ -1731,7 +1775,8 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     today = datetime.date.today().isoformat()
     max_backups = CONFIRM_MAX_BACKUPS if max_backups is None else max_backups
     vals = _read_high()
-    targets = select_backfill_targets(vals, max_backups=max_backups, min_backups=min_backups)
+    targets = select_backfill_targets(vals, max_backups=max_backups, min_backups=min_backups,
+                                      watch=load_watch_by_item())
     cache = _load_cache()
 
     # ★前提(skip台帳 cooldown / 候補NG / 他出品が使用中のURL)は build_confirm_context に1本化。
