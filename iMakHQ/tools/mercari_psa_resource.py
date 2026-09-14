@@ -554,6 +554,32 @@ def _is_lot(name):
     return bool(supply_lot_hint(name))
 
 
+def _parse_new_layout_cell(b):
+    """新しい形の item-cell 1つ → {type,name,price,href}。読めない/まとめ売りは None (純関数)。
+
+    ★2026-09-15: 9/14 夜から一時プロファイルの headless では cell に itemtype も
+      aria-label="<名前>の画像 <価格>円" も無い形が出ている (UT の補URL検索が全件 拾えた0)。
+      名前は thumbnail-item-name、価格は item-tile-price、種類は href で見分ける
+      (/shops/product/ = ショップ)。3つ揃わない cell (まだ描画されていない枠) は拾わない。
+    """
+    import html as _html
+    hr = re.search(r'href="(/(?:item/m\w+|shops/product/\w+))"', b)
+    nm = re.search(r'data-testid="thumbnail-item-name"[^>]*>(.*?)</p>', b, re.S)
+    pr = re.search(r'data-testid="item-tile-price".*?>¥</span><span[^>]*>([\d,]+)</span>', b, re.S)
+    if not (hr and nm and pr):
+        return None
+    # オークションは価格が「現在 ¥300」になる (実機 2026-09-15: PSA10 検索で 44件)。確定価格ではないので拾わない
+    tile = b[b.find('data-testid="item-tile-price"'):][:400]
+    if "現在" in tile:
+        return None
+    name = _html.unescape(re.sub(r"<[^>]+>", "", nm.group(1))).strip()
+    if not name or _is_lot(name):
+        return None
+    return {"type": "ITEM_TYPE_BEYOND" if hr.group(1).startswith("/shops/") else "ITEM_TYPE_MERCARI",
+            "name": name, "price": int(pr.group(1).replace(",", "")),
+            "href": f"https://jp.mercari.com{hr.group(1)}"}
+
+
 def parse_mercari_items(src):
     """検索結果HTMLを item-cell 単位で {type,name,price,href} に分解する純関数。
 
@@ -568,10 +594,18 @@ def parse_mercari_items(src):
     """
     items = []
     for b in re.split(r'data-testid="item-cell"', src)[1:]:
-        it = re.search(r'itemtype="([A-Z_]+)"', b)
-        if not it or it.group(1) not in _ALLOWED_ITEM_TYPES:
-            continue
+        # ★2026-09-15: cell は自分の </li> までに限る。最後の cell にページ末尾の文言データ
+        #   ("オークション" "入札" 等) が付いて来て、マーカー判定を汚していた。
+        b = b.split("</li>", 1)[0]
         if any(mk in b for mk in _AUCTION_MARKERS):   # オークション cell を除外
+            continue
+        it = re.search(r'itemtype="([A-Z_]+)"', b)
+        if not it:
+            nw = _parse_new_layout_cell(b)
+            if nw:
+                items.append(nw)
+            continue
+        if it.group(1) not in _ALLOWED_ITEM_TYPES:
             continue
         al = re.search(r'aria-label="(.+?)の画像\s*([\d,]+)円"', b)
         if not al:
