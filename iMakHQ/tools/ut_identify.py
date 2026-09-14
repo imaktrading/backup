@@ -254,14 +254,11 @@ def gallery(p, color_name=""):
     return ([main] if main else []) + subs + others
 
 
-def rank_candidates(text, color_jp, catalog, hint_kw="", tag_no="", limit=MAX_CANDS):
-    """行の文字 → カタログ候補 (点数順)。**並べるだけで確定はしない**。純関数。
+def score_candidates(text, color_jp, catalog, hint_kw="", tag_no=""):
+    """行の文字 → [(素の点数, 商品)] (公式売り切れの +2 を足す前)。純関数。
 
-    点: タグの番号が一致 +100 / 抽出くんが使った検索語 = コラボ名 +50 /
-        作品・キャラ名がタイトルか説明文にある +10 /
-        タイトルの語 (ブラッキー 等) が公式の商品名・説明文にある +5 (語ごと) /
-        同じ色がある +3 / 公式売り切れ +2
-    語も番号も当たらない商品は並べない (全商品を並べると選べない)。
+    ★2026-09-14 切り出し: 「一番の候補が公式仕入で出品中の商品か」は、売り切れの +2 を足す前で
+      比べないと、同点の現役商品が売り切れの昔の商品の下に隠れる (1件目の ONE PIECE マンガUT)。
     """
     t = expand_alias(norm(text))
     kw = norm(hint_kw)
@@ -283,11 +280,58 @@ def rank_candidates(text, color_jp, catalog, hint_kw="", tag_no="", limit=MAX_CA
         sc += 5 * sum(1 for w in words if w in p.get("_desc", "") and w not in toks)
         if pick_color(p.get("colors") or [], color_jp):
             sc += 3
-        if p.get("sold_out"):
-            sc += 2
         out.append((sc, p))
+    return out
+
+
+def rank_candidates(text, color_jp, catalog, hint_kw="", tag_no="", limit=MAX_CANDS):
+    """行の文字 → カタログ候補 (点数順)。**並べるだけで確定はしない**。純関数。
+
+    点: タグの番号が一致 +100 / 抽出くんが使った検索語 = コラボ名 +50 /
+        作品・キャラ名がタイトルか説明文にある +10 /
+        タイトルの語 (ブラッキー 等) が公式の商品名・説明文にある +5 (語ごと) /
+        同じ色がある +3 / 公式売り切れ +2
+    語も番号も当たらない商品は並べない (全商品を並べると選べない)。
+    """
+    out = [(sc + (2 if p.get("sold_out") else 0), p)
+           for sc, p in score_candidates(text, color_jp, catalog, hint_kw=hint_kw, tag_no=tag_no)]
     out.sort(key=lambda x: (-x[0], x[1]["pid"]))
     return [p for _sc, p in (out[:limit] if limit else out)]        # limit=0 = 全部
+
+
+def officially_listed_best(scored, color_jp, official_l1):
+    """素の点数で一番の候補 (同点を含む・色が合う物) に、公式仕入で出品中の商品があればその商品番号。純関数。
+
+    ★2026-09-14 ユーザー「目視に、現役商品が出てるんだけど」→「そもそも候補に入れないで欲しい」
+      「無駄な作業だから」「(公式仕入の出品シートと) 突き合わせしてないの？重複出品にもなる」。
+      公式仕入で出品中 = 公式で今買える現役商品で、しかも出せば重複出品。目視しても出せない。
+      実測 (目視待ち 672件): 一番の候補が全部 出品中 69件 / 一部が出品中 30件 (1件目はこちら)。
+    無ければ ""。
+    """
+    if not official_l1:
+        return ""
+    keep = [(sc, p) for sc, p in scored if color_ok(p, color_jp)]
+    if not keep:
+        return ""
+    top = max(sc for sc, _p in keep)
+    hit = next((p for sc, p in keep if sc == top and p.get("l1") in official_l1), None)
+    return hit["pid"] if hit else ""
+
+
+def load_official_l1():
+    """公式仕入で出品中の商品番号 (6桁) の集合 (I/O)。読めない・空なら None = 外す処理をしない。"""
+    try:
+        sys.path.insert(0, r"C:\dev\iMak\iMakMercari")
+        from ut_catalog_values import load_official_identities
+        keys = load_official_identities() or {}
+        l1 = {k.split(":")[1] for k in keys if k.count(":") >= 3}
+        if not l1:
+            raise ValueError("出品中の商品が0件")
+        return l1
+    except Exception as e:                                         # noqa: BLE001
+        print(f"⚠ 公式仕入の出品シートを読めない ({type(e).__name__}: {e}) → 目視から外す処理をしない "
+              "(出品を作る時の二重出品の止めは効きます)")
+        return None
 
 
 def search_catalog(q, catalog, limit=MAX_CANDS):
@@ -1036,7 +1080,7 @@ def only_new(rows):
             if not (t[2] == "sheet" and len(t[1]) > 1 and (t[1][1] or "").strip())]
 
 
-def load_items(limit=DEFAULT_LIMIT, new_only=False):
+def load_items(limit=DEFAULT_LIMIT, new_only=False, stats=None):
     led = load_ledger()
     prod = _product_values()
     # ★2026-09-12: 中間タブ (抽出くんが集めた分) と 商品管理シートの **まだ出していない Tシャツ行**
@@ -1047,11 +1091,23 @@ def load_items(limit=DEFAULT_LIMIT, new_only=False):
         rows = only_new(rows)
     rows = order_rows(rows, load_demand())
     catalog = load_catalog()
+    official = load_official_l1()
+    stats = stats if stats is not None else {}
+    stats["official"] = 0
     items = []
-    for i, r, _src in rows[:limit] if limit else rows:
+    for i, r, _src in rows:
+        if limit and len(items) >= limit:
+            break
         text = " ".join([r[C_TITLE], r[C_DESC]])
+        scored = score_candidates(text, r[C_COLOR], catalog, hint_kw=r[C_KW], tag_no=r[C_TAG])
+        # ★2026-09-14 公式仕入で出品中の商品の出品は目視に出さない (枠にも数えない)
+        if officially_listed_best(scored, r[C_COLOR], official):
+            stats["official"] += 1
+            continue
         allc = rank_candidates(text, r[C_COLOR], catalog, hint_kw=r[C_KW], tag_no=r[C_TAG],
                                limit=0)
+        if official:
+            allc = [p for p in allc if p.get("l1") not in official]     # 候補にも出さない
         # 色が明らかに違う候補は隠す (件数は画面に出す。検索欄では色で絞らない)
         keep = [p for p in allc if color_ok(p, r[C_COLOR])]
         # ★2026-09-12 ユーザー「公式で買えないものだけに対象を絞ってほしい」:
@@ -1149,10 +1205,14 @@ def main():
     ap.add_argument("--new-only", action="store_true",
                     help="出品済みの行 (KEY 埋め) を出さない。🤖自動 から呼ぶ時に使う")
     a = ap.parse_args()
-    items, n_all = load_items(a.limit, new_only=a.new_only)
+    _stats = {}
+    items, n_all = load_items(a.limit, new_only=a.new_only, stats=_stats)
     n_listed = sum(1 for it in items
                    if it.get("src") == "sheet" and (it["row"][1] or "").strip())
     print(f"目視に出す UT: {len(items)}件 (残り全部で {n_all}件)")
+    if _stats.get("official"):
+        print(f"  公式仕入で出品中の商品と同じ出品 {_stats['official']}件を外しました "
+              "(現役商品・出すと重複出品になる)")
     if n_listed:
         print(f"  うち **出品済みなのに KEY が無い行** {n_listed}件 (先に出しています。"
               f"KEY が無いと重複くんが二重出品を止められません)")
