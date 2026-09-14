@@ -2348,23 +2348,44 @@ _SCAN_PATS = [("HOLD/gate", re.compile(r"\bHOLD\b|gate_row_or_hold|csv_hold")),
 #   同じ事象を per-row の明細行 (`❌ 仕入値が上限を超えている ...`) と二重に説明するだけ。
 #   両方を「1行=1件」で足すと、実際は2件の異常が「除外2件+エラー2件+明細2行=4件」に水増しされる
 #   (依頼書: hq/requests/2026-09-05_act_code_proposals_tcg.md 提案1)。
+# ★2026-09-14 (act_code_proposals_mercari 提案4): `結果: ✅ GO n / ... ❌ NO-GO n / ⬜ 不明 n`
+#   (check_csv.py の GATE判定サマリー行) は「件」が付かないため line_is_signal の
+#   「件数表記なし=常に数える」フォールバックに落ち、NO-GO=0 でも1件と誤検出していた。
+#   自前の (\d+) キャプチャで NO-GO の実数を見て判定する。
 _ERROR_SUMMARY_RES = (re.compile(r"❌\s*除外\(出品しない\)[:：]\s*(\d+)\s*件"),
-                      re.compile(r"❌\s*エラー[:：]\s*(\d+)\s*件"))
+                      re.compile(r"❌\s*エラー[:：]\s*(\d+)\s*件"),
+                      re.compile(r"結果:.*❌\s*NO-GO\s*(\d+)"))
+
+# ★2026-09-14 (提案4): `📄 生成ログ signal: ...` は監査くん自身が直前のパスで書いた出力行。
+# 同じログを再走査すると自分の出力を signal として数えてしまい、走行のたびに件数が増える
+# (狼少年 = 本物の error が埋もれる)。
+_SELF_OUTPUT_PREFIX = "📄 生成ログ signal:"
+
+
+def _is_self_output_line(line):
+    return (line or "").strip().startswith(_SELF_OUTPUT_PREFIX)
 
 
 def _is_error_summary_line(line):
-    """`❌ 除外(出品しない): N件` / `❌ エラー: N件` の集計行か。"""
+    """`❌ 除外(出品しない): N件` / `❌ エラー: N件` / GATEサマリー行 の集計行か。"""
     return any(p.search(line or "") for p in _ERROR_SUMMARY_RES)
 
 
 def line_is_signal(line, pat):
     """ログ1行を数えるか (純関数, test可)。
 
-    件数表記 (`N件`) がある行は **N>0 のときだけ**数える。件数表記が無い行
-    (素の `Traceback` 等) はそのまま数える。
+    集計行 (`_ERROR_SUMMARY_RES`) は自前のキャプチャ数値が **N>0 の時だけ**数える。
+    それ以外で件数表記 (`N件`) がある行も **N>0 のときだけ**数える。件数表記が無い行
+    (素の `Traceback` 等) はそのまま数える。監査くん自身の出力行は常に除外する。
     """
+    if _is_self_output_line(line):
+        return False
     if not pat.search(line or ""):
         return False
+    for summary_pat in _ERROR_SUMMARY_RES:
+        sm = summary_pat.search(line or "")
+        if sm:
+            return int(sm.group(1)) > 0
     m = _LINE_COUNT_RE.search(line or "")
     return int(m.group(1)) > 0 if m else True
 
@@ -2403,7 +2424,7 @@ def _signal_line_samples(txt, limit=3, maxlen=80):
 
 def scan_log_lines(txt):
     """生成ログ本文 → logシグナル list (純関数, test可)。"""
-    lines = (txt or "").splitlines()
+    lines = [ln for ln in (txt or "").splitlines() if not _is_self_output_line(ln)]
     sig = []
     n_miss = sum(1 for ln in lines
                  for m in [_CATALOG_MISS_RE.search(ln)] if m and int(m.group(1)) > 0)

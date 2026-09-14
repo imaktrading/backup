@@ -34,7 +34,7 @@ from datetime import datetime
 CONDITION_MASTER = {
     1000: {
         "name": "Brand New",
-        "title_markers": ["Brand New Japan", "Brand New", "New Japan", "New"],
+        "title_markers": ["Brand New Japan", "Brand New", "New Japan", "New", "NWT"],
         "description_default": "Brand new, unused condition. Comes with original packaging when applicable.",
         "mercari_states": ["新品", "新品、未使用", "未使用"],
     },

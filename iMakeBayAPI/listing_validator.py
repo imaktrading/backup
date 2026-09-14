@@ -6,6 +6,11 @@ iMak Trading Japan - リスティングCSV出力前セルフチェック
 """
 import re
 
+# ★2026-09-14 (act_code_proposals_mercari 提案3): "llama-3.3-70b-versatile" は
+# Groq のモデル一覧 (GET /openai/v1/models で2026-09-13 実測) から既に消えており、
+# 常に例外→ABSTAINになっていた。現存モデルに差し替え (SSOTとして1箇所に集約)。
+GROQ_MODEL = "openai/gpt-oss-120b"
+
 # セットコード接頭辞の語彙 (= catalog の product_id 実データから採取)。
 # 2026-08-01: ここが One Piece 専用 (OP|ST|EB|PRB) だったため、Gundam の
 #   title '#ST02-010' × PSA brand 'GUNDAM JAPANESE PB01-PREMIUM GOODS SET ...' が
@@ -318,7 +323,7 @@ Respond JSON only (no surrounding text):
 {{"verdict": "OK" or "WARNING", "issues": ["specific issue 1", ...]}}"""
     try:
         resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=GROQ_MODEL,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             temperature=0.0,
@@ -622,7 +627,7 @@ Consider eBay constraints (limited category/Specs options). Respond JSON only:
 {{"verdict": "PASS" or "BLOCK", "reason": "..."}}"""
     try:
         resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=GROQ_MODEL,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             temperature=0.0,
@@ -671,14 +676,25 @@ def deliberate_3ai(title, specs, psa_brand=None, psa_card_number=None, max_round
 
         # 合意チェック (ABSTAINは除外して判定)
         active = [op["verdict"] for op in opinions.values() if op["verdict"] in ("PASS", "BLOCK")]
+        abstained = [name for name, op in opinions.items() if op["verdict"] == "ABSTAIN"]
         if not active:
             # 全員 ABSTAIN → HOLD
             break
         if len(set(active)) == 1:
+            # ★2026-09-14 (提案3): ABSTAIN が居ても「全員合意」と表示しない。
+            #   実数を出す (黙って人数が減るのが一番困る)。
+            if abstained:
+                agreement_label = f"{len(active)}AI合意 ({', '.join(abstained)}: 利用不可)"
+                history = (f"ラウンド{round_num}で{len(active)}AI({', '.join(n for n in opinions if n not in abstained)}) "
+                           f"が {active[0]} に合意 ({', '.join(abstained)}: ABSTAIN)")
+            else:
+                agreement_label = f"{len(active)}AI合意"
+                history = f"ラウンド{round_num}で全員 {active[0]} に合意"
             return {
                 "final_verdict": active[0],
                 "rounds": rounds,
-                "history": f"ラウンド{round_num}で全員 {active[0]} に合意",
+                "history": history,
+                "agreement_label": agreement_label,
             }
 
     # max_rounds 終了後も不一致 → HOLD
@@ -686,6 +702,7 @@ def deliberate_3ai(title, specs, psa_brand=None, psa_card_number=None, max_round
         "final_verdict": "HOLD",
         "rounds": rounds,
         "history": f"{max_rounds}ラウンド議論しても合意形成できず、人間判断要求",
+        "agreement_label": "合意なし",
     }
 
 
@@ -781,12 +798,12 @@ def validate_and_report(idx, title, specs, model, category, condition_id, price,
             if warnings:
                 for w in warnings:
                     print(f"       ⚠️ {w}")
-            print(f"    ✅ 3AI合意: PASS ({delib['history']})")
+            print(f"    ✅ {delib.get('agreement_label', '3AI合意')}: PASS ({delib['history']})")
             return True
 
         elif verdict == "BLOCK":
             # 全AI合意 BLOCK → 除外
-            print(f"    ❌ 3AI合意: BLOCK (#{idx})")
+            print(f"    ❌ {delib.get('agreement_label', '3AI合意')}: BLOCK (#{idx})")
             print(f"       {delib['history']}")
             for r in delib["rounds"]:
                 print(f"       === Round {r['round']} ===")

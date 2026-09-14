@@ -54,6 +54,25 @@ def _banned_title_words_in(title, words):
     return banned_title_words_in(title, words)
 # 注: "japan" はMercari系（Porter/montbell/UT）では許可（Japan Exclusive等で使用）
 
+# ★2026-09-14 (act_code_proposals_mercari 提案2): タイトルの単独 "Japan" と
+# C:Country of Origin の矛盾チェックを決定論ルールに固定 (旧: LLM合議のみで非決定)。
+# "Japan Exclusive" は市場限定を指す表現で原産国の主張ではないため対象外。
+_BARE_JAPAN_RE = re.compile(r'\bJapan\b(?!\s+Exclusive)', re.IGNORECASE)
+
+
+def japan_origin_mismatch(title, country_of_origin):
+    """タイトルの単独 'Japan' と C:Country of Origin の矛盾を検出する(純関数)。
+
+    一致していれば None、矛盾なら issue メッセージを返す。
+    """
+    country = (country_of_origin or "").strip()
+    if not country or country.lower() == "japan":
+        return None
+    if _BARE_JAPAN_RE.search(title or ""):
+        return f"タイトルの単独 'Japan' と C:Country of Origin='{country}' が矛盾"
+    return None
+
+
 # 必須Item Specifics（空欄だと品質低下）。カテゴリで適用specが異なる。
 # 2026-07-01: バッグ(57988/52357)に apparel spec の C:Type/C:Size を必須扱いしていたため
 # Porter が毎回「C:Type 空」で誤検出→監査くん再発の主因(9件)。category-aware 化して解消。
@@ -392,6 +411,11 @@ def validate_row(row, row_idx):
             issues.append(("WARN", f"タイトル内で '{w}' が重複"))
             break
         seen.add(w)
+
+    # --- タイトルの単独 Japan × 原産国の矛盾 (決定論ルール) ---
+    mismatch = japan_origin_mismatch(title, get_col(row, "C:Country of Origin"))
+    if mismatch:
+        issues.append(("ERROR", mismatch))
 
     # --- カテゴリ・条件 ---
     if category not in ("57988", "52357", "11450", "15687"):

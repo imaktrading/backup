@@ -244,16 +244,19 @@ Generate eBay listing content for UNIQLO UT T-shirts.
 ※ TOPセラー(fb>2000) 調査結果を反映 (2026-04-22)
 
 ## TITLE RULES
+# 出典 (唯一の決定・これ以外の形は誤り): skill apparel-tee-listing/SKILL.md
+# + iMakMercari/UNIQLO_GU_LISTING_RUNBOOK.md §4 (2026-07-19 実listingで確定)。
+# cat_v (カタログ特定済) の行は ut_catalog_values.title_for() が上書きするので実質そちら基準。
+# 決め直したら、まずそちらを直してからここを合わせる。
 - Max 80 characters, English only
-- Format: UNIQLO UT [Collab/Series] [Character] T-Shirt [Color] US [Size] (JP [Size]) NWT Japan
-- Size MUST be in format: "US L (JP XL)" — always show both
-- MUST INCLUDE: "T-Shirt", "Short Sleeve" (もしくは "Tee" のみ可), "Men" (Department明確化)
-- "T-Shirt" 推奨 (検索ボリューム高)、"Tee" は補助
+- Format: [Series/Collab] [Character] Anime Graphic Tee UNIQLO UT Japan Exclusive [Color] US [Size] (JP [Size]) NWT
+- Series/Character を先頭に置く。ブランド語("UNIQLO UT")を先頭にしない
+- MUST INCLUDE: "Anime Graphic Tee" (もしくは "Graphic Tee"), "UNIQLO UT", "Japan Exclusive", 末尾 "NWT"
+- Size MUST be in format: "US L (JP XL)" — always show both, placed right before NWT
 - NWT = New With Tags
-- 80字超過時: "Short Sleeve" → "Men's" → collab/character短縮 の順で削減
-- 70字未満なら "Graphic" "Anime" "Music" "Video Games" 等で埋める
+- 80字超過時: "Exclusive" → character短縮 → series/collab短縮 の順で削減
+- 70字未満なら "Anime" "Graphic" 等で埋める
 - Size: JP→US: JP S→US XS, JP M→US S, JP L→US M, JP XL→US L, JP XXL→US XL, JP 3XL→US 2XL, JP 4XL→US 3XL
-- "Japan" at end (Japan exclusive)
 
 ## MODEL NUMBER EXTRACTION
 - 画像から型番（UNIQLO UTは6桁数字、例 471234）を読み取れた場合のみ item_specifics.Model と model_number に記入
@@ -783,7 +786,9 @@ def main():
                 continue
 
         # 画像取得
-        photo_urls = target["photo_urls"]
+        # ★2026-09-14 写真列に ほかの商品のサムネイル・出品者アイコンが混ざっていた (商品管理シートの
+        #   Tシャツ 130行で 941枚)。ここで絞れば 画像解析 / 1枚目 / カタログの後ろに足す分 すべてに効く
+        photo_urls = "|".join(UCV.own_item_photos(target["url"], (target["photo_urls"] or "").split("|")))
         images_b64 = []
         if photo_urls:
             for url in photo_urls.split("|")[:3]:
