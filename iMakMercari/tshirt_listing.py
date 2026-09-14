@@ -249,13 +249,13 @@ Generate eBay listing content for UNIQLO UT T-shirts.
 # cat_v (カタログ特定済) の行は ut_catalog_values.title_for() が上書きするので実質そちら基準。
 # 決め直したら、まずそちらを直してからここを合わせる。
 - Max 80 characters, English only
-- Format: [Series/Collab] [Character] Anime Graphic Tee UNIQLO UT Japan Exclusive [Color] US [Size] (JP [Size]) NWT
+- Format: [Series/Collab] [Character & Character] Anime Graphic T-Shirt UNIQLO UT [Color] [Men's|Unisex] US [Size] (JP [Size]) NWT
 - Series/Character を先頭に置く。ブランド語("UNIQLO UT")を先頭にしない
-- MUST INCLUDE: "Anime Graphic Tee" (もしくは "Graphic Tee"), "UNIQLO UT", "Japan Exclusive", 末尾 "NWT"
+- MUST INCLUDE: series/collab, "Graphic T-Shirt", "UNIQLO UT", color, size, 末尾 "NWT"
 - Size MUST be in format: "US L (JP XL)" — always show both, placed right before NWT
 - NWT = New With Tags
-- 80字超過時: "Exclusive" → character短縮 → series/collab短縮 の順で削減
-- 70字未満なら "Anime" "Graphic" 等で埋める
+- ★2026-09-14 SEO (eBay 検索上位の語の使われ方): 空きがあれば character → "Anime" → "Men's"/"Unisex" → "Japan Exclusive" の順に足す
+- Never write "Japan" alone (reads as Made in Japan). Never leave a trailing comma when dropping a character
 - Size: JP→US: JP S→US XS, JP M→US S, JP L→US M, JP XL→US L, JP XXL→US XL, JP 3XL→US 2XL, JP 4XL→US 3XL
 
 ## MODEL NUMBER EXTRACTION

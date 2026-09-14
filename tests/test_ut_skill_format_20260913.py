@@ -37,26 +37,27 @@ def _v(**kw):
 
 
 def test_title_follows_the_skill_word_order():
+    # ★2026-09-14 SEO の形に変更 (Tee → T-Shirt / 単独の Japan を出さない)。詳細は test_ut_title_seo_20260914.py
     t = V.title_for(_v(work_en="Bleach", color_name="WHITE", size_jp="L", size_us="M"),
                     character="Ichigo Kurosaki")
-    # サイズを足すと83字 → スキルの取捨どおり まず「Exclusive」を落とす
-    assert t == "Bleach Ichigo Kurosaki Anime Graphic Tee UNIQLO UT Japan White US M (JP L) NWT"
+    assert t == "Bleach Ichigo Kurosaki Anime Graphic T-Shirt UNIQLO UT White US M (JP L) NWT"
     assert len(t) <= 80 and t.endswith(" NWT")
     short = V.title_for(_v(work_en="Bleach", color_name="RED", size_jp="S", size_us="XS"), character="Ichigo")
-    assert short == "Bleach Ichigo Anime Graphic Tee UNIQLO UT Japan Exclusive Red US XS (JP S) NWT"
+    assert short.startswith("Bleach Ichigo Anime Graphic T-Shirt UNIQLO UT ") and short.endswith("Red US XS (JP S) NWT")
     assert "Japan New" not in t and "Brand New" not in t
 
 
-def test_long_title_drops_exclusive_then_character_words():
+def test_long_title_keeps_required_words_and_no_bare_japan():
     t = V.title_for(_v(color_name="LIGHT BLUE"), character="Frieza Goku Vegeta")
     assert len(t) <= 80
-    assert "Exclusive" not in t and t.startswith("Dragon Ball ")
+    assert t.startswith("Dragon Ball ") and "," not in t
     assert "Light Blue US S (JP M) NWT" in t
+    assert " Japan " not in t.replace("Japan Exclusive", "")
 
 
 def test_non_anime_theme_has_no_anime_word():
     t = V.title_for(_v(work_en="Andy Warhol", themes=["Retro"]), character="")
-    assert "Anime" not in t and "Graphic Tee UNIQLO UT" in t
+    assert "Anime" not in t and "Graphic T-Shirt UNIQLO UT" in t
 
 
 def test_character_same_as_work_is_not_repeated():

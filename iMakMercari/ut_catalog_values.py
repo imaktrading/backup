@@ -449,37 +449,70 @@ def size_label(size_jp):
     return f"US {us} (JP {size_jp})" if us else f"JP {size_jp}"
 
 
-def title_for(v, character=""):
-    """スキルの形のタイトル (純関数)。80字に収まらなければ NotListable。
+_DEPT_WORD = {"men": "Men's", "women": "Women's", "unisex adults": "Unisex", "unisex": "Unisex"}
 
-    形: [作品] [キャラ] Anime Graphic Tee UNIQLO UT Japan Exclusive [色] US M (JP L) NWT
-      - スキルの例はバリエーション出品なのでサイズが無い。メルカリ仕入れは 1出品1サイズなので
-        色の後ろに入れる (2026-09-13 ユーザー確定)
-      - 80字を超えたら スキルの取捨どおり 「Exclusive」→ キャラ名 (後ろの語から) の順に削る
-      - 「Anime」はカタログのテーマが Anime の時だけ (アート・音楽のコラボに付けない)
+
+def _fold_name(x):
+    """Pokémon と Pokemon / 大文字小文字 / 記号を同じに見る (純関数)。"""
+    return _nk(unicodedata.normalize("NFKD", x or "").encode("ascii", "ignore").decode())
+
+
+def character_names(character, work=""):
+    """キャラ名の文字列 → 1人ずつの list (純関数)。'Goku, Krillin' / 'Luffy & Ace' を分ける。
+    作品名と同じ名前・重複は外す (Pokémon の UT で character=Pokemon 等)。"""
+    out = []
+    for n in re.split(r"\s*(?:,|&|/|\band\b)\s*", character or ""):
+        n = n.strip()
+        if not n or (work and _fold_name(n) in _fold_name(work)):
+            continue
+        if any(_fold_name(n) == _fold_name(o) for o in out):
+            continue
+        out.append(n)
+    return out
+
+
+def title_for(v, character=""):
+    """メルカリ新品 UT のタイトル (純関数)。必須語が80字に入らなければ NotListable。
+
+    ★2026-09-14 ユーザー「削るというか、SEO的に最適な語の組み合わせをしてほしい」→「おｋ」。
+      決めた形から機械的に削っていたため、「Japan Exclusive」→「Japan」だけが残り (日本製と読める・
+      原産国チェックで11件除外)、キャラ名を後ろから削って「Goku, Anime」と読点が残っていた。
+      eBay の検索上位 (UT の3検索語×50件) の語の使われ方で並べ直した:
+        T-Shirt 50〜72% / Tee 4〜24% / Graphic 26〜56% / Anime 8〜34% / Men・Mens 20〜40% /
+        Japan 14〜34% (多くは原産国と読める単独) / Exclusive 0〜2%
+    必ず入れる: 作品名 / Graphic T-Shirt / UNIQLO UT (GU) / 色 / US サイズ (JP サイズ) / NWT
+    空きがあれば この順に足す: キャラ (1人ずつ「&」でつなぐ) → Anime (テーマが Anime の時)
+      → Men's / Unisex (カタログの Department) → Japan Exclusive (2語セット。単独の Japan は使わない)
     """
     work = (v.get("work_en") or "").strip()
     color = " ".join(w.capitalize() for w in (v.get("color_name") or "").split())
     brand = "UNIQLO GU" if v.get("is_gu") else "UNIQLO UT"
-    kind = "Anime Graphic Tee" if "Anime" in (v.get("themes") or []) else "Graphic Tee"
     size = size_label(v.get("size_jp") or "")
-    ch = (character or "").strip()
+    anime = "Anime" in (v.get("themes") or [])
+    dept = _DEPT_WORD.get(((v.get("specs") or {}).get("Department") or "").strip().lower(), "")
+    names = character_names(character, work)
 
-    def _fold(x):                                 # Pokémon と Pokemon を同じに見る
-        import unicodedata
-        return _nk(unicodedata.normalize("NFKD", x).encode("ascii", "ignore").decode())
-    if ch and _fold(ch) in _fold(work):
-        ch = ""                                   # 作品名と同じなら重ねない
-    words = ch.split()
-    # 削る順 = 「Exclusive」が先、キャラ名は後 (キャラ名の方が検索に効く)
-    for n in range(len(words), -1, -1):
-        for exclusive in (True, False):
-            parts = [work, " ".join(words[:n]), kind, brand,
-                     "Japan Exclusive" if exclusive else "Japan", color, size, "NWT"]
-            t = " ".join(x for x in parts if x)
-            if len(t) <= MAX_TITLE:
-                return t
-    raise NotListable(f"タイトルが{MAX_TITLE}字に収まらない: {work} / {color} / {size}")
+    def render(chars, use_anime, use_dept, use_jex):
+        parts = [work, " & ".join(chars), "Anime" if use_anime else "", "Graphic T-Shirt", brand,
+                 "Japan Exclusive" if use_jex else "", color, dept if use_dept else "", size, "NWT"]
+        return " ".join(x for x in parts if x)
+
+    state = {"chars": [], "anime": False, "dept": False, "jex": False}
+
+    def fits(**change):
+        t = dict(state, **change)
+        return len(render(t["chars"], t["anime"], t["dept"], t["jex"])) <= MAX_TITLE
+
+    if not fits():
+        raise NotListable(f"タイトルが{MAX_TITLE}字に収まらない: {work} / {color} / {size}")
+    for n in names:                                   # キャラは先頭の人から。入らない人で止める
+        if not fits(chars=state["chars"] + [n]):
+            break
+        state["chars"] = state["chars"] + [n]
+    for key, wanted in (("anime", anime), ("dept", bool(dept)), ("jex", True)):
+        if wanted and fits(**{key: True}):
+            state[key] = True
+    return render(state["chars"], state["anime"], state["dept"], state["jex"])
 
 
 def has_size_chart(v):
