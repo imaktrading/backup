@@ -1327,6 +1327,21 @@ SCRIPTS = [
         "params": [],
     },
     {
+        # ★2026-09-14 残務 №63 (№14統合)。中身は 新規 と同じ生成 + 締めのチェーン
+        # (監査→入稿→書戻し→広告→メール)。件数は PSA の20枠と別 (GSHOCK_BATCH_LIMIT)。
+        "category": "G-SHOCK", "type": "auto", "label": "🤖自動",
+        "verified": False,        # 実戦未検証 (初回は 1件で試すこと)
+        "double_check": True,
+        "cwd": f"{WORKSPACE}/iMakG-shock",
+        "cmd": ["python", "gshock_to_csv.py"],
+        "env": {"GSHOCK_BATCH_LIMIT": "20"},
+        "params": [],
+        "auto_full": True,
+        "auto_csv_prefix": "gshock_upload_",
+        "auto_upload_write": True,
+        "auto_upload_schedule": True,
+    },
+    {
         "category": "PSA TCG", "type": "new", "label": "新規",
         "verified": True,  # 2026-04-24 及第点到達
         "double_check": True,  # 2026-04-26 入稿前の人手ダブルチェック必須
@@ -1374,6 +1389,43 @@ SCRIPTS = [
         "cmd": ["python", "ichibankuji_to_csv.py"],
         "params": [],
         "custom_buttons": "ichibankuji",
+    },
+    {
+        # ★2026-09-14 残務 №63 (№14統合)。中身は 新規 と同じ生成 + 締めのチェーン
+        # (監査→入稿→書戻し→広告→メール)。件数は PSA の20枠と別 (ICHIBANKUJI_BATCH_LIMIT)。
+        "category": "一番くじ", "type": "auto", "label": "🤖自動",
+        "verified": False,        # 実戦未検証 (初回は 1件で試すこと)
+        "double_check": True,
+        "cwd": f"{WORKSPACE}/iMak_ichibankuji",
+        "cmd": ["python", "ichibankuji_to_csv.py"],
+        "env": {"ICHIBANKUJI_BATCH_LIMIT": "20"},
+        "params": [],
+        "auto_full": True,
+        "auto_csv_prefix": "ichibankuji_upload_",
+        "auto_upload_write": True,
+        "auto_upload_schedule": True,
+    },
+    {
+        # ★2026-09-14 残務 №63 (№14統合)。ガチャはパネルにボタンが1つも無く、
+        # CSV が 8/21 を最後に作られていなかった (中間スプシ302行→出せる293件)。
+        "category": "ガチャ", "type": "new", "label": "新規",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "gacha_to_csv.py"],
+        "params": [],
+    },
+    {
+        # 件数は PSA の20枠と別。gacha_to_csv.py は既存の --limit をそのまま使う
+        # (env を新設しない)。
+        "category": "ガチャ", "type": "auto", "label": "🤖自動",
+        "verified": False,        # 実戦未検証 (初回は 1件で試すこと)
+        "double_check": True,
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "gacha_to_csv.py", "--limit", "20"],
+        "params": [],
+        "auto_full": True,
+        "auto_csv_prefix": "gacha_upload_",
+        "auto_upload_write": True,
+        "auto_upload_schedule": True,
     },
     {
         "category": "Tomica", "type": "new", "label": "新規",

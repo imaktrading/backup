@@ -1059,6 +1059,17 @@ def _process_sheet_to_ebay_csv():
         print("→ 先に ③スプシ転記 で中間CSVを統合Hightへ追記してください")
         return
 
+    # ★2026-09-14 残務 №63: 🤖自動ボタンの件数枠 (PSA の20枠と別)。
+    #   env 未設定なら無制限のまま (手動「新規」ボタンは無指定=無変更)。
+    _batch = 0
+    try:
+        _batch = max(0, int(os.environ.get("ICHIBANKUJI_BATCH_LIMIT") or 0))
+    except ValueError:
+        _batch = 0
+    if _batch and len(targets) > _batch:
+        print(f"合計 {len(targets)} 件中、先頭 {_batch} 件を処理します (残 {len(targets)-_batch} 件は次回実行で)。")
+        targets = targets[:_batch]
+
     # 修復レイヤ1: size_cm が空の行 → pending/ 内の中間CSV を逆引きして補完
     missing_size = [t for t in targets if not t.get('size_cm')]
     if missing_size:
