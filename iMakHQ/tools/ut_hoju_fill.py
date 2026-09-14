@@ -211,8 +211,18 @@ def usable_candidate(cond, ship, reviews, is_shops, min_reviews=MIN_REVIEWS,
     return True
 
 
+def load_watch():
+    """最新のファネル CSV のウォッチ数 {itemID: 数} (PSA と同じ読み方)。読めなければ {} = 行の順のまま。"""
+    try:
+        from psa_hoju_fill import load_watch_by_item
+        return load_watch_by_item()
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ ウォッチ数を読めず、並び順は行の順のまま ({type(e).__name__})")
+        return {}
+
+
 def select_targets(rows2d, max_backups=AUX_MAX, category=CATEGORY, sold_out=False, hints=None,
-                   min_backups=0):
+                   min_backups=0, watch=None):
     """探す対象の UT 行 → [{row, itemID, title, size, have}] (純関数)。
 
     sold_out=False (既定) … **出品中**で補URL が max_backups 未満の行 = 予備を足す
@@ -250,6 +260,14 @@ def select_targets(rows2d, max_backups=AUX_MAX, category=CATEGORY, sold_out=Fals
                     "size": hint.get("size") or jp_size_of(title), "have": have,
                     "keyword": hint.get("kw") or build_keyword(title),
                     "from_catalog": bool(hint.get("kw"))})
+    # ★2026-09-15 ユーザー「そうしとこ」(PSA 補URL③ と同じ並び順に):
+    #   補充 (補0〜3本) は 補が少ない順 → ウォッチの多い順。入れ替え (補4〜5本) と再仕入れは ウォッチの多い順。
+    #   ウォッチが多い = 欲しい人が居る出品ほど、安い仕入元・戻す仕入元が効く。同着は行の順のまま。
+    if watch:
+        for t in out:
+            t["watch"] = watch.get(t["itemID"], 0)
+        thin = (not sold_out) and min_backups < AUX_MAX - 1
+        out.sort(key=lambda t: (len(t["have"]) if thin else 0, -t["watch"]))
     return out
 
 
@@ -318,7 +336,8 @@ def search(limit=None, sold_out=False, min_backups=0, max_backups=AUX_MAX):
         print(f"  (特定済みの検索語を読めず、タイトルから作ります: {type(e).__name__})")
         hints = {}
     targets = select_targets(sheet_io._product_ws().get_all_values(), sold_out=sold_out,
-                             hints=hints, min_backups=min_backups, max_backups=max_backups)
+                             hints=hints, min_backups=min_backups, max_backups=max_backups,
+                             watch=load_watch())
     targets = [t for t in targets if t["keyword"] and t["size"] and t["size"] != "KIDS"]
     if limit:
         targets = targets[:limit]
@@ -441,18 +460,17 @@ def confirm(dry_run=False, min_backups=0, max_backups=AUX_MAX):
 
     today = datetime.date.today().isoformat()
     vals = sheet_io._product_ws().get_all_values()
-    targets = {t["itemID"]: t for t in select_targets(vals, min_backups=min_backups,
-                                                     max_backups=max_backups)}
+    # ★2026-09-15: 画面は **対象の並び順** (補が少ない → ウォッチ多い) で出す。キャッシュの順ではない
+    tlist = select_targets(vals, min_backups=min_backups, max_backups=max_backups, watch=load_watch())
     cache = load_cache()
     ng = load_cand_ng()
 
     items, back, n_allng = [], [], 0
-    for iid, c in cache.items():
+    for t in tlist:                     # 補URLが埋まった / 売れた行は tlist に居ない = もう対象でない
+        iid = t["itemID"]
+        c = cache.get(iid) or {}
         if c.get("date") != today or not c.get("candidates"):
             continue
-        t = targets.get(iid)
-        if not t:
-            continue                    # 補URLが埋まった / 売れた = もう対象でない
         # ★2026-09-04: 前に「違う」と外した候補は出さない (再仕入れ側と同じ扱い)
         _cands = drop_ng_candidates(c["candidates"], ng.get(iid))
         if not _cands:
@@ -502,17 +520,16 @@ def restock_confirm(dry_run=False):
 
     today = datetime.date.today().isoformat()
     vals = sheet_io._product_ws().get_all_values()
-    targets = {t["itemID"]: t for t in select_targets(vals, sold_out=True)}
+    tlist = select_targets(vals, sold_out=True, watch=load_watch())   # ★2026-09-15 ウォッチ多い順で出す
     cache = load_cache(RESTOCK_CACHE_PATH)
     ng = load_cand_ng()
 
     items, back, n_allng = [], [], 0
-    for iid, c in cache.items():
+    for t in tlist:                     # 売れた印が消えた行は tlist に居ない = もう対象でない
+        iid = t["itemID"]
+        c = cache.get(iid) or {}
         if c.get("date") != today or not c.get("candidates"):
             continue
-        t = targets.get(iid)
-        if not t:
-            continue                    # 売れた印が消えた = もう対象でない
         # ★2026-09-04: 前に「違う」と外した候補は出さない (人の1クリックを捨てない)
         _cands = drop_ng_candidates(c["candidates"], ng.get(iid))
         if not _cands:
