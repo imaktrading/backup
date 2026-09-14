@@ -33,6 +33,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sheet_io as S  # noqa: E402
 
 DESK = os.path.join(os.path.expanduser("~"), "OneDrive", "デスクトップ")
+# ★2026-09-14 レポートはファネル用と同じ置き場 (日付フォルダ) に置く運用。デスクトップだけ見ていたので、
+#   9/14 に DL した注文レポートを拾えず「押しても0件」のままだった。
+REPORTS = r"C:\dev\iMak_data\seller_hub\reports"
+ORDER_PATTERNS = ("ebay-all-orders-report-*.csv", "eBay-OrdersReport-*.csv")
 AUX = S.PRODUCT_COL_AUX_START
 
 # ---------------------------------------------------------------- 純関数
@@ -71,16 +75,42 @@ def read_orders(path):
             if (r.get("Item Number") or "").strip()]
 
 
-def classify(row, item_col=S.PRODUCT_COL_ITEMID):
+def classify(row, item_col=S.PRODUCT_COL_ITEMID, live=None):
     """台帳の1行 → (状態, 補URL list) (純関数, test 可)。
 
-    B列に itemID があれば **既に補充済** (別の出品として生きている)。
-    空なら未補充。補URL(AC-AG) は次に買える個体の候補。
+    B列が空 → 未補充。補URL(AC-AG) は次に買える個体の候補。
+    live (出品一覧 {itemID: {avail,...}}) を渡すと **eBay の在庫で** 判定する:
+      B列の出品が在庫1以上 → 補充済 / 在庫0 → 在庫0 (その出品の数量を戻す) /
+      一覧に無い → 出品なし (判らないので触らない)
+    ★2026-09-14: B列に番号があるだけで「補充済」にしていたため、売れて在庫0のまま残った
+      4件 (監視くんは仕入元が売切→在庫ありに戻った時しか数量を戻さない) が
+      一覧にもボタンの件数にも出ず、押しても何もしなかった。
+    live を渡さない時は従来どおり (B列に番号 = 補充済)。
     """
     b = (row[item_col] or "").strip() if len(row) > item_col else ""
     aux = [(row[i] or "").strip() for i in range(AUX, AUX + S.PRODUCT_AUX_MAX)
            if len(row) > i and (row[i] or "").strip()]
-    return ("補充済" if b else "未補充"), aux
+    if not b:
+        return "未補充", aux
+    if live is None:
+        return "補充済", aux
+    v = live.get(b)
+    if v is None:
+        return "出品なし", aux
+    return ("補充済" if int(v.get("avail") or 0) > 0 else "在庫0"), aux
+
+
+def load_live():
+    """出品一覧キャッシュ (取下げ候補づくりと共用・eBay は呼ばない)。読めなければ None。"""
+    try:
+        import json as _json
+        import itemid_writeback_audit as _A
+        if _A.CACHE.exists():
+            d = _json.loads(_A.CACHE.read_text(encoding="utf-8"))
+            return d if isinstance(d, dict) and d else None
+    except Exception:                                              # noqa: BLE001
+        return None
+    return None
 
 
 def find_row(sheets, sku, item_id):
@@ -99,10 +129,33 @@ def find_row(sheets, sku, item_id):
     return None, None, None
 
 
-def _find_desk_report():
-    fs = sorted(glob.glob(os.path.join(DESK, "ebay-all-orders-report-*.csv")),
-                key=os.path.getmtime, reverse=True)
-    return fs[0] if fs else ""
+def report_day(path):
+    """ファイル名の日付 (純関数)。'...-2026-09-13-...' / 'OrdersReport-Sep-13-2026-...'。読めなければ None。"""
+    import datetime as _dt
+    b = os.path.basename(path)
+    m = re.search(r"(\d{4})-(\d{2})-(\d{2})", b)
+    if m:
+        return _dt.date(int(m[1]), int(m[2]), int(m[3]))
+    m = re.search(r"([A-Z][a-z]{2})-(\d{2})-(\d{4})", b)
+    if m:
+        try:
+            return _dt.datetime.strptime(f"{m[1]}-{m[2]}-{m[3]}", "%b-%d-%Y").date()
+        except ValueError:
+            return None
+    return None
+
+
+def _find_desk_report(roots=None):
+    """注文レポート: レポート置き場 (日付フォルダの中も) とデスクトップから、ファイル名の日付が一番新しい1本。"""
+    import datetime as _dt
+    roots = roots if roots is not None else [(REPORTS, True), (DESK, False)]
+    fs = []
+    for root, deep in roots:
+        for pat in ORDER_PATTERNS:
+            fs += glob.glob(os.path.join(root, "**", pat) if deep else os.path.join(root, pat), recursive=deep)
+    if not fs:
+        return ""
+    return max(fs, key=lambda p: (report_day(p) or _dt.date.min, os.path.getmtime(p)))
 
 
 def _sheets():
@@ -127,7 +180,7 @@ def main():
     src = paths[0] if paths else _find_desk_report()
     if not src or not os.path.isfile(src):
         print("注文レポートが見つかりません "
-              "(デスクトップの ebay-all-orders-report-*.csv を置いてください)")
+              f"({REPORTS} の日付フォルダに ebay-all-orders-report-*.csv を置いてください)")
         return 2
     print(f"対象: {os.path.basename(src)}")
 
@@ -138,6 +191,9 @@ def main():
         return 0
 
     sheets = _sheets()
+    live = load_live()
+    if live is None:
+        print("  ⚠ 出品一覧を読めず、B列に番号がある行は補充済として扱います (eBay の在庫は見ていません)")
     todo, done, orphan = [], 0, []
     for o, cat in want:
         sku = (o.get("Custom Label") or "").strip()
@@ -146,13 +202,14 @@ def main():
         if r is None:
             orphan.append((o.get("Sale Date"), cat, o.get("Item Title") or ""))
             continue
-        state, aux = classify(r)
+        state, aux = classify(r, live=live)
         if state == "補充済":
             done += 1
             continue
         todo.append({"date": o.get("Sale Date"), "cat": cat, "sheet": label, "row": n,
                      "title": o.get("Item Title") or "", "supply": r[0] if r else "",
-                     "aux": aux})
+                     "aux": aux, "state": state,
+                     "item": (r[S.PRODUCT_COL_ITEMID] or "").strip() if len(r) > S.PRODUCT_COL_ITEMID else ""})
 
     print(f"\n売れた {len(want)}件 (PSA/G-Shock/一番くじ) → "
           f"補充済 {done} / **未補充 {len(todo)}** / 台帳に行が無い {len(orphan)}")
@@ -177,6 +234,10 @@ def main():
             mark = f"補URL {len(t['aux'])}本 (生死不明)"
         else:
             mark = "補URL なし = 個体探しから"
+        if t.get("state") == "在庫0":
+            mark = f"出品 {t['item']} が在庫0 (数量を戻せば売れる) / " + mark
+        elif t.get("state") == "出品なし":
+            mark = f"出品 {t['item']} が出品一覧に無い / " + mark
         print(f"\n{t['date']} [{t['cat']}] {t['sheet'][:6]} row{t['row']} — {mark}")
         print(f"   {t['title'][:88]}")
         print(f"   売れた時の仕入元: {t['supply'][:70]}")

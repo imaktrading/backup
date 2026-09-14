@@ -193,6 +193,17 @@ python -u demand_winners.py >> "%LOG%" 2>&1
 echo [restock-worklist] %date% %time% >> "%LOG%"
 python -u restock_worklist.py >> "%LOG%" 2>&1
 
+REM --- 6c1) sold listings: put the quantity back to 1 at today's cost.
+REM          2026-09-14: nothing did this automatically. The monitor only revives when
+REM          a supplier goes sold -> in stock, so a listing that sold while its supplier
+REM          stayed in stock sat at 0 (4 found). Orders come from the order API so this
+REM          does not wait for the weekly report download. Skips: unshipped orders,
+REM          supplier sold / crawl older than the shipment, same card already live,
+REM          non-US (mirror) listings. FIRST NIGHTS = LIST ONLY (no --write) until the
+REM          morning log has been checked.
+echo [sold-restock] %date% %time% >> "%LOG%"
+python -u sold_restock.py --orders-api >> "%LOG%" 2>&1
+
 REM --- 6c2) cull (take-down) candidates from the live listing list.
 REM          2026-09-10: the funnel above stops by itself when the Seller Hub
 REM          reports are 4+ days old, and only a human can download them. So the

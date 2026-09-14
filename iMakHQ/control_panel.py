@@ -3398,9 +3398,10 @@ class ListingPanel:
                 text=("Seller Hub で下記5レポートをDL → 📁reports フォルダに置く:\n"
                       "  ・eBay-all-active-listings\n"
                       "  ・ebay-all-orders-report\n"
-                      "  ・eBay-unsold-listings-report\n"
+                      "  ・eBay-inactive-listings-report (旧 unsold-listings)\n"
                       "  ・Listing quality report\n"
-                      "  ・eBay-promoted-listing-general-listing-report (露出をorganic+PL累計で正す)"),
+                      "  ・eBay-promoted-listing-general-listing-report ★期間は必ず90日\n"
+                      "週1回でよい (7日より古いとファネルが止まる)"),
             ).pack(anchor="w", pady=(4, 0))
 
             # ② レポート鮮度: 各レポートの「内容の日付」が何日前か。古いまま判断する事故を防ぐ。
@@ -3422,16 +3423,19 @@ class ListingPanel:
                 import datetime as _dt
                 pats = [("active", "eBay-all-active-listings-report*"),
                         ("orders", "ebay-all-orders-report*"),
-                        ("unsold", "eBay-unsold-listings-report*"),
+                        ("unsold", ("eBay-unsold-listings-report*", "eBay-inactive-listings-report*")),
                         ("quality", "Listing quality report*")]
                 today = _dt.date.today()
                 parts, worst = [], 0
-                for nm, pat in pats:
+                for nm, pat_or_pats in pats:
                     # ★2026-08-25: レポートは **日付フォルダの中**に置かれている
                     #   (reports/20260823/eBay-all-active-... 等)。直下しか見ていなかったので
                     #   4種とも 0件 = 常に「✗無し」で、鮮度が一度も更新されなかった。
                     #   どこに置いても拾えるよう再帰で探す。
-                    fs = _glob.glob(os.path.join(REPORTS_DIR, "**", pat), recursive=True)
+                    # ★2026-09-14 未落札レポートは名前が変わった (unsold → inactive)。新旧どちらも探す
+                    fs = []
+                    for pat in (pat_or_pats if isinstance(pat_or_pats, tuple) else (pat_or_pats,)):
+                        fs += _glob.glob(os.path.join(REPORTS_DIR, "**", pat), recursive=True)
                     if not fs:
                         parts.append(f"{nm} ✗無し")
                         worst = 999
@@ -4184,7 +4188,7 @@ class ListingPanel:
             #   出て、こちらが何をすればいいのか読み取れなかった (下の分岐は死んでいた)。
             if sr and not sr.get("report"):
                 sr_txt = ("\n※押しても0件 — 先に注文レポートをDL"
-                          "\n(デスクトップに ebay-all-orders-report-*.csv)")
+                          "\n(📁reports フォルダに ebay-all-orders-report-*.csv)")
             elif sr.get("error"):
                 sr_txt = "\n(残件 取得できず: %s)" % str(sr["error"])[:40]
             elif sr:
@@ -4919,6 +4923,11 @@ class ListingPanel:
                             f"⚠️ 出品できていない行が {len(_left)}件 あります — 完了していません\n")
                         self.append_log(f"   {', '.join(_left[:20])}\n")
                         self.append_log("   原因を潰してから、この分だけ出し直してください\n")
+                    elif item[1] not in (0, None):
+                        # ★2026-09-14: 途中で落ちても (売れた分を補充 が returncode=1) 「🎉 完了」と出ていた。
+                        #   None は Chrome の後始末で返ることがあり成功扱いのまま (_after_phase2 と同じ)。
+                        self.append_log(f"❌ 失敗しました (returncode={item[1]}) — 完了していません。"
+                                        "上のエラーを確認してください\n")
                     else:
                         self.append_log("🎉 全 process 完了 — 入稿準備 OK\n")
                     if _latest_csv:

@@ -33,6 +33,13 @@ except Exception:
 
 EBAY_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "iMakeBayAPI"))
 KEYS_FILE = os.path.join(EBAY_DIR, "ebay keys.txt")
+try:
+    # ★2026-09-14: 鍵は credentials 置き場に移っていて、旧パス固定のままだと起動すらしなかった
+    sys.path.insert(0, EBAY_DIR)
+    from credentials import keys_path as _keys_path
+    KEYS_FILE = _keys_path()
+except Exception:  # noqa: BLE001
+    pass
 OAUTH_TOKEN = "https://api.ebay.com/identity/v1/oauth2/token"
 RATE_LIMIT_URL = "https://api.ebay.com/developer/analytics/v1_beta/rate_limit/"
 

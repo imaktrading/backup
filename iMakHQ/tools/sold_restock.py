@@ -80,11 +80,209 @@ def build_item_xml(item_id, price, profile, qty=1):
     return "<Item>" + "".join(parts) + "</Item>"
 
 
+# ★2026-09-14 pricing_engine のキーと合わせる (G-SHOCK / 一番くじ は各生成器の PROFIT_CATEGORY と同じ)。
+#   "G-shock" / "Ichibankuji" は存在しないキーで、G-SHOCK の売上が1件あるだけで一覧ごと落ちていた。
 CATEGORY_FOR_PRICING = {
     "PSA": "TCG(PSA10)",
-    "G-Shock": "G-shock",
-    "一番くじ": "Ichibankuji",
+    "G-Shock": "G-SHOCK",
+    "一番くじ": "一番くじ",
 }
+
+
+def parse_item_status(xml):
+    """GetItem の応答 → (ListingStatus, 残り在庫, 出品サイト) (純関数, test 可)。
+
+    ★2026-09-14 実機で確認: GetItem に QuantityAvailable は無く、Quantity は **出品時の総数**。
+      売れて在庫0の出品も Quantity=1 / QuantitySold=1 で返る。Quantity だけ見ると
+      「在庫1 = 触らない」になり、数量を戻す処理が一度も動かない。残り = Quantity − QuantitySold。
+    ★出品サイトは ShipToLocations の直後の <Site>。その前の <Site> は出品者・落札者のもので、
+      オーストラリアのミラーでも先頭は "US" になる。
+    """
+    x = xml or ""
+    st = re.search(r"<ListingStatus>(.*?)</ListingStatus>", x)
+    qa = re.search(r"<QuantityAvailable>(\d+)</QuantityAvailable>", x)
+    q = re.search(r"<Quantity>(\d+)</Quantity>", x)
+    qs = re.search(r"<QuantitySold>(\d+)</QuantitySold>", x)
+    if qa:
+        avail = int(qa.group(1))
+    elif q:
+        avail = max(0, int(q.group(1)) - (int(qs.group(1)) if qs else 0))
+    else:
+        avail = -1
+    m = re.search(r"</ShipToLocations>\s*<Site>(.*?)</Site>", x)
+    sites = re.findall(r"<Site>(.*?)</Site>", x)
+    site = m.group(1) if m else (sites[-1] if sites else "?")
+    return (st.group(1) if st else "?"), avail, site
+
+
+COL_SOLD = 3        # D 売り切れ (監視くんが仕入元の売切を書く)
+COL_CHECKED = 14    # O 売り切れチェック時間 (監視くんの巡回時刻)
+COST_FRESH_DAYS = 2
+
+
+def row_cost_is_current(row, now=None, max_age_days=COST_FRESH_DAYS, after=None):
+    """台帳の仕入値 (N = M − K) を「今の仕入値」として使ってよいか (純関数, test 可)。
+
+    ★2026-09-14 監視くんは巡回のたびに M (現在価格) を **仕入元と補URLのうち生きている最安** で
+      書き直す (M-min, inventory commit 8d89664)。巡回が新しく、仕入元が売切でなければ
+      N はその時点の仕入値。これを一律「売れた時の古い値」扱いにしていたため、
+      補充が毎回「古い仕入値なので止めます」で止まっていた。
+    """
+    import datetime as _dt
+    if len(row) > COL_SOLD and (row[COL_SOLD] or "").strip():
+        return False
+    raw = (row[COL_CHECKED] or "").strip() if len(row) > COL_CHECKED else ""
+    try:
+        t = _dt.datetime.strptime(raw, "%Y/%m/%d %H:%M:%S")
+    except ValueError:
+        return False
+    now = now or _dt.datetime.now()
+    if after and t.date() < after:
+        # ★2026-09-14 発送より前の巡回は、その注文のために買った仕入元をまだ「在庫あり」と見ている
+        #   ことがある。買った後の巡回 (= 発送日以降) の値だけを今の仕入値にする。
+        return False
+    return _dt.timedelta(0) <= now - t <= _dt.timedelta(days=max_age_days)
+
+
+def _order_date(s):
+    """'Sep-08-26' → date。読めなければ None (純関数)。"""
+    import datetime as _dt
+    try:
+        return _dt.datetime.strptime((s or "").strip(), "%b-%d-%y").date()
+    except ValueError:
+        return None
+
+
+def shipped_after_by_row(want, sheets):
+    """台帳の行ごとに、いちばん新しい発送日 {(シート, 行番号): date} (I/O 無し)。"""
+    out = {}
+    for o, _cat in want:
+        d = _order_date(o.get("Shipped On Date"))
+        if not d:
+            continue
+        label, n, row = W.find_row(sheets, (o.get("Custom Label") or "").strip(),
+                                   (o.get("Item Number") or "").strip())
+        if row is not None and (out.get((label, n)) is None or d > out[(label, n)]):
+            out[(label, n)] = d
+    return out
+
+
+def _api_day(iso):
+    """'2026-09-08T07:26:00.000Z' → 'Sep-08-26' (注文レポートと同じ形)。空は '' (純関数)。"""
+    import datetime as _dt
+    try:
+        return _dt.datetime.strptime((iso or "")[:10], "%Y-%m-%d").strftime("%b-%d-%y")
+    except ValueError:
+        return ""
+
+
+def order_rows_from_api(order, shipped_iso=""):
+    """Fulfillment API の注文1件 → 注文レポートと同じキーの行 list (純関数, test 可)。
+
+    ★2026-09-14 夜間は注文 API から取る。注文レポートは人が週1で落とすので、それだけだと
+      補充が最大1週間遅れる。返金・キャンセルは Total Price 0、未払いは Paid On Date 空にして、
+      order_pending の判定をレポートと同じにする。
+    """
+    pay = (order.get("orderPaymentStatus") or "").upper()
+    cancelled = ((order.get("cancelStatus") or {}).get("cancelState") or "") == "CANCELED"
+    paid = ""
+    if pay in ("PAID", "PARTIALLY_REFUNDED", "FULLY_REFUNDED"):
+        pays = (order.get("paymentSummary") or {}).get("payments") or []
+        paid = _api_day(pays[0].get("paymentDate") if pays else order.get("creationDate"))
+    total = (order.get("pricingSummary") or {}).get("total") or {}
+    total_s = "0" if (pay == "FULLY_REFUNDED" or cancelled) else str(total.get("value") or "")
+    out = []
+    for li in order.get("lineItems") or []:
+        out.append({
+            "Item Number": str(li.get("legacyItemId") or ""),
+            "Custom Label": li.get("sku") or "",
+            "Item Title": li.get("title") or "",
+            "Quantity": str(li.get("quantity") or ""),
+            "Sale Date": _api_day(order.get("creationDate")),
+            "Paid On Date": paid,
+            "Shipped On Date": _api_day(shipped_iso),
+            "Total Price": total_s,
+        })
+    return out
+
+
+def orders_from_api(days=90):
+    """注文 API → 注文レポートと同じ形の行 (I/O)。発送日は fulfillmentHrefs を読む。取れなければ例外。"""
+    import datetime as _dt
+    import requests
+    import ads_add_new_listings as _A
+    tok = _A._token()
+    h = {"Authorization": f"Bearer {tok}", "Accept": "application/json"}
+    end = _dt.datetime.utcnow()
+    params = {"filter": f"creationdate:[{end - _dt.timedelta(days=days):%Y-%m-%dT%H:%M:%S.000Z}.."
+                        f"{end:%Y-%m-%dT%H:%M:%S.000Z}]", "limit": "200"}
+    url, rows = "https://api.ebay.com/sell/fulfillment/v1/order", []
+    while url:
+        r = requests.get(url, headers=h, params=params, timeout=60)
+        params = None
+        r.raise_for_status()
+        d = r.json()
+        for o in d.get("orders") or []:
+            shipped = ""
+            for href in o.get("fulfillmentHrefs") or []:
+                f = requests.get(href, headers=h, timeout=60)
+                if f.ok:
+                    shipped = max(shipped, f.json().get("shippedDate") or "")
+            rows += order_rows_from_api(o, shipped)
+        url = d.get("next")
+    return rows
+
+
+def order_shipped(order):
+    """注文レポートの1行が発送済みか (純関数, test 可)。"""
+    return bool((order.get("Shipped On Date") or "").strip())
+
+
+def order_pending(order):
+    """まだ仕入れ・発送が終わっていない注文か (純関数, test 可)。
+
+    ★2026-09-14 支払い済みで未発送 = その注文のための仕入れが終わっていないことがある。ここで数量を戻すと、
+      同じ仕入元を2人に売ることになる (実例: カビゴン 9/12 の注文が未発送のまま在庫0)。
+      未払い (Paid On Date 空 = 8/23 G-SHOCK) と全額返金 (Total Price 0 = 7/24 G-SHOCK) は
+      仕入れが発生しないので止めない。
+    """
+    if order_shipped(order):
+        return False
+    if not (order.get("Paid On Date") or "").strip():
+        return False
+    import re as _re
+    total = _re.sub(r"[^0-9.]", "", order.get("Total Price") or "")
+    try:
+        if total and float(total) == 0:
+            return False
+    except ValueError:
+        pass
+    return True
+
+
+def pending_rows(want, sheets):
+    """未発送の注文がある台帳の行 {(シート, 行番号)} (I/O 無し)。同じ出品が2回売れて片方だけ未発送でも止める。"""
+    out = set()
+    for o, _cat in want:
+        if not order_pending(o):
+            continue
+        label, n, row = W.find_row(sheets, (o.get("Custom Label") or "").strip(),
+                                   (o.get("Item Number") or "").strip())
+        if row is not None:
+            out.add((label, n))
+    return out
+
+
+def restock_target(state, row, sold_item_id, item_col=S.PRODUCT_COL_ITEMID):
+    """数量を戻す相手の itemID (純関数, test 可)。
+
+    台帳の出品が在庫0 → **台帳の出品** (US の親)。ミラーで売れても注文の番号はミラーなので、
+    注文の番号を使うとミラーを触ってしまう (820041751397 = AU で売れた実例)。
+    台帳が空 (売れて閉じた) → 注文の番号。
+    """
+    if state == "在庫0":
+        return (row[item_col] or "").strip()
+    return sold_item_id
 
 
 def parse_cost_args(argv):
@@ -101,12 +299,13 @@ def parse_cost_args(argv):
 
 
 def ebay_status(fx, U, item_id, tok):
-    """GetItem → (ListingStatus, Quantity)。取れなければ ('?', -1) = 触らない。"""
+    """GetItem → (ListingStatus, 残り在庫, 出品サイト)。取れなければ ('?', -1, '?') = 触らない。"""
     try:
         r = fx.post("GetItem", f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel>",
                     tok, U.SITE_US)
     except Exception:                                              # noqa: BLE001
-        return "?", -1
+        return "?", -1, "?"
+    return parse_item_status(r)
     st = re.search(r"<ListingStatus>(.*?)</ListingStatus>", r or "")
     q = re.search(r"<QuantityAvailable>(\d+)</QuantityAvailable>", r or "") or         re.search(r"<Quantity>(\d+)</Quantity>", r or "")
     return (st.group(1) if st else "?"), (int(q.group(1)) if q else -1)
@@ -163,7 +362,12 @@ def live_keys(sheets, live_ids, key_col=S.PRODUCT_COL_KEY,
       出品くん本体は同じカードの二重出品を3段で止めている
       (抽出時の「同KEYが出品済の2枚目を除外」/ 重複くん excluder / dup_guard)。
       補充は eBay を直接叩くのでそのどれも通らない。**ここで同じ判定をする**。
+
+    ★2026-09-14: live_ids に出品一覧 (dict) を渡すと **在庫1以上の出品だけ** を数える。
+      在庫0 の出品まで「出品中」にすると、在庫0 の自分自身に当たって補充できない。
     """
+    if isinstance(live_ids, dict):
+        live_ids = {k for k, v in live_ids.items() if int((v or {}).get("avail") or 0) > 0}
     out = set()
     for _label, rows in sheets:
         for r in rows[1:]:
@@ -206,7 +410,7 @@ def count_workload():
     try:
         src = W._find_desk_report()
         if not src:
-            out["error"] = "注文レポートがありません (デスクトップの ebay-all-orders-report-*.csv)"
+            out["error"] = "注文レポートがありません (reports フォルダに ebay-all-orders-report-*.csv)"
             return out
         out["report"] = True
         pairs = [(o, W.category_of(o.get("Item Title") or "")) for o in W.read_orders(src)]
@@ -222,16 +426,28 @@ def count_workload():
                 cache_raw = _json.loads(_A.CACHE.read_text(encoding="utf-8"))
         except Exception:                                          # noqa: BLE001
             cache_raw = {}
-        already = live_keys(sheets, set(cache_raw.keys())) if cache_raw else set()
+        already = live_keys(sheets, cache_raw) if cache_raw else set()
+        pending = pending_rows(want, sheets)
+        seen = set()
         for o, cat in want:
             sku = (o.get("Custom Label") or "").strip()
             iid = (o.get("Item Number") or "").strip()
             label, n, row = W.find_row(sheets, sku, iid)
             if row is None:
                 continue
-            state, _aux = W.classify(row)
+            state, _aux = W.classify(row, live=cache_raw or None)
             if state == "補充済":
                 out["done"] += 1
+                continue
+            if state == "出品なし":
+                out["unknown"] += 1
+                continue
+            target = restock_target(state, row, iid)
+            if target in seen:          # 同じ出品が2回売れた (注文は2行) → 1回だけ
+                continue
+            seen.add(target)
+            if (label, n) in pending:   # 未発送の注文がある = まだ仕入れ中
+                out["blocked"] = out.get("blocked", 0) + 1
                 continue
             _key = (row[S.PRODUCT_COL_KEY] or "").strip() if len(row) > S.PRODUCT_COL_KEY else ""
             if _key and _key in already:
@@ -240,8 +456,8 @@ def count_workload():
             #   「仕入値が取れないので止めます」で skip)。青にすると押しても減らない。
             #   本体と同じ _cost_from_row を通す (二重実装しない)。cost_override や
             #   当日の調査結果で埋まる可能性は残るので、0 にせず blocked として出す。
-            _has_cost = bool(_cost_from_row(row))
-            info = cache_raw.get(iid)
+            _has_cost = bool(_cost_from_row(row)) and row_cost_is_current(row)
+            info = cache_raw.get(target)
             if info is None:
                 out["unknown"] += 1
             elif int(info.get("avail") or 0) == 0:
@@ -261,13 +477,24 @@ def main():
     allow_stale = "--allow-stale-cost" in argv
     cost_override = parse_cost_args(argv)
     paths = [a for a in argv if not a.startswith("--") and "=" not in a]
-    src = paths[0] if paths else W._find_desk_report()
-    if not src or not os.path.isfile(src):
-        print("注文レポートが見つかりません (デスクトップの ebay-all-orders-report-*.csv)")
-        return 2
-    print(f"対象: {os.path.basename(src)} / {'本番' if write else 'まだ送りません (--write で実行)'}")
+    max_send = next((int(a.split("=", 1)[1]) for a in argv if a.startswith("--max=")), 10)
+    if "--orders-api" in argv:
+        try:
+            orders = orders_from_api()
+        except Exception as e:                                     # noqa: BLE001
+            print(f"⚠️要対応: 注文 API を読めませんでした ({type(e).__name__}: {e}) → 何もしません")
+            return 1
+        print(f"対象: 注文 API (90日 {len(orders)}行) / {'本番' if write else 'まだ送りません (--write で実行)'}"
+              f" / 1回の上限 {max_send}件")
+    else:
+        src = paths[0] if paths else W._find_desk_report()
+        if not src or not os.path.isfile(src):
+            print("注文レポートが見つかりません (reports フォルダに ebay-all-orders-report-*.csv)")
+            return 2
+        print(f"対象: {os.path.basename(src)} / {'本番' if write else 'まだ送りません (--write で実行)'}")
+        orders = W.read_orders(src)
 
-    pairs = [(o, W.category_of(o.get("Item Title") or "")) for o in W.read_orders(src)]
+    pairs = [(o, W.category_of(o.get("Item Title") or "")) for o in orders]
     want = [(o, c) for o, c in pairs if c]
     if not want:
         print("補充対象カテゴリ (PSA / G-Shock / 一番くじ) の売上はありません")
@@ -280,12 +507,14 @@ def main():
         fresh = {}
     print(f"今の仕入値 (🃏 PSA再仕入れ照合 の最安¥): {len(fresh)}件")
     # ★同じカードが既に live なら補充しない (本体と同じ判定)
+    _live = {}
     try:
         import json as _json
         import itemid_writeback_audit as _A
-        _live = set(_json.loads(_A.CACHE.read_text(encoding="utf-8")))
+        _live = _json.loads(_A.CACHE.read_text(encoding="utf-8"))
         already = live_keys(sheets, _live)
     except Exception:                                              # noqa: BLE001
+        _live = {}
         already = set()
         print("  ⚠ live 一覧を読めず、同じカードの二重出品チェックを飛ばします")
     print(f"  既に live なカード: {len(already)}種類")
@@ -297,6 +526,10 @@ def main():
     tok = fx.token()
 
     done = skipped = acted = 0
+    seen = set()
+    pending = pending_rows(want, sheets)
+    shipped_after = shipped_after_by_row(want, sheets)
+    relisted = failed = 0
     for o, cat in want:
         sku = (o.get("Custom Label") or "").strip()
         iid = (o.get("Item Number") or "").strip()
@@ -306,9 +539,21 @@ def main():
             print(f"  ⏭ [{cat}] 台帳に行が無い: {title}")
             skipped += 1
             continue
-        state, _aux = W.classify(row)
+        state, _aux = W.classify(row, live=_live or None)
         if state == "補充済":
             done += 1
+            continue
+        if state == "出品なし":
+            print(f"  ⏭ [{cat}] 台帳の出品 {row[S.PRODUCT_COL_ITEMID].strip()} が出品一覧に無い → 触らない: {title}")
+            skipped += 1
+            continue
+        target = restock_target(state, row, iid)
+        if target in seen:
+            continue
+        seen.add(target)
+        if (label, n) in pending:
+            print(f"  ⏭ [{cat}] 未発送の注文がある (仕入れが済んでから戻す): {title}")
+            skipped += 1
             continue
         _key = (row[S.PRODUCT_COL_KEY] or "").strip() if len(row) > S.PRODUCT_COL_KEY else ""
         if _key and _key in already:
@@ -323,7 +568,7 @@ def main():
             cost = fresh.get(card_no_of(o))
         if not cost:
             cost = _cost_from_row(row)
-            stale = bool(cost)
+            stale = bool(cost) and not row_cost_is_current(row, after=shipped_after.get((label, n)))
         price, profile = price_for(cost, CATEGORY_FOR_PRICING.get(cat, "TCG(PSA10)"))
         # ★2026-09-04: 仕入値の上限 (global.yaml cost_sanity) はここにも効かせる。
         #   売れた物をもう一度出すのも「仕入れる」こと。新規と同じ基準にする。
@@ -333,9 +578,14 @@ def main():
         except Exception:                                          # noqa: BLE001
             _ng = None
 
-        status, qty = ebay_status(fx, U, iid, tok)
+        status, qty, site = ebay_status(fx, U, target, tok)
         act = plan_action(status, qty)
-        head = f"  [{cat}] row{n} {title}"
+        head = f"  [{cat}] row{n} {target} {title}"
+        if site != "US":
+            # eBaymag のミラーは触らない (親の US を戻せば付いてくる)。サイト不明も触らない
+            print(f"{head}\n     → 出品サイトが {site} (US 以外) → 触らない")
+            skipped += 1
+            continue
         if act in ("noop", "skip"):
             print(f"{head}\n     → {act} (eBay状態={status} qty={qty}) 触らない")
             skipped += 1
@@ -350,7 +600,7 @@ def main():
             skipped += 1
             continue
 
-        src_mark = " ⚠️売れた時の古い仕入値" if stale else ""
+        src_mark = " ⚠️古い仕入値 (監視くんの巡回が古い/仕入元が売切)" if stale else " 監視くんの今の最安"
         print(f"{head}")
         print(f"     → {act} / qty=1 / ${price} / {profile} "
               f"(仕入¥{int(cost):,}{src_mark})")
@@ -363,22 +613,40 @@ def main():
         if not write:
             acted += 1
             continue
+        if acted >= max_send:
+            # 急増ガード: 1回に送る数を絞る。残りは次の回 (データ不具合での一括送信を防ぐ)
+            print(f"     → 1回の上限 {max_send}件に達したので、次の回に回します")
+            skipped += 1
+            continue
         call = "RelistFixedPriceItem" if act == "relist" else "ReviseFixedPriceItem"
-        resp = fx.post(call, build_item_xml(iid, price, profile), tok, U.SITE_US)
+        resp = fx.post(call, build_item_xml(target, price, profile), tok, U.SITE_US)
         ack, new_id, err = U.parse_ack(resp)
         if ack not in ("Success", "Warning"):
             print(f"     ❌ 失敗: {err[:120]}")
             continue
-        new_id = new_id or iid
-        print(f"     ✅ {call} → ItemID {new_id}")
+        new_id = new_id or target
+        # 送った後に読み直して、在庫1になったかを確かめる (送れた ≠ 戻った)
+        v_status, v_qty, _v_site = ebay_status(fx, U, new_id, tok)
+        if v_status == "Active" and v_qty >= 1:
+            print(f"     ✅ {call} → ItemID {new_id} (読み直し: 在庫{v_qty})")
+        else:
+            print(f"     ⚠️要対応: {call} は通ったが読み直すと 状態={v_status} 在庫={v_qty} (ItemID {new_id})")
+            failed += 1
+        if act == "relist":
+            relisted += 1
         acted += 1
 
-    print(f"\n補充済で何もしない {done} / 対象 {acted} / 見送り {skipped}")
+    print(f"\n補充済で何もしない {done} / 対象 {acted} / 見送り {skipped}"
+          + (f" / ⚠️要対応 {failed}" if failed else ""))
     if acted and not write:
         print("→ 実行するには --write")
-    if write and acted:
-        print("→ itemID をスプシに反映: python itemid_writeback_audit.py --apply --no-cache")
-    return 0
+    if write and relisted:
+        # 出し直すと番号が変わる。台帳の B列を合わせないと、監視くんが新しい出品を見られない
+        import subprocess
+        print("→ 出し直した分の itemID をスプシに反映します")
+        subprocess.run([sys.executable, "-u", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                           "itemid_writeback_audit.py"), "--apply", "--no-cache"])
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

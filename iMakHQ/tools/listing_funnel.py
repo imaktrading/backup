@@ -10,7 +10,8 @@ eBay API を一切使わず、Seller Hub から DL する 4 レポートだけ�
   1. all-active   : eBay-all-active-listings-report-*.csv  … 全4サイト母集団 (qty/watchers/sold/price/site)
   2. quality      : Listing quality report*.xlsx            … US per-listing 深いファネル
                     (Daily impressions / CTR / Sales conversion / 適正価格 / item specifics 欠落 / 写真数 …)
-  3. unsold       : eBay-unsold-listings-report-*.csv        … 売れ残り (Sold status / Relist status)
+  3. unsold       : eBay-unsold-listings-report-*.csv (2026-09 から eBay-inactive-listings-report-*.csv)
+                          … 売れ残り (Sold status / Relist status)
   4. orders       : *orders-report-*.csv                     … 実売 (Item Number 別に集計)
 
 「今見る」snapshot より上位互換: impressions/CTR/転換率/適正価格 を per-listing で持つ。
@@ -221,7 +222,51 @@ def find_file(data_dir, pattern):
                                     os.path.getmtime(p)))
 
 
-STALE_REPORT_DAYS = 4   # 主要レポートがこれ以上古い → ファネル分析を中断 (古いと世代/効果測定が無意味)
+STALE_REPORT_DAYS = 7   # 主要レポートがこれ以上古い → ファネル分析を中断 (古いと世代/効果測定が無意味)
+# ★2026-09-14 4→7: 判定は1回で 1〜2% しか変わらない (実測 9/06→9/07 2% / 9/07→9/08 1%)。
+#   4日だと週1の DL では毎週半分以上の夜が止まる (9/03〜9/13 で 9夜中 6夜 中断)。
+PROMOTED_MIN_DAYS = 85  # 広告レポートの期間がこれ未満 → 中断
+# ★2026-09-14 広告レポートは DL 時に選んだ期間で中身が変わる。判定の線は回数 (30回 / 100回) なので、
+#   短い期間のレポートだと大半が「検索に出ていない」になる。実害: 7/23 は 3日分、9/01 は 1日分で、
+#   9/02・9/04 のファネルは NO_SEARCH 277件 (90日分の 9/06 では 2件)。期間はファイルの
+#   Start date / End date 列に入っているので、それを読んで確かめる。
+
+
+def promoted_period(path):
+    """広告レポートの Start date / End date 列 → (開始, 終了, 日数)。読めなければ None (純関数に近い I/O)。"""
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8-sig", newline="") as f:
+            rows = list(csv.reader(f))
+    except OSError:
+        return None
+    hi = next((i for i, r in enumerate(rows) if "Item ID" in [c.strip() for c in r]), None)
+    if hi is None:
+        return None
+    h = [c.strip() for c in rows[hi]]
+    if "Start date" not in h or "End date" not in h:
+        return None
+    si, ei = h.index("Start date"), h.index("End date")
+    for r in rows[hi + 1:]:
+        if len(r) > max(si, ei) and r[si].strip() and r[ei].strip():
+            try:
+                d0 = datetime.datetime.strptime(r[si].strip(), "%b %d, %Y").date()
+                d1 = datetime.datetime.strptime(r[ei].strip(), "%b %d, %Y").date()
+            except ValueError:
+                return None
+            return d0, d1, (d1 - d0).days + 1
+    return None
+
+
+def find_newest(data_dir, patterns):
+    """複数の名前のどれかで、ファイル名の日付が一番新しい1本。
+    ★2026-09-14 未落札レポートは eBay 側で名前が変わった (unsold-listings → inactive-listings)。
+      古い名前だけ探すと 9/05 の古い方を拾い、鮮度で止まる。"""
+    hits = [p for p in (find_file(data_dir, pat) for pat in patterns) if p]
+    if not hits:
+        return None
+    return max(hits, key=lambda p: (_report_date_or_none(p) or datetime.date.min, os.path.getmtime(p)))
 
 
 def _report_age_days(path):
@@ -772,7 +817,7 @@ def main():
 
     f_active = find_file(data_dir, "*all-active-listings*.csv")
     f_quality = find_file(data_dir, "Listing quality report*.xlsx")
-    f_unsold = find_file(data_dir, "*unsold-listings*.csv")
+    f_unsold = find_newest(data_dir, ("*unsold-listings*.csv", "*inactive-listings*.csv"))
     f_promoted = find_file(data_dir, "*promoted-listing*report*.csv")
     f_orders = find_file(data_dir, "*orders-report*.csv")
     if not f_active:
@@ -792,6 +837,16 @@ def main():
             f"   古いレポートで走らせると funnel世代が更新されず効果測定も無意味になります。\n"
             f"   → Seller Hub で4-5レポートを再DL → {data_dir} に置き直してから再実行。\n"
             f"   (どうしても古いまま実行する場合は --force)")
+    _pp = promoted_period(f_promoted) if f_promoted else None
+    if f_promoted and (not _pp or _pp[2] < PROMOTED_MIN_DAYS) and not args.force:
+        sys.exit(
+            f"⛔ 中断: 広告レポートの期間が "
+            + (f"{_pp[0]:%m/%d}〜{_pp[1]:%m/%d} の {_pp[2]}日分" if _pp else "読めません")
+            + f" (必要 {PROMOTED_MIN_DAYS}日以上)。\n"
+            f"   期間が短いと、ほとんどの出品が「検索に出ていない」になります。\n"
+            f"   → Seller Hub の広告レポートを **期間 90日** で落とし直して {data_dir} に置いてください。")
+    if _pp:
+        print(f"  広告レポートの期間: {_pp[0]:%m/%d}〜{_pp[1]:%m/%d} ({_pp[2]}日)")
     # 生レポートを世代フォルダに永久アーカイブ(以後 定期実行で自動蓄積=分析を後から遡れる)
     try:
         _adir, _ncopy = archive_generation(data_dir, [f_active, f_quality, f_unsold, f_promoted, f_orders])
