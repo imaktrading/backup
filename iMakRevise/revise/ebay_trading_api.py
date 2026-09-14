@@ -195,6 +195,90 @@ def get_item(item_id: str, access_token: Optional[str] = None, timeout: int = 10
     }
 
 
+def _build_getitem_specifics_xml(item_id: str) -> str:
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        f'<ItemID>{item_id}</ItemID>'
+        '<DetailLevel>ReturnAll</DetailLevel>'
+        '<IncludeItemSpecifics>true</IncludeItemSpecifics>'
+        '</GetItemRequest>'
+    )
+
+
+def _parse_item_specifics(xml: str) -> dict:
+    """Item 直下 <ItemSpecifics> の NameValueList → {Name: 先頭Value}.
+
+    <Variations><VariationSpecifics> は別ブロック (= variation 固有 trait) なので、
+    先に <Variations>...</Variations> を取り除いてから <ItemSpecifics> を探す。
+    """
+    xml_wo_variations = re.sub(r"<Variations>.*?</Variations>", "", xml, flags=re.DOTALL)
+    m = re.search(r"<ItemSpecifics>(.*?)</ItemSpecifics>", xml_wo_variations, re.DOTALL)
+    if not m:
+        return {}
+    specifics: dict = {}
+    for nv in re.finditer(r"<NameValueList>(.*?)</NameValueList>", m.group(1), re.DOTALL):
+        block = nv.group(1)
+        name = _x(block, "Name")
+        vm = re.search(r"<Value>(.*?)</Value>", block, re.DOTALL)
+        value = vm.group(1).strip() if vm else ""
+        if name:
+            specifics[name] = value
+    return specifics
+
+
+def get_item_specifics(item_id: str, access_token: Optional[str] = None, timeout: int = 10,
+                        _allow_refresh: bool = True) -> dict:
+    """ItemID → {"department":.., "size":.., "size_type":.., "error": None}.
+
+    GetItem (IncludeItemSpecifics=true) で Department / Size / Size Type を読む。
+    2026-09-14 窓口依頼 (3XL Size Type 残存スキャン、read-only) 用。
+    """
+    import requests  # 遅延 import (= test で mock しやすい)
+
+    if access_token is None:
+        access_token = load_access_token()
+
+    headers = {
+        "X-EBAY-API-COMPATIBILITY-LEVEL": COMPATIBILITY_LEVEL,
+        "X-EBAY-API-CALL-NAME": "GetItem",
+        "X-EBAY-API-SITEID": SITE_ID_US,
+        "X-EBAY-API-IAF-TOKEN": access_token,
+        "Content-Type": "text/xml; charset=utf-8",
+    }
+    body = _build_getitem_specifics_xml(item_id)
+
+    try:
+        r = requests.post(TRADING_API_URL, headers=headers, data=body.encode("utf-8"),
+                          timeout=timeout)
+    except Exception as e:
+        return {"department": None, "size": None, "size_type": None,
+                "error": f"{type(e).__name__}: {e}"}
+
+    if r.status_code != 200:
+        return {"department": None, "size": None, "size_type": None,
+                "error": f"HTTP {r.status_code}"}
+
+    xml = r.text
+    if _allow_refresh and _is_expired_iaf_token_error(xml):
+        try:
+            new_token = refresh_access_token()
+            print(f"  [Trading API] IAF token expired → refresh OK")
+            return get_item_specifics(item_id, access_token=new_token, timeout=timeout,
+                                       _allow_refresh=False)
+        except Exception as e:
+            return {"department": None, "size": None, "size_type": None,
+                    "error": f"token refresh 失敗: {e}"}
+
+    specifics = _parse_item_specifics(xml)
+    return {
+        "department": specifics.get("Department") or None,
+        "size": specifics.get("Size") or None,
+        "size_type": specifics.get("Size Type") or None,
+        "error": None,
+    }
+
+
 def get_items_batch(item_ids: list, access_token: Optional[str] = None,
                      sleep_sec: float = 0.5, verbose: bool = True) -> dict:
     """複数 ItemID を順次取得 → {item_id: dict}.
