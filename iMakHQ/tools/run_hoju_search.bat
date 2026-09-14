@@ -199,10 +199,11 @@ REM          a supplier goes sold -> in stock, so a listing that sold while its 
 REM          stayed in stock sat at 0 (4 found). Orders come from the order API so this
 REM          does not wait for the weekly report download. Skips: unshipped orders,
 REM          supplier sold / crawl older than the shipment, same card already live,
-REM          non-US (mirror) listings. FIRST NIGHTS = LIST ONLY (no --write) until the
-REM          morning log has been checked.
+REM          non-US (mirror) listings. At most 10 sends per night; each send is read back.
+REM          2026-09-15: switched on (--write) after the 09-14 list-only night matched the
+REM          daytime check exactly (3 to put back, Snorlax held for an unshipped order).
 echo [sold-restock] %date% %time% >> "%LOG%"
-python -u sold_restock.py --orders-api >> "%LOG%" 2>&1
+python -u sold_restock.py --orders-api --write --max=10 >> "%LOG%" 2>&1
 
 REM --- 6c2) cull (take-down) candidates from the live listing list.
 REM          2026-09-10: the funnel above stops by itself when the Seller Hub

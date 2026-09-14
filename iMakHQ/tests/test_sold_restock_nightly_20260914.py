@@ -67,8 +67,9 @@ def test_send_has_a_cap_and_a_read_back():
     assert src.index("if acted >= max_send:") < src.index('call = "RelistFixedPriceItem"')
 
 
-def test_nightly_bat_runs_list_only_for_now():
+def test_nightly_bat_sends_with_a_cap():
+    """★2026-09-15 ユーザー「うん」: 9/14 の一覧だけの夜が昼の確認と一致 → 実際に送る (1晩10件まで)。"""
     bat = open(os.path.join(HQ, "tools", "run_hoju_search.bat"), "rb").read()
     assert b"\r\n" in bat and b"\n" not in bat.replace(b"\r\n", b"")
-    line = next(l for l in bat.decode("ascii").splitlines() if "sold_restock.py" in l)
-    assert "--orders-api" in line and "--write" not in line
+    line = next(l for l in bat.decode("ascii").splitlines() if l.startswith("python") and "sold_restock.py" in l)
+    assert "--orders-api" in line and "--write" in line and "--max=10" in line
