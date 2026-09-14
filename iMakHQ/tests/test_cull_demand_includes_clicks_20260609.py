@@ -35,12 +35,20 @@ def _flags(c, iid):
     return {k for k, v in c.items() if isinstance(v, list) and any(r.get("item_id") == iid for r in v)}
 
 
-def test_oos_with_exposure_is_restock_even_zero_clicks():
-    """OOS・実売0・クリック0 でも eBay が1000表示(関連性あり) → RESTOCK。CULLにしない。"""
-    c = lf.classify([_oos("exposed", impr_total=1000, ctr_total=0.0)])
+def test_oos_with_search_exposure_is_restock_even_zero_clicks():
+    """OOS・実売0・クリック0 でも 検索(広告以外)で表示された → RESTOCK。CULLにしない。"""
+    c = lf.classify([_oos("exposed", impr=3, impr_total=1000, ctr_total=0.0)])
     f = _flags(c, "exposed")
     assert "RESTOCK" in f
     assert "CULL" not in f
+
+
+def test_oos_ad_only_exposure_is_cull():
+    """★2026-09-14 (残務 №21): 広告に出ただけ (impr_total のみ) は PSA 以外も CULL。"""
+    c = lf.classify([_oos("adonly", impr_total=1000, ctr_total=0.0)])
+    f = _flags(c, "adonly")
+    assert "CULL" in f
+    assert "RESTOCK" not in f
 
 
 def test_oos_no_exposure_no_demand_is_cull():
@@ -51,9 +59,9 @@ def test_oos_no_exposure_no_demand_is_cull():
     assert "RESTOCK" not in f
 
 
-def test_oos_any_exposure_is_restock():
-    """OOS・impr_total=1 でも eBayが表示した(関連性あり) → RESTOCK。CULL は impr完全0だけ。"""
-    c = lf.classify([_oos("tiny", impr_total=1, ctr_total=0.0)])
+def test_oos_any_search_exposure_is_restock():
+    """OOS・検索表示(impr)=1 でも eBayが表示した(関連性あり) → RESTOCK。"""
+    c = lf.classify([_oos("tiny", impr=1, impr_total=1, ctr_total=0.0)])
     f = _flags(c, "tiny")
     assert "RESTOCK" in f
     assert "CULL" not in f

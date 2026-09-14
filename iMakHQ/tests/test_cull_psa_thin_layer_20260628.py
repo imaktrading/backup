@@ -40,10 +40,12 @@ def test_psa_with_real_demand_stays_restock():
     assert _flags([psa2], psa2) == "RESTOCK"
 
 
-def test_ichibankuji_impr_total_stays_restock():
-    # 一番くじ (戻す仕組みあり) は従来通り impr_total>0 だけで RESTOCK
+def test_ichibankuji_impr_total_only_goes_cull():
+    # ★2026-09-14 (残務 №21): 一番くじも PSA と同じ厳しさ。広告表示だけ → CULL
     k = _row("Ichiban Kuji Dragon Ball A Prize", impr_total=50.0)
-    assert _flags([k], k) == "RESTOCK"
+    assert _flags([k], k) == "CULL"
+    k2 = _row("Ichiban Kuji Naruto B Prize", impr=2, impr_total=50.0)
+    assert _flags([k2], k2) == "RESTOCK"
 
 
 def test_no_restock_owner_is_cull():

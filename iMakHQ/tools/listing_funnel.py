@@ -448,16 +448,16 @@ def classify(rows):
     #   (実売/watch/organic impr ≥1) でしか拾われない。impr_total(広告込み)だけで RESTOCK に
     #   すると、再仕入れにも乗らず CULL にも落ちず宙ぶらりんになる(2026-06-28 実データ 211件)。
     #   → PSA は real_demand(=PSA再仕入れと同基準)で判定し、実需ゼロなら CULL(畳む)に落とす。
-    #   非PSA は従来通り impr_total>0 を RESTOCK とみなす(各カテゴリの再仕入れ運用に委ねる)。
+    #   ★2026-09-14 ユーザー確定 (残務 №21): **非PSA も同じ厳しさ**にそろえる。
+    #     広告に出ただけ (impr_total のみ) では再仕入れ待ちにしない。実測 9/14 funnel で該当は
+    #     一番くじフィギュア3件 (売れた/ウォッチ/検索表示 すべて0・出品79〜172日) → CULL へ。
     def _real_demand(r):
         return _demand(r) > 0 or r.get("impr", 0) >= 1   # organic のみ (impr_total=広告は除外)
     def _worth_restock(r):
         owner = restock_owner(r)
         if not owner:
             return False        # 戻す口が無い → 需要があっても誰も戻さない = 畳む
-        if owner == "PSA10":
-            return _real_demand(r)
-        return _demand(r) > 0 or r.get("impr_total", 0) > 0
+        return _real_demand(r)
     restock = [r for r in oos if _worth_restock(r)]
     cull = [r for r in oos if not _worth_restock(r)]
     restock.sort(key=lambda x: -_demand(x))
