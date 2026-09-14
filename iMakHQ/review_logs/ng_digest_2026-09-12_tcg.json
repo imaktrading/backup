@@ -1,0 +1,17 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [
+    "error: 2件"
+  ],
+  "log_signal_lines": [
+    "失敗",
+    "失敗"
+  ],
+  "recurring_missing": [],
+  "counts": {
+    "program": 0,
+    "log": 1,
+    "recurring_missing": 0
+  }
+}

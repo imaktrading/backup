@@ -1,0 +1,18 @@
+{
+  "project": "mercari",
+  "program_items": [],
+  "log_signals": [
+    "error: 3件"
+  ],
+  "log_signal_lines": [
+    "❌ 3AI合意: BLOCK (#7)",
+    "結果: ✅ GO 0 / 🟡 保留 0 / ❌ NO-GO 0 / ⬜ 不明 10",
+    "📄 生成ログ signal: error: 2件"
+  ],
+  "recurring_missing": [],
+  "counts": {
+    "program": 0,
+    "log": 1,
+    "recurring_missing": 0
+  }
+}

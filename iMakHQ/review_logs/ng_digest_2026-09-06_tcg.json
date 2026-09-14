@@ -1,0 +1,11 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [],
+  "recurring_missing": [],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 0
+  }
+}

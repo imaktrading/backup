@@ -1,0 +1,40 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [],
+  "log_signal_lines": [],
+  "recurring_missing": [
+    {
+      "category": "one_piece_tcg",
+      "item_id": "番号不明 【PSA10】 シャンクス　OP09 001 152552917 (捨てた仕入候補の目視 2026-09-05 / https://jp.mercari.com/item/m15522708256)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "seen_days": 2,
+      "status": "pending"
+    },
+    {
+      "category": "one_piece_tcg",
+      "item_id": "番号不明 世界に11枚⁉️【PSA10】 シャンクス　OP09 001 (捨てた仕入候補の目視 2026-09-05 / https://jp.mercari.com/item/m17729932849)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "seen_days": 2,
+      "status": "pending"
+    },
+    {
+      "category": "pokemon_tcg",
+      "item_id": "127/193 PSA10 レックウザ　ボールミラー　m2a 127/193 by メルカリ (捨てた仕入候補の目視 2026-09-05 / https://jp.mercari.com/item/m75865715893)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "seen_days": 2,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 3
+  }
+}
