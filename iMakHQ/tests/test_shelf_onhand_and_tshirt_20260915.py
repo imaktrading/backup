@@ -48,6 +48,17 @@ def test_onhand_ids_from_sheet_and_empty_supply_rows():
     assert SE.onhand_ids_from(oh, [prod]) == {GOKU, "356959007432"}
 
 
+def test_purchase_table_tab_counts_as_onhand():
+    """★ユーザー「ここのどこかにないかな」: ①有在庫の仕入れ表 (2行目見出し / E列 出品番号) に Thunder Pass 赤が載っていた。"""
+    buy = [[""] * 10,
+           ["仕入れ先", "カテゴリー", "日付", "商品名", "カスタムラベル（管理番号）", "仕入点数", "仕入金額", "1点当たり", "在庫", "出品中"],
+           ["", "", "2025/06/13", "Montbell Thunder Pass Jacket 1128635 US L (JP XL) Red", "357100759244", "", "14,800"],
+           ["", "", "2025/06/13", "no number", "", "", ""],
+           ["", "", "", "short", "12345", "", ""]]
+    assert SE.onhand_ids_from([], [], buy) == {"357100759244"}
+    assert SE.ONHAND_PURCHASE_GID == 1530110022
+
+
 def test_funnel_group_names():
     assert lf.evict_group(_row(GOKU, "S.H.Figuarts Son Goku", age=500), onhand={GOKU}) == "対象外 (有在庫)"
     t = "Dragon Ball Goku Anime Graphic T-Shirt UNIQLO UT Orange US S (JP M) NWT"

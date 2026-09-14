@@ -103,6 +103,10 @@ STALE_CATEGORIES = tuple(STALE_MAX_AGE)
 ONHAND = "有在庫"
 ONHAND_SHEET_ID = "1zbzr1fifHMAcgJ5n_9CcMXzJASxcvk3DutgOQfNElNA"   # 有在庫シート (シート2: B列 出品番号)
 ONHAND_GID = 2025152218
+# ★2026-09-15 ユーザー「(有在庫のファイルの) ここのどこかにないかな」→ 「①有在庫の仕入れ表」タブ (2行目が見出し、
+#   E列「カスタムラベル（管理番号）」= 出品番号)。シート2 に無い Thunder Pass 赤/茶 (357100759244 / 357100717683) が載っていた
+ONHAND_PURCHASE_GID = 1530110022
+ONHAND_PURCHASE_COL = 4
 ONHAND_CACHE = r"C:/dev/iMak_data/hq/shelf_onhand_cache.json"
 ONE_OFF_SUPPLY = re.compile(r"jp\.mercari\.com|fril\.jp", re.I)       # メルカリ・ラクマ = 1点物の仕入元
 
@@ -122,13 +126,17 @@ def category_for(item_id, sheet_category, supply_url="", onhand=()):
     return sheet_category or None
 
 
-def onhand_ids_from(onhand_rows, product_rows_list):
+def onhand_ids_from(onhand_rows, product_rows_list, purchase_rows=None):
     """有在庫の出品番号 (純関数, test 可)。
 
     有在庫シート (1〜3行目は見出し、B列 出品番号) + 商品管理シートで **出品番号があるのに仕入元URL (A列) が空**
     の行 (= 有在庫。巡回対象外で正常 / onhand_stock_rows_have_no_supply_url)。
     """
     out = set()
+    for r in (purchase_rows or [])[2:]:                 # ①有在庫の仕入れ表 (E列 = 出品番号)
+        iid = (r[ONHAND_PURCHASE_COL] if len(r) > ONHAND_PURCHASE_COL else "").strip()
+        if iid.isdigit() and len(iid) == 12:
+            out.add(iid)
     for r in (onhand_rows or [])[3:]:
         iid = (r[1] if len(r) > 1 else "").strip()
         if iid.isdigit():
@@ -152,8 +160,10 @@ def load_onhand_ids(gc=None, product_rows_list=None):
         if product_rows_list is None:
             product_rows_list = [gc.open_by_key(sid).get_worksheet_by_id(LF.SHEET_GID).get_all_values()
                                  for sid in LF.SHEET_IDS]
-        oh = gc.open_by_key(ONHAND_SHEET_ID).get_worksheet_by_id(ONHAND_GID).get_all_values()
-        ids = onhand_ids_from(oh, product_rows_list)
+        book = gc.open_by_key(ONHAND_SHEET_ID)
+        oh = book.get_worksheet_by_id(ONHAND_GID).get_all_values()
+        buy = book.get_worksheet_by_id(ONHAND_PURCHASE_GID).get_all_values()
+        ids = onhand_ids_from(oh, product_rows_list, buy)
         if ids:
             os.makedirs(os.path.dirname(ONHAND_CACHE), exist_ok=True)
             with open(ONHAND_CACHE, "w", encoding="utf-8") as f:
