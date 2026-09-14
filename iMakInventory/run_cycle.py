@@ -701,21 +701,14 @@ def _phase_monitor(
                  + ", ".join(f"row{m.get('row_index')}slot{m.get('slot')}" for m in _mm_swap[:10]),
                  test_mode)
         _parts = []
+        # ★ 2026-09-14 ユーザー指示「意味のないアラートは出さないで」:
+        #   急増ガードの HOLD は「手作業不要・次 cycle 以降に自動で消し込む」ものなので告知しない
+        #   (cycle ログには下で必ず残す)。告知するのは人が直す必要がある mismatch だけ。
         if _held:
-            _parts.append(
-                "【消込急増ガード HOLD】" + ", ".join(
-                    f"[{h['sheet']}] 新規{h.get('new_count', '?')}件 (候補{h['candidate_count']}件)"
-                    for h in _held)
-                + " → この cycle の一括消込は見送り。\n"
-                "  ★ **手作業は不要**: 候補は 1 件ずつ「消す直前にもう一度 URL を引いて "
-                "2 回とも売切だった枠」だけに絞ってある。積み残しは次 cycle 以降に "
-                "自動で消し込まれる (1 cycle の上限は {cap})。\n"
-                "  ★ この通知の意味は「1 cycle でこれだけ湧いたのは多い」という記録。"
-                "supplier が 1 つに偏っていたら scraper 系統崩壊を疑って DOM 検体を見ること。\n"
-                "  急いで消したい時だけ: python -m tools.supervised_backup_drain "
-                "[--reverify-snkrdunk --execute]\n"
-                "  (compare-and-clear + 復元アーカイブで安全。触るのは補URL(AC-AG)のみ)。".format(
-                    cap=(f"{CLEAR_DRAIN_CAP} 件" if CLEAR_DRAIN_CAP else "無し")))
+            _log("  [補URL消込] 急増ガード HOLD: " + ", ".join(
+                f"[{h['sheet']}] 新規{h.get('new_count', '?')}件 (候補{h['candidate_count']}件)"
+                for h in _held) + " → この cycle は見送り、次 cycle 以降に自動で消込 (告知しない)",
+                test_mode)
         if _mm:
             _parts.append(f"【compare-and-clear mismatch {len(_mm)}件】セル値≠確認URL "
                           "(HQ が生きた新URLに差替 or 変化) → 消さずに要対応記録。")
@@ -756,8 +749,8 @@ def _phase_monitor(
                 _log(f"  [!] 補URL消込 mail 失敗: {type(e).__name__}: {e}", test_mode)
         else:
             # 非 silent: 告知は throttle したが cycle ログ + report には必ず残す (墓場化しない)。
-            _log(f"  [補URL消込] HOLD={len(_held)}(候補最大{_held_max}) / mismatch=0 "
-                 f"= 既知 backlog 継続 (desktop/mail は throttle、次は悪化 or 24h で再告知)", test_mode)
+            _log(f"  [補URL消込] HOLD={len(_held)}(候補最大{_held_max}) / 要対応 mismatch={len(_mm)} "
+                 f"→ 告知なし (HOLD は自動で消化される / mismatch は throttle 中)", test_mode)
 
     # 補URL救済 (Phase1 救済率 signal)。正常イベント = ログのみ (HQ が 補URL救済ログ から集計)。
     if grand["rescue_new"] or grand["rescue_current"]:

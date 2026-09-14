@@ -42,8 +42,12 @@ def _base_stats(**over):
     return d
 
 
-def test_backup_clear_surge_hold_alerts(monkeypatch, tmp_path):
-    """消込急増ガード HOLD → desktop ALERT + mail 発報."""
+def test_backup_clear_surge_hold_does_not_alert(monkeypatch, tmp_path):
+    """★ 2026-09-14 ユーザー指示「意味のないアラートは出さないで」.
+
+    急増ガードの HOLD は「手作業不要・次 cycle 以降に自動で消し込む」ので告知しない。
+    記録 (grand / cycle ログ) には残す。
+    """
     sent = {}
     run_cycle = _patch_common(monkeypatch, tmp_path, sent)
     stats = _base_stats(backup_clear={"cleared": 0, "skipped_mismatch": [], "held": True,
@@ -52,11 +56,10 @@ def test_backup_clear_surge_hold_alerts(monkeypatch, tmp_path):
 
     grand = run_cycle._phase_monitor(sheet="high", limit=None, test_mode=True,
                                      single_sheet_id="dummy", single_sheet_label="HIGH")
-    assert len(grand["backup_clear_held"]) == 1
+    assert len(grand["backup_clear_held"]) == 1          # 記録には残る
     alerts = list((tmp_path / "OneDrive" / "デスクトップ").glob("ALERT_iMakInventory_backup_clear_*.txt"))
-    assert len(alerts) == 1
-    assert "fail-OPEN ではない" in alerts[0].read_text(encoding="utf-8")
-    assert "補URL消込" in sent.get("subject", "")
+    assert alerts == []                                   # デスクトップに出さない
+    assert "subject" not in sent                          # メールも出さない
 
 
 def test_backup_clear_mismatch_alerts(monkeypatch, tmp_path):

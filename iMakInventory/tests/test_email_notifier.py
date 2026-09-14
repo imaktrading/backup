@@ -301,3 +301,19 @@ def test_send_swallows_smtp_error(monkeypatch, tmp_path):
     assert res["sent"] is False
     assert res["error"] is not None
     assert "ConnectionError" in res["error"]
+
+
+def test_skip_status_is_not_mailed(monkeypatch):
+    """★ 2026-09-14 「意味のないアラートは出さないで」: 取下げ対象なし ([SKIP]) はメールしない.
+
+    送らない時は skipped_reason だけ返す (= run_cycle は送信失敗扱いにせず、mail_failed ALERT も出ない)。
+    """
+    import email_notifier as en
+    called = []
+    monkeypatch.setattr(en, "_send_via_gmail", lambda *a, **k: called.append(a))
+    for st in ("success_no_upload", "success_no_changes"):
+        res = en.send_cycle_report({"status": st, "phases": {}, "ts_start": "2026-09-14T13:30:00"})
+        assert res["sent"] is False
+        assert res["error"] is None
+        assert res["skipped_reason"]
+    assert called == []

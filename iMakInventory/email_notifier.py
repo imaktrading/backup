@@ -732,6 +732,12 @@ def send_cycle_report(cycle_log: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         {"sent": bool, "skipped_reason": Optional[str], "error": Optional[str]}
     """
+    # ★ 2026-09-14 ユーザー指示「意味のないアラートは出さないで」:
+    #   取下げ対象なし ([SKIP]) は何も起きていない報告なので送らない。
+    #   巡回が止まった時は staleness 告知 (run_cycle._check_cycle_staleness) が別に出る。
+    if cycle_log.get("status") in ("success_no_upload", "success_no_changes"):
+        return {"sent": False, "skipped_reason": "取下げ対象なし (告知不要)", "error": None}
+
     # 遅延 import (auth/encrypted_gmail は pywin32 依存、テストで不要なら触らない)
     try:
         from auth.encrypted_gmail import load_gmail_config  # noqa: PLC0415
