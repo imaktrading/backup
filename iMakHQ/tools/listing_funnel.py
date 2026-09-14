@@ -664,9 +664,11 @@ def evict_group(r, onhand=None, sheet_cat=None, known=None):
         return _EVICT_OUT
     if se._f(r.get("age_days")) <= se.STALE_MAX_AGE.get(cat, se.MIN_AGE_DAYS):
         return _EVICT_WAIT
+    if se.is_dead_shelf(r):
+        return "落とす1 ウォッチ0・200日超"     # ★2026-09-15 作品に関係なく先に落とす (棚と同じ判定)
     names = {0: "ガンダム/ドラゴンボール", 1: "ワンピース・その他", 2: "G-SHOCK", 3: "ポケモン"}
     rank = se.franchise_rank(r.get("title"))
-    return f"落とす{rank + 1} {names.get(rank, '')}".strip()
+    return f"落とす{rank + 2} {names.get(rank, '')}".strip()
 
 
 def _funnel_vals(r):

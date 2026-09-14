@@ -25,11 +25,12 @@ def test_column_exists_and_url_stays_last():
 
 
 def test_groups_follow_shelf_evict_order():
-    assert lf.evict_group(_row("PSA 10 Gundam CCG", 60)).startswith("落とす1")
-    assert lf.evict_group(_row("PSA 10 Dragon Ball", 60)).startswith("落とす1")
-    assert lf.evict_group(_row("PSA 10 One Piece", 60)).startswith("落とす2")
-    assert lf.evict_group(_row("CASIO G-Shock GA-2100", 60)).startswith("落とす3")
-    assert lf.evict_group(_row("PSA 10 Pokemon SV5a", 60)).startswith("落とす4")
+    # ★2026-09-15: 先頭に「落とす1 ウォッチ0・200日超」が入ったので作品のグループは2〜5に繰り下げ
+    assert lf.evict_group(_row("PSA 10 Gundam CCG", 60)).startswith("落とす2")
+    assert lf.evict_group(_row("PSA 10 Dragon Ball", 60)).startswith("落とす2")
+    assert lf.evict_group(_row("PSA 10 One Piece", 60)).startswith("落とす3")
+    assert lf.evict_group(_row("CASIO G-Shock GA-2100", 60)).startswith("落とす4")
+    assert lf.evict_group(_row("PSA 10 Pokemon SV5a", 60)).startswith("落とす5")
 
 
 def test_not_candidates():
@@ -51,4 +52,4 @@ def test_vals_line_up_with_cols():
                             "price": 1.0, "trend_price": 0, "qty": 1, "sold_qty": 0,
                             "watch": 0, "impr": 0.0, "ctr": 0.0, "age_days": 60})
     assert len(vals) == len(lf.FUNNEL_COLS)
-    assert dict(zip(lf.FUNNEL_COLS, vals))["落とすグループ"].startswith("落とす1")
+    assert dict(zip(lf.FUNNEL_COLS, vals))["落とすグループ"].startswith("落とす2")   # ★2026-09-15 繰り下げ

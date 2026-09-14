@@ -63,7 +63,7 @@ CSV_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__
 
 TIER_OOS, TIER_STALE = 1, 2
 TIER_NAME = {TIER_OOS: "① 買えない & 需要ゼロ",
-             TIER_STALE: "② TCG/G-SHOCK 30日超・未販売 (売れない作品 → ウォッチ少ない順)"}
+             TIER_STALE: "② TCG/G-SHOCK 30日超・未販売 (ウォッチ0・200日超 → 売れない作品 → ウォッチ少ない順)"}
 # 出品からこれ未満は「まだ判定できない」ので触らない。
 MIN_AGE_DAYS = 30
 # ★②(仕入元が活きている分)を落とすカテゴリ。
@@ -448,6 +448,18 @@ def write_candidates(picked, shelf_of, cat_of=None, path=None, clicks=None):
         return ""
 
 
+# ★2026-09-15 ユーザー「WATCHが0で200日以上なら、カテゴリ関係なく、不良在庫＝陳列居座り＝SEOロスじゃないのかな」:
+#   ② の中で **作品より先に** 落とす。実測 (9/15 ファネル・US 200日超): ウォッチ0 63件 → 90日で売れ1 (対象外の UNIQLO) /
+#   ウォッチ1以上 50件 → 売れ2。在庫ありで落とす候補に入っているウォッチ0・200日超は50件 (G-SHOCK 41 / ワンピース他 8 / DB 1)。
+#   どれも既に30日超の候補なので、変わるのは **落ちる順番だけ** (有在庫・売れた物・対象外カテゴリは今までどおり残す)。
+DEAD_SHELF_AGE = 200
+
+
+def is_dead_shelf(row):
+    """ウォッチ0 で出品200日超 = 居座り (純関数, test可)。"""
+    return _f(row.get("watch")) == 0 and _f(row.get("age_days")) > DEAD_SHELF_AGE
+
+
 def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=None,
          no_demand=None):
     """目標額に届くまで、順位の上から選ぶ。戻り: (選んだ行, 空く額) 純関数, test可。
@@ -479,7 +491,8 @@ def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=No
         if t == TIER_OOS:
             rank = (0, 0, -shelf_of(r))              # ① 空く額の大きい順
         else:
-            rank = (franchise_rank(r.get("title")),  # ② 売れない作品から (2026-09-07)
+            rank = (0 if is_dead_shelf(r) else 1,    # ② ウォッチ0・200日超を先に (2026-09-15)
+                    franchise_rank(r.get("title")),  #    → 売れない作品から (2026-09-07)
                     _f(r.get("watch")),              #    → ウォッチ少ない順
                     _f(r.get("impr_total")),         #    → 表示少ない順
                     -shelf_of(r))                    #    → 金額 大きい順
@@ -925,7 +938,7 @@ def main():
             return _l(row) if "_mirror" in row else _f2(row)
 
     print("対象: 仕入元が死んでいるもの(全カテゴリ) → "
-          f"{'/'.join(STALE_CATEGORIES)} の 期限超え・未販売を 売れない作品 → ウォッチ少ない順")
+          f"{'/'.join(STALE_CATEGORIES)} の 期限超え・未販売を ウォッチ0・200日超 → 売れない作品 → ウォッチ少ない順")
     if target <= 0:
         print("  今日はまだ出品していないので、落とす分もありません")
         return 0
