@@ -49,10 +49,22 @@ def test_pokemon_normal_expansion_still_requires_rarity():
     ★ Advisor 明示指示: 「カテゴリ丸ごとの除外は本当の欠損を見逃すので禁止」
     """
     from check_csv import required_specifics_for_card
-    for cardno in ["SV10-001", "SV4-025", "S8a-005", "SV-P-100"]:
+    # ★2026-09-14 (残務 №23): S8a-005 / SV-P-100 を外した。edcb493 で免除は
+    #   「catalog が公式にレアリティ表記なしと持つ行」に変わり、両者は catalog の rarity が空
+    #   (実測 2026-09-14) = 免除が正しい。代わりに catalog に rarity が在る通常拡張を置く。
+    for cardno in ["SV10-001", "SV4-025", "S8-001", "S9-001"]:
         req = required_specifics_for_card(cardno, "")
         assert "C:Rarity" in req, \
             f"{cardno}: C:Rarity 過剰除外 (通常拡張は必須のまま維持)"
+
+
+def test_catalog_rarity_absent_rows_drop_rarity():
+    """catalog の rarity が空の行は prefix に無くても免除 (edcb493 の新ルール)。"""
+    from check_csv import required_specifics_for_card, rarity_absent_official
+    for cardno in ["S8a-005", "SV-P-100"]:
+        if not rarity_absent_official(cardno):
+            continue    # catalog が変わった/読めない時は判定しない (fail-closed 側)
+        assert "C:Rarity" not in required_specifics_for_card(cardno, "")
 
 
 def test_don_and_resource_prefixes_still_drop_rarity():

@@ -377,6 +377,14 @@ def sheet_pending_rows(rows2d, decided, today=None):
     return out
 
 
+def _own_photos(r):
+    """行の写真のうち、その出品自身の写真だけ (★2026-09-14 ほかの商品のサムネイル・アイコンが混ざっていた)。"""
+    sys.path.insert(0, r"C:\dev\iMak\iMakMercari")
+    from ut_catalog_values import own_item_photos
+    return own_item_photos(r[C_URL] if len(r) > C_URL else "",
+                           ((r[C_PHOTOS] if len(r) > C_PHOTOS else "") or "").split("|"))
+
+
 def high_row(r, color_jp=""):
     """中間タブの行 → 商品管理シートに足す行 (A..T)。純関数。
 
@@ -388,6 +396,7 @@ def high_row(r, color_jp=""):
         row[c] = r[c] if c < len(r) else ""
     row[C_COLOR] = color_jp or (r[C_COLOR] if C_COLOR < len(r) else "")
     row[C_CAT] = SHEET_CATEGORY
+    row[C_PHOTOS] = "|".join(_own_photos(r))      # 出品画像に別の商品の写真を持ち込まない
     return row
 
 
@@ -762,7 +771,7 @@ def build_html(items, catalog):
              "<b>確信が無ければ選ばない</b> (違う柄を出すと別デザイン発送になります)。</div>"]
     for it in items:
         r = it["row"]
-        photos = [u for u in (r[C_PHOTOS] or "").split("|") if u.strip()]
+        photos = _own_photos(r)
         main = prc._proxied(photos[0]) if photos else ""
         # メルカリの写真は全部 (背面の写真が2枚目以降にあることが多い)
         sm = "".join(f"<a href='{_html.escape(r[C_URL])}' target='_blank'>"
@@ -1108,7 +1117,7 @@ def save(items, res, now=None):
         if not it:
             continue
         r = it["row"]
-        photos = [u.strip() for u in (r[C_PHOTOS] or "").split("|") if u.strip()]
+        photos = _own_photos(r)
         _info = (res.get("nocat_info") or {}).get(idx) or {}
         req_rows.append({"url": r[C_URL].strip(), "title": r[C_TITLE], "color": r[C_COLOR],
                          "size": r[C_SIZE], "tag": r[C_TAG], "kw": r[C_KW],

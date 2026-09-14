@@ -698,6 +698,38 @@ def images_for_listing(v, seller_urls=()):
                           v.get("img_drop") or [], first=v.get("img_main") or "")
 
 
+_RE_MERCARI_ITEM = re.compile(r"jp\.mercari\.com/item/(m\d+)")
+
+
+def own_item_photos(source_url, photos):
+    """仕入元の写真のうち **その出品自身の写真だけ** (純関数, test 可)。
+
+    ★2026-09-14 ユーザー「目視の仕入元の画像、余計なの入ってない？」。
+      抽出くんの写真列には、その出品の写真の後ろに **出品者のアイコン** と
+      **ほかの商品のサムネイル** (thumb/item/webp/別の番号) が続いていた。
+      中間タブ 618行中390行 / 目視に出た20件中19件。出品画像はカタログの後ろに
+      仕入元の写真を足すので、目視で外さないと **別の商品の写真が eBay に載る**。
+    メルカリの出品 (…/item/m番号) は、その番号の写真だけを残す。
+    それ以外 (ラクマ・Amazon 等) は番号で見分けられないので、メルカリの
+    ほかの商品のサムネイルとアイコンだけを外す (自分の写真まで消さない)。
+    """
+    m = _RE_MERCARI_ITEM.search(source_url or "")
+    own = m.group(1) if m else ""
+    out, seen = [], set()
+    for u in photos or ():
+        u = (u or "").strip()
+        if not u or u in seen:
+            continue
+        if own:
+            if not re.search(rf"/{own}_\d+\.", u):
+                continue
+        elif "mercdn.net" in u and ("/thumb/item/" in u or "member" in u):
+            continue
+        seen.add(u)
+        out.append(u)
+    return out
+
+
 def apply_to_specs(specs, v, validate):
     """Claude の Item Specifics に カタログの値を上書き → 検証後の specs。純関数寄り。
 
