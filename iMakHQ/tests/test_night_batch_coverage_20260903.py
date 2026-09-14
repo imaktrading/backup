@@ -43,13 +43,33 @@ def test_analyses_run_at_night():
         assert _runs(s), s
 
 
+# ★2026-09-14: `--write` が無い時は一覧を出すだけ (eBay に書かない) と**確かめた物だけ**を並べる。
+#   sold_restock.py: 既定は「まだ送りません (--write で実行)」を出して終わる (コードで確認)。
+#   他のスクリプトは確かめていないので、名前が出ただけで止める (緩めない)。
+_LIST_ONLY_WITHOUT_WRITE = ("sold_restock.py",)
+
+
 def test_nothing_that_writes_to_ebay_runs_at_night():
-    """取下げ・再出品・数量戻しは人が押す。夜に混ぜない。"""
+    """取下げ・再出品・数量戻しは人が押す。夜に混ぜない。
+
+    ★2026-09-14: 名前だけで赤にすると、読むだけの下ごしらえ (`sold_restock.py --orders-api` =
+      一覧だけ) まで止めて、全員のコミットが通らなくなっていた。例外は上の表に載せた物の
+      `--write` 無しだけ。PSA の目視を `--dry-run` なら夜に許しているのと同じ考え方。
+    """
     for s in ("cull_end.py", "shelf_evict.py", "sold_restock.py",
               "relist_from_funnel.py", "relist_add_from_pending.py",
               "relist_writeback.py", "psa_restock_writeback.py",
               "ebay_upload_csv.py"):
-        assert not _runs(s), f"eBay に書くものが夜間バッチに入っている: {s}"
+        head = "python -u " + s
+        for line in _BAT.splitlines():
+            if head not in line:
+                continue
+            rest = line.split(head, 1)[1]
+            if rest[:1] and (rest[:1].isalnum() or rest[:1] in "_."):
+                continue                      # 別のスクリプト名の一部
+            if s in _LIST_ONLY_WITHOUT_WRITE and "--write" not in rest:
+                continue                      # 一覧だけ (eBay に書かない)
+            raise AssertionError(f"eBay に書くものが夜間バッチに入っている: {s}{rest}")
 
 
 def test_no_visual_confirm_runs_at_night():

@@ -878,13 +878,29 @@ def write_unresolved_note(held, out_path, today, category=""):
     return len(held)
 
 
+def _md_cell(v, limit=None):
+    """Markdown 表のセルに入れる文字列 (純関数)。
+
+    ★2026-09-14 catalog 指摘 (catalog/requests/2026-09-12_pdca_catalog_queue_tcg_question.md):
+      identity に生の縦棒 (例 `083/062 | Chili | Sv3a: Raging Surf`) が入り、表の列がずれて
+      field / 候補値 / 根拠 の境界を読み違えていた。縦棒は全角 `｜`、改行は空白にする
+      (全角にするのは、生のテキストのまま読んでも読みやすいため)。
+    """
+    t = str(v if v is not None else "").replace("|", "｜")
+    t = " ".join(t.splitlines())
+    return t[:limit] if limit else t
+
+
 def _queue_table(items):
     rows = ["| pri | item | 商品(identity) | field | 候補値 | 確信度 | 根拠 |",
             "|--:|---|---|---|---|--:|---|"]
     for r in items:
-        ident = (r.get("identity") or "").strip() or "**(不明=要調査)**"
-        rows.append(f"| {r['priority']} | {r['item_id']} | {ident} | {r['target_field']} | "
-                    f"{(r['suggested_value'] or '')[:24]} | {r.get('confidence','')} | {(r['evidence'] or '')[:50]} |")
+        ident = _md_cell((r.get("identity") or "").strip()) or "**(不明=要調査)**"
+        # ★2026-09-14: 根拠を50字で切っていたため、catalog が判断できなかった
+        #   (「PSA Subject='RIKA SUPER' の語が CSVの」で途切れていた)。判断に足る長さにする。
+        rows.append(f"| {r['priority']} | {_md_cell(r['item_id'])} | {ident} | {_md_cell(r['target_field'])} | "
+                    f"{_md_cell(r['suggested_value'] or '', 24)} | {_md_cell(r.get('confidence',''))} | "
+                    f"{_md_cell(r['evidence'] or '', 200)} |")
     return rows
 
 
@@ -1128,9 +1144,9 @@ def generate_report(con, out_path, limit=50):
         "|--:|---|---|---|---|--:|---|---|",
     ]
     for r in list_queue(con, status="pending", limit=limit):
-        lines.append(f"| {r['priority']} | {r['item_id']} | {(r.get('identity') or '') or '(不明)'} | "
-                     f"{r['target_field']} | "
-                     f"{(r['suggested_value'] or '')[:20]} | {r['seen_count']} | {r['layer']} | {r['source']} |")
+        lines.append(f"| {r['priority']} | {_md_cell(r['item_id'])} | {_md_cell(r.get('identity') or '') or '(不明)'} | "
+                     f"{_md_cell(r['target_field'])} | "
+                     f"{_md_cell(r['suggested_value'] or '', 20)} | {r['seen_count']} | {_md_cell(r['layer'])} | {_md_cell(r['source'])} |")
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     Path(out_path).write_text("\n".join(lines), encoding="utf-8")
     return st

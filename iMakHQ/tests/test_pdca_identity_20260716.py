@@ -120,7 +120,10 @@ def test_emitted_request_md_carries_identity(con, tmp_path):
     n = pdca_store.emit_consolidated_request(con, "tcg", str(tmp_path), "2026-07-16")
     assert n == 1
     text = (tmp_path / "2026-07-16_pdca_catalog_queue_tcg.md").read_text(encoding="utf-8")
-    assert "OP04-119 | Rosinante | Kingdoms of Intrigue" in text
+    # ★2026-09-14: 表のセルの縦棒は全角にする (catalog 指摘: 生の | で表の列がずれていた)。
+    #   identity が出ていること自体は変わらない。DB には生の値のまま入っている
+    #   (parse_identity_fields は DB の値を読むので影響なし)。
+    assert "OP04-119 ｜ Rosinante ｜ Kingdoms of Intrigue" in text
     assert "商品(identity)" in text
 
 

@@ -55,7 +55,10 @@ class TestInvariants:
     def test_expected_counts_are_pinned(self):
         """人が焼いた3つの tag 件数は勝手に変えない (変えるなら根拠つきで)."""
         assert odr.INVARIANTS == {
-            "blanked_by_ultra_prism_mismap_20260731": 327,
+            # ★2026-09-14 根拠つきで 327 → 0: 空欄化した327件は後の是正で正しい値に埋め直され、
+            #   tag の行は 0件 (catalog 実測 / `--check` も一致)。327 のままだと月次で巻き戻す。
+            #   catalog/requests/2026-09-13_scheduled_checks_not_acted_on_response.md
+            "blanked_by_ultra_prism_mismap_20260731": 0,
             "filter_map_backfill_20260801": 21,
             "filter_map_restamp_20260801": 76,
         }

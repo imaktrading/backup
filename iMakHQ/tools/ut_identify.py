@@ -486,8 +486,12 @@ def load_catalog(db=DB_PATH):
     con = sqlite3.connect(db)
     out = []
     # ★GU も入れる (中間タブには GU のコラボT も入る。例: ジョジョ DIO)
-    for pid, name, specs, images in con.execute(
-            "select product_id, name, specs, images from products where category in ('uniqlo_ut','gu')"):
+    # source 列が無い DB (テストの最小テーブル等) でも読めるようにする。無ければフラグだけで弾く
+    _cols = {r[1] for r in con.execute("pragma table_info(products)")}
+    _src_col = "source" if "source" in _cols else "null"
+    for pid, name, specs, images, _src in con.execute(
+            f"select product_id, name, specs, images, {_src_col} from products"
+            " where category in ('uniqlo_ut','gu')"):
         try:
             s = json.loads(specs or "{}")
         except ValueError:
@@ -503,6 +507,16 @@ def load_catalog(db=DB_PATH):
         #   仕入れは「メルカリ日本の新品未使用」が前提なので、日本の店に並んでいない物は
         #   国内に新品が出てくる経路が無い。候補に混ぜると取り違えの元にしかならない。
         if s.get("region_only") is True:
+            continue
+        # ★2026-09-14 (catalog 依頼 hq/requests/2026-09-13_ut_fp_design_rows_key_notice):
+        #   ファッション記事から拾ったデザイン行 (data_level=fp_design / 2,966件) は
+        #   commerce の値 (素材・原産国・実寸) を持たず、カタログ自身が not_for_listing を付けている。
+        #   候補に出すと FP... の KEY で特定できてしまい、写す値が何も無い出品になる。
+        #   ★同日追記: フラグの無い fashion_press 行が3件あった (FP-102598 / FP-143930 / FP-143792)。
+        #   フラグだけに頼ると漏れるので、**情報源 (source) でも**弾く。catalog に意図を照会中
+        #   (catalog/requests/2026-09-14_fashion_press_rows_without_flags.md)。
+        if (s.get("not_for_listing") is True or s.get("data_level") == "fp_design"
+                or str(_src or "").startswith("fashion_press")):
             continue
         try:
             imgs = json.loads(images or "[]") or s.get("image_urls") or []

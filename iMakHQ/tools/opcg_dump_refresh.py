@@ -43,7 +43,11 @@ LOG_DIR = Path(__file__).resolve().parent.parent / "review_logs"
 # 過去に人が焼いた tag の件数。**取得で1件でも動いたら異常**として巻き戻す。
 # (2026-07-31 Ultra Prism 空欄化 / 2026-08-01 promo backfill / 2026-08-01 ST-21,22,25 restamp)
 INVARIANTS = {
-    "blanked_by_ultra_prism_mismap_20260731": 327,
+    # ★2026-09-14: 327 → 0。8/01 に空欄化した327件は、その後の別の是正で正しい英語セット名に
+    #   埋め直された (catalog 実測: この tag の行 0件 / 誤マップ先 `Sun & Moon—Ultra Prism` も 0件)。
+    #   期待値が 327 のままだと、月次の取得のたびに「件数が動いた = 異常」と判定して **巻き戻していた**。
+    #   依頼書: catalog/requests/2026-09-13_scheduled_checks_not_acted_on_response.md
+    "blanked_by_ultra_prism_mismap_20260731": 0,
     "filter_map_backfill_20260801": 21,
     "filter_map_restamp_20260801": 76,
 }
