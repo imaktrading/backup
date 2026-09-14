@@ -85,6 +85,33 @@ def _is_closed(path: Path, stems: set[str]) -> bool:
     return any(s != path.stem and s.startswith(prefix) for s in stems)
 
 
+# ★2026-09-14 (残務 №19): 話題の単語としても使われる判定語。手で置いた新規依頼の名前が
+#   これで終わると、投入した瞬間に決着済扱いになり **誰にも配られない**
+#   (8/17 `..._machine_readable_verdict` / 8/13 `..._naming_decision` の実害)。
+#   ただし「元依頼が無い = 未決着」と決めて配り直すのは不可: 実測で孤立19件の大半は
+#   `<topic>_hq_reply` 等の **本物の回答** (元依頼と名前が違うだけ)。→ 配らずに **板で名指しする**。
+AMBIGUOUS_CLOSED_SUFFIXES = ("_decision", "_verdict", "_confirm", "_close", "_closure",
+                             "_reply", "_ack")
+
+
+def name_only_closed(worktree: str, recent_days: int = RECENT_DAYS) -> list[Path]:
+    """名前の末尾だけで決着扱いになっている、元依頼の無い直近ファイル (中身は人が見る)."""
+    d = DATA_ROOT / worktree / "requests"
+    if not d.is_dir():
+        return []
+    cutoff = time.time() - recent_days * 86400
+    allf = list(d.glob("*.md"))
+    stems = {p.stem for p in allf}                 # 元依頼は期間で絞らずに探す
+    out = []
+    for p in allf:
+        if p.stat().st_mtime < cutoff or not p.stem.lower().endswith(AMBIGUOUS_CLOSED_SUFFIXES):
+            continue
+        if any(o != p.stem and p.stem.startswith(o + "_") for o in stems):
+            continue                               # 元依頼がある = 本物の回答
+        out.append(p)
+    return sorted(out, key=lambda x: -x.stat().st_mtime)
+
+
 # headless 担当が書く中間成果物。窓口がレビューして `_response.md` に昇格させる。
 # **依頼として再 dispatch してはいけない**ので pending とは別枠に分ける。
 DRAFT_SUFFIXES = ("_draft", "_question")
@@ -336,10 +363,17 @@ def main() -> int:
         files = [p for p in d.glob("*.md") if p.stat().st_mtime >= cutoff]
         mine, theirs, drafts = pending_for(wt, RECENT_DAYS)
         latest = max((p.stat().st_mtime for p in files), default=0)
+        _named = name_only_closed(wt, RECENT_DAYS)
+
+        def _print_named():
+            for p in _named[:MAX_SHOW]:
+                print(f"- 🟠 **名前だけで決着扱い(元依頼なし)** {p.name} ({_age(p.stat().st_mtime)})"
+                      f" — 新規依頼なら配られていない。中身を見て `_req` を付けて置き直す")
 
         if not (mine or theirs or drafts):
             state = f"動きなし (最終 {_age(latest)})" if latest else "動きなし"
             print(f"## {label} — {state}")
+            _print_named()
             print()
             continue
 
