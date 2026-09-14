@@ -262,7 +262,10 @@ def run_from_raw(commit: bool) -> None:
     db = sqlite3.connect(str(api._DB_PATH), timeout=120)
     db.row_factory = sqlite3.Row
     have = {x[0] for x in db.execute(
-        "SELECT product_id FROM products WHERE category IN ('uniqlo_ut','gu')")}
+        "SELECT product_id FROM products WHERE category IN ('uniqlo_ut','gu') "
+        # ★画像だけの行 (images_only) は「在る」に数えない (2026-09-14)。数えると
+        #   Wayback に商品ページが残っていても起こせず、名前不明のまま残った (E453662)
+        "AND coalesce(json_extract(specs,'$.data_level'),'') != 'images_only'")}
     files = sorted(f for f in os.listdir(RAW) if f.startswith("revive_"))
     todo = [(f, f[len("revive_"):len("revive_") + 11]) for f in files]
     todo = [(f, p) for f, p in todo if p not in have]
@@ -294,7 +297,10 @@ def run(commit: bool, limit: int | None, pids_file: str | None = None,
     db = sqlite3.connect(str(api._DB_PATH), timeout=120)
     db.row_factory = sqlite3.Row
     have = {x[0] for x in db.execute(
-        "SELECT product_id FROM products WHERE category IN ('uniqlo_ut','gu')")}
+        "SELECT product_id FROM products WHERE category IN ('uniqlo_ut','gu') "
+        # ★画像だけの行 (images_only) は「在る」に数えない (2026-09-14)。数えると
+        #   Wayback に商品ページが残っていても起こせず、名前不明のまま残った (E453662)
+        "AND coalesce(json_extract(specs,'$.data_level'),'') != 'images_only'")}
     if pids_file:
         # ★渡されたリスト **だけ** を救済する (2026-09-11)。以前は倉庫の未収録分も
         #   全部混ぜていて、4件を確かめるつもりが 10分以上回り続けた。
@@ -360,9 +366,12 @@ def _save_one(db, pid, d, src, raw, imgs, err, now, commit, stat) -> None:
     col = (((d.get("breadcrumbs") or {}).get("subcategory") or {}).get("locale") or "")
     if col:
         specs["collab"] = col
+    # ★原産国は Wayback の保存ページにも載っている (2026-09-14 実測: 保存 402件中 202件)。
+    #   以前は公式から取れた時だけ移していて、209行が空のまま残った
+    coo = [x.get("code") for x in (d.get("countriesOfOrigin") or []) if x.get("code")]
+    if coo:
+        specs["countries_of_origin"] = coo
     if src == "official":
-        specs["countries_of_origin"] = [x.get("code") for x in
-                                        (d.get("countriesOfOrigin") or []) if x.get("code")]
         specs["enriched_at"] = now
     stat[f"取れた ({src.split('_')[0]})"] += 1
     stat["画像あり"] += bool(imgs)
