@@ -58,6 +58,21 @@ def key_for(url: str) -> str:
     return "site_" + hashlib.sha1(url.encode()).hexdigest()[:16]
 
 
+def _already_saved_elsewhere(cat: str, url: str) -> bool:
+    """別の取り込みが **別の名前で** 保存済みのページか.
+
+    ★ポケモンのカードページは 8/22 の取り込みが `<cardID>` (22,299件) / `detail_<cardID>` で
+      保存している。ここは `site_<sha1>` で探すので見つからず、2026-09-14 に 22,373本を
+      取り直しに行った (3,500本で止めた)。同じページなので取らない。
+    """
+    m = re.search(r"pokemon-card\.com/card-search/details\.php/card/(\d+)", url)
+    if not m:
+        return False
+    cid = m.group(1)
+    return any(_raw_store.have(cat, key, ext=ext)
+               for key in (cid, f"detail_{cid}") for ext in ("html", "json"))
+
+
 def run(cat: str, limit: int | None) -> Counter:
     db = sqlite3.connect(api._DB_PATH, timeout=60)
     urls = []
@@ -78,7 +93,7 @@ def run(cat: str, limit: int | None) -> Counter:
     n = Counter()
     t0 = time.time()
     for i, (k, u) in enumerate(urls, 1):
-        if _raw_store.have(cat, k):
+        if _raw_store.have(cat, k) or _already_saved_elsewhere(cat, u):
             n["手元に有り"] += 1
             continue
         try:
