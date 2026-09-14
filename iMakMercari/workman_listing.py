@@ -804,7 +804,7 @@ def build_parent_row(rec: dict, ajax_data: Optional[dict]) -> Optional[list]:
     )
     desc = build_description_html(rec)
     material = material_jp_to_ebay(s.get("material_jp", ""))
-    features_str = ", ".join(s.get("features", []))
+    features_str = "|".join(s.get("features", []))
     type_str = derive_type_from_category(cat_code, rec.get("name_en", ""))
     activity = derive_activity(cat_code, s.get("features", []))
     season = derive_season(s.get("features", []), cat_code)

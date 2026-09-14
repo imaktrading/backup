@@ -268,7 +268,7 @@ def normalize_features(features_str):
         if v and v not in out:
             out.append(v)
 
-    for raw in str(features_str or "").split(","):
+    for raw in re.split(r"[|,]", str(features_str or "")):
         tok = raw.strip()
         if not tok:
             continue
@@ -526,10 +526,10 @@ def trim_features(features_str, max_len=65):
     sorted_parts = sorted(parts, key=lambda x: FEATURES_PRIORITY.index(x) if x in FEATURES_PRIORITY else 99)
     result = []
     for p in sorted_parts:
-        candidate = ", ".join(result + [p])
+        candidate = "|".join(result + [p])
         if len(candidate) <= max_len:
             result.append(p)
-    return ", ".join(result)
+    return "|".join(result)
 SQUARE_MODELS = [
     "DW5600", "GWB5600", "GWS5600", "GWM5610",  # 5600系はSquare
     "GM5600", "GMS5600", "GW5000", "GWS5000",    # GM-5600・GW-5000もSquare
@@ -814,7 +814,7 @@ def get_features(text, display=""):
         for f in DIGITAL_COMMON_FEATURES:
             if f not in features:
                 features.append(f)
-    return ", ".join(features)
+    return "|".join(features)
 
 def get_case_size(s):
     m = re.search(r'[\d.]+\s*[×x]\s*([\d.]+)\s*[×x]', s)
@@ -1003,7 +1003,7 @@ def _catalog_record_to_scrape_dict(record, fallback_model):
         "display":           specs.get("display", ""),
         # catalog 側 features は list の場合あり (Catalog Phase 2026-05-05 拡充以降).
         # build_row → trim_features() は string を期待 → list なら "," 結合で string 化.
-        "features":          ", ".join(specs["features"]) if isinstance(specs.get("features"), list) else specs.get("features", ""),
+        "features":          "|".join(specs["features"]) if isinstance(specs.get("features"), list) else specs.get("features", ""),
         "is_metal":          bool(specs.get("is_metal", False)),
     }
     # band_strap_override: scrape_casio は "Two-Piece Strap" 以外の時のみセット
@@ -1301,7 +1301,9 @@ def build_specs_html(data):
     _add("Movement", movement)
     _add("Display", display)
     _add("Water Resistance", water)
-    _add("Features", features)
+    # 説明文はバイヤーが読む自由文なので "|" をそのまま出さず読点に戻す
+    # (C:Features 列は縦棒のまま = eBay 側の複数値区切り、ここは表示用の変換のみ)
+    _add("Features", features.replace("|", ", "))
     _add("Case Size", case_size)
     _add("Case Thickness", thickness)
     _add("Weight", weight)

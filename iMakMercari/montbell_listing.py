@@ -135,7 +135,7 @@ def _merge_catalog_spec(specs, catalog_spec):
     # Features (multi, list → カンマ区切り文字列)
     features = catalog_spec.get("features")
     if features:
-        out["Features"] = ", ".join(features) if isinstance(features, list) else features
+        out["Features"] = "|".join(features) if isinstance(features, list) else features
     return out
 
 
