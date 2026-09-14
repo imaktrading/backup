@@ -284,17 +284,41 @@ def _commits():
     return lines
 
 
+def top_entry(text):
+    """daily_report の最上段 (最初の `## 20..` 見出しから次の `## 20..` の手前まで)."""
+    m = re.search(r"^## 20.*?(?=^## 20|\Z)", text, re.S | re.M)
+    return m.group(0) if m else ""
+
+
+def next_actions_from(text):
+    """最上段の中だけから「次に何をやるか」を引く (純関数・作文しない)。
+
+    ★2026-09-14: 以前はファイル全体から最初の『いま誰待ちか』節を探していたため、
+      最上段に節が無い日は **4,238行目の8月の表** を「次にやること」として出していた
+      (補URL 254件 等の古い数字)。最上段以外は見ない。無ければ無いと言う。
+    """
+    top = top_entry(text)
+    if not top:
+        return ["(daily_report に日付見出しが見つからない)"]
+    m = re.search(r"##\s*4\.\s*いま誰待ちか[^\n]*\n(.*?)(?=\n## |\n---|\Z)", top, re.S)
+    if not m:
+        # 最上段の「判断待ち / 次」の太字ブロックだけを原文で出す
+        m = re.search(r"^\*\*[^\n]*(?:判断待ち|次にやること|次の一手)[^\n]*\*\*[^\n]*\n(.*?)(?=\n\*\*|\n---|\Z)",
+                      top, re.S | re.M)
+    head = top.split("\n", 1)[0]
+    if not m:
+        return [f"(最上段 {head} に『次にやること』節なし → 残務ボードを見ること)"]
+    return [f"({head})"] + [ln for ln in m.group(1).split("\n") if ln.strip()]
+
+
 def _next_actions():
-    """daily_report 最上段の「次に何をやるか」表をそのまま出す (作文しない)。"""
+    """daily_report 最上段の「次に何をやるか」(いま誰待ちか 節) をそのまま出す (作文しない)。"""
     try:
         with open(DAILY, encoding="utf-8") as f:
             t = f.read()
     except OSError as e:
         return [f"(daily_report 読めず: {e})"]
-    m = re.search(r"##\s*4\.\s*いま誰待ちか[^\n]*\n(.*?)(?=\n## |\n---)", t, re.S)
-    if not m:
-        return ["(daily_report に『いま誰待ちか』節が見つからない)"]
-    return [ln for ln in m.group(1).split("\n") if ln.strip()]
+    return next_actions_from(t)
 
 
 STALL_DAYS = 7
