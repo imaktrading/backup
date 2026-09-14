@@ -113,3 +113,47 @@ def test_gone_products_are_included_by_default():
 ])
 def test_is_anime(specs, anime):
     assert T.is_anime(specs) is anime
+
+
+# --- 2026-09-13 catalog 連絡: fp_design (品番の実体が無い「柄の記録」) を除外 ---
+
+def _make_products_db(tmp_path, rows):
+    import sqlite3
+    db_path = tmp_path / "products.sqlite"
+    con = sqlite3.connect(db_path)
+    con.execute("create table products (product_id text, category text, specs text)")
+    for pid, specs in rows:
+        con.execute("insert into products values (?, 'uniqlo_ut', ?)", (pid, json.dumps(specs)))
+    con.commit()
+    con.close()
+    return str(db_path)
+
+
+def test_sold_out_collabs_drops_not_for_listing_rows(tmp_path):
+    db_path = _make_products_db(tmp_path, [
+        ("FP150873-03", {"collab": "架空コラボ", "data_level": "fp_design",
+                         "not_for_listing": True, "official_gone_at": "2026-01-01"}),
+        ("123456", {"collab": "架空コラボ", "official_gone_at": "2026-01-01"}),
+    ])
+    out = T.sold_out_collabs(db_path=db_path)
+    assert out == {"架空コラボ": ["123456"]}
+
+
+def test_sold_out_collabs_drops_fp_design_rows_without_not_for_listing_flag(tmp_path):
+    """not_for_listing が立っていなくても data_level=='fp_design' なら除外する
+    (2026-09-14 窓口 GO: 日付列が空なことに頼らない明示除外)."""
+    db_path = _make_products_db(tmp_path, [
+        ("FP150873-04", {"collab": "架空コラボ2", "data_level": "fp_design",
+                         "official_gone_at": "2026-01-01"}),
+        ("222222", {"collab": "架空コラボ2", "official_gone_at": "2026-01-01"}),
+    ])
+    out = T.sold_out_collabs(db_path=db_path)
+    assert out == {"架空コラボ2": ["222222"]}
+
+
+def test_sold_out_collabs_keeps_normal_rows_when_no_fp_design_present(tmp_path):
+    db_path = _make_products_db(tmp_path, [
+        ("999999", {"collab": "通常コラボ", "official_gone_at": "2026-01-01"}),
+    ])
+    out = T.sold_out_collabs(db_path=db_path)
+    assert out == {"通常コラボ": ["999999"]}

@@ -81,6 +81,9 @@ def sold_out_collabs(db_path: str = DB_PATH, include_gone: bool = True,
                 continue
             if s.get("not_tee"):
                 continue
+            if s.get("not_for_listing") or s.get("data_level") == "fp_design":
+                continue           # 品番の実体が無い「柄の記録」(FP...) (2026-09-13 catalog 連絡)
+                                   # not_for_listing 未設定でも data_level で拾う (2026-09-14 窓口 GO)
             gone = bool(s.get("official_gone_at"))
             if not gone and not s.get("sold_out_since"):
                 continue                      # 公式でまだ買える = 対象外
