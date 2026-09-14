@@ -28,6 +28,12 @@ if _TOOLS not in sys.path:
     sys.path.insert(0, _TOOLS)
 from tcg_catalog_audit import _resolve_card_id, _detect_franchise, PSA_CACHE_DIR, CATALOG_DB  # noqa: E402
 
+# forced_card_id 経路の名前照合は自動解決経路と同じ関数を再利用 (2026-09-14・2箇所に別実装を作らない)
+_CATALOG_ROOT = r"C:/dev/iMak/iMakCatalog"
+if _CATALOG_ROOT not in sys.path:
+    sys.path.insert(0, _CATALOG_ROOT)
+from integrations.psa_to_csv import _record_name_matches_subject  # noqa: E402
+
 # catalog specs key → eBay CSV 列名 (値はそのままコピー)
 _SPEC_TO_COL = {
     "game_ebay":       "C:Game",
@@ -161,11 +167,11 @@ def _catalog_specs(card_id: str, category: str = ""):
     con.row_factory = sqlite3.Row
     if category:
         rows = con.execute(
-            "SELECT name_en, language, specs FROM products "
+            "SELECT name_en, name_jp, language, specs FROM products "
             "WHERE product_id=? AND category=?", (card_id, category)).fetchall()
     else:
         rows = con.execute(
-            "SELECT name_en, language, specs FROM products "
+            "SELECT name_en, name_jp, language, specs FROM products "
             "WHERE product_id=?", (card_id,)).fetchall()
     con.close()
     if not rows:
@@ -179,8 +185,31 @@ def _catalog_specs(card_id: str, category: str = ""):
     except Exception:
         specs = {}
     specs["_name_en"] = row["name_en"] or ""
+    specs["_name_jp"] = row["name_jp"] or ""
     specs["_language"] = row["language"] or ""
     return specs
+
+
+def _name_matches_psa_subject(specs: dict, cert: str) -> bool:
+    """forced_card_id で確定した card_id の名前が、PSA 現物の Subject と合うか (2026-09-14 新設).
+
+    人が目視で確定したのは card_id (= どのカードか) であって、catalog が持つ名前が
+    合っているかは別問題 (提案1: S11a-083 が catalog 側で Juan と誤登録され、目視確定を
+    経由して Juan のまま出品直前まで到達した実害2件)。自動解決経路
+    (iMakCatalog/integrations/psa_to_csv.py の _record_name_matches_subject) と同じ照合を通す。
+
+    Subject が取れない/有意トークンが無い時は検証スキップで True
+    (_record_name_matches_subject 自体の既定と同じ・fail-open は意図的)。
+    """
+    p = os.path.join(PSA_CACHE_DIR, f"{cert}.json")
+    if not os.path.exists(p):
+        return True
+    try:
+        subject = json.load(open(p, encoding="utf-8")).get("Subject") or ""
+    except Exception:
+        return True
+    record = {"name": specs.get("_name_en", ""), "name_jp": specs.get("_name_jp", "")}
+    return _record_name_matches_subject(record, subject)
 
 
 def _psa_year(cert: str):
@@ -222,6 +251,10 @@ def build_listing_fields(cert: str, game_hint: str = "", forced_card_id: str = "
             return {}, (f"forced card_id {forced_card_id} が catalog に無い"
                         if (cat or franchise)
                         else f"forced card_id {forced_card_id} がどのゲームか決まらない")
+        # 人が確定したのは card_id (ID)。名前が現物 Subject と合うかは別に確かめる (提案1)。
+        if not _name_matches_psa_subject(specs, cert):
+            return {}, (f"forced card_id {forced_card_id} の名前が PSA Subject と不一致 "
+                        f"(catalog側の疑い)")
         fields = map_specs_to_fields(specs, _psa_year(cert))
         fields["_card_id"] = pid
         _fill_game_fallback(fields, game_hint)

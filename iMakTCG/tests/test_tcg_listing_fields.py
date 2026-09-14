@@ -152,6 +152,32 @@ def test_forced_card_id_builds_from_given_id():
     assert err2 and f2 == {}
 
 
+# 提案1 (2026-09-14): forced_card_id 経路にも名前照合を通す (人が確定したのは ID、名前は別問題)。
+# 実害: cert 116296131 が forced_card_id='S11a-083' 経由で catalog 誤登録の 'Juan' のまま
+# 出品直前まで到達した。catalog は既に 'Wallace' に是正済 (2026-09-13) なので、
+# 現在は err なしで通ることも合わせて固定する (= 是正が壊れていないことの回帰)。
+def test_forced_card_id_passes_when_catalog_name_matches_psa_subject():
+    from tcg_listing_fields import build_listing_fields
+    f, err = build_listing_fields("116296131", forced_card_id="S11a-083")
+    assert err is None
+    assert f["C:Character"] == "Wallace"
+
+
+def test_forced_card_id_rejected_when_catalog_name_mismatches_psa_subject(monkeypatch):
+    """catalog 側が誤登録 (name_en='Juan') に戻っても、PSA Subject 'WALLACE' との
+    不一致で必ず reject されることを固定 (提案1 の再発防止本体)。"""
+    import tcg_listing_fields as tlf
+
+    def fake_specs(card_id, category=""):
+        return {"_name_en": "Juan", "_name_jp": "ミクリ",
+                "character_name": "Juan"}
+
+    monkeypatch.setattr(tlf, "_catalog_specs", fake_specs)
+    f, err = tlf.build_listing_fields("116296131", forced_card_id="S11a-083")
+    assert err is not None and "PSA Subject" in err
+    assert f == {}
+
+
 # --- eBay 正規化フィールド (catalog *_ebay 由来・最大活用 2026-06-15) ---
 def test_cost_from_raw_clean_integer():
     # cost はどのゲームも clean 整数 → raw 直結 (即活用)

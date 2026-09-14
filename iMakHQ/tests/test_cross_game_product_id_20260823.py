@@ -47,9 +47,9 @@ def test_catalog_specs_requires_category_when_ambiguous(monkeypatch):
                 def fetchall():
                     # category 指定が無ければ 2 カテゴリ分ヒットする状況を再現
                     if "category=?" in sql:
-                        return [{"name_en": "Eustass Kid", "language": "ja", "specs": "{}"}]
-                    return [{"name_en": "Wing Gundam", "language": "ja", "specs": "{}"},
-                            {"name_en": "Eustass Kid", "language": "ja", "specs": "{}"}]
+                        return [{"name_en": "Eustass Kid", "name_jp": "", "language": "ja", "specs": "{}"}]
+                    return [{"name_en": "Wing Gundam", "name_jp": "", "language": "ja", "specs": "{}"},
+                            {"name_en": "Eustass Kid", "name_jp": "", "language": "ja", "specs": "{}"}]
             return _R()
 
         def close(self):
@@ -207,3 +207,30 @@ def test_auditor_silent_without_psa_data():
     """PSA データが無い行は何も言わない (推測で止めない)。"""
     import csv_auditor as A
     assert A.psa_identity_findings(_HDRS, _row("t", "Pokémon TCG", "x"), None) == []
+
+
+# ── 提案2 (2026-09-14): 監査くんの名前照合がセット名の語で素通りする ─────────
+def test_auditor_catches_name_hidden_behind_set_name_in_title():
+    """実害 (cert116296131): PSA Subject 'FA/WALLACE INCANDESCENT ARCANA' なのに CSV は
+    'Juan' のまま。旧ルールは *Title に C:Set の語 'Incandescent Arcana' が必ず載るため
+    Subject 側の 'INCANDESCENT' が Title でヒットして素通りしていた (未検出)。
+    照合方向を逆にし *Title を外したことで検出できることを固定する。"""
+    import csv_auditor as A
+
+    meta = {"Brand": "POKEMON JAPANESE SWORD & SHIELD INCANDESCENT ARCANA",
+            "Subject": "FA/WALLACE INCANDESCENT ARCANA", "CardNumber": "083"}
+    row = _row("PSA 10 Pokemon Japanese S11a: Incandescent Arcana #083/068 Juan Super Rare 2022",
+               "Pokémon TCG", "Juan", "Juan", cert="116296131")
+    out = A.psa_identity_findings(_HDRS, row, meta)
+    assert out and "名前が一致しない" in out[0][1]
+
+
+def test_auditor_correct_name_still_passes_with_set_name_in_subject():
+    """Subject にセット名語が同居していても、正しい名前 (Wallace) なら鳴らない。"""
+    import csv_auditor as A
+
+    meta = {"Brand": "POKEMON JAPANESE SWORD & SHIELD INCANDESCENT ARCANA",
+            "Subject": "FA/WALLACE INCANDESCENT ARCANA", "CardNumber": "083"}
+    row = _row("PSA 10 Pokemon Japanese S11a: Incandescent Arcana #083/068 Wallace Super Rare 2022",
+               "Pokémon TCG", "Wallace", "Wallace", cert="116296131")
+    assert A.psa_identity_findings(_HDRS, row, meta) == []

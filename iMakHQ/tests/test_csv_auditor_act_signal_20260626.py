@@ -96,7 +96,7 @@ def test_recurring_findings_sorted_by_seen():
 
 def test_ng_digest_counts():
     d = ca._build_ng_digest("tcg", [("sku1", "msg1")], ["error: 2件"], [_find(seen=2)])
-    assert d["counts"] == {"program": 1, "log": 1, "recurring_missing": 1}
+    assert d["counts"] == {"program": 1, "log": 1, "recurring_missing": 1, "recurring_dropped": 0}
 
 
 def test_act_prompt_with_digest_mandates_disposition():

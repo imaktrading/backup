@@ -516,7 +516,15 @@ def psa_identity_findings(headers, row, meta):
     meta: PSA cache の dict (Brand / Subject / CardNumber)。無ければ何も言わない。
     見るのは2つだけ。どちらも「間違いなく違う」時しか鳴らさない (誤検出を出さない):
       ① ゲームが違う   … PSA の Brand と CSV の C:Game が別ゲーム名
-      ② 名前がかすりもしない … PSA の Subject の語が CSV の名前/タイトルに1つも無い
+      ② 名前がかすりもしない … CSV の名前 (Card Name/Character) の語が PSA Subject に1つも無い
+
+    ★2026-09-14 (提案2): ②は元々「Subject の語が CSV の名前/タイトルに有るか」の順方向だった。
+    *Title には C:Set の語が必ず載るため、PSA Subject にセット名が含まれていれば人物名が
+    全く違っても Title 側でヒットして素通りしていた (実害: cert116296131 'Juan' が
+    Subject 'FA/WALLACE INCANDESCENT ARCANA' の 'INCANDESCENT' で素通り)。
+    逆方向 (CSV の名前の語が Subject に有るか) に直し、照合先から *Title を外した。
+    過去CSV 1,004行の実測で誤検出0 (Brand も候補に入れると 'Pokemon' が両側に必ず出て
+    素通りが再発するため、Brand は入れない)。
     """
     if not meta:
         return []
@@ -538,14 +546,14 @@ def psa_identity_findings(headers, row, meta):
                     f"CSVは{csv_game!r} (C:Game={_cell('C:Game')!r} / {_cell('C:Card Name')!r})"))
         return out            # ゲームが違う時点で名前照合は無意味
 
-    want = _name_tokens(subject)
+    want = _name_tokens(" ".join([_cell("C:Card Name"), _cell("C:Character")]))
     if want:
-        have = _name_tokens(" ".join([_cell("C:Card Name"), _cell("C:Character"),
-                                      _cell(COL_TITLE)]))
-        if have and not any(_token_matches(w, have) for w in want):
+        reference = _name_tokens(subject)
+        if reference and not any(_token_matches(w, reference) for w in want):
             out.append(("ERROR",
-                        f"PSAの現物と名前が一致しない: PSA Subject={subject!r} の語が "
-                        f"CSVの名前/タイトルに1つも無い (C:Card Name={_cell('C:Card Name')!r})"))
+                        f"PSAの現物と名前が一致しない: CSVの名前 (C:Card Name={_cell('C:Card Name')!r} "
+                        f"/ C:Character={_cell('C:Character')!r}) の語が PSA Subject={subject!r} に"
+                        f"1つも無い"))
     return out
 
 
@@ -1177,8 +1185,14 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     #   これをしないと、既に片づいた件が毎日 `pending` として digest に載り続ける。
     _pdca_prune_resolved(dry_run)
     recurring = filter_recurring_for_project(recurring_findings(_load_pdca_recurring()), project)
-    digest = _build_ng_digest(project, program_items, log_signals, recurring, log_signal_lines)
+    recurring_dropped = _scan_run_logs_dropped()
+    digest = _build_ng_digest(project, program_items, log_signals, recurring, log_signal_lines,
+                              recurring_dropped)
     digest_path = _write_ng_digest(project, digest, dry_run)
+    if recurring_dropped:
+        top = recurring_dropped[0]
+        print(f"  🔁 再発drop(台帳未経由・build skip等) {len(recurring_dropped)}件 "
+              f"/ 筆頭 cert {top['cert']} ×{top['days']}日")
     # --- PDCA spiral-up: 改善キュー蓄積 → 集約発行 → 完了同期 (write-only・絶対に監査を壊さない) ---
     _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku,
                      audited_rows=len(rows),
@@ -1275,21 +1289,27 @@ def _load_open_program_fix(limit=50):
         return []
 
 
-def _build_ng_digest(project, program_items, log_signals, recurring, log_signal_lines=None):
+def _build_ng_digest(project, program_items, log_signals, recurring, log_signal_lines=None,
+                      recurring_dropped=None):
     """決定論で検出した NG を1つに束ねる (純関数, test可)。headless が各項目を必ず処分する元。
 
     `log_signal_lines`: log_signals の内訳 (当たった行の実文、先頭3件・各80字)。
     Act が digest だけを見て処分を書けるように、ログを読み直させない
     (依頼書: hq/requests/2026-09-05_act_code_proposals_tcg.md 提案1)。
+    `recurring_dropped`: 台帳を経由しない再発 (提案4)。recurring_missing (台帳ベース) が
+    構造的に取りこぼす「カテゴリ確定前に落ちる cert」を走行ログから直接拾う。
     """
+    recurring_dropped = list(recurring_dropped or [])
     return {
         "project": project,
         "program_items": [{"sku": s, "msg": m} for s, m in program_items],
         "log_signals": list(log_signals or []),
         "log_signal_lines": list(log_signal_lines or []),
         "recurring_missing": recurring,
+        "recurring_dropped": recurring_dropped,
         "counts": {"program": len(program_items), "log": len(log_signals or []),
-                   "recurring_missing": len(recurring)},
+                   "recurring_missing": len(recurring),
+                   "recurring_dropped": len(recurring_dropped)},
     }
 
 
@@ -2232,6 +2252,65 @@ def _scan_log_samples(log_path="", csv_path="", run_logs_dir=""):
     if not txt:
         return []
     return _signal_line_samples(txt)
+
+
+# ★2026-09-14 (提案4): digest の recurring_missing は missing_models.csv/pdca 台帳ベースなので、
+#   カテゴリが確定する前に落ちる cert (提案3型: PSA 404 等) は台帳に一度も乗らず、
+#   何日連続で再発していても digest からは「今日のerror」としか見えなかった
+#   (実害: cert936643273 が14走行連続で再発し、3日連続で同じ穴を提案し続けた)。
+#   台帳を経由せず、走行ログの「build skip」「出品見送り」行から直接 cert を拾う。
+_DROP_CERT_RE = re.compile(r"⚠️ cert (\d+): .*\(build skip\)")
+_DROP_LIST_RE = re.compile(r"出品見送り:\s*\d+\s*件\s*\[([^\]]*)\]")
+_LOG_DATE_RE = re.compile(r"(\d{8})_\d{6}\.log$", re.I)
+
+
+def _extract_dropped_certs_from_log(text: str) -> set:
+    """走行ログ本文から「build skip」「出品見送り」に載った cert 番号を拾う (純関数, test可)。"""
+    certs = set(_DROP_CERT_RE.findall(text or ""))
+    for m in _DROP_LIST_RE.findall(text or ""):
+        certs.update(re.findall(r"\d+", m))
+    return certs
+
+
+def recurring_dropped_certs(log_text_by_date: dict, min_days: int = 3):
+    """日付別ログ束から、複数日 build skip/出品見送りに載り続けている cert を返す (純関数, test可)。
+
+    log_text_by_date: {"20260901": "<その日の走行ログ全部連結>", ...}。
+    戻り: [{"cert": "...", "days": N}, ...] days(出現日数) 降順。
+    """
+    cert_days: dict = {}
+    for date, text in (log_text_by_date or {}).items():
+        for cert in _extract_dropped_certs_from_log(text):
+            cert_days.setdefault(cert, set()).add(date)
+    out = [{"cert": c, "days": len(days)} for c, days in cert_days.items() if len(days) >= min_days]
+    out.sort(key=lambda r: r["days"], reverse=True)
+    return out
+
+
+def _run_logs_by_date(run_logs_dir=""):
+    """run_logs/*.log を走行日別に束ねる (I/O)。同日複数走行は連結。"""
+    d = run_logs_dir or os.path.join(WORKSPACE, "iMakHQ", "run_logs")
+    try:
+        names = [f for f in os.listdir(d) if f.lower().endswith(".log")]
+    except OSError:
+        return {}
+    by_date: dict = {}
+    for name in names:
+        m = _LOG_DATE_RE.search(name)
+        if not m:
+            continue
+        date = m.group(1)
+        try:
+            txt = open(os.path.join(d, name), encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        by_date[date] = by_date.get(date, "") + "\n" + txt
+    return by_date
+
+
+def _scan_run_logs_dropped(run_logs_dir="", min_days=3):
+    """recurring_dropped_certs の I/O 側 (本番は run_logs_dir 省略で既定ディレクトリ)。"""
+    return recurring_dropped_certs(_run_logs_by_date(run_logs_dir), min_days)
 
 
 # ★2026-08-21: 「ラベルの出現」ではなく「**0でない件数**」を数える。
