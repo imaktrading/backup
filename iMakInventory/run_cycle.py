@@ -432,7 +432,7 @@ def _last_cycle_success(label: str) -> Optional[datetime]:
     return None
 
 
-def _check_cycle_staleness(test_mode: bool = False) -> list:
+def _check_cycle_staleness(test_mode: bool = False, own_cycle: Optional[dict] = None) -> list:
     """全 label の「最後の完走からの経過」を突合し、想定間隔超過を非-silent 告知。
 
     skip 時だけでなく毎 cycle 末に呼ぶ (= 自分以外の label が止まっていても気づける)。
@@ -440,8 +440,14 @@ def _check_cycle_staleness(test_mode: bool = False) -> list:
     """
     stale = []
     now = datetime.now()
+    # ★ 2026-09-14: 完走した cycle 自身を「最終完走」に数える。判定は記録を書く前に走るので、
+    #   数えないと **今まさに完走した回が「止まっている」と警告を出す** (09-14 17:35:22 に
+    #   13:30 開始の HIGH が完走した瞬間、1 つ前の 04:21 を最終完走と見て 13.2h 超過を発報)。
+    own_label = None
+    if own_cycle and str(own_cycle.get("status", "")).startswith("success"):
+        own_label = _cycle_label_of(own_cycle)
     for label, interval_h in CYCLE_INTERVAL_HOURS.items():
-        last = _last_cycle_success(label)
+        last = now if label == own_label else _last_cycle_success(label)
         if last is None:
             continue
         elapsed_h = (now - last).total_seconds() / 3600.0
@@ -1537,7 +1543,7 @@ def run_cycle(
 
     # ★ 全 label の巡回 staleness を毎 cycle 突合 (自分以外が止まっていても気づける = 非 silent)
     try:
-        cycle_log["staleness"] = _check_cycle_staleness(test_mode)
+        cycle_log["staleness"] = _check_cycle_staleness(test_mode, own_cycle=cycle_log)
     except Exception as e:
         _log(f"  [!] staleness 判定失敗: {type(e).__name__}: {e}", test_mode)
 

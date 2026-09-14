@@ -202,3 +202,35 @@ def test_sheet_interval_matches_task_scheduler_6h():
     from run_cycle import CYCLE_INTERVAL_HOURS
     assert CYCLE_INTERVAL_HOURS["SHEET"] == 6
     assert CYCLE_INTERVAL_HOURS["LOW"] == 8
+
+
+# ---------------------------------------------------------------- 完走した回は自分を数える
+def test_finishing_cycle_counts_itself(rc_env):
+    """★ 2026-09-14: 完走した瞬間の回が「止まっている」と警告を出さない.
+
+    実害: 09-14 17:35:22、13:30 開始の HIGH が完走した直後の判定で、記録を書く前だったため
+    1 つ前の 04:21 を最終完走と見て「13.2h 経過」を発報した。
+    """
+    rc, d, emitted = rc_env
+    _write_cycle(d, "cycle_1.jsonl", "SHEET", "success", datetime.now() - timedelta(hours=13.5))
+    stale = rc._check_cycle_staleness(own_cycle={"sheet": "both", "status": "success"})
+    assert [s["label"] for s in stale] == []
+    assert emitted == []
+
+
+def test_skipped_cycle_does_not_count_itself(rc_env):
+    """skip した回は完走ではないので、自分を数えずに従来どおり警告する."""
+    rc, d, emitted = rc_env
+    _write_cycle(d, "cycle_1.jsonl", "SHEET", "success", datetime.now() - timedelta(hours=13.5))
+    stale = rc._check_cycle_staleness(own_cycle={"sheet": "both", "status": "skipped_lock_held"})
+    assert [s["label"] for s in stale] == ["SHEET"]
+    assert emitted
+
+
+def test_other_label_finishing_does_not_hide_stale_sheet(rc_env):
+    """LOW が完走しても、止まっている SHEET の警告は消さない."""
+    rc, d, emitted = rc_env
+    _write_cycle(d, "cycle_1.jsonl", "SHEET", "success", datetime.now() - timedelta(hours=20))
+    _write_cycle(d, "cycle_2.jsonl", "LOW", "success", datetime.now() - timedelta(hours=2))
+    stale = rc._check_cycle_staleness(own_cycle={"sheet": "low", "status": "success"})
+    assert [s["label"] for s in stale] == ["SHEET"]
