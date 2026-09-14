@@ -78,6 +78,61 @@ def test_panel_sweeps_at_startup_and_on_a_timer():
     assert "SWEEP_EVERY_MS = 10 * 60 * 1000" in src
 
 
+def test_root_search_is_killed_after_ten_minutes():
+    """★2026-09-14: ディスク全体の検索は10分で落とす (持ち主が居ても)。"""
+    procs = [_p(1, 0, "claude.exe", created=0),
+             _p(20, 1, "find.exe", '"C:\\Program Files\\Git\\usr\\bin\\find.exe" / -iname *x*', created=100)]
+    assert K.orphan_roots(procs, now=100 + 9 * 60) == []
+    assert K.orphan_roots(procs, now=100 + 10 * 60) == [20]
+
+
+def test_normal_find_is_never_touched():
+    """フォルダを指定した検索は長くても触らない。"""
+    procs = [_p(20, 999, "find.exe", "find.exe /c/dev/iMak -name *.py", created=0)]
+    assert K.orphan_roots(procs, now=10 ** 6) == []
+
+
+def test_orphan_test_run_is_killed():
+    """★2026-09-14: セッションが消えた後に残ったテスト (claude → bash → bash → python) は落とす。"""
+    procs = [_p(30, 777, "bash.exe", created=100),
+             _p(31, 30, "bash.exe", created=101),
+             _p(32, 31, "python3.11.exe", "python.exe -m pytest -q", created=102)]
+    assert K.orphan_roots(procs, now=102 + 3 * 60) == [32]
+
+
+def test_precommit_test_run_is_kept():
+    """git が生きている pre-commit のテストは残す。"""
+    procs = [_p(1, 0, "git.exe", created=90),
+             _p(30, 1, "bash.exe", created=100),
+             _p(32, 30, "python3.11.exe", "python -m pytest tests/ --tb=short -q", created=102)]
+    assert K.orphan_roots(procs, now=102 + 3600) == []
+
+
+def test_just_orphaned_test_is_given_time():
+    """終わった直後 (2分未満) は片付け中かもしれないので触らない。"""
+    procs = [_p(32, 777, "python3.11.exe", "python -m pytest -q", created=100)]
+    assert K.orphan_roots(procs, now=100 + 60) == []
+
+
+def test_without_clock_search_and_tests_are_kept():
+    """現在時刻が無い時は、時間で判定するものは落とさない側。"""
+    procs = [_p(20, 999, "find.exe", "find / -iname x", created=0),
+             _p(32, 777, "python3.11.exe", "python -m pytest -q", created=0)]
+    assert K.orphan_roots(procs) == []
+
+
+def test_japanese_command_line_does_not_break_the_list():
+    """★2026-09-14: cp932 の日本語 (2バイト目が 0x5C) を含む一覧が読めること。
+
+    従来は utf-8 の replace で読んで JSON が壊れ、掃除が毎回「何もしない」で終わっていた。
+    """
+    import json
+    raw = json.dumps([{"pid": 1, "name": "x.exe", "cmd": "表示 ソース"}],
+                     ensure_ascii=False).encode("cp932")
+    assert json.loads(K.decode_ps_output(raw))[0]["cmd"] == "表示 ソース"
+    assert json.loads(K.decode_ps_output(raw.decode("cp932").encode("utf-8")))[0]["pid"] == 1
+
+
 def test_sweeper_runs_off_the_ui_thread():
     """プロセス一覧の取得で画面を止めない (別スレッドで回す)。"""
     hq = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
