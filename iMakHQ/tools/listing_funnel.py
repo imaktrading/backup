@@ -621,7 +621,8 @@ FUNNEL_COLS = ["item_id", "title", "site", "category", "price", "trend_price", "
 _EVICT_KEEP_SOLD = "残す (売れた)"
 _EVICT_WAIT = "様子見 (30日未満)"
 _EVICT_OUT = "対象外 (カテゴリ)"
-_EVICT_ONHAND = "対象外 (有在庫)"     # ★2026-09-15 ユーザー「グループ名を対象外 (有在庫)にしておいて」
+_EVICT_ONHAND = "対象外 (有在庫)"
+_EVICT_UNKNOWN = "対象外 (有在庫？)"   # ★2026-09-15 どのシートにも載っていない。後で調べる (ユーザー)     # ★2026-09-15 ユーザー「グループ名を対象外 (有在庫)にしておいて」
 # 表を書く時だけ棚と同じ材料 (有在庫の一覧 / シートのカテゴリの写し) を入れる。evict_group(r) だけの呼び方は今までどおり
 _EVICT_CTX = {}
 
@@ -636,7 +637,7 @@ def _evict_category(title):
     return None
 
 
-def evict_group(r, onhand=None, sheet_cat=None):
+def evict_group(r, onhand=None, sheet_cat=None, known=None):
     """在庫ありの行が「落とす候補」のどれに入るか (純関数, test可)。
 
     落とす順そのものを表に出す。並べ替えれば、上から落ちる順になる。
@@ -650,6 +651,8 @@ def evict_group(r, onhand=None, sheet_cat=None):
         return ""
     if onhand and str(r.get("item_id") or "") in onhand:
         return _EVICT_ONHAND                  # ★2026-09-15 有在庫は全カテゴリ落とさない
+    if known is not None and str(r.get("item_id") or "") not in known:
+        return _EVICT_UNKNOWN                 # どのシートにも無い = 調べるまで落とさない
     if se._f(r.get("sold_qty")) + se._f(r.get("sales90")) > 0:
         return _EVICT_KEEP_SOLD
     cat = _evict_category(r.get("title"))
@@ -674,7 +677,8 @@ def _funnel_vals(r):
             r.get("photos", 0), r.get("keywords", 0), r.get("relist_status", ""),
             r.get("age_days", 0), r.get("supply_url", ""),
             evict_group(r, onhand=_EVICT_CTX.get("onhand"),
-                        sheet_cat=(_EVICT_CTX.get("cats") or {}).get(str(r["item_id"]))),
+                        sheet_cat=(_EVICT_CTX.get("cats") or {}).get(str(r["item_id"])),
+                        known=_EVICT_CTX.get("known")),
             r.get("ebay_url") or f"https://www.ebay.com/itm/{r['item_id']}"]
 
 
@@ -778,6 +782,7 @@ def write_funnel_to_sheet(rows, c, summary_lines):
     try:
         import shelf_evict as _se
         _EVICT_CTX["onhand"] = _se.load_onhand_ids()
+        _EVICT_CTX["known"] = _se.load_known_ids(onhand=_EVICT_CTX["onhand"])
         _EVICT_CTX["cats"] = _se._category_cache_load()
     except Exception as _e:                                    # noqa: BLE001
         print(f"  ⚠ 有在庫・カテゴリを読めず、落とすグループは今までの判定で出します: {type(_e).__name__}")

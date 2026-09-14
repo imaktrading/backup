@@ -101,6 +101,11 @@ STALE_MAX_AGE = {"TCG": 30, "G-shock": 30, "Tシャツ": 30}
 STALE_CATEGORIES = tuple(STALE_MAX_AGE)
 
 ONHAND = "有在庫"
+# ★2026-09-15 ユーザー「じゃ、落とすグループに有在庫？にしておいて、後で調べる」:
+#   在庫ありなのに **どのシートにも載っていない** 出品 (商品管理シート / 公式仕入 / 有在庫 のどれにも無い)。
+#   無在庫なら監視くんが仕入元を見ていない (売り切れても取り下がらない)。調べるまで落とさない。
+ONHAND_UNKNOWN = "有在庫？"
+KNOWN_CACHE = r"C:/dev/iMak_data/hq/shelf_known_ids_cache.json"
 ONHAND_SHEET_ID = "1zbzr1fifHMAcgJ5n_9CcMXzJASxcvk3DutgOQfNElNA"   # 有在庫シート (シート2: B列 出品番号)
 ONHAND_GID = 2025152218
 # ★2026-09-15 ユーザー「(有在庫のファイルの) ここのどこかにないかな」→ 「①有在庫の仕入れ表」タブ (2行目が見出し、
@@ -111,7 +116,7 @@ ONHAND_CACHE = r"C:/dev/iMak_data/hq/shelf_onhand_cache.json"
 ONE_OFF_SUPPLY = re.compile(r"jp\.mercari\.com|fril\.jp", re.I)       # メルカリ・ラクマ = 1点物の仕入元
 
 
-def category_for(item_id, sheet_category, supply_url="", onhand=()):
+def category_for(item_id, sheet_category, supply_url="", onhand=(), known=None):
     """棚が使うカテゴリ (純関数, test 可)。
 
     有在庫 → "有在庫" (どの期限にも入らない = 落とさない) /
@@ -121,6 +126,8 @@ def category_for(item_id, sheet_category, supply_url="", onhand=()):
     iid = str(item_id or "").strip()
     if onhand and iid in onhand:
         return ONHAND
+    if known is not None and iid not in known:
+        return ONHAND_UNKNOWN              # どのシートにも無い = 調べるまで落とさない
     if (sheet_category or "").strip() == "Tシャツ":
         return "Tシャツ" if ONE_OFF_SUPPLY.search(supply_url or "") else "Tシャツ(公式等)"
     return sheet_category or None
@@ -147,6 +154,50 @@ def onhand_ids_from(onhand_rows, product_rows_list, purchase_rows=None):
             if iid.isdigit() and not ((r[0] if r else "") or "").strip():
                 out.add(iid)
     return out
+
+
+def known_ids_from(product_rows_list, official_item_ids=(), onhand=()):
+    """出品が載っている台帳の出品番号 (純関数, test 可): 商品管理シート B列 + 公式仕入 + 有在庫。"""
+    out = set(str(i) for i in (official_item_ids or ())) | set(onhand or ())
+    for rows in product_rows_list or []:
+        for r in rows[1:]:
+            iid = (r[1] if len(r) > 1 else "").strip()
+            if iid.isdigit():
+                out.add(iid)
+    return out
+
+
+def load_known_ids(gc=None, product_rows_list=None, onhand=None):
+    """台帳に載っている出品番号 (I/O)。読めなければ前回の写し。写しも無ければ None (= 有在庫？ の判定をしない)。"""
+    try:
+        if gc is None:
+            import gspread
+            from google.oauth2.service_account import Credentials
+            gc = gspread.authorize(Credentials.from_service_account_file(
+                LF.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"]))
+        if product_rows_list is None:
+            product_rows_list = [gc.open_by_key(sid).get_worksheet_by_id(LF.SHEET_GID).get_all_values()
+                                 for sid in LF.SHEET_IDS]
+        sys.path.insert(0, r"C:\dev\iMak\iMakMercari")
+        from ut_catalog_values import load_official_identities
+        official = {v.get("item_id") for v in (load_official_identities() or {}).values() if v.get("item_id")}
+        if not official:
+            raise ValueError("公式仕入の出品シートが0件")
+        if onhand is None:
+            onhand = load_onhand_ids(gc, product_rows_list) or set()
+        ids = known_ids_from(product_rows_list, official, onhand)
+        if ids:
+            os.makedirs(os.path.dirname(KNOWN_CACHE), exist_ok=True)
+            with open(KNOWN_CACHE, "w", encoding="utf-8") as f:
+                json.dump(sorted(ids), f)
+            return ids
+    except Exception as e:                                         # noqa: BLE001
+        print(f"  ⚠ 台帳の出品番号を読めず、前回の写しを使います ({type(e).__name__})")
+    try:
+        with open(KNOWN_CACHE, encoding="utf-8") as f:
+            return set(json.load(f))
+    except (OSError, ValueError):
+        return None
 
 
 def load_onhand_ids(gc=None, product_rows_list=None):
@@ -666,7 +717,7 @@ def _load():
     #   (実測。表示のために毎回シートを叩いている)。取れた分をローカルに残し、
     #   叩けなかった時は前回の写しを使う。カテゴリは日に何度も変わる値ではない。
     by_item = _category_cache_load()
-    supply, onhand = {}, None
+    supply, onhand, known = {}, None, None
     try:
         import gspread
         from google.oauth2.service_account import Credentials
@@ -688,17 +739,19 @@ def _load():
             by_item = fresh
             _category_cache_save(fresh)
         onhand = load_onhand_ids(gc, sheets)
+        known = load_known_ids(gc, sheets, onhand)
     except Exception as e:                                     # noqa: BLE001
         if not by_item:
             raise
         print(f"  ⚠ カテゴリはシートを読めず前回の写しを使います ({type(e).__name__})")
         onhand = load_onhand_ids()
+        known = load_known_ids()
     if onhand:
         print(f"  🛡 有在庫 {len(onhand)}件 は落としません")
 
     def cat_of(row):
         iid = str(row.get("item_id") or "")
-        return category_for(iid, by_item.get(iid), supply.get(iid, ""), onhand)
+        return category_for(iid, by_item.get(iid), supply.get(iid, ""), onhand, known)
 
     return fr, shelf_of, cat_of
 

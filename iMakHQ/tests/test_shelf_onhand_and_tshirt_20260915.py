@@ -70,6 +70,21 @@ def test_funnel_group_names():
     assert lf.evict_group(_row("3", t, age=60)) == lf._EVICT_OUT          # 材料なしの呼び方は今までどおり
 
 
+def test_listing_on_no_sheet_is_unknown_and_not_dropped():
+    """★ユーザー「じゃ、落とすグループに有在庫？にしておいて、後で調べる」。
+    在庫ありなのに 商品管理シート / 公式仕入 / 有在庫 のどれにも無い出品 (9/15 時点 7件)。"""
+    known = {"358000000001", GOKU}
+    assert SE.category_for("358908083354", "TCG", "", onhand=set(), known=known) == SE.ONHAND_UNKNOWN
+    assert SE.tier_of(_row("358908083354", "PSA 10 Dragon Ball", age=60),
+                      category=SE.category_for("358908083354", None, "", set(), known)) is None
+    assert SE.category_for("358000000001", "TCG", "", onhand=set(), known=known) == "TCG"
+    assert SE.category_for("358000000001", "TCG", "", onhand=set(), known=None) == "TCG"   # 一覧が無い時は今までどおり
+    assert lf.evict_group(_row("358908083354", "PSA 10 Dragon Ball", age=60), onhand=set(), known=known) == "対象外 (有在庫？)"
+    assert lf.evict_group(_row(GOKU, "S.H.Figuarts Son Goku", age=500), onhand={GOKU}, known=known) == "対象外 (有在庫)"
+    prod = [["A", "B"], ["https://jp.mercari.com/item/m1", "358000000001"]]
+    assert SE.known_ids_from([prod], {"357401200653"}, {GOKU}) == {"358000000001", "357401200653", GOKU}
+
+
 def test_panel_tip_matches_the_rule():
     src = open(os.path.join(HQ, "control_panel.py"), encoding="utf-8").read()
     i = src.index('"label": "📉 棚② ')
