@@ -183,9 +183,30 @@ def _parse_backlog(path: Path) -> dict:
         "priority": int(mp.group(1)) if mp else 5,
         "blocked": mb.group(1).strip() if mb else "",
         "owner": _owner_of(body),
-        "mtime": path.stat().st_mtime if path.exists() else 0.0,
+        "mtime": filed_ts(body, path.stat().st_mtime if path.exists() else 0.0),
         "body": body,
     }
+
+
+RE_FILED = re.compile(r"^\s*[-*]\s*起票\s*[:：]\s*(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}):(\d{2}))?", re.M)
+
+
+def filed_ts(body: str, fallback: float) -> float:
+    """本文の `- 起票: YYYY-MM-DD HH:MM` を時刻にする。無ければ fallback (ファイル時刻).
+
+    ★2026-09-14: ファイル時刻で「N日前」と並び順を出していたため、進捗を追記しただけで
+      10〜20日前の件が「9分前」になり、P1 の中の順番も後ろにずれた。起票日は追記で変わらない。
+    """
+    m = RE_FILED.search(body or "")
+    if not m:
+        return fallback
+    try:
+        d = datetime.strptime(m.group(1), "%Y-%m-%d")
+        if m.group(2):
+            d = d.replace(hour=int(m.group(2)), minute=int(m.group(3)))
+        return d.timestamp()
+    except ValueError:
+        return fallback
 
 
 def backlog_items() -> list[dict]:
