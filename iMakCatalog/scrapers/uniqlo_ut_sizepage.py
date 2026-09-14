@@ -161,6 +161,22 @@ def to_inch(cm: str) -> str:
     return f"{w} {r.numerator}/{r.denominator}" if w else f"{r.numerator}/{r.denominator}"
 
 
+INDEX = _raw_store.RAW_ROOT / CATEGORY / "_sizepage_wayback_index.json"
+_INDEX_CACHE: list = []
+
+
+def _wayback_index() -> dict | None:
+    """Wayback のサイズページ保存一覧 {品番6桁: [timestamp 新しい順]}。無ければ None (品番ごとに CDX).
+
+    作り方 (2026-09-14 に 3,454保存 / 2,452ページ):
+        cdx?url=uniqlo.com/jp/ja/size/*&fl=original,timestamp&filter=statuscode:200
+    """
+    if not _INDEX_CACHE:
+        _INDEX_CACHE.append(json.loads(INDEX.read_text(encoding="utf-8"))["pages"]
+                            if INDEX.exists() else None)
+    return _INDEX_CACHE[0]
+
+
 def fetch(pid: str) -> tuple[list[dict] | None, str, str]:
     """(表, 出所, URL)。"""
     n = pid[1:7]
@@ -171,11 +187,17 @@ def fetch(pid: str) -> tuple[list[dict] | None, str, str]:
         if rows:
             _raw_store.save(CATEGORY, f"sizepage_{pid}", h, PAGE.format(n=n))
             return rows, "official_size_page", PAGE.format(n=n)
-    st, b = _get(CDX.format(n=n), timeout=90)
-    try:
-        stamps = [x[0] for x in json.loads(b or b"[]")[1:]]
-    except ValueError:
-        stamps = []
+    idx = _wayback_index()
+    if idx is not None:
+        # ★保存一覧をまとめて取った索引を先に使う (2026-09-14)。品番ごとに CDX を
+        #   問い合わせると 1件30秒かかり、615件で5時間になった。索引に無い = 保存が無い
+        stamps = idx.get(n, [])
+    else:
+        st, b = _get(CDX.format(n=n), timeout=90)
+        try:
+            stamps = [x[0] for x in json.loads(b or b"[]")[1:]]
+        except ValueError:
+            stamps = []
     for ts in sorted(set(stamps), reverse=True)[:3]:           # 新しい保存から
         st, b = _get(WB.format(ts=ts, n=n), timeout=90)
         if st != 200 or not b:
