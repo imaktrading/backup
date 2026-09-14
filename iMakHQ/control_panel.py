@@ -4392,7 +4392,10 @@ class ListingPanel:
             #   ここで直接 import すると tools/ が見えず、毎回「取得できず」になっていた。
             _ut = (w0.get("ut") or {}) if isinstance(w0, dict) else {}
             if _ut.get("error"):
-                ut_s_txt = ut_c_txt = ut_rs_txt = ut_rc_txt = ut_rq_txt = (
+                # ★2026-09-15: ut_sn_txt / ut_sw_txt もここで入れる。抜けていたので UT の件数が
+                #   1回取れないだけで UnboundLocalError → **PSA 補URL を含む全ボタンの残件が取得失敗**
+                #   になり「押しても件数が減りませんでした (35件 → 35件)」と出ていた。
+                ut_s_txt = ut_c_txt = ut_rs_txt = ut_rc_txt = ut_rq_txt = ut_sn_txt = ut_sw_txt = (
                     "\n(残件 取得できず: %s)" % str(_ut["error"])[:40])
             else:
                 ut_s_txt = self.todo_line("ut_search", _ut.get("search", 0), "探します")
