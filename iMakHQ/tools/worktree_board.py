@@ -461,15 +461,27 @@ def main() -> int:
         _watch_age = _dwatch.heartbeat_age()
     except Exception:                                          # noqa: BLE001
         _watch_age = None
-    if _watch_age is None:
-        print("⚠️ dispatch watcher の heartbeat が無い — **依頼が誰にも配られていない疑い**")
-        print("→ `schtasks /end /tn iMakHQ_DispatchWatch; schtasks /run /tn iMakHQ_DispatchWatch`\n")
-    elif _watch_age > 300:
-        print(f"⚠️ dispatch watcher が {int(_watch_age / 60)}分 止まっている — "
-              "**依頼が誰にも配られていない**")
-        print("→ `schtasks /end /tn iMakHQ_DispatchWatch; schtasks /run /tn iMakHQ_DispatchWatch`\n")
-    else:
-        print(f"dispatch watcher: 稼働中 (heartbeat {int(_watch_age)}秒前)\n")
+    print(watcher_status_line(_watch_age, WATCH_DISABLED_FLAG.exists()))
+
+
+# ★2026-09-14 ユーザー判断「廃止して / 必要な時に再開するから」。
+#   タスク iMakHQ_DispatchWatch は Disabled。止めてある間は「止まっている」警告を出さない
+#   (出し続けると誰かが再起動してしまう)。再開する時はこの印を消してタスクを有効にする。
+WATCH_DISABLED_FLAG = DATA_ROOT.parent / "iMak" / "iMakHQ" / "review_logs" / "dispatch_watch.disabled"
+
+
+def watcher_status_line(age, disabled):
+    """見張り役の状態1行 (純関数)。"""
+    if disabled:
+        return ("dispatch watcher: **停止中 (廃止・2026-09-14 ユーザー判断)** — 依頼は各担当の窓を開くまで配られない。"
+                "再開: `dispatch_watch.disabled` を消して `schtasks /change /tn iMakHQ_DispatchWatch /enable`\n")
+    if age is None:
+        return ("⚠️ dispatch watcher の heartbeat が無い — **依頼が誰にも配られていない疑い**\n"
+                "→ `schtasks /end /tn iMakHQ_DispatchWatch; schtasks /run /tn iMakHQ_DispatchWatch`\n")
+    if age > 300:
+        return (f"⚠️ dispatch watcher が {int(age / 60)}分 止まっている — **依頼が誰にも配られていない**\n"
+                "→ `schtasks /end /tn iMakHQ_DispatchWatch; schtasks /run /tn iMakHQ_DispatchWatch`\n")
+    return f"dispatch watcher: 稼働中 (heartbeat {int(age)}秒前)\n"
 
     print(f"---\n**合計: 要返球 {grand_mine + grand_theirs}件"
           f" (うち窓口宛 {grand_theirs}件)**")
