@@ -106,6 +106,16 @@ def test_締めの順番は監査_入稿_書戻し_広告():
                      "itemid_writeback_audit.py", "ads_add_new_listings.py"]
 
 
+def test_監査は今回のCSVだけを見る_無ければ監査しない_20260915():
+    """無指定の監査は csv_output の一番新しい CSV を商材を問わず拾う。
+    実害 (2026-09-15): Tシャツ自動で CSV が出来なかった時、11:08 の TCG の CSV を監査して
+    「CSV入稿準備OK 19件」の窓を出した。"""
+    s = _src()
+    i = s.index("def _run_auto_full_tail")
+    body = s[i:s.index("\ndef ", i + 1)]
+    assert '"csv_auditor.py", "--csv", latest] if latest else []' in body
+
+
 def test_出品は本番モードで呼ぶ():
     s = _src()
     i = s.index("def _run_auto_full_tail")

@@ -934,7 +934,12 @@ def _run_auto_full_tail(append_log_func, env, entry=None, since_ts=None):
     steps = [
         # ★順番が意味を持つ: 監査 → 入稿 → 書戻し → 広告 → メール。
         #   監査は **入稿前の関所**なので必ず先。itemID は入稿しないと出ないので書戻しは後。
-        ("CSV監査くん (入稿前チェック)", [sys.executable, "csv_auditor.py"]),
+        # ★2026-09-15: 監査にも **今回の CSV を渡す**。無指定だと csv_output で一番新しい CSV を
+        #   商材も時刻も問わず拾う → Tシャツで CSV が出来なかった時に 11:08 の TCG の CSV を監査し、
+        #   「🟢 CSV入稿準備OK 19件」の窓を出した (出品は latest 空で skip 済 = 窓だけが嘘)。
+        #   今回の CSV が無ければ監査もしない (入稿と同じ門)。
+        ("CSV監査くん (入稿前チェック)",
+         [sys.executable, "csv_auditor.py", "--csv", latest] if latest else []),
         # ★2026-09-12: 新しい商材は **検証のみ (eBay が受理するか確かめるだけ・出品しない)** から始める。
         #   ボタンの定義で `auto_upload_write: True` にした時だけ本当に出す。
         (("eBay へ予約出品 (API・公開前に確認)" if upload_schedule else "eBay へ出品 (API)")
