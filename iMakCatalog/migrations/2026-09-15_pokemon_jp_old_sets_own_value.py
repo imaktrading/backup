@@ -82,6 +82,7 @@ FIX = {
     "拡張パック「ソウルシルバーコレクション」": ("Heartgold & Soulsilver", "SoulSilver Collection"),
     "拡張パック「破天の怒り」": ("Breakpoint", "Rage of the Broken Heavens"),
     "拡張パック「頂上大激突」": ("Triumphant", "L3: Clash at the Summit"),
+    "強化拡張パック「サン＆ムーン」": ("Sun & Moon", "Enhanced Expansion Pack Sun & Moon"),   # eBay の Sun & Moon は英語版の基本セット
     "ポケモンカードゲームDPtギフトボックス（ナエトルデッキ）": ("Platinum", "DPt Gift Box (Turtwig)"),
     "ポケモンカードゲームDPtギフトボックス（ヒコザルデッキ）": ("Platinum", "DPt Gift Box (Chimchar)"),
     "ポケモンカードゲームDPtギフトボックス（ポッチャマデッキ）": ("Platinum", "DPt Gift Box (Piplup)"),

@@ -1349,6 +1349,9 @@ set:
   - source: "拡張パック「破空の激闘」"
     ebay: "Intense Fight in the Destroyed Sky"
     note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール①/③。旧 'Stormfront' = 英語版セット)。eBay master に在る値"
+  - source: "強化拡張パック「サン＆ムーン」"
+    ebay: "Enhanced Expansion Pack Sun & Moon"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。eBay の Sun & Moon は英語版の基本セット (別商品)。英訳は Bulbapedia (SM1+ Enhanced Expansion Pack Sun & Moon)"
 set_code:
   # ----- Scarlet & Violet (SV / SVxx) -----
   - source: SV1V

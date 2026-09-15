@@ -183,6 +183,10 @@ values:
     category: pokemon_tcg
     rows: 63
     jp_set: "いつでもどこでも バトルアカデミー"
+  - value: "Enhanced Expansion Pack Sun & Moon"
+    category: pokemon_tcg
+    rows: 63
+    jp_set: "強化拡張パック「サン＆ムーン」"
   - value: "Blue Shock"
     category: pokemon_tcg
     rows: 62

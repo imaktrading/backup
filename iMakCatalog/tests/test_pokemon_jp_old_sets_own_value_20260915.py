@@ -29,6 +29,7 @@ class TestJpOldSetsOwnValue(unittest.TestCase):
         self.assertEqual(SET["ポケモンカードゲームDP 拡張パック「湖の秘密」"], "Secret of the Lakes")
         self.assertEqual(SET["拡張パック「頂上大激突」"], "L3: Clash at the Summit")          # eBay master の値
         self.assertEqual(SET["ポケモンカードゲームDPtギフトボックス（ナエトルデッキ）"], "DPt Gift Box (Turtwig)")
+        self.assertEqual(SET["強化拡張パック「サン＆ムーン」"], "Enhanced Expansion Pack Sun & Moon")
 
     def test_no_jp_set_maps_to_english_version_name(self):
         bad = {s: v for s, v in SET.items() if v in EN_VERSION_NAMES and ("「" in s or "DPt" in s)}
