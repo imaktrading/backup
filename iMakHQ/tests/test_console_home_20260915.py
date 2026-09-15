@@ -86,6 +86,12 @@ def test_counts_retry_quota_errors_once():
     assert "time.sleep(65)" in COUNTS
 
 
+def test_launcher_vbs_is_ascii_only():
+    """9/15 実害: 1行目の日本語コメントを VBScript が ANSI で読み、次の行を飲み込んで起動しなかった。"""
+    raw = open(os.path.join(HQ, "console", "start_console.vbs"), "rb").read()
+    assert all(b < 0x80 for b in raw)
+
+
 def test_server_is_local_only_and_posts_need_the_header():
     assert 'HOST = "127.0.0.1"' in SERVER
     assert 'self.headers.get("X-Console") != "1"' in SERVER
