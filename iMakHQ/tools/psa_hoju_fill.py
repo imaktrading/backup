@@ -680,7 +680,8 @@ def _own_driver_pids():
     )
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                           timeout=30, capture_output=True, text=True)
+                           timeout=30, capture_output=True, text=True,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))   # 黒窓を出さない (2026-09-15)
         val = _json.loads((r.stdout or "").strip() or "[]")
         return [int(v) for v in (val if isinstance(val, list) else [val])]
     except Exception:
@@ -701,7 +702,8 @@ def _cleanup_own_drivers():
     try:
         subprocess.run(["powershell", "-NoProfile", "-Command",
                         f"Stop-Process -Id {ids} -Force -EA SilentlyContinue"],
-                       timeout=30, capture_output=True)
+                       timeout=30, capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))   # 黒窓を出さない (2026-09-15)
     except Exception:
         return 0
     return len(pids)

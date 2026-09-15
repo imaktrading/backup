@@ -173,8 +173,10 @@ def _snapshot():
         "ConvertTo-Json -Compress -Depth 3"
     )
     try:
+        # ★2026-09-15 ユーザー「掃除してくれるのはいいんだけど、黒窓が邪魔」: 出品くん (pythonw) から
+        #   10分おきに呼ばれ、そのたびに PowerShell の黒い窓が一瞬出ていた。窓を出さずに走らせる。
         r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                           capture_output=True, timeout=60)
+                           capture_output=True, timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         data = json.loads(decode_ps_output(r.stdout) or "[]")
         return data if isinstance(data, list) else [data]
     except Exception as e:                                     # noqa: BLE001
@@ -190,13 +192,13 @@ def _kill(pid):
     ok = False
     try:
         r = subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
-                           capture_output=True, timeout=30)
+                           capture_output=True, timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         ok = r.returncode == 0
     except Exception:                                          # noqa: BLE001
         pass
     if not ok and os.path.exists(_GIT_KILL):
         try:
-            r = subprocess.run([_GIT_KILL, "-f", str(pid)], capture_output=True, timeout=30)
+            r = subprocess.run([_GIT_KILL, "-f", str(pid)], capture_output=True, timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             ok = r.returncode == 0
         except Exception:                                      # noqa: BLE001
             pass

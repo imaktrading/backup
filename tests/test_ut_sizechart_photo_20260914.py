@@ -20,7 +20,7 @@ for p in (ROOT / "iMakMercari", ROOT / "iMakeBayAPI"):
 import ut_catalog_values as V  # noqa: E402
 import ut_sizechart_image as SC  # noqa: E402
 
-CHART = "https://i.ebayimg.com/00/s/MTA4MFgxMDgw/z/abc/$_57.PNG"
+CHART = "https://raw.githubusercontent.com/imaktrading/imaktrading.github.io/main/tshirt_sizechart_ut_gu.png"
 
 
 def _v(**kw):
@@ -57,19 +57,25 @@ def test_no_chart_when_not_applicable_or_no_url():
     assert V.listing_images([], second=[CHART]) == [CHART]
 
 
-def test_upload_request_and_response():
-    xml = SC.upload_request_xml("imak_tshirt_sizechart")
-    assert "<UploadSiteHostedPicturesRequest" in xml and "<PictureName>imak_tshirt_sizechart</PictureName>" in xml
-    ok = "<Ack>Success</Ack><SiteHostedPictureDetails><FullURL>https://i.ebayimg.com/x.PNG</FullURL>"
-    assert SC.parse_full_url(ok) == "https://i.ebayimg.com/x.PNG"
-    assert SC.parse_full_url("<Ack>Failure</Ack>") == ""
-    assert SC.cached_url({"url": "https://i.ebayimg.com/x.PNG", "sha1": "s"}, "s") == "https://i.ebayimg.com/x.PNG"
-    assert SC.cached_url({"url": "https://i.ebayimg.com/x.PNG", "sha1": "old"}, "new") == ""
+def test_chart_is_not_on_ebay_picture_host_20260915():
+    """eBay は eBay に置いた画像 (i.ebayimg.com) と外の URL を1出品に混ぜると弾く。
+    実害 (2026-09-15): サイズ表だけ eBay に置いていて、🤖自動 17件が 0件出品。"""
+    assert "ebayimg" not in SC.CHART_URL and SC.CHART_URL.startswith("https://")
+    assert not hasattr(SC, "upload")    # eBay の画像置き場に上げる道を残さない
 
 
-def test_failure_does_not_stop_listing(tmp_path, monkeypatch):
-    monkeypatch.setattr(SC, "upload", lambda path=None, tok=None: (_ for _ in ()).throw(RuntimeError("down")))
-    assert SC.ensure_chart_url(cache_path=str(tmp_path / "c.json"), log=lambda *_: None) == ""
+def test_url_returned_only_when_github_matches_local():
+    with open(SC.CHART_PATH, "rb") as f:
+        same = f.read()
+    quiet = dict(log=lambda *_: None)
+    assert SC.ensure_chart_url(fetch=lambda u: same, **quiet) == SC.CHART_URL
+    assert SC.ensure_chart_url(fetch=lambda u: b"old picture", **quiet) == ""   # 描き直して上げ直していない
+
+
+def test_failure_does_not_stop_listing():
+    assert SC.ensure_chart_url(fetch=lambda u: None, log=lambda *_: None) == ""
+    boom = lambda u: (_ for _ in ()).throw(RuntimeError("down"))   # noqa: E731
+    assert SC.ensure_chart_url(fetch=boom, log=lambda *_: None) == ""
 
 
 def test_chart_image_exists_and_generator_uses_it():
