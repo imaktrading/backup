@@ -52,6 +52,30 @@ def test_only_mercari_urls_are_opened():
                                     "https://jp.mercari.com/shops/product/X"]
 
 
+def test_collect_live_keeps_checking_until_enough():
+    """★「何回も押しちゃう」: 先頭の20件が全部売り切れでも、次の20件へ進んでそろえる。"""
+    items = [_it("u%d" % i) for i in range(60)]
+    sold = {"u%d" % i for i in range(20)}                      # 最初の20件は全部売り切れ
+    calls = []
+
+    def check(chunk):
+        calls.append(len(chunk))
+        return [c for c in chunk if c["url"] not in sold]
+    keep = N.collect_live(items, want=20, check=check, now=lambda: 0)
+    assert len(keep) == 20 and keep[0]["url"] == "u20"
+    assert calls == [20, 20], "足りた所で止まる"
+    assert [k["idx"] for k in keep] == list(range(20))
+
+
+def test_collect_live_stops_at_the_time_limit():
+    """時間切れなら、そろった分だけで開く (全部を待たない)。"""
+    items = [_it("u%d" % i) for i in range(60)]
+    clock = iter([0, 999, 999, 999])        # 開始=0 / 1束目の後に確かめる時点で 999秒
+    keep = N.collect_live(items, want=20, check=lambda ch: ch[:5], budget_sec=360,
+                          now=lambda: next(clock))
+    assert len(keep) == 5
+
+
 def test_index_is_renumbered():
     keep, _ = N.split_by_stock([_it("a"), _it("b"), _it("c")], {"b": "sold"})
     assert [k["idx"] for k in keep] == [0, 1]

@@ -695,9 +695,17 @@ def test_count_workload_reports_what_pressing_gives(monkeypatch):
     monkeypatch.setattr(N.sheet_io, "_product_ws",
                         lambda: type("W", (), {"get_all_values": lambda self: [[]]})())
     monkeypatch.setattr(N, "catalog_candidates", lambda *a, **k: [])
+    # ★2026-09-15: 件数は「買えないと判っている URL」を除いて数える。本物の台帳に左右されないよう空にする
+    import mercari_psa_resource as _mp
+    monkeypatch.setattr(_mp, "load_not_buyable", lambda *a, **k: {})
     w = N.count_workload()
-    assert w == {"show": 1, "auto": 1, "pending": 2}, w
+    assert w == {"show": 1, "auto": 1, "pending": 2, "known_sold": 0}, w
     assert not wrote, "数えるだけなのに書いている"
+    # 目視に出る1件が「買えない」と判っていれば 数えない (押しても画面に出ないので)
+    monkeypatch.setattr(_mp, "load_not_buyable",
+                        lambda *a, **k: {"https://jp.mercari.com/item/m901": {"why": "売り切れ"}})
+    w = N.count_workload()
+    assert w["show"] == 0 and w["known_sold"] == 1, w
 
 
 def test_panel_shows_seed_backlog_on_the_button():

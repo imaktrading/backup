@@ -1412,9 +1412,16 @@ def count_workload(limit=0):
     st = {}
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        load_items(limit=limit, write=False, resolve=False, stats=st)
-    return {"show": st.get("show", 0), "auto": st.get("auto", 0),
-            "pending": st.get("pending", 0)}
+        items = load_items(limit=limit, write=False, resolve=False, stats=st)
+    # ★2026-09-15: 一度 開いて「買えない」と判っている URL は数えない (ページは開かない = 速いまま)
+    try:
+        import mercari_psa_resource as _mp
+        known = _mp.load_not_buyable()
+    except Exception:                                          # noqa: BLE001
+        known = {}
+    show = sum(1 for it in items if it.get("url") not in known)
+    return {"show": show, "auto": st.get("auto", 0),
+            "pending": st.get("pending", 0), "known_sold": len(items) - show}
 
 
 def count_workload_high():
@@ -1918,6 +1925,35 @@ def run_append_high(timeout=10800, dry_run=False):
     return 0
 
 
+COLLECT_BUDGET_SEC = 360
+
+
+def collect_live(items, want, check, budget_sec=COLLECT_BUDGET_SEC, now=None):
+    """買える候補が want 件そろうまで、先頭から順に在庫を確かめる (I/O は check に任せる)。
+
+    ★2026-09-15 ユーザー指摘「いまのままだと、何回も押しちゃうよ」。
+      先頭20件だけ確かめると、売り切れが多い日は画面に数件しか出ず、何回も押すことになる。
+      → 20件ずつ確かめ、足りなければ次の20件へ。**時間の上限**を過ぎたら、そろった分だけで開く。
+    check(chunk) → そのうち買える items。want=0 は全部。戻り: idx を振り直した items。
+    """
+    import time as _t
+    now = now or _t.monotonic
+    t0 = now()
+    size = want or 20
+    keep = []
+    for i in range(0, len(items), size):
+        if keep and now() - t0 > budget_sec:
+            print(f"  ⏱ 在庫確認の時間切れ ({budget_sec}秒) — そろった {len(keep)}件で開きます")
+            break
+        keep.extend(check(items[i:i + size]))
+        if want and len(keep) >= want:
+            break
+    keep = keep[:want] if want else keep
+    for j, it in enumerate(keep):
+        it["idx"] = j
+    return keep
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0, help="先頭N件だけ見る (0=全部)")
@@ -1937,9 +1973,13 @@ def main():
         sync_status()
         return run_append_high(timeout=a.timeout, dry_run=a.dry_run)
     sync_status()          # 走行前にも最新化 (手でHIGHに貼った分がすぐ反映される)
-    items = load_items(limit=a.limit, write=not a.dry_run)
-    if items and not a.dry_run:
-        items = drop_sold_before_review(items, write=True)
+    if a.dry_run:
+        items = load_items(limit=a.limit, write=False)
+    else:
+        # 全部の未処理を並べ、先頭から在庫を確かめて **買える候補を limit 件そろえる** (売り切れは NG へ)
+        items = load_items(limit=0, write=True)
+        items = collect_live(items, want=a.limit,
+                             check=lambda chunk: drop_sold_before_review(chunk, write=True))
     if not items:
         print("  未処理の候補なし。")
         return 0
