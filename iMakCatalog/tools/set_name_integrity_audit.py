@@ -803,6 +803,28 @@ def main():
         for x in facet_n1[:30]:
             print(f"    {x['set_name_ebay']!r} <- stranger {list(x['strangers'].items())[:4]}")
 
+    # 14. レアリティの取りこぼし候補 (2026-09-15・ポケモン)
+    #     rarity が空で、同じ弾の他の行には入っていて、まだ公式で確かめていない行。
+    #     0件で維持する。出たら tools/pokemon_rarity_gap_check.py --commit で確かめる。
+    rarity_gap = 0
+    if not categories or "pokemon_tcg" in categories:
+        sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+        import pokemon_rarity_gap_check as _G  # noqa: E402
+        _gc = sqlite3.connect(str(DB_PATH), timeout=120)
+        try:
+            # ★最小 fixture の DB (source_url 等の列が無い) では数えない。
+            #   接続は必ず閉じる (閉じ忘れると回帰テストの一時 DB が消せず 7本落ちた・2026-09-15)
+            _cols = {r[1] for r in _gc.execute("PRAGMA table_info(products)")}
+            if {"source_url", "set_name_official", "specs"} <= _cols:
+                rarity_gap = len(_G.candidates(_gc))
+        except sqlite3.OperationalError:
+            rarity_gap = 0
+        finally:
+            _gc.close()
+        print(f"\n## 14. レアリティの取りこぼし候補 (ポケモン・未確認) — {rarity_gap} 件\n"
+              "- rarity が空で、同じ弾の他の行には入っていて、まだ公式で確かめていない行。0件で維持。\n"
+              "- 出たら `python tools/pokemon_rarity_gap_check.py --commit` (倉庫の公式ページで確かめる)。")
+
     # 完走マーカー (末尾に必ず出す。ログの grep でこれが無ければ途中死亡).
     print(
         f"{_END_MARK}: era={len(era_mismatch)} inconsistent={len(inconsistent)} "
@@ -820,7 +842,8 @@ def main():
         f"rarity_map_drift={sum(v['map_drift'] for v in rarity_by_cat.values())} "
         f"rarity_unmapped={sum(v['unmapped'] for v in rarity_by_cat.values())} "
         f"rarity_accepted_blank={sum(v['accepted_blank'] for v in rarity_by_cat.values())} "
-        f"not_a_rarity={sum(not_rarity.values())} ==="
+        f"not_a_rarity={sum(not_rarity.values())} "
+        f"rarity_gap_unchecked={rarity_gap} ==="
     )
 
 
