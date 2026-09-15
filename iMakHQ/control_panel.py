@@ -4244,8 +4244,12 @@ class ListingPanel:
             elif sr.get("error"):
                 sr_txt = "\n(残件 取得できず: %s)" % str(sr["error"])[:40]
             elif sr:
-                sr_txt = (self.todo_line("sold_restock", sr.get("actionable", 0),
-                                         "送ります")
+                # ★2026-09-15 ユーザー判断: 補充は **夜が送る** (1aedc64・1晩10件まで)。
+                #   このボタンは一覧を出すだけなので「残り N件 — 今回 全部 送ります」と書くと
+                #   押しても減らない (badge_drift に記録された)。「残り」を使わない = 突き合わせの対象外
+                _sr_n = int(sr.get("actionable", 0) or 0)
+                sr_txt = (("\n夜に %d件 送ります (押すと一覧だけ)" % _sr_n if _sr_n
+                           else "\n送る分なし")
                           + "\n(要確認 %s件・補充済 %s件)" % (
                               sr.get("unknown", 0), sr.get("done", 0)))
                 if sr.get("unknown"):
@@ -4485,7 +4489,9 @@ class ListingPanel:
                         "kuji_confirm": bool((kj.get("confirm") or {}).get("ready")),
                         "cull_end": bool(ce.get("remaining")),
                         "shelf_evict": bool(se.get("picked")),
-                        "sold_restock": bool(sr.get("actionable") or sr.get("unknown")),
+                        # ★2026-09-15: 補充は夜が送る (1aedc64)。補URL 夜間検索と同じく
+                        #   夜が動いている日は黒・止まった日だけ青
+                        "sold_restock": bool(sr.get("actionable") or sr.get("unknown")) and not _auto,
                         # 変種の確認だけが残っている時も押せば人が見る = 青にする (2026-09-08)
                         "psa_gate": bool(pg.get("actionable") or pg.get("variant_todo")),
                         "restock_build": bool(rb.get("actionable")),

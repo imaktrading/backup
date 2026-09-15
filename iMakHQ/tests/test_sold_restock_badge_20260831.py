@@ -46,4 +46,14 @@ def test_panel_counts_and_paints():
     assert '"sold_restock": sr_txt' in _SRC, "ヒントに出していない"
     # ★2026-09-03 (後): 青 = **押さないと減らない残件がある**。
     #   ユーザーは青いものしか押さないので、黒にすると永遠に押されない。
-    assert '"sold_restock": bool(sr.get("actionable") or sr.get("unknown"))' in _SRC
+    # ★2026-09-15: 補充は夜が送るようになった (1aedc64)。夜が動いている日は黒、止まった日だけ青
+    #   (補URL 夜間検索と同じ決まり)。
+    assert '"sold_restock": bool(sr.get("actionable") or sr.get("unknown")) and not _auto' in _SRC
+
+
+def test_hint_does_not_claim_the_button_sends():
+    """★2026-09-15: ボタンは一覧だけ。「残り N件 — 今回 全部 送ります」と書くと押しても減らない。"""
+    i = _SRC.index('sr_txt = (("\\n夜に %d件 送ります (押すと一覧だけ)"')
+    seg = _SRC[i - 400:i + 300]
+    assert 'todo_line("sold_restock"' not in seg, "『残り N件 — 今回 送ります』に戻っている"
+    assert "押すと一覧だけ" in seg

@@ -27,7 +27,8 @@ _END = next(i for i, ln in enumerate(_LINES) if '"kuji_refresh"' in ln)
 _SEG = chr(10).join(_LINES[:_END + 1])   # 行単位 (値の中に {} が入る行がある)
 
 # 夜間バッチが減らすもの = 黒でよい (ただし _auto が偽なら青)
-_NIGHTLY = ("hoju_search", "ut_search", "ut_restock_search", "kuji_search")
+# ★2026-09-15: 売れた分の補充も夜が送るようになった (1aedc64・--write --max)。ユーザー GO で黒側へ
+_NIGHTLY = ("hoju_search", "ut_search", "ut_restock_search", "kuji_search", "sold_restock")
 
 
 def test_nothing_is_hardcoded_black():
@@ -68,3 +69,6 @@ def test_nightly_list_matches_the_batch_file():
     for frag in ("psa_hoju_fill.py search", "ut_hoju_fill.py search",
                  "ut_hoju_fill.py restock-search", "run_kuji_night.py"):
         assert frag in bat, frag
+    # 補充は「夜が本当に送る」時だけ黒でよい。一覧だけ (--write 無し) に戻ったら青に戻すこと
+    assert any("sold_restock.py" in ln and "--write" in ln for ln in bat.splitlines()), \
+        "夜の補充が --write で回っていない = sold_restock を黒にする根拠が無い"
