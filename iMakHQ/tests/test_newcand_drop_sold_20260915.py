@@ -44,6 +44,14 @@ def test_live_dup_takes_over_when_head_is_sold():
     assert [s["url"] for s in sold] == ["a"]
 
 
+def test_only_mercari_urls_are_opened():
+    """判定はメルカリの購入ボタンなので、スニダン等は開かない (判らない = 見せる)。"""
+    urls = ["https://jp.mercari.com/item/m1", "https://snkrdunk.com/apparels/1/used/2",
+            "https://jp.mercari.com/shops/product/X", "https://jp.mercari.com/item/m1"]
+    assert N.mercari_urls(urls) == ["https://jp.mercari.com/item/m1",
+                                    "https://jp.mercari.com/shops/product/X"]
+
+
 def test_index_is_renumbered():
     keep, _ = N.split_by_stock([_it("a"), _it("b"), _it("c")], {"b": "sold"})
     assert [k["idx"] for k in keep] == [0, 1]

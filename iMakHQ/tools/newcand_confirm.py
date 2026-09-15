@@ -693,6 +693,11 @@ def split_by_stock(items, status):
     return keep, sold
 
 
+def mercari_urls(urls):
+    """詳細ページのボタンで在庫を判定できる URL (メルカリ個人 / Shops) だけ (純関数)。"""
+    return [u for u in dict.fromkeys(urls) if u and "jp.mercari.com/" in u]
+
+
 def drop_sold_before_review(items, write=True):
     """目視の前に売り切れの候補を外す (I/O)。外した分は NG タブに理由つきで残す = 次回も出さない。"""
     urls = []
@@ -709,12 +714,18 @@ def drop_sold_before_review(items, write=True):
         status.update({u: "sold" for u in urls if u in known})
     except Exception:                                          # noqa: BLE001
         _mp = None
-    rest = [u for u in urls if u not in status]
+    # ★2026-09-15 実測: 監視くんの在庫チェックCLI (live_stock) は既定が「巡回の記録」で、
+    #   捨てた候補は巡回していないので **5件とも判定不能** だった (売り切れを1件も外せない)。
+    #   → 補URL の書込み直前と同じ確認 (詳細ページを開いて購入ボタンを見る) を使う。
+    #   判定がメルカリのボタンなので **メルカリの URL だけ** 開く。他 (スニダン等) は判らない = 見せる。
+    rest = mercari_urls(u for u in urls if u not in status)
     if rest:
         try:
-            import csv_drop_sold_rows as _cds
-            print(f"  🔎 目視の前に在庫を確認: {len(rest)}件 (監視くんの在庫チェック)")
-            status.update(_cds.live_stock(rest))
+            import hoju_url_from_dupes as _hud
+            print(f"  🔎 目視の前に在庫を確認: メルカリ {len(rest)}件 (詳細ページを開く)")
+            alive, dead = _hud.verify_alive(rest)
+            status.update({u: "in_stock" for u in alive})
+            status.update({u: "sold" for u, _why in dead})
         except Exception as e:                                 # noqa: BLE001
             print(f"  ⚠️ 在庫を確認できず → 売り切れ判定なしで見せます: {type(e).__name__}: {e}")
     keep, sold = split_by_stock(items, status)
