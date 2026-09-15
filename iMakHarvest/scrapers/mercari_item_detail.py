@@ -166,6 +166,12 @@ def fetch_detail(driver, url: str) -> Optional[dict]:
         color = ""
     else:
         size = _extract_size(driver)
+        if not size:
+            # ★構造化「サイズ」欄はカテゴリ依存 (ホーム>UNIQLO>ファッション>メンズ>
+            #   トップス>Tシャツ で出品された物にしか無い)。 それ以外のカテゴリで
+            #   出品された UT は欄自体が無く、 出品者が説明文に自由記述しているだけ
+            #   (2026-09-14 user 確定「それ以外は説明文から拾って」)。
+            size = _extract_size_from_description(description)
         color = _judge_color(image_urls, title=title, description=description)
 
     return {
@@ -307,6 +313,51 @@ def _extract_size(driver) -> str:
     except Exception:
         pass
     return ""
+
+
+# 構造化欄が無い出品向けの説明文フォールバック (2026-09-14 user 確定)。
+# 確証の薄い形は拾わない (推測で埋めない = 出品の正確性原則)。
+_SIZE_XN_RE = r"[2-5]XL"
+_SIZE_TOKEN_RE = r"XXXL|XXL|XXS|XL|XS|S|M|L|F|フリー"
+_SIZE_NUM_RE = r"\d{2,3}"
+_SIZE_ANY_RE = f"(?:{_SIZE_XN_RE}|{_SIZE_TOKEN_RE}|{_SIZE_NUM_RE})"
+
+# 「- サイズ: M」「サイズ : M」「サイズ　Mサイズ」 (ラベルが先)。
+# 区切りは同じ行の空白/コロンのみ (\s* だと改行を跨いで、 「Lサイズ」の後の
+# 無関係な段落から数字を拾ってしまう。 2026-09-14 実害: 「Lサイズ\n\n1928年11月18日
+# にアメリカで公開された…」から 1928 の先頭3桁 "192" を誤って拾った)。
+_SIZE_LABEL_SEP_RE = r"[ \t　:：]*"
+_SIZE_LABEL_VALUE_RE = re.compile(
+    rf"サイズ{_SIZE_LABEL_SEP_RE}({_SIZE_ANY_RE})(?:サイズ)?", re.IGNORECASE)
+# 「Sサイズ」「3XLサイズ」 (値が先、 文中に埋まっていてもよい)
+_SIZE_VALUE_LABEL_RE = re.compile(rf"({_SIZE_ANY_RE})サイズ", re.IGNORECASE)
+# 行まるごと "XS" のような、 ラベルの言葉が無い裸の表記 (1文字の S/M/L/F は
+# 誤検出リスクが高いので対象外、 2文字以上の英字 or 2-3桁の数字のみ)
+_SIZE_STANDALONE_RE = re.compile(rf"^({_SIZE_XN_RE}|XXS|XXL|XS|XL|{_SIZE_NUM_RE})$",
+                                 re.IGNORECASE)
+
+
+def _extract_size_from_description(description: str) -> str:
+    """構造化「サイズ」欄が無い出品向け: 説明文の自由記述からサイズを拾う.
+
+    対象は「ホーム>UNIQLO>ファッション>メンズ>トップス>Tシャツ」以外のカテゴリで
+    出品された UT (キャラクターグッズ等で出品され、 サイズ欄自体が存在しない)。
+    確証の薄い形 (ラベルも「サイズ」の語も無い裸の数字/英字だけ) は拾わない。
+    """
+    text = description or ""
+    m = _SIZE_LABEL_VALUE_RE.search(text) or _SIZE_VALUE_LABEL_RE.search(text)
+    if m:
+        return _canonical_size_token(m.group(1))
+    for line in text.splitlines():
+        stripped = line.strip(" \t　・-*☆★•")
+        m = _SIZE_STANDALONE_RE.match(stripped)
+        if m:
+            return _canonical_size_token(m.group(1))
+    return ""
+
+
+def _canonical_size_token(raw: str) -> str:
+    return raw if raw.isdigit() else raw.upper()
 
 
 def _first_product_image_url(image_urls: list[str] | None) -> str:

@@ -9,7 +9,11 @@ from __future__ import annotations
 
 import pytest
 
-from scrapers.mercari_item_detail import SIZE_TESTID, _extract_size
+from scrapers.mercari_item_detail import (
+    SIZE_TESTID,
+    _extract_size,
+    _extract_size_from_description,
+)
 import sheet_writer
 import sheet_writer_amazon
 
@@ -224,3 +228,41 @@ class TestSheetWriterAmazonBuildRowColorSize:
         row = sheet_writer_amazon._build_row(item)
         assert row[18] == "Black"
         assert row[19] == "L"
+
+
+# --------------------------------------------------------------------------
+# _extract_size_from_description: 構造化欄が無い出品 (トップス>Tシャツ 以外の
+# カテゴリで出品された UT) 向けの説明文フォールバック (2026-09-14 user 確定)。
+# 実データ (mercari_uniqlo_20260913 走行) で観測した形をそのままケース化。
+# --------------------------------------------------------------------------
+class TestExtractSizeFromDescription:
+    @pytest.mark.parametrize("description, expected", [
+        ("- ブランド: UNIQLO UT\n- カラー: ブラック\n- サイズ: M\n- 状態: 新品", "M"),
+        ("- カラー: イエロー\n- サイズ: 110\n- デザイン: フュージョンポーズ", "110"),
+        ("- カラー: ホワイト\n- サイズ: 3XL\n\n新品未開封未使用です", "3XL"),
+        ("UTグラフィックデザインTシャツ\n\nサイズ : M\n\n・新品未使用ですが", "M"),
+        ("新品未使用UNIQLO　\n\nサイズ　Mサイズ\nタグ付き", "M"),
+        ("とんがりくんTシャツ Sサイズ\n\nタグ付き新品未使用", "S"),
+        ("即購入可能です。\n\n未使用未開封\nXS", "XS"),
+        ("- ブランド: UNIQLO UT\n- サイズ: XXS\n- ネックライン: クルーネック", "XXS"),
+    ])
+    def test_recovers_known_patterns(self, description, expected):
+        assert _extract_size_from_description(description) == expected
+
+    def test_no_size_mentioned_stays_empty(self):
+        # サイズの手がかりが説明文に無い → 推測しない (fail-closed)
+        assert _extract_size_from_description("新品タグ付きです☆") == ""
+
+    def test_does_not_cross_into_next_paragraph(self):
+        """m85xxx 実害: 「Lサイズ」の後の空行を挟んだ無関係な段落から
+        年号の先頭3桁を誤って拾っていた (\\s* が改行を跨いでいたのが原因)."""
+        description = (
+            "UNIQLO\nミッキーシャインズ UT グラフィックTシャツ\n男女兼用 \nLサイズ\n\n"
+            "1928年11月18日にアメリカで公開されたディズニー短編アニメーション"
+            "「蒸気船ウィリー」をモチーフにした一枚。"
+        )
+        assert _extract_size_from_description(description) == "L"
+
+    def test_bare_single_letter_line_not_recovered(self):
+        # 1文字だけの裸行 (S/M/L/F) は誤検出リスクが高いので拾わない
+        assert _extract_size_from_description("よろしくお願いします\nM\nありがとう") == ""

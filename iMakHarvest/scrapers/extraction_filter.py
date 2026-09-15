@@ -48,6 +48,14 @@ SKIP_COLOR_SIZE_KEYWORDS: tuple[str, ...] = (
     # 注: 今後 Takaaki さんから「○○も skip」指示があったらここに追加していく
 )
 
+# タイトルにこれがあれば服 (TCG カード本体ではない)。
+# 「ポケカ好きの方へ」等、 UT の説明文に趣味アピールとして TCG 語が混じるとキーワードだけでは
+# 服が誤って skip される (2026-09-14 実害: ポケモン UT が「ポケカ」を含み size/color 未取得)。
+# 「ワンピース」は ONE PIECE と衝突するため入れない (2026-08-22 の既知の罠、別途対応済)。
+_APPAREL_TITLE_MARKERS: tuple[str, ...] = (
+    "tシャツ", "パーカー", "スウェット", "ジャケット", "半袖", "長袖", "カットソー",
+)
+
 
 def should_skip_color_size(title: str, description: str) -> bool:
     """この商品は color/size 抽出が不要 (TCG 等) かを判定.
@@ -60,7 +68,13 @@ def should_skip_color_size(title: str, description: str) -> bool:
         True  → color/size 抽出を skip (空欄でスプシに書込)
         False → 通常通り color (Vision AI) / size (構造化 field) を抽出
     """
-    text = ((title or "") + " " + (description or "")).lower()
+    title_lower = (title or "").lower()
+    text = (title_lower + " " + (description or "")).lower()
     if not text.strip():
         return False
-    return any(kw.lower() in text for kw in SKIP_COLOR_SIZE_KEYWORDS)
+    if not any(kw.lower() in text for kw in SKIP_COLOR_SIZE_KEYWORDS):
+        return False
+    # タイトルが明らかに服 → TCG 語は「〜好きの方」等の趣味アピールと見なし skip しない
+    if any(m in title_lower for m in _APPAREL_TITLE_MARKERS):
+        return False
+    return True

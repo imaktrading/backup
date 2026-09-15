@@ -126,3 +126,18 @@ class TestEdgeCases:
         assert "psa10" in [kw.lower() for kw in SKIP_COLOR_SIZE_KEYWORDS]
         assert "ワンピースカード" in SKIP_COLOR_SIZE_KEYWORDS
         assert "ポケカ" in SKIP_COLOR_SIZE_KEYWORDS
+
+
+# --------------------------------------------------------------------------
+# UT の説明文に TCG 語が混じっても服は skip しない (2026-09-14 実害)
+# --------------------------------------------------------------------------
+class TestApparelWithStrayTcgWord:
+    def test_ut_mentioning_poke_card_fan_not_skipped(self):
+        """m12782692881: ポケモン UT の説明文「ポケカ好きの方」で誤って skip されていた."""
+        title = "値引き不可　ポケモン × ユニクロ Tシャツ　Mサイズ 新品・未使用"
+        desc = "ポケモン好きの方、ポケカ好きの方、コレクターの方等におすすめです。"
+        assert should_skip_color_size(title, desc) is False
+
+    def test_real_tcg_title_with_apparel_word_in_description_still_skips(self):
+        # タイトルが TCG のままなら、 説明文に無関係な語があっても skip は維持
+        assert should_skip_color_size("ポケモンカード リザードン VMAX 美品", "おまけでシャツ付き") is True
