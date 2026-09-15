@@ -32,7 +32,8 @@ def _patch(monkeypatch, built=(), undeliverable=()):
     monkeypatch.setattr(RB, "built_today", lambda: set(built))
     monkeypatch.setattr(RB, "undeliverable", lambda: set(undeliverable))
     monkeypatch.setattr(RB, "build_restock_input",
-                        lambda pending, c2, km: ({"certs": [c2[(p.get("itemID") or "").strip()]
+                        # ★2026-09-15: 売り切れの仕入元で出し直さない門 (sold_out_supply=) を足したので **kw を受ける
+                        lambda pending, c2, km, **kw: ({"certs": [c2[(p.get("itemID") or "").strip()]
                                                             for p in pending
                                                             if c2.get((p.get("itemID") or "").strip())],
                                                   "forced": []}, []))

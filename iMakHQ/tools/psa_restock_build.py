@@ -41,11 +41,32 @@ def _cost_sanity(cost_jpy, live_price_usd=None):
     return cost_sanity(cost_jpy, live_price_usd=live_price_usd)
 
 
-def build_restock_input(restock_rows, itemid_to_cert, itemid_to_key):
+def _norm_supply(u):
+    """仕入元URLの比較用 (クエリと末尾スラッシュを落とす)。純関数。"""
+    return (u or "").strip().split("?", 1)[0].rstrip("/")
+
+
+def sold_out_supply_by_item(product_vals):
+    """商品管理シート → {itemID: 今の仕入元URL(A列)} ※監視くんが売り切れ (D列) にした行だけ。純関数。"""
+    out = {}
+    for r in (product_vals or [])[1:]:
+        iid = (r[1] if len(r) > 1 else "").strip()
+        if iid and ((r[3] if len(r) > 3 else "") or "").strip():
+            out[iid] = ((r[0] if r else "") or "").strip()
+    return out
+
+
+def build_restock_input(restock_rows, itemid_to_cert, itemid_to_key, sold_out_supply=None):
     """RESTOCK確定 rows → psa_to_csv RESTOCK入力 dict。純関数。
 
-    restock_rows: [{"itemID":.., "cost":¥, "supply_url":url}]
+    restock_rows: [{"itemID":.., "cost":¥, "supply_url":url, "confirmed_url":url}]
+    sold_out_supply: sold_out_supply_by_item() の結果。渡すと下の門が効く。
     Returns: (input_dict, skipped[(itemID, 理由)])
+
+    ★2026-09-15: **確定した仕入元が、監視くんが売り切れにした今の仕入元と同じ**なら作らない。
+      一度戻した出品の仕入元が売り切れ → 監視くんが D列○・在庫0 → ③ が「入稿待ち」に戻す →
+      次の ② が売り切れの仕入元のまま在庫1で出し直す、という流れを止める (9/15 実測 10件)。
+      売り切れ印だけでは止めない (新しく見つけた仕入元で戻す正規の再仕入れも D列○ から始まる)。
     """
     certs, forced, cost, supply = [], {}, {}, {}
     skipped = []
@@ -57,6 +78,11 @@ def build_restock_input(restock_rows, itemid_to_cert, itemid_to_key):
         cert = itemid_to_cert.get(iid)
         if not cert:
             skipped.append((iid, "cert#未解決(商品管理シートI列に無い)→生成不可"))
+            continue
+        _dead = (sold_out_supply or {}).get(iid)
+        _conf = r.get("confirmed_url") or ""
+        if _dead and _conf and _norm_supply(_conf) == _norm_supply(_dead):
+            skipped.append((iid, "確定した仕入元が監視くんで売り切れ (D列) → 再仕入れ①で探し直す→生成不可"))
             continue
         if cert in seen:
             continue
@@ -116,6 +142,7 @@ def _pending_from_confirmed_rows(rows):
     def _i(name):
         return h.index(name) if name in h else None
     ii, ci, ui, si = _i("itemID"), _i("最安¥"), _i("仕入URL"), _i("RESTOCK状態")
+    cu = _i("確認済仕入URL")    # ★2026-09-15 売り切れの仕入元で出し直さない門に使う (supply_url は触らない)
     out, skipped_done = [], 0
     for r in rows[1:]:
         if not any(r):
@@ -125,9 +152,11 @@ def _pending_from_confirmed_rows(rows):
         if "実行済" in status or "終了済" in status:
             skipped_done += 1
             continue
+        _joined = (r[cu] if cu is not None and cu < len(r) else "") or ""
         out.append({"itemID": (r[ii] if ii is not None and ii < len(r) else ""),
                     "cost": (r[ci] if ci is not None and ci < len(r) else ""),
-                    "supply_url": (r[ui] if ui is not None and ui < len(r) else "")})
+                    "supply_url": (r[ui] if ui is not None and ui < len(r) else ""),
+                    "confirmed_url": next((u.strip() for u in _joined.split(" | ") if u.strip()), "")})
     return out, skipped_done
 
 
@@ -217,10 +246,13 @@ def count_workload(rows=None, itemid_to_cert=None):
             from sheet_io import read_tab
             rows = read_tab("RESTOCK確定")
         pending, done = _pending_from_confirmed_rows(rows)
+        _sold = None
         if itemid_to_cert is None:
             try:
                 from sheet_io import build_cert_map, _product_ws
-                itemid_to_cert = build_cert_map(_product_ws().get_all_values())
+                _pv = _product_ws().get_all_values()
+                itemid_to_cert = build_cert_map(_pv)
+                _sold = sold_out_supply_by_item(_pv)
             except Exception:                                  # noqa: BLE001
                 itemid_to_cert = None
         # ★2026-09-07 ユーザー指摘「やる事が残っていないなら残数は0で黒文字やろ。主旨を理解しろ」。
@@ -233,7 +265,7 @@ def count_workload(rows=None, itemid_to_cert=None):
         built = built_today()
         built_n = 0
         if itemid_to_cert is not None:
-            inp, skipped = build_restock_input(pending, itemid_to_cert, {})
+            inp, skipped = build_restock_input(pending, itemid_to_cert, {}, sold_out_supply=_sold)
             blocked = len(skipped)
             _live = set(inp["certs"])          # 押せば CSV に出る cert
             _cert_of = {(p.get("itemID") or "").strip(): itemid_to_cert.get(
@@ -283,8 +315,10 @@ def main():
     if not rows:
         sys.exit("「RESTOCK確定」タブが空。先に PSA再仕入れ照合→視覚確証で確定してください。")
     keymap, _itemrow, _certmap = product_index()
-    itemid_to_cert = build_cert_map(_product_ws().get_all_values())
-    inp, skipped = build_restock_input(rows, itemid_to_cert, keymap)
+    _pv = _product_ws().get_all_values()
+    itemid_to_cert = build_cert_map(_pv)
+    inp, skipped = build_restock_input(rows, itemid_to_cert, keymap,
+                                       sold_out_supply=sold_out_supply_by_item(_pv))
     print(f"RESTOCK確定 {len(rows)}件 → cert解決 {len(inp['certs'])} / forced KEY {len(inp['forced'])} / skip {len(skipped)}")
     for s in skipped[:10]:
         print("  ⏭", s)
