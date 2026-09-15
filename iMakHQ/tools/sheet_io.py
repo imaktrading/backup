@@ -208,6 +208,25 @@ def range_touches_col(a1_range, col_idx0):
     return min(lo, hi) <= col_idx0 <= max(lo, hi)
 
 
+def _read_with_quota_retry(read, retries=3):
+    """読み取りを 429 (1分あたりの上限) なら待って再試行する。他のエラーはそのまま出す。
+
+    ★2026-09-15: パネルを開き直した直後に 🛒 PSA 再仕入れ ② を押したら、商品管理シートの読み取りが
+      429 で落ちた (開き直しで全ボタンの件数を数え直す読み取りと重なった)。read_tab には 2026-08-15 に
+      待ち直しを入れていたが、**商品管理シートの読み取り (29か所) は素通り**だった。入口でまとめて待つ。
+    """
+    for attempt in range(retries + 1):
+        try:
+            return read()
+        except Exception as e:                                    # noqa: BLE001
+            if not is_quota_error(e) or attempt == retries:
+                raise
+            wait = 20 * (attempt + 1)
+            print(f"  ⏳ Sheets 読み取り上限 (429) → {wait}秒待って再試行 "
+                  f"({attempt + 1}/{retries}) 商品管理シート", flush=True)
+            _t.sleep(wait)
+
+
 class _ColWriteGuard:
     """商品管理シートの **指定列への書込を実行時に拒否**する薄い proxy (2026-07-27 → 08-02 汎用化)。
 
@@ -253,10 +272,10 @@ class _ColWriteGuard:
         """
         ws = object.__getattribute__(self, "_ws")
         if a or kw or not _memo_on():
-            return ws.get_all_values(*a, **kw)
+            return _read_with_quota_retry(lambda: ws.get_all_values(*a, **kw))
         k = ("prodws", getattr(ws, "id", None), getattr(getattr(ws, "spreadsheet", None), "id", None))
         if k not in _READ_MEMO:
-            _READ_MEMO[k] = ws.get_all_values()
+            _READ_MEMO[k] = _read_with_quota_retry(ws.get_all_values)
         return _READ_MEMO[k]
 
     def __getattr__(self, name):
