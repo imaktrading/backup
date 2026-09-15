@@ -56,7 +56,8 @@ def sold_out_supply_by_item(product_vals):
     return out
 
 
-def build_restock_input(restock_rows, itemid_to_cert, itemid_to_key, sold_out_supply=None):
+def build_restock_input(restock_rows, itemid_to_cert, itemid_to_key, sold_out_supply=None,
+                        undeliverable_ids=None):
     """RESTOCK確定 rows → psa_to_csv RESTOCK入力 dict。純関数。
 
     restock_rows: [{"itemID":.., "cost":¥, "supply_url":url, "confirmed_url":url}]
@@ -67,6 +68,12 @@ def build_restock_input(restock_rows, itemid_to_cert, itemid_to_key, sold_out_su
       一度戻した出品の仕入元が売り切れ → 監視くんが D列○・在庫0 → ③ が「入稿待ち」に戻す →
       次の ② が売り切れの仕入元のまま在庫1で出し直す、という流れを止める (9/15 実測 10件)。
       売り切れ印だけでは止めない (新しく見つけた仕入元で戻す正規の再仕入れも D列○ から始まる)。
+    ★2026-09-15 ユーザー「直してよ」:
+      ・**D列が空 (仕入元が生きている)** 行は作らない。在庫0の理由は「売れた」で、戻すのは
+        売れた分の補充 (未発送の注文があれば待つ) / 監視くんの担当。② が在庫1で出すと
+        未発送の注文がある出品 (358887214446 カビゴン) まで戻してしまう。
+      ・**上げられない台帳** (undeliverable_ids) の行は作らない。件数表示だけ外していて本体は素通りで、
+        358514312870 が「必須 C:Rarity 空」のまま CSV に入りアップロードされた。
     """
     certs, forced, cost, supply = [], {}, {}, {}
     skipped = []
@@ -78,6 +85,13 @@ def build_restock_input(restock_rows, itemid_to_cert, itemid_to_key, sold_out_su
         cert = itemid_to_cert.get(iid)
         if not cert:
             skipped.append((iid, "cert#未解決(商品管理シートI列に無い)→生成不可"))
+            continue
+        if undeliverable_ids and iid in undeliverable_ids:
+            _why = undeliverable_ids.get(iid, "") if isinstance(undeliverable_ids, dict) else ""
+            skipped.append((iid, "上げられない台帳に載っている (%s)→生成不可" % (_why[:40] or "理由なし")))
+            continue
+        if sold_out_supply is not None and iid not in sold_out_supply:
+            skipped.append((iid, "仕入元が生きている (D列が空) = 売れた分の補充 / 監視くんの担当→生成不可"))
             continue
         _dead = (sold_out_supply or {}).get(iid)
         _conf = r.get("confirmed_url") or ""
@@ -265,7 +279,8 @@ def count_workload(rows=None, itemid_to_cert=None):
         built = built_today()
         built_n = 0
         if itemid_to_cert is not None:
-            inp, skipped = build_restock_input(pending, itemid_to_cert, {}, sold_out_supply=_sold)
+            inp, skipped = build_restock_input(pending, itemid_to_cert, {}, sold_out_supply=_sold,
+                                               undeliverable_ids=undeliverable())
             blocked = len(skipped)
             _live = set(inp["certs"])          # 押せば CSV に出る cert
             _cert_of = {(p.get("itemID") or "").strip(): itemid_to_cert.get(
@@ -318,7 +333,8 @@ def main():
     _pv = _product_ws().get_all_values()
     itemid_to_cert = build_cert_map(_pv)
     inp, skipped = build_restock_input(rows, itemid_to_cert, keymap,
-                                       sold_out_supply=sold_out_supply_by_item(_pv))
+                                       sold_out_supply=sold_out_supply_by_item(_pv),
+                                       undeliverable_ids=undeliverable())
     print(f"RESTOCK確定 {len(rows)}件 → cert解決 {len(inp['certs'])} / forced KEY {len(inp['forced'])} / skip {len(skipped)}")
     for s in skipped[:10]:
         print("  ⏭", s)
