@@ -406,7 +406,13 @@ def _extract_image_urls(driver) -> list[str]:
             urls.append(src)
         if urls:
             break  # 最初に当たった selector で十分なら終了
-    return urls
+
+    # フォールバック selector (img[src*='static.mercdn.net']) はページ内の
+    # mercdn.net 画像を全部拾うため、出品者アイコン (thumb/members/) や
+    # 他商品サムネ (thumb/item/) が混ざる。商品本体画像パターンのみ残し、
+    # 一致0件でもフォールバックせず空を返す (fail-closed。2026-09-14 HQ 依頼:
+    # G列に他商品の写真が混入していた実害 618行中390行)。
+    return [u for u in urls if _MERCARI_PRODUCT_IMAGE_RE.search(u)]
 
 
 # ============================================================================
