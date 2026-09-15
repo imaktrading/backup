@@ -204,6 +204,7 @@ class TestParse:
     def test_reason_lists(self):
         """PSA の理由を流用 (仕入元売り切れ等)。見送りと対象外は混ぜない."""
         assert "gone" in dict(U.OUT_REASONS)
+        assert "no_tag" in dict(U.OUT_REASONS)   # 2026-09-15 タグ無しは NWT で出せない
         assert all(k.startswith("skip_") for k, _ in U.SKIP_REASONS)
         assert not any(k.startswith("skip_") for k, _ in U.OUT_REASONS)
 
