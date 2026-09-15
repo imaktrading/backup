@@ -62,7 +62,10 @@ IMG_BASES = ("https://image.uniqlo.com/GU/ST3/AsianCommon/imagesgoods/{l1}/",
              "https://image.uniqlo.com/GU/ST3/jp/imagesgoods/{l1}/")
 IMG_PRE = ("goods", "jpgoods")
 KIDS = {"KIDS", "BABY", "GIRLS", "BOYS"}
-WALK = 8                      # 見つけた品番の前後をこの幅だけ続けて外れるまで歩く
+# 見つけた品番 (と catalog の品番) の前後をこの幅だけ歩く。
+# ★8 では足りなかった (2026-09-15): GU は品番がパンツ・靴下等と入り混じっていて、
+#   E357167 / E361243 (公式から消えたグラフィックT) が catalog の品番から 8 より離れていて1回目で漏れた
+WALK = 20
 
 
 def _json(url: str) -> dict:
@@ -174,6 +177,10 @@ def main() -> None:
     seeds = set(have)
     if WAYBACK_PIDS.exists():
         seeds |= set(json.loads(WAYBACK_PIDS.read_text(encoding="utf-8")))
+    # ★判定済みの当たりと catalog の品番からも前後を歩く (再実行で WALK を広げた時に効かせるため)
+    for p in {q for q, v in verdicts.items() if is_target(v)} | have:
+        n = int(p[1:7])
+        seeds |= {f"E{k:06d}-000" for k in range(n - WALK, n + WALK + 1)}
     queue = sorted(p for p in seeds if p not in verdicts)
     print(f"  候補 {len(seeds)}件 / 判定済み {len(seeds) - len(queue)}件 は飛ばす", flush=True)
 
