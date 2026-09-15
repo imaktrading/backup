@@ -655,6 +655,82 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
     return items
 
 
+# ★2026-09-15 ユーザー判断「捨てた候補のは、売り切れていない方がいいよね。無駄な作業だし」。
+#   実測: 候補490件のうち 商品管理シートに入った73件で itemID が付いたのは25件・売り切れ印も25件。
+#   売り切れた仕入元は新規出品にならない (入稿直前の在庫確認で落ちる) ので、**目視の前に**除く。
+#   在庫が判らない候補 (unknown / CLI が動かない) は従来どおり見せる = 候補を消す側に倒さない。
+SOLD_REASON = "売り切れ (目視前の在庫確認)"
+
+
+def split_by_stock(items, status):
+    """在庫の結果で候補を分ける (純関数)。戻り: (見せる items, 売り切れの候補 list)。
+
+    status: {url: "sold"|"in_stock"|"unknown"}。載っていない url は判らない扱い = 見せる。
+    同じカードの別の仕入元 (dups) も売り切れは外す (確定時に補URLへ行くので死んだURLを入れない)。
+    代表が売り切れで dups に生きているものがあれば、生きている先頭を代表に繰り上げる。
+    """
+    keep, sold = [], []
+    for it in items:
+        dups = list(it.get("dups") or [])
+        live_dups = [d for d in dups if status.get(d.get("url")) != "sold"]
+        sold.extend(d for d in dups if status.get(d.get("url")) == "sold")
+        if status.get(it.get("url")) == "sold":
+            sold.append(it)
+            if not live_dups:
+                continue
+            head = dict(live_dups[0])
+            for k in ("variants", "card_no", "_gkey", "decided"):
+                if k in it and k not in head:
+                    head[k] = it[k]
+            head["dups"] = live_dups[1:]
+            keep.append(head)
+            continue
+        it = dict(it)
+        it["dups"] = live_dups
+        keep.append(it)
+    for i, it in enumerate(keep):
+        it["idx"] = i
+    return keep, sold
+
+
+def drop_sold_before_review(items, write=True):
+    """目視の前に売り切れの候補を外す (I/O)。外した分は NG タブに理由つきで残す = 次回も出さない。"""
+    urls = []
+    for it in items:
+        urls.append(it.get("url"))
+        urls.extend(d.get("url") for d in (it.get("dups") or []))
+    urls = [u for u in dict.fromkeys(urls) if u]
+    if not urls:
+        return items
+    status = {}
+    try:
+        import mercari_psa_resource as _mp
+        known = _mp.load_not_buyable()
+        status.update({u: "sold" for u in urls if u in known})
+    except Exception:                                          # noqa: BLE001
+        _mp = None
+    rest = [u for u in urls if u not in status]
+    if rest:
+        try:
+            import csv_drop_sold_rows as _cds
+            print(f"  🔎 目視の前に在庫を確認: {len(rest)}件 (監視くんの在庫チェック)")
+            status.update(_cds.live_stock(rest))
+        except Exception as e:                                 # noqa: BLE001
+            print(f"  ⚠️ 在庫を確認できず → 売り切れ判定なしで見せます: {type(e).__name__}: {e}")
+    keep, sold = split_by_stock(items, status)
+    n_unknown = sum(1 for u in urls if status.get(u) not in ("sold", "in_stock"))
+    print(f"  🧹 売り切れを除外: {len(sold)}件 / 見せる {len(keep)}件"
+          + (f" (在庫が判らず そのまま見せる {n_unknown}件)" if n_unknown else ""))
+    if sold and write:
+        today = _today()
+        _append_tab(NG_TAB, NG_HEADER,
+                    [[s.get("url"), SOLD_REASON, today, (s.get("title") or "")[:80]] for s in sold])
+        if _mp is not None:
+            for s in sold:
+                _mp.remember_not_buyable(s.get("url"), SOLD_REASON)
+    return keep
+
+
 # ---------------------------------------------------------------------------
 # HTML
 # ---------------------------------------------------------------------------
@@ -1851,6 +1927,8 @@ def main():
         return run_append_high(timeout=a.timeout, dry_run=a.dry_run)
     sync_status()          # 走行前にも最新化 (手でHIGHに貼った分がすぐ反映される)
     items = load_items(limit=a.limit, write=not a.dry_run)
+    if items and not a.dry_run:
+        items = drop_sold_before_review(items, write=True)
     if not items:
         print("  未処理の候補なし。")
         return 0
