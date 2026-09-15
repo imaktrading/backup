@@ -25,7 +25,8 @@ def test_build_restock_input_resolves_cert_key_cost():
     assert inp["certs"] == ["142490884", "196679145"]
     assert inp["forced"] == {"142490884": "OP01-016_P", "196679145": "M2a-231"}
     assert inp["cost"] == {"142490884": 29400.0, "196679145": 40000.0}
-    assert inp["supply_url"]["142490884"] == "https://m/1"
+    # ★2026-09-15: 仕入元URLは生成に渡さない (SKU を PSA10-<cert> に保ち、二重出品の門をすり抜けさせない)
+    assert inp["supply_url"] == {}
     assert len(sk) == 1 and sk[0][0] == "999"          # cert無は fail-closed で skip
 
 

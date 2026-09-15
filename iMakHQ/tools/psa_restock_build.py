@@ -123,8 +123,11 @@ def build_restock_input(restock_rows, itemid_to_cert, itemid_to_key, sold_out_su
                     skipped.append((iid, "%s→生成不可" % _ng))
                     continue
                 cost[cert] = _c
-        if r.get("supply_url"):
-            supply[cert] = r["supply_url"]
+        # ★2026-09-15: 仕入元URLは **生成に渡さない** (supply は常に空)。生成側は supply_url から SKU を作り
+        #   (m… / スニダン番号 / 無ければ PSA10-<cert>)、渡すと SKU が m… に変わる。二重出品の門
+        #   (sheet_io.certs_from_skus) は PSA10-<cert> しか読まないので、再仕入れの出品が門をすり抜ける。
+        #   以前は渡すつもりの作りだったが、読む列名が「仕入URL」でタブは「確認済仕入URL」= 一度も渡っていなかった。
+        #   仕入元 (A列) は ③ の master 同期で書く。
     return {"certs": certs, "forced": forced, "cost": cost, "supply_url": supply}, skipped
 
 
