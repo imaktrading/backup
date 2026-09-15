@@ -39,6 +39,21 @@ class TestVerdictResume(unittest.TestCase):
             self.assertNotIn("E000002-000", done)
 
 
+class TestImageFolderUsesBranch(unittest.TestCase):
+    def test_branch_pid_uses_its_own_folder(self):
+        seen = []
+        orig = G._head_ok
+        G._head_ok = lambda u: seen.append(u) or False
+        try:
+            G.images_of("E356602-002")
+            G.images_of("E356602-000")
+        finally:
+            G._head_ok = orig
+        self.assertTrue(any("/356602002/" in u for u in seen))
+        self.assertFalse(any("/356602/" in u and "356602002" not in u for u in seen[: len(seen) // 2]))
+        self.assertTrue(any(u.split("imagesgoods/")[1].startswith("356602/") for u in seen))
+
+
 class TestGoneRowsNotForListing(unittest.TestCase):
     def test_images_only_rows_carry_flag(self):
         src = (ROOT / "scrapers" / "gu_graphic_discover.py").read_text(encoding="utf-8")

@@ -125,8 +125,12 @@ def _head_ok(url: str) -> bool:
 
 
 def images_of(pid: str) -> list[str]:
-    """画像サーバーを総当たり (並行)。色ごと・サブ番号ごとに最初に当たった1つ."""
-    l1 = pid[1:7]
+    """画像サーバーを総当たり (並行)。色ごと・サブ番号ごとに最初に当たった1つ.
+
+    ★GU は品番の枝番ごとに画像の置き場所が別 (E361361-001 → `imagesgoods/361361001/`)。
+      6桁だけで探すと、枝番の商品に **-000 の商品の画像**を付けてしまう (2026-09-15 に実際に付けた)。
+    """
+    l1 = pid[1:7] if pid.endswith("-000") else pid[1:7] + pid[8:11]
     main = [[b.format(l1=l1) + f"item/{p}_{c:02d}_{l1}_3x4.jpg" for b in IMG_BASES for p in IMG_PRE]
             for c in range(100)]
     subs = [[b.format(l1=l1) + f"sub/{p}_{l1}_sub{n}_3x4.jpg" for b in IMG_BASES for p in IMG_PRE]
