@@ -13,7 +13,7 @@
 <div class="wrap">
   <div class="top">
     <div class="brand"><div class="mark">出</div><b>出品くん</b></div>
-    <div class="shop" id="shop"><span id="shop-at">件数 読込中</span></div>
+    <div class="shop" id="shop"><span id="shop-at">件数 読込中</span><span id="shop-ver" class="ver"></span></div>
     <div class="tact"><button class="btn" id="btn-refresh" type="button">残件を数え直す</button></div>
   </div>
 
@@ -30,6 +30,7 @@
     <div class="small"><div class="smrow">
       <button class="sm" role="tab" aria-selected="false" data-page="ana" type="button">分析・棚</button>
       <button class="sm" role="tab" aria-selected="false" data-page="sch" type="button">定期</button>
+      <button class="sm" role="tab" aria-selected="false" data-page="ver" type="button">版・移行</button>
     </div></div>
   </div>
 
@@ -121,6 +122,20 @@
     <section class="card">
       <div class="ch"><h3>登録されているタスク</h3><p>前回の結果と次回の予定</p><span class="right" id="sch-at"></span></div>
       <div class="rows" id="sch-rows"><div class="empty">読込中…</div></div>
+    </section>
+  </div>
+
+  <!-- ===== 版・移行 ===== -->
+  <div class="page" id="p-ver" hidden style="--pc:var(--p-other);--pcs:var(--p-other-soft)">
+    <div class="hero"><div><h1>版・移行</h1><div class="why" id="ver-why">旧 出品くん (今のパネル) は残したまま、押せるボタンを1つずつこちらに移していきます。全部押せるようになったら 1.0</div></div>
+      <div class="kp"><div><label>この画面の版</label><b id="kp-ver">—</b></div><div><label>新画面で押せる</label><b id="kp-ready">—</b></div><div><label>旧パネルのまま</label><b id="kp-left">—</b></div></div></div>
+    <section class="card">
+      <div class="ch"><h3>移行の残り</h3><p>押せない理由ごと。ここが 0 になったら 1.0</p><span class="right" id="ver-commit"></span></div>
+      <div class="rows" id="ver-rows"><div class="empty">読込中…</div></div>
+    </section>
+    <section class="card">
+      <div class="ch"><h3>変更の記録</h3><p>CHANGELOG.md</p></div>
+      <div class="rows"><div class="rw" style="grid-template-columns:1fr"><pre id="ver-log" style="margin:0;font:12px/1.7 var(--f-mono);white-space:pre-wrap;color:var(--ink-2)"></pre></div></div>
     </section>
   </div>
 </div>

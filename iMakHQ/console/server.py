@@ -25,6 +25,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import version
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 HQ = os.path.dirname(HERE)
 TOOLS = os.path.join(HQ, "tools")
@@ -362,8 +364,31 @@ def get_buttons():
     for i, s in enumerate(cp.SCRIPTS):
         out.append({"i": i, "type": s.get("type"), "category": s.get("category"),
                     "label": display_label(s["label"]), "badge": s.get("badge"),
-                    "runnable": runnable(s), "tip": (s.get("tip") or "")[:160]})
+                    "runnable": runnable(s), "why": version.why_not_runnable(s),
+                    "tip": (s.get("tip") or "")[:160]})
     return {"buttons": out}
+
+
+def get_version():
+    """版と移行状況 (旧パネルの何本が新画面で押せるか / 残りは何が要るか)。"""
+    cp = _cp()
+    rows, ready = [], 0
+    for s in cp.SCRIPTS:
+        ok = runnable(s)
+        ready += 1 if ok else 0
+        rows.append({"label": display_label(s["label"]), "category": s.get("category") or "",
+                     "ready": ok, "why": version.why_not_runnable(s)})
+    return {"version": version.VERSION, "released": version.RELEASED, "commit": version.git_commit(),
+            "total": len(rows), "ready": ready, "rows": rows,
+            "changelog": _read_text(os.path.join(HERE, "CHANGELOG.md"))}
+
+
+def _read_text(path, limit=8000):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()[:limit]
+    except OSError:
+        return ""
 
 
 def _tasks_worker():
@@ -488,6 +513,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, get_buttons())
         if u.path == "/api/tasks":
             return self._json(200, get_tasks())
+        if u.path == "/api/version":
+            return self._json(200, get_version())
         if u.path == "/api/log":
             after = int((parse_qs(u.query).get("after") or ["0"])[0] or 0)
             with _LOCK:

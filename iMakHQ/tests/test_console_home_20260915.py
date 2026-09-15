@@ -124,3 +124,20 @@ def test_screen_has_no_crew_or_permanent_log_panel():
     html = open(os.path.join(HQ, "console", "static", "index.html"), encoding="utf-8").read()
     assert "担当" not in html
     assert 'id="drawer" hidden' in html                  # 既定は出さない
+
+
+def test_version_and_migration_status():
+    """ユーザー「ver管理も」(2026-09-16)。版は 0.x = 旧パネル併用、1.0 = 全ボタンが新画面で押せる。"""
+    sys.path.insert(0, os.path.join(HQ, "console"))
+    import version as V
+    sys.path.insert(0, HQ)
+    import control_panel as cp
+    assert re.match(r"^\d+\.\d+\.\d+$", V.VERSION)
+    ready = [s_ for s_ in cp.SCRIPTS if S.runnable(s_)]
+    blocked = [s_ for s_ in cp.SCRIPTS if not S.runnable(s_)]
+    assert all(not V.why_not_runnable(s_) for s_ in ready)       # 押せる物に「理由」は出さない
+    assert all(V.why_not_runnable(s_) for s_ in blocked)         # 押せない物は必ず理由が出る
+    # 1.0 を名乗れるのは全部押せる時だけ
+    assert V.VERSION.startswith("0.") or not blocked
+    log = open(os.path.join(HQ, "console", "CHANGELOG.md"), encoding="utf-8").read()
+    assert V.VERSION in log                                      # 版を上げたら CHANGELOG に1行足す

@@ -266,7 +266,10 @@
       shop.push("評価 <b>" + s.feedback_score + "</b> (" + s.feedback_percentage + "%)");
     }
     if (!h.shelf_unread && m.usd != null) shop.push("今月追加 <b>" + money(m.usd) + "</b>");
-    $("shop").innerHTML = '<span id="shop-at">' + esc($("shop-at").textContent) + "</span>" + shop.map(function (x) { return "<span>" + x + "</span>"; }).join("");
+    var ver = $("shop-ver") ? $("shop-ver").textContent : "";
+    $("shop").innerHTML = '<span id="shop-at">' + esc($("shop-at").textContent) + "</span>" +
+      shop.map(function (x) { return "<span>" + x + "</span>"; }).join("") +
+      '<span id="shop-ver" class="ver">' + esc(ver) + "</span>";
 
     $("kp-month").textContent = h.shelf_unread ? "—" : money(m.usd);
     $("kp-month-n").textContent = h.shelf_unread ? "読込中" : (m.count || 0) + "件";
@@ -348,6 +351,26 @@
       .then(function () { setTimeout(pollLog, running && running.running ? 1200 : 4000); });
   }
 
+  function paintVersion(d) {
+    var left = (d.total || 0) - (d.ready || 0);
+    $("kp-ver").textContent = "v" + d.version;
+    $("kp-ready").textContent = d.ready + " / " + d.total;
+    $("kp-left").textContent = left;
+    $("ver-commit").textContent = d.released + (d.commit ? " · " + d.commit : "");
+    if ($("shop-ver")) $("shop-ver").textContent = "v" + d.version + (d.commit ? " · " + d.commit : "");
+    var why = {};
+    (d.rows || []).forEach(function (r) { if (!r.ready) (why[r.why] = why[r.why] || []).push(r); });
+    var names = Object.keys(why).sort(function (a, b) { return why[b].length - why[a].length; });
+    $("ver-rows").innerHTML = names.map(function (w) {
+      return '<div class="rw"><span class="t">' + esc(w) + " <span class=\"chip todo\">" + why[w].length + "本</span></span>" +
+        '<span class="d">' + esc(why[w].map(function (r) {
+          return r.category ? r.category + " " + r.label : r.label;      // 「新規」だけだと商材が分からない
+        }).join(" · ")) + "</span>" +
+        '<span class="else">旧パネルのまま</span></div>';
+    }).join("") || '<div class="empty">全部このボタンから押せます (1.0)</div>';
+    $("ver-log").textContent = d.changelog || "";
+  }
+
   function refreshJobs() { return getJSON("/api/jobs").then(paintJobs); }
   function refreshHome() { return getJSON("/api/home").then(function (d) { paintHome(d); if (d.loading || !d.home) setTimeout(refreshHome, 3000); }); }
   function refreshTasks() { return getJSON("/api/tasks").then(function (d) { paintTasks(d); if (d.loading) setTimeout(refreshTasks, 3000); }); }
@@ -392,6 +415,7 @@
 
   var h = (location.hash || "").slice(1);
   if ($("p-" + h)) show(h);
+  getJSON("/api/version").then(paintVersion);
   getJSON("/api/buttons").then(function (d) { buttons = d.buttons || []; return refreshJobs(); }).then(refreshHome);
   setInterval(refreshJobs, 60000);
   pollLog();
