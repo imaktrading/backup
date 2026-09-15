@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>出品くん Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@400;500;600&family=Zen+Kaku+Gothic+New:wght@500;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><div class="mark">出</div><div><b>出品くん</b><small>iMak Trading Japan</small></div></div>
+    <nav class="nav" aria-label="メニュー">
+      <div class="grp">今日</div>
+      <a class="on" href="#today">ホーム <span class="n" id="nav-today">…</span></a>
+      <div class="grp">仕入元</div>
+      <a href="#g-hoju">補URL <span class="n" id="nav-hoju">…</span></a>
+      <a href="#g-restock">再仕入れ <span class="n" id="nav-restock">…</span></a>
+      <div class="grp">棚</div>
+      <a href="#g-shelf">取下げ・棚 <span class="n" id="nav-shelf">…</span></a>
+      <a href="#g-seed">種・目視特定 <span class="n" id="nav-seed">…</span></a>
+      <a href="#shelf">棚割り</a>
+    </nav>
+    <div class="foot">
+      <div id="night-foot"><span class="dot wait"></span>夜間バッチ 読込中</div>
+      <div id="counts-foot">件数 —</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="top">
+      <div>
+        <div class="crumbs" id="today-date">—</div>
+        <h1>今日やること</h1>
+      </div>
+      <div class="acts">
+        <button class="btn primary" id="btn-refresh" type="button">残件を数え直す</button>
+      </div>
+    </div>
+
+    <section class="stats" aria-label="店の状態">
+      <div class="stat"><label>出品中</label><div class="v" id="st-active">—</div><div class="s" id="st-seller">eBay 読込中</div></div>
+      <div class="stat"><label>評価</label><div class="v" id="st-fb">—</div><div class="s good" id="st-fbp">—</div></div>
+      <div class="stat"><label>今月 追加した額</label><div class="v" id="st-month">—</div><div class="s" id="st-month-n">—</div></div>
+      <div class="stat"><label>押さないと減らない残件</label><div class="v" id="st-todo">—</div><div class="s" id="st-todo-n">—</div></div>
+    </section>
+
+    <div id="alerts"></div>
+
+    <div class="grid">
+      <div class="col">
+        <section class="panel" id="today">
+          <div class="ph"><h2>押さないと減らないもの</h2><p>夜間で自動に減るものは下の表</p></div>
+          <div class="queue" id="queue"><div class="empty">件数を読込中…</div></div>
+        </section>
+
+        <section class="panel" id="jobs-panel">
+          <div class="ph"><h2>作業</h2><p>① 当日 → ② 夜に探す → ③ 目視して書く</p></div>
+          <div class="tbl" id="jobs"></div>
+        </section>
+
+        <section class="panel" id="shelf">
+          <div class="ph"><h2>棚割り</h2><p id="shelf-sub">US 価格 · 予算に対する今の棚</p></div>
+          <div class="shelf" id="shelf-bars"><div class="empty">統合シート読込中…</div></div>
+        </section>
+      </div>
+
+      <div class="col">
+        <section class="panel">
+          <div class="ph"><h2>市場の時刻</h2><p>現地</p></div>
+          <div class="clocks" id="clocks"></div>
+        </section>
+        <section class="panel">
+          <div class="ph"><h2>担当</h2><p id="crew-sub">依頼の受け渡し</p></div>
+          <div class="crew" id="crew"><div class="empty">読込中…</div></div>
+        </section>
+        <section class="panel">
+          <div class="ph"><h2>実行ログ</h2><p id="job-status">待機中</p></div>
+          <div class="log" id="log" aria-live="polite"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<script src="app.js"></script>
+</body>
+</html>
