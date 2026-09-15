@@ -60,6 +60,7 @@ def test_listing_sold_twice_with_one_unshipped_is_pending(monkeypatch):
 
 def test_main_checks_pending_before_sending():
     src = open(R.__file__, encoding="utf-8").read()
-    i_pending = src.index("if (label, n) in pending:\n            print(")
+    # ★2026-09-15: ほかに買える仕入元が残る時は戻す (has_spare_supply) ようにしたので条件が伸びた
+    i_pending = src.index("if (label, n) in pending and not has_spare_supply(row, _nb):\n            print(")
     i_send = src.index('call = "RelistFixedPriceItem"')
     assert i_pending < i_send

@@ -213,7 +213,11 @@ def orders_from_api(days=90):
     import ads_add_new_listings as _A
     tok = _A._token()
     h = {"Authorization": f"Bearer {tok}", "Accept": "application/json"}
-    end = _dt.datetime.utcnow()
+    # ★2026-09-15: 終了日時に「今」を入れると、PC の時計が eBay より少しでも進んでいれば
+    #   400 "The start and end dates can't be in the future" で全部読めない (9/15 16:33 に実際に発生)。
+    #   実測: この PC は時刻合わせが効いておらず (Local CMOS Clock)、eBay より約2.5秒進んでいた。
+    #   10分前までにする (夜間バッチで毎晩読むので、直近10分の注文は翌晩に拾える)。
+    end = _dt.datetime.utcnow() - _dt.timedelta(minutes=10)
     params = {"filter": f"creationdate:[{end - _dt.timedelta(days=days):%Y-%m-%dT%H:%M:%S.000Z}.."
                         f"{end:%Y-%m-%dT%H:%M:%S.000Z}]", "limit": "200"}
     url, rows = "https://api.ebay.com/sell/fulfillment/v1/order", []
@@ -258,6 +262,37 @@ def order_pending(order):
     except ValueError:
         pass
     return True
+
+
+AUX_SLOTS = 5   # 補URL AC〜AG
+
+
+def has_spare_supply(row, not_buyable):
+    """未発送の注文があっても戻してよいか = **ほかにも買える仕入元が残るか** (純関数, test 可)。
+
+    ★2026-09-15 ユーザー「どれかで仕入れたら、仕入元は売り切れになる。それ以外の仕入元が活きているなら、
+      戻してもいいのでは？」: 未発送の注文分に1本使っても、もう1本以上あれば2人目にも応えられる。
+      数えるのは 仕入元 (A列) + 補URL で、買えないと分かっている URL (not_buyable) を除いた本数。2本以上で可。
+      not_buyable を読めなかった時 (None) は **戻さない** (今までどおり待つ)。
+    """
+    if not_buyable is None:
+        return False
+    cols = [0] + [S.PRODUCT_COL_AUX_START + k for k in range(AUX_SLOTS)]
+    live = set()
+    for c in cols:
+        u = ((row[c] if len(row) > c else "") or "").strip()
+        if u and u not in not_buyable and u.split("?", 1)[0] not in not_buyable:
+            live.add(u.split("?", 1)[0].rstrip("/"))
+    return len(live) >= 2
+
+
+def _load_not_buyable():
+    """買えないと分かっている URL の記録。読めなければ None (= 未発送は待つ側に倒す)。"""
+    try:
+        from mercari_psa_resource import load_not_buyable
+        return load_not_buyable()
+    except Exception:                                          # noqa: BLE001
+        return None
 
 
 def pending_rows(want, sheets):
@@ -428,6 +463,7 @@ def count_workload():
             cache_raw = {}
         already = live_keys(sheets, cache_raw) if cache_raw else set()
         pending = pending_rows(want, sheets)
+        _nb = _load_not_buyable() if pending else {}
         seen = set()
         for o, cat in want:
             sku = (o.get("Custom Label") or "").strip()
@@ -446,7 +482,7 @@ def count_workload():
             if target in seen:          # 同じ出品が2回売れた (注文は2行) → 1回だけ
                 continue
             seen.add(target)
-            if (label, n) in pending:   # 未発送の注文がある = まだ仕入れ中
+            if (label, n) in pending and not has_spare_supply(row, _nb):   # 未発送で ほかに買える仕入元が無い
                 out["blocked"] = out.get("blocked", 0) + 1
                 continue
             _key = (row[S.PRODUCT_COL_KEY] or "").strip() if len(row) > S.PRODUCT_COL_KEY else ""
@@ -528,6 +564,7 @@ def main():
     done = skipped = acted = 0
     seen = set()
     pending = pending_rows(want, sheets)
+    _nb = _load_not_buyable() if pending else {}
     shipped_after = shipped_after_by_row(want, sheets)
     relisted = failed = 0
     for o, cat in want:
@@ -551,8 +588,8 @@ def main():
         if target in seen:
             continue
         seen.add(target)
-        if (label, n) in pending:
-            print(f"  ⏭ [{cat}] 未発送の注文がある (仕入れが済んでから戻す): {title}")
+        if (label, n) in pending and not has_spare_supply(row, _nb):
+            print(f"  ⏭ [{cat}] 未発送の注文があり、ほかに買える仕入元が無い (仕入れが済んでから戻す): {title}")
             skipped += 1
             continue
         _key = (row[S.PRODUCT_COL_KEY] or "").strip() if len(row) > S.PRODUCT_COL_KEY else ""
