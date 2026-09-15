@@ -95,7 +95,8 @@ def test_old_csv_is_never_picked_up(tmp_path):
 def test_auto_tail_is_given_the_run_start():
     import io
     src = io.open(ROOT / "iMakHQ" / "control_panel.py", encoding="utf-8").read()
-    i = src.index("_run_auto_full_tail(self.append_log")
+    # 2026-09-16: 後処理は control_panel.after_run() に抜き出した (旧パネルと新 Console が共用)
+    i = src.index("_run_auto_full_tail(append_log")
     assert "since_ts=" in src[i:i + 200]
 
 

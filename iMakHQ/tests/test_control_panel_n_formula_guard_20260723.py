@@ -16,10 +16,15 @@ with open(_CP, encoding="utf-8") as f:
     _SRC = f.read()
 
 
+def _guard_body():
+    """ガード本体 (2026-09-16: 新 Console と共用するため module 直下に抜き出した)。"""
+    return _SRC.split("def check_n_formula_guard(append_log)")[1].split("\ndef before_run")[0]
+
+
 def test_guard_function_exists_and_checks_both_sheets():
-    """_check_n_formula_guard が定義され、CONSOLIDATED_SHEETS (high+low) を走査する。"""
-    assert "_check_n_formula_guard" in _SRC
-    body = _SRC.split("def _check_n_formula_guard")[1].split("def run_script")[0]
+    """ガードが定義され、CONSOLIDATED_SHEETS (high+low) を走査する。"""
+    assert "_check_n_formula_guard" in _SRC          # 旧パネルの呼び口は残す
+    body = _guard_body()
     assert "CONSOLIDATED_SHEETS" in body, "両スプシを走査していない"
     assert "ARRAYFORMULA" in body
     assert 'value_render_option="FORMULA"' in body, "式の存在確認は FORMULA render 必須"
@@ -37,6 +42,13 @@ def test_run_script_gates_new_type_on_guard():
 
 def test_guard_fails_open_only_on_check_error():
     """チェック自体の失敗(ネットワーク等)は警告のみで続行 (True)、破損確証時のみ False。"""
-    body = _SRC.split("def _check_n_formula_guard")[1].split("def run_script")[0]
+    body = _guard_body()
     assert "return False" in body      # 破損 → 中止
     assert body.rstrip().endswith("return True")  # except 側 → 続行
+
+
+def test_new_listing_always_passes_the_guard_from_both_screens():
+    """2026-09-16: 新 Console から押した新規生成も、必ず同じガードを通る。"""
+    body = _SRC.split("def before_run(script, append_log)")[1].split("\ndef after_run")[0]
+    assert 'script.get("type") == "new" and not check_n_formula_guard(append_log)' in body
+    assert "return False" in body

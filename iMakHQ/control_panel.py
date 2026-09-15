@@ -2035,6 +2035,292 @@ import json as _json
 WINDOW_GEOMETRY_FILE = f"{WORKSPACE}/iMakHQ/.window_geometry.json"
 
 
+def run_psa_orphan_clean(append_log):
+    """PSA新規生成の前に orphan canonical KEY を掃除(歩留まり激減の恒久対策, 2026-06-21)。
+
+    未出品(B列空)なのに KEY が付いて dedup に誤ブロックされた在庫を出品対象に戻す。同期実行。
+    失敗しても新規生成は続行(掃除は best-effort)。dedupe/psa_to_csv は触らずスプシ AI列のみ。
+    """
+    append_log("\n🧹 orphan KEY 掃除(未出品なのに誤ブロックされた在庫を出品対象へ戻す)...\n")
+    try:
+        tool = os.path.join(WORKSPACE, "iMakHQ", "tools", "psa_orphan_key_clean.py")
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        r = _run_step([sys.executable, tool, "--execute"],
+                      capture_output=True, text=True, encoding="utf-8",
+                      errors="replace", timeout=180, creationflags=flags)
+        if r.stdout:
+            append_log(r.stdout)
+        if r.returncode != 0:
+            append_log(f"⚠️ orphan掃除 returncode={r.returncode}(新規生成は続行)\n")
+            if r.stderr:
+                append_log(r.stderr[-500:] + "\n")
+    except Exception as e:
+        append_log(f"⚠️ orphan掃除 skip(新規生成は続行): {type(e).__name__}: {e}\n")
+
+
+def check_n_formula_guard(append_log):
+    """統合High/Low の N列(仕入値SSOT)関数の破損検知。壊れていたら False (=run 中止)。
+
+    2026-07-23 設計: N =(M=現在価格 or F)−K=ポイント の ARRAYFORMULA (N1 の1セル)。
+    どこかのプロセスが N セルに値を書くと関数が静かに壊れ、陳腐化した仕入値で誤価格
+    出品が続く (fail-OPEN)。listing 系 run の前に両シートを確認する。
+    LOW は gshock_to_csv 内にも同ガードあり (二重化)。HIGH の主要消費者 psa_to_csv は
+    no-touch 運用のため、HIGH はここが唯一のガード。
+    ネットワーク等でチェック自体が失敗した場合は警告のみで続行 (可用性優先。破損の
+    確証がある時だけ止める)。
+    """
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        creds = Credentials.from_service_account_file(
+            GSHEET_CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+        gc = gspread.authorize(creds)
+        for label, (sid, gid) in CONSOLIDATED_SHEETS.items():
+            ws = gc.open_by_key(sid).get_worksheet_by_id(gid)
+            f = ws.acell("N1", value_render_option="FORMULA").value or ""
+            if not f.startswith("=ARRAYFORMULA"):
+                append_log(
+                    f"🚫 {label} スプシ N列の仕入値関数が壊れています (N1={f[:40]!r})。\n"
+                    "   N セルに値を書いたプロセスを特定し、N1 に ARRAYFORMULA を再設置\n"
+                    "   してください (memory: amazon_points_net_cost_system 参照)。run 中止。\n")
+                return False
+        return True
+    except Exception as e:
+        append_log(f"⚠️ N関数ガード チェック不能(続行): {type(e).__name__}: {e}\n")
+        return True
+
+
+def before_run(script, append_log):
+    """走る前のガード (2026-09-16 抜き出し)。False なら **走らせてはいけない**。
+
+    元は ControlPanel.run_script の中 (画面のコード) にあり、新画面からは呼べなかった。
+    中身・順番・文言は変えていない。新規生成の安全弁なので、どちらの画面から押しても必ず通る。
+    """
+    script = script or {}
+    # PSA新規: 生成の前に orphan canonical KEY を自動掃除(2026-06-21 恒久対策)。
+    # write-keys が出品確定前に KEY を書く → 未出品在庫を dedup が誤ブロックし歩留まり激減する
+    # 問題を、毎回 生成前に掃除して再発防止。control_panel のみ・dedupe/psa_to_csv は不変。
+    if script.get("category") == "PSA TCG" and script.get("type") == "new":
+        run_psa_orphan_clean(append_log)
+    # listing 系 run 前の N列(仕入値SSOT)関数ガード (2026-07-23、両スプシ)
+    if script.get("type") == "new" and not check_n_formula_guard(append_log):
+        return False
+    return True
+
+
+def after_run(script, returncode, append_log, run_log_text=None, listing_start_ts=None):
+    """走った後の後処理 (2026-09-16 抜き出し)。**旧 出品くん と 新 Console が同じ物を呼ぶ**。
+
+    元は ControlPanel.poll_queue の中 (画面のコード) に書かれていて、新画面からは呼べなかった。
+    中身・順番・ログの文言は**変えていない**。画面に依存していた部分だけ引数にした:
+      append_log      … ログを書く関数 (旧パネル = ログ欄 / Console = 画面下のログ)
+      run_log_text    … 今回の走行の stdout を返す関数 (監査サマリー・問題提起に使う)
+      listing_start_ts… 押した時刻 (今回の CSV だけを対象にするための基準)
+
+    戻り値 {"latest_csv": ..., "left": [...]} — 呼んだ側が締めの表示に使う。
+    """
+    script = script or {}
+    run_log_text = run_log_text or (lambda: "")
+    cmd_now = script.get("cmd", []) or []
+
+    # CSV監査くん 完走 → 要点サマリーをポップアップ (HQチャットの介在なしで結果を即可視化。
+    # 2026-06-29: 対話セッションは外部から起こせないため、出品くん側で報告する)。
+    try:
+        # 新規生成(全カテゴリ)完了時: 統合問題提起(CSV化分の監査問題 + 非化分の原因→対策案)。
+        # 生成ログは drops + inline自己監査を含むので1本で両方カバー。
+        if script.get("type") == "new":
+            _report = build_problem_report(run_log_text())
+            if _report:
+                append_log("\n" + "=" * 70 + "\n" + _report + "\n" + "=" * 70 + "\n")
+        elif any("csv_auditor.py" in str(c) for c in cmd_now):
+            _summary = summarize_audit_log(run_log_text())
+            if _summary:
+                append_log("\n" + "=" * 70 + "\n📋 監査サマリー (要点)\n" + _summary + "\n" + "=" * 70 + "\n")
+    except Exception as _e:
+        append_log(f"⚠️ サマリー表示失敗: {_e}\n")
+
+    # open_after: 結果ファイル(最新)を自動で開く (ファネル分析/需要強化 等)
+    _oa = script.get("open_after")
+    # restock_revise は Revise CSV が post-chain(後段)で生成されるため、ここで開くと
+    # 一つ前の古いCSVを掴む(2026-06-22 指摘)。生成後(Step4.5の後)に開く。
+    if _oa and script.get("restock_revise"):
+        _oa = None
+    if _oa and returncode in (0, None):  # None=returncode未確定でも完走時は開く
+        try:
+            import glob as _g
+            hits = _g.glob(_oa)
+            if hits:
+                latest = max(hits, key=os.path.getmtime)
+                os.startfile(latest)
+                append_log(f"📂 開く: {os.path.basename(latest)}\n")
+            else:
+                append_log(f"⚠️ 出力ファイルが見つかりません: {_oa}\n")
+        except Exception as _e:
+            append_log(f"⚠️ ファイル起動失敗: {_e}\n")
+    # open_url: 結果スプシ(URL)を自動で開く (集約方針=結果はスプシ。2026-06-07)
+    _ou = script.get("open_url")
+    if _ou and returncode in (0, None):
+        try:
+            import webbrowser as _wb
+            _wb.open(_ou)
+            append_log(f"🌐 開く: {_ou}\n")
+        except Exception as _e:
+            append_log(f"⚠️ スプシ起動失敗: {_e}\n")
+    # 取下再出品②(relist)は CSV破壊系の後処理をスキップ。
+    # 理由: relist は「同じ型番を意図的に再出品」。重複くん/excluder は通常出品用で、
+    #       取下げ前(=管理シート上はまだACTIVE)の同型番を「重複」と誤判定し CSV から物理削除する。
+    _skip_pp = bool(script.get("skip_postprocess"))
+    if _skip_pp:
+        _skip_label = script.get("label", "")
+        append_log(f"\n({_skip_label}: excluder/title-fix/重複くん の後処理をスキップ — skip_postprocess)\n")
+    # Step 2: csv_postprocess_excluder (check_csv NO-GO 行を CSV 物理除外)
+    # Step 2.5: post_title_fix (TCG タイトル長補強・PSA 名前正規化, 2026-05-02 追加)
+    # Step 3: rarara (CSV outlier 検出) - excluder 後の CSV を分析
+    if not _skip_pp:
+        try:
+            captured_log = run_log_text()
+            _run_excluder_for_latest_csv(append_log, captured_log)
+        except Exception as _e:
+            append_log(f"\n⚠️ excluder hook 失敗: {_e}\n")
+    if not _skip_pp:
+        try:
+            _ptf_dir = os.path.join(WORKSPACE, "iMakTCG", "tools")
+            if _ptf_dir not in sys.path:
+                sys.path.insert(0, _ptf_dir)
+            from post_title_fix import run_post_title_fix_for_latest_csv
+            run_post_title_fix_for_latest_csv(append_log)
+        except Exception as _e:
+            append_log(f"\n⚠️ post_title_fix hook 失敗: {_e}\n")
+    # rarara hook 削除 (= 5/28 ユーザー判断、 DON 仕様で WARN ばかり実害発見ゼロ)
+    # Step 4: dedupe_excluder (2026-05-27 追加、 重複くん (KEY1, KEY2) tuple 物理除外)
+    # RESTOCK Revise は既存出品の修正=重複を作らないので新規用 dedupe を skip
+    # (2026-06-22: 自己重複で RESTOCK 行が誤除外される事故の根治。_runs_new_listing_dedupe 参照)。
+    if _runs_new_listing_dedupe(script):
+        try:
+            _run_dedupe_for_latest_csv(append_log, since_ts=listing_start_ts)
+        except Exception as _e:
+            append_log(f"\n⚠️ dedupe hook 失敗: {_e}\n")
+        # 🤖PSA自動 だけ: 締めに itemID書込 → 広告8% → CSV監査くん (2026-08-18)
+        if script.get("auto_full"):
+            try:
+                _envf = os.environ.copy()
+                _envf["PYTHONIOENCODING"] = "utf-8"
+                _envf["PYTHONUNBUFFERED"] = "1"
+                _run_auto_full_tail(append_log, _envf, script, since_ts=listing_start_ts)
+            except Exception as _e:
+                append_log(f"\n⚠️ PSA自動の締め 失敗: {_e}\n")
+    elif script.get("restock_revise"):
+        append_log(
+            "\n(♻ RESTOCK: 新規出品用の重複くんを skip — Revise は既存出品の修正で重複を作らない。"
+            "自己重複による誤除外を防止)\n")
+    # Step 4.5: RESTOCK Revise 変換 (2026-06-20)。excluder/title-fix/dedup の **後** に、
+    # 最終クリーンな Add CSV を Add→Revise 化する(順序保証=赤字/重複/旧タイトルを含めない)。
+    # ♻ ボタン (restock_revise=True) の時のみ。旧: psa_restock_build が dedup 前に変換→混入バグ。
+    _restock_open_after_pending = None
+    try:
+        if script.get("restock_revise"):
+            _run_restock_revise_for_latest_csv(append_log, since_ts=listing_start_ts)
+            # CSV の open_after は post_psa_review の **後** に回す(同時オープン回避)。
+            # 確認ブラウザが開く時は CSV を開かない(2026-06-22 指摘)。フラグだけ立てる。
+            _restock_open_after_pending = script.get("open_after")
+    except Exception as _e:
+        append_log(f"\n⚠️ RESTOCK Revise hook 失敗: {_e}\n")
+    # Step 5: post_psa_review (2026-05-28 追加、 PSA TCG cert HTML viewer ユーザー判定 hook)
+    # 5/29 修正: 今 cycle で生成された tcg_upload_*.csv のみ対象 (= TCG 以外 cycle で毎回 HTML 出る問題対策)
+    # 2026-06-15: verify→build (PSA_VERIFY_BEFORE_BUILD=1) の時は CSV 生成 **前** に
+    #   目視確認済 → この後付け hook は二重なので skip (HTML が CSV 後に出る問題の解消)。
+    _verify_before_build = bool((script.get("env") or {}).get("PSA_VERIFY_BEFORE_BUILD") == "1")
+    # RESTOCK Revise は変種を確定KEIから forced 生成済み(既存出品の再出品)。
+    # cert確認 viewer は無関係=Revise CSV は既に確定変種で生成済みなので出さない
+    # (2026-07-24 ユーザー指摘: 無関係なら出すな)。
+    _is_restock_revise = bool(script.get("restock_revise"))
+    _skip_review = _verify_before_build or _is_restock_revise
+    if _verify_before_build:
+        append_log("\n(post_psa_review: verify→build で生成前に確認済 — 後付け hook skip)\n")
+    elif _is_restock_revise:
+        append_log("\n(post_psa_review: RESTOCK Revise は確定変種で生成済 — cert確認 hook skip)\n")
+    _latest_csv = None
+    try:
+        _tools_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
+        if _tools_dir not in sys.path:
+            sys.path.insert(0, _tools_dir)
+        from post_psa_review import run_post_psa_review
+        _csv_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "csv_output")
+        if os.path.isdir(_csv_dir):
+            _candidates = sorted(
+                [os.path.join(_csv_dir, f) for f in os.listdir(_csv_dir)
+                 if f.startswith("tcg_upload_") and f.endswith(".csv")],
+                key=os.path.getmtime,
+                reverse=True,
+            )
+            if _candidates and listing_start_ts:
+                # 今 cycle (= listing_start 以降に生成) のみ対象
+                if os.path.getmtime(_candidates[0]) >= listing_start_ts:
+                    _latest_csv = _candidates[0]
+        # verify→build は生成前に確認済 → 後付け viewer は出さない (二重防止)。
+        # _latest_csv の算出は Step 6 (no_go_sentinel) が使うため残す。
+        _review_opened = False
+        if _latest_csv and not _skip_review:
+            _review_opened = bool(run_post_psa_review(_latest_csv, append_log))
+        # RESTOCK CSV の open_after: 確認ブラウザを開いた時は開かない(同時オープン回避)。
+        # 確認が無い時のみ最新CSVを開く(生成後=新しい方を掴む)。
+        if _restock_open_after_pending:
+            _pend_oa = _restock_open_after_pending
+            _restock_open_after_pending = None
+            if _review_opened:
+                append_log("📄 確認ブラウザを開いたため CSV自動オープンは保留(確認後に手動/同期で)\n")
+            else:
+                try:
+                    import glob as _g2
+                    _hits = _g2.glob(_pend_oa)
+                    if _hits:
+                        _latest_oa = max(_hits, key=os.path.getmtime)
+                        os.startfile(_latest_oa)
+                        append_log(f"📂 開く: {os.path.basename(_latest_oa)}\n")
+                except Exception as _e3:
+                    append_log(f"⚠️ open_after(restock) 失敗: {_e3}\n")
+    except Exception as _e:
+        append_log(f"\n⚠️ post_psa_review hook 失敗: {_e}\n")
+    # Step 6: post_no_go_sentinel (2026-05-28 追加、 NO-GO 除外 cert にスプシ K 列 sentinel 赤字書込)
+    # 5/29: Step 5 と同 _latest_csv 使用 (= 今 cycle TCG のみ。 Porter 等は None で skip)
+    try:
+        from post_no_go_sentinel import run_post_no_go_sentinel
+        if _latest_csv:
+            run_post_no_go_sentinel(_latest_csv, append_log)
+    except Exception as _e:
+        append_log(f"\n⚠️ post_no_go_sentinel hook 失敗: {_e}\n")
+    # 全 process 完了通知 (= ユーザー要望 2026-05-31)
+    # ★2026-08-23: 出品が途中で止まっていても、ここは常に「🎉 完了」と出ていた。
+    #   9件中2件しか出ていない走行が成功に見えた。出し残しがあるなら締めを変える。
+    _left = []
+    try:
+        _rj = os.path.join(WORKSPACE, "iMakHQ", "csv_output", "last_upload_result.json")
+        if os.path.isfile(_rj):
+            with open(_rj, encoding="utf-8") as _f:
+                _left = unlisted_from_result(json.load(_f), started_ts=listing_start_ts,
+                                             file_mtime=os.path.getmtime(_rj))
+    except Exception as _e:
+        append_log(f"\n⚠️ 出品結果の読取に失敗 (締めの判定のみ): {_e}\n")
+    append_log("\n" + "=" * 70 + "\n")
+    if _left:
+        append_log(f"⚠️ 出品できていない行が {len(_left)}件 あります — 完了していません\n")
+        append_log(f"   {', '.join(_left[:20])}\n")
+        append_log("   原因を潰してから、この分だけ出し直してください\n")
+    elif returncode not in (0, None):
+        # ★2026-09-14: 途中で落ちても (売れた分を補充 が returncode=1) 「🎉 完了」と出ていた。
+        #   None は Chrome の後始末で返ることがあり成功扱いのまま (_after_phase2 と同じ)。
+        append_log(f"❌ 失敗しました (returncode={returncode}) — 完了していません。"
+                   "上のエラーを確認してください\n")
+    else:
+        append_log("🎉 全 process 完了 — 入稿準備 OK\n")
+    if _latest_csv:
+        append_log(f"   出力 CSV: {_latest_csv}\n")
+    from datetime import datetime as _dt
+    append_log(f"   終了時刻: {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    append_log("=" * 70 + "\n")
+    return {"latest_csv": _latest_csv, "left": _left}
+
+
 def _load_geometry(window_name, default):
     try:
         with open(WINDOW_GEOMETRY_FILE, encoding="utf-8") as f:
@@ -4567,57 +4853,12 @@ class ListingPanel:
         self.now_processing.set("")
 
     def _run_psa_orphan_clean(self):
-        """PSA新規生成の前に orphan canonical KEY を掃除(歩留まり激減の恒久対策, 2026-06-21)。
-
-        未出品(B列空)なのに KEY が付いて dedup に誤ブロックされた在庫を出品対象に戻す。同期実行。
-        失敗しても新規生成は続行(掃除は best-effort)。dedupe/psa_to_csv は触らずスプシ AI列のみ。
-        """
-        self.append_log("\n🧹 orphan KEY 掃除(未出品なのに誤ブロックされた在庫を出品対象へ戻す)...\n")
-        try:
-            tool = os.path.join(WORKSPACE, "iMakHQ", "tools", "psa_orphan_key_clean.py")
-            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            r = _run_step([sys.executable, tool, "--execute"],
-                               capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", timeout=180, creationflags=flags)
-            if r.stdout:
-                self.append_log(r.stdout)
-            if r.returncode != 0:
-                self.append_log(f"⚠️ orphan掃除 returncode={r.returncode}(新規生成は続行)\n")
-                if r.stderr:
-                    self.append_log(r.stderr[-500:] + "\n")
-        except Exception as e:
-            self.append_log(f"⚠️ orphan掃除 skip(新規生成は続行): {type(e).__name__}: {e}\n")
+        """共通処理を呼ぶだけ (2026-09-16: 新 Console と同じ物を使うため抜き出した)。"""
+        run_psa_orphan_clean(self.append_log)
 
     def _check_n_formula_guard(self):
-        """統合High/Low の N列(仕入値SSOT)関数の破損検知。壊れていたら False (=run 中止)。
-
-        2026-07-23 設計: N =(M=現在価格 or F)−K=ポイント の ARRAYFORMULA (N1 の1セル)。
-        どこかのプロセスが N セルに値を書くと関数が静かに壊れ、陳腐化した仕入値で誤価格
-        出品が続く (fail-OPEN)。listing 系 run の前に両シートを確認する。
-        LOW は gshock_to_csv 内にも同ガードあり (二重化)。HIGH の主要消費者 psa_to_csv は
-        no-touch 運用のため、HIGH はここが唯一のガード。
-        ネットワーク等でチェック自体が失敗した場合は警告のみで続行 (可用性優先。破損の
-        確証がある時だけ止める)。
-        """
-        try:
-            import gspread
-            from google.oauth2.service_account import Credentials
-            creds = Credentials.from_service_account_file(
-                GSHEET_CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
-            gc = gspread.authorize(creds)
-            for label, (sid, gid) in CONSOLIDATED_SHEETS.items():
-                ws = gc.open_by_key(sid).get_worksheet_by_id(gid)
-                f = ws.acell("N1", value_render_option="FORMULA").value or ""
-                if not f.startswith("=ARRAYFORMULA"):
-                    self.append_log(
-                        f"🚫 {label} スプシ N列の仕入値関数が壊れています (N1={f[:40]!r})。\n"
-                        "   N セルに値を書いたプロセスを特定し、N1 に ARRAYFORMULA を再設置\n"
-                        "   してください (memory: amazon_points_net_cost_system 参照)。run 中止。\n")
-                    return False
-            return True
-        except Exception as e:
-            self.append_log(f"⚠️ N関数ガード チェック不能(続行): {type(e).__name__}: {e}\n")
-            return True
+        """共通処理を呼ぶだけ (2026-09-16: 同上)。"""
+        return check_n_formula_guard(self.append_log)
 
     def run_script(self, idx):
         script = SCRIPTS[idx]
@@ -4787,223 +5028,16 @@ class ListingPanel:
                 item = self.queue.get_nowait()
                 if isinstance(item, tuple) and item[0] == "__done__":
                     self.append_log(f"\n--- 終了 (returncode={item[1]}) ---\n")
-                    # CSV監査くん 完走 → 要点サマリーをポップアップ (HQチャットの介在なしで結果を即可視化。
-                    # 2026-06-29: 対話セッションは外部から起こせないため、出品くん側で報告する)。
+                    # ★2026-09-16: 後処理は after_run() に抜き出した (旧パネルと新 Console が同じ物を呼ぶ)。
+                    #   中身・順番・文言は変えていない。ここは画面の状態更新だけ残す。
+                    _idx = getattr(self, "_current_idx", -1)
+                    _script_now = SCRIPTS[_idx] if _idx >= 0 else {}
                     try:
-                        _idx2 = getattr(self, "_current_idx", -1)
-                        _cmd2 = SCRIPTS[_idx2].get("cmd", []) if _idx2 >= 0 else []
-                        # 新規生成(全カテゴリ)完了時: 統合問題提起(CSV化分の監査問題 + 非化分の原因→対策案)。
-                        # 生成ログは drops + inline自己監査を含むので1本で両方カバー。
-                        if _idx2 >= 0 and SCRIPTS[_idx2].get("type") == "new":
-                            self._show_problem_report(self._run_log_text())
-                        elif any("csv_auditor.py" in str(c) for c in _cmd2):
-                            self._show_audit_summary(self._run_log_text())
+                        after_run(_script_now, item[1], self.append_log,
+                                  run_log_text=self._run_log_text,
+                                  listing_start_ts=getattr(self, "_listing_start_ts", None))
                     except Exception as _e:
-                        self.append_log(f"⚠️ サマリー表示失敗: {_e}\n")
-                    # open_after: 結果ファイル(最新)を自動で開く (ファネル分析/需要強化 等)
-                    _cur = SCRIPTS[getattr(self, "_current_idx", -1)] if getattr(self, "_current_idx", -1) >= 0 else {}
-                    _oa = _cur.get("open_after")
-                    # restock_revise は Revise CSV が post-chain(後段)で生成されるため、ここで開くと
-                    # 一つ前の古いCSVを掴む(2026-06-22 指摘)。生成後(Step4.5の後)に開く。
-                    if _oa and _cur.get("restock_revise"):
-                        _oa = None
-                    if _oa and item[1] in (0, None):  # None=returncode未確定でも完走時は開く
-                        try:
-                            import glob as _g
-                            hits = _g.glob(_oa)
-                            if hits:
-                                latest = max(hits, key=os.path.getmtime)
-                                os.startfile(latest)
-                                self.append_log(f"📂 開く: {os.path.basename(latest)}\n")
-                            else:
-                                self.append_log(f"⚠️ 出力ファイルが見つかりません: {_oa}\n")
-                        except Exception as _e:
-                            self.append_log(f"⚠️ ファイル起動失敗: {_e}\n")
-                    # open_url: 結果スプシ(URL)を自動で開く (集約方針=結果はスプシ。2026-06-07)
-                    _ou = _cur.get("open_url")
-                    if _ou and item[1] in (0, None):
-                        try:
-                            import webbrowser as _wb
-                            _wb.open(_ou)
-                            self.append_log(f"🌐 開く: {_ou}\n")
-                        except Exception as _e:
-                            self.append_log(f"⚠️ スプシ起動失敗: {_e}\n")
-                    # 取下再出品②(relist)は CSV破壊系の後処理をスキップ。
-                    # 理由: relist は「同じ型番を意図的に再出品」。重複くん/excluder は通常出品用で、
-                    #       取下げ前(=管理シート上はまだACTIVE)の同型番を「重複」と誤判定し CSV から物理削除する。
-                    _skip_pp = False
-                    try:
-                        _idx = getattr(self, "_current_idx", -1)
-                        _skip_pp = bool(_idx >= 0 and SCRIPTS[_idx].get("skip_postprocess"))
-                    except Exception:
-                        _skip_pp = False
-                    if _skip_pp:
-                        _skip_label = SCRIPTS[_idx].get("label", "") if _idx >= 0 else ""
-                        self.append_log(f"\n({_skip_label}: excluder/title-fix/重複くん の後処理をスキップ — skip_postprocess)\n")
-                    # Step 2: csv_postprocess_excluder (check_csv NO-GO 行を CSV 物理除外)
-                    # Step 2.5: post_title_fix (TCG タイトル長補強・PSA 名前正規化, 2026-05-02 追加)
-                    # Step 3: rarara (CSV outlier 検出) - excluder 後の CSV を分析
-                    if not _skip_pp:
-                        try:
-                            captured_log = self._run_log_text()
-                            _run_excluder_for_latest_csv(self.append_log, captured_log)
-                        except Exception as _e:
-                            self.append_log(f"\n⚠️ excluder hook 失敗: {_e}\n")
-                    if not _skip_pp:
-                        try:
-                            _ptf_dir = os.path.join(WORKSPACE, "iMakTCG", "tools")
-                            if _ptf_dir not in sys.path:
-                                sys.path.insert(0, _ptf_dir)
-                            from post_title_fix import run_post_title_fix_for_latest_csv
-                            run_post_title_fix_for_latest_csv(self.append_log)
-                        except Exception as _e:
-                            self.append_log(f"\n⚠️ post_title_fix hook 失敗: {_e}\n")
-                    # rarara hook 削除 (= 5/28 ユーザー判断、 DON 仕様で WARN ばかり実害発見ゼロ)
-                    # 旧: self._run_rarara_after()
-                    # Step 4: dedupe_excluder (2026-05-27 追加、 重複くん (KEY1, KEY2) tuple 物理除外)
-                    # RESTOCK Revise は既存出品の修正=重複を作らないので新規用 dedupe を skip
-                    # (2026-06-22: 自己重複で RESTOCK 行が誤除外される事故の根治。_runs_new_listing_dedupe 参照)。
-                    _entry_now = SCRIPTS[_idx] if _idx >= 0 else {}
-                    if _runs_new_listing_dedupe(_entry_now):
-                        try:
-                            _run_dedupe_for_latest_csv(self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
-                        except Exception as _e:
-                            self.append_log(f"\n⚠️ dedupe hook 失敗: {_e}\n")
-                        # 🤖PSA自動 だけ: 締めに itemID書込 → 広告8% → CSV監査くん (2026-08-18)
-                        if _entry_now.get("auto_full"):
-                            try:
-                                _envf = os.environ.copy()
-                                _envf["PYTHONIOENCODING"] = "utf-8"
-                                _envf["PYTHONUNBUFFERED"] = "1"
-                                _run_auto_full_tail(self.append_log, _envf, _entry_now,
-                                                    since_ts=getattr(self, '_listing_start_ts', None))
-                            except Exception as _e:
-                                self.append_log(f"\n⚠️ PSA自動の締め 失敗: {_e}\n")
-                    elif _entry_now.get("restock_revise"):
-                        self.append_log(
-                            "\n(♻ RESTOCK: 新規出品用の重複くんを skip — Revise は既存出品の修正で重複を作らない。"
-                            "自己重複による誤除外を防止)\n")
-                    # Step 4.5: RESTOCK Revise 変換 (2026-06-20)。excluder/title-fix/dedup の **後** に、
-                    # 最終クリーンな Add CSV を Add→Revise 化する(順序保証=赤字/重複/旧タイトルを含めない)。
-                    # ♻ ボタン (restock_revise=True) の時のみ。旧: psa_restock_build が dedup 前に変換→混入バグ。
-                    try:
-                        _ridx = getattr(self, "_current_idx", -1)
-                        if _ridx >= 0 and SCRIPTS[_ridx].get("restock_revise"):
-                            _run_restock_revise_for_latest_csv(
-                                self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
-                            # CSV の open_after は post_psa_review の **後** に回す(同時オープン回避)。
-                            # 確認ブラウザが開く時は CSV を開かない(2026-06-22 指摘)。フラグだけ立てる。
-                            self._restock_open_after_pending = SCRIPTS[_ridx].get("open_after")
-                    except Exception as _e:
-                        self.append_log(f"\n⚠️ RESTOCK Revise hook 失敗: {_e}\n")
-                    # Step 5: post_psa_review (2026-05-28 追加、 PSA TCG cert HTML viewer ユーザー判定 hook)
-                    # 5/29 修正: 今 cycle で生成された tcg_upload_*.csv のみ対象 (= TCG 以外 cycle で毎回 HTML 出る問題対策)
-                    # 2026-06-15: verify→build (PSA_VERIFY_BEFORE_BUILD=1) の時は CSV 生成 **前** に
-                    #   目視確認済 → この後付け hook は二重なので skip (HTML が CSV 後に出る問題の解消)。
-                    _verify_before_build = False
-                    try:
-                        _vidx = getattr(self, "_current_idx", -1)
-                        _verify_before_build = bool(
-                            _vidx >= 0 and SCRIPTS[_vidx].get("env", {}).get("PSA_VERIFY_BEFORE_BUILD") == "1")
-                    except Exception:
-                        _verify_before_build = False
-                    # RESTOCK Revise は変種を確定KEIから forced 生成済み(既存出品の再出品)。
-                    # cert確認 viewer は無関係=Revise CSV は既に確定変種で生成済みなので出さない
-                    # (2026-07-24 ユーザー指摘: 無関係なら出すな)。
-                    _is_restock_revise = False
-                    try:
-                        _ridx2 = getattr(self, "_current_idx", -1)
-                        _is_restock_revise = bool(_ridx2 >= 0 and SCRIPTS[_ridx2].get("restock_revise"))
-                    except Exception:
-                        _is_restock_revise = False
-                    _skip_review = _verify_before_build or _is_restock_revise
-                    if _verify_before_build:
-                        self.append_log("\n(post_psa_review: verify→build で生成前に確認済 — 後付け hook skip)\n")
-                    elif _is_restock_revise:
-                        self.append_log("\n(post_psa_review: RESTOCK Revise は確定変種で生成済 — cert確認 hook skip)\n")
-                    try:
-                        _tools_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
-                        if _tools_dir not in sys.path:
-                            sys.path.insert(0, _tools_dir)
-                        from post_psa_review import run_post_psa_review
-                        _latest_csv = None
-                        _listing_start = getattr(self, '_listing_start_ts', None)
-                        _csv_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "csv_output")
-                        if os.path.isdir(_csv_dir):
-                            _candidates = sorted(
-                                [os.path.join(_csv_dir, f) for f in os.listdir(_csv_dir) if f.startswith("tcg_upload_") and f.endswith(".csv")],
-                                key=os.path.getmtime,
-                                reverse=True,
-                            )
-                            if _candidates and _listing_start:
-                                # 今 cycle (= listing_start 以降に生成) のみ対象
-                                if os.path.getmtime(_candidates[0]) >= _listing_start:
-                                    _latest_csv = _candidates[0]
-                        # verify→build は生成前に確認済 → 後付け viewer は出さない (二重防止)。
-                        # _latest_csv の算出は Step 6 (no_go_sentinel) が使うため残す。
-                        _review_opened = False
-                        if _latest_csv and not _skip_review:
-                            _review_opened = bool(run_post_psa_review(_latest_csv, self.append_log))
-                        # RESTOCK CSV の open_after: 確認ブラウザを開いた時は開かない(同時オープン回避)。
-                        # 確認が無い時のみ最新CSVを開く(生成後=新しい方を掴む)。
-                        _pend_oa = getattr(self, "_restock_open_after_pending", None)
-                        if _pend_oa:
-                            self._restock_open_after_pending = None
-                            if _review_opened:
-                                self.append_log("📄 確認ブラウザを開いたため CSV自動オープンは保留(確認後に手動/同期で)\n")
-                            else:
-                                try:
-                                    import glob as _g2
-                                    _hits = _g2.glob(_pend_oa)
-                                    if _hits:
-                                        _latest_oa = max(_hits, key=os.path.getmtime)
-                                        os.startfile(_latest_oa)
-                                        self.append_log(f"📂 開く: {os.path.basename(_latest_oa)}\n")
-                                except Exception as _e3:
-                                    self.append_log(f"⚠️ open_after(restock) 失敗: {_e3}\n")
-                    except Exception as _e:
-                        self.append_log(f"\n⚠️ post_psa_review hook 失敗: {_e}\n")
-                    # Step 6: post_no_go_sentinel (2026-05-28 追加、 NO-GO 除外 cert にスプシ K 列 sentinel 赤字書込)
-                    # 5/29: Step 5 と同 _latest_csv 使用 (= 今 cycle TCG のみ。 Porter 等は None で skip)
-                    try:
-                        from post_no_go_sentinel import run_post_no_go_sentinel
-                        if _latest_csv:
-                            run_post_no_go_sentinel(_latest_csv, self.append_log)
-                    except Exception as _e:
-                        self.append_log(f"\n⚠️ post_no_go_sentinel hook 失敗: {_e}\n")
-                    # 全 process 完了通知 (= ユーザー要望 2026-05-31)
-                    # ★2026-08-23: 出品が途中で止まっていても、ここは常に「🎉 完了」と出ていた。
-                    #   9件中2件しか出ていない走行が成功に見えた。出し残しがあるなら締めを変える。
-                    _left = []
-                    try:
-                        _rj = os.path.join(WORKSPACE, "iMakHQ", "csv_output",
-                                           "last_upload_result.json")
-                        if os.path.isfile(_rj):
-                            with open(_rj, encoding="utf-8") as _f:
-                                _left = unlisted_from_result(
-                                    json.load(_f),
-                                    started_ts=getattr(self, "_listing_start_ts", None),
-                                    file_mtime=os.path.getmtime(_rj))
-                    except Exception as _e:
-                        self.append_log(f"\n⚠️ 出品結果の読取に失敗 (締めの判定のみ): {_e}\n")
-                    self.append_log("\n" + "=" * 70 + "\n")
-                    if _left:
-                        self.append_log(
-                            f"⚠️ 出品できていない行が {len(_left)}件 あります — 完了していません\n")
-                        self.append_log(f"   {', '.join(_left[:20])}\n")
-                        self.append_log("   原因を潰してから、この分だけ出し直してください\n")
-                    elif item[1] not in (0, None):
-                        # ★2026-09-14: 途中で落ちても (売れた分を補充 が returncode=1) 「🎉 完了」と出ていた。
-                        #   None は Chrome の後始末で返ることがあり成功扱いのまま (_after_phase2 と同じ)。
-                        self.append_log(f"❌ 失敗しました (returncode={item[1]}) — 完了していません。"
-                                        "上のエラーを確認してください\n")
-                    else:
-                        self.append_log("🎉 全 process 完了 — 入稿準備 OK\n")
-                    if _latest_csv:
-                        self.append_log(f"   出力 CSV: {_latest_csv}\n")
-                    from datetime import datetime as _dt
-                    self.append_log(f"   終了時刻: {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    self.append_log("=" * 70 + "\n")
+                        self.append_log(f"\n⚠️ 後処理で例外: {_e}\n")
                     self.status_var.set("待機中")
                     self.now_processing.set("")
                     # ★走行後に残件を数え直す (押した分だけ減ったのが見える)

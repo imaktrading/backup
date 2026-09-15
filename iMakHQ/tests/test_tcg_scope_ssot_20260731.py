@@ -90,7 +90,13 @@ def test_scope_helper_preserves_existing_out_of_scope():
     from tcg_scope import is_out_of_scope
     assert is_out_of_scope("Yu-Gi-Oh!", "YU-GI-OH! JAPANESE")[0]
     assert is_out_of_scope("Itajaga", "ITAJAGA DRAGON BALL")[0]
-    assert is_out_of_scope("Pokemon", "POKEMON JAPANESE SWORD & SHIELD FAMILY POKEMON CARD GAME")[0]
+
+
+def test_family_pokemon_card_game_no_longer_out_of_scope():
+    """★2026-09-14: catalog 実測53件 (SH-prefix) で「catalog 0件」前提が崩れ撤廃。"""
+    from tcg_scope import is_out_of_scope
+    assert not is_out_of_scope(
+        "Pokemon", "POKEMON JAPANESE SWORD & SHIELD FAMILY POKEMON CARD GAME")[0]
 
 
 def test_scope_helper_returns_false_for_normal_sets():

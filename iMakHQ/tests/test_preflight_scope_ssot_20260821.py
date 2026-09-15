@@ -32,13 +32,17 @@ def oos(brand):
 
 # 依頼書 2026-08-19_psa_preflight_scope_ssot_gap.md の実測 8件。
 # (cert, brand, 委譲前の preflight ラベル)
+# ★2026-09-14: cert 142931324 (FAMILY POKEMON CARD GAME) を除去。「委譲前ラベル=RESOLVED」の
+# 通り、catalog 実測53件 (SH-prefix) で「catalog 0件」前提が崩れ FAMILY の OOS 条件を撤廃した
+# (2026-09-14_family_pokemon_back_in_scope_response.md)。以後この cert は他8件と違い OOS で
+# 弾かれず通常の catalog resolver へ進む。真理表の回帰は test_tcg_scope_ssot_20260731.py の
+# test_family_pokemon_card_game_no_longer_out_of_scope で固定済み。
 GAP_BEFORE = [
     ("146117881", "ONE PIECE WAFERS JAPANESE 20TH ANNIVERSARY", "GAP"),
     ("152136358", "POKEMON JAPANESE WEB", "GAP"),
     ("158452571", "DRAGON BALL SUPER DIVERS 4", "REVIEW"),
     ("163045378", "DRAGON BALL SUPER DIVERS ADVANCE PACK DRAGON BALL 40TH ANNIVERSARY EDITION",
      "REVIEW"),
-    ("142931324", "POKEMON JAPANESE SWORD & SHIELD FAMILY POKEMON CARD GAME", "RESOLVED"),
     ("158452535", "ITAJAGA DRAGON BALL VOL.7", "OUT-OF-SCOPE"),
     ("158452537", "ITAJAGA DRAGON BALL VOL.8", "OUT-OF-SCOPE"),
     ("158452575", "DRAGON BALL SUPER DIVERS 7", "OUT-OF-SCOPE"),

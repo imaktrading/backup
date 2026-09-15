@@ -12,16 +12,13 @@
 import os
 import subprocess
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 RELEASED = "2026-09-16"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # 押せない理由 (移行の残り作業)。control_panel の script の形から判定する
 BLOCK_REASONS = (
     ("custom_buttons", "ウィザード画面が要る"),
-    ("params", "入力欄が要る"),
-    ("ask_amount", "金額を聞く画面が要る"),
-    ("restock_revise", "CSV の後処理 (再仕入れ) が要る"),
 )
 
 
@@ -30,10 +27,6 @@ def why_not_runnable(script):
     for key, why in BLOCK_REASONS:
         if script.get(key):
             return why
-    if script.get("type") == "new":
-        return "新規生成の後処理 (除外・重複・タイトル) が要る"
-    if not script.get("skip_postprocess"):
-        return "CSV の後処理 (除外・重複・タイトル) が要る"
     return ""
 
 

@@ -52,13 +52,14 @@ def display_label(label):
 
 
 def runnable(script):
-    """この画面から押してよいボタンか。後処理・入力欄・確認画面・新規出品は今のパネルで押す。"""
-    return bool(script.get("skip_postprocess")
-                and not script.get("params")
-                and not script.get("ask_amount")
-                and not script.get("custom_buttons")
-                and not script.get("restock_revise")
-                and script.get("type") != "new")
+    """この画面から押してよいボタンか。
+
+    ★2026-09-16 (v0.3.0): 走る前のガード (before_run) と走った後の後処理 (after_run) を
+      control_panel から抜き出して共用にしたので、**後処理のあるボタン・新規生成も押せる**。
+      入力欄 (params) と金額 (ask_amount) は画面で聞いてから渡す。
+      残る旧パネル専用は **ウィザード画面が要る物だけ** (一番くじの新規)。
+    """
+    return not script.get("custom_buttons")
 
 
 def group_of(label):
@@ -343,16 +344,17 @@ def get_jobs():
     nightly = (STATE["home"] or {}).get("nightly") or {}
     summ = summarize(STATE["counts"], nightly_ok=bool(nightly.get("done")))
     jobs = []
-    for s in cp.SCRIPTS:
+    for i, s in enumerate(cp.SCRIPTS):
         kind = s.get("badge")
         if not kind or kind == "hoju_status":
             continue
         label = display_label(s["label"])
         m = STEP_RE.search(label)
         info = summ.get(kind) or {"n": None, "state": "unknown", "note": "", "hold": 0}
-        jobs.append({"kind": kind, "label": label, "step": m.group(0) if m else "",
+        jobs.append({"kind": kind, "i": i, "label": label, "step": m.group(0) if m else "",
                      "group": group_of(label), "tip": (s.get("tip") or "")[:160],
-                     "runnable": runnable(s), **info})
+                     "runnable": runnable(s), "params": s.get("params") or [],
+                     "ask_amount": bool(s.get("ask_amount")), **info})
     return {"jobs": jobs, "counts_at": STATE["counts_at"], "counting": STATE["counting"],
             "counts_error": STATE["counts_error"]}
 
@@ -365,6 +367,7 @@ def get_buttons():
         out.append({"i": i, "type": s.get("type"), "category": s.get("category"),
                     "label": display_label(s["label"]), "badge": s.get("badge"),
                     "runnable": runnable(s), "why": version.why_not_runnable(s),
+                    "params": s.get("params") or [], "ask_amount": bool(s.get("ask_amount")),
                     "tip": (s.get("tip") or "")[:160]})
     return {"buttons": out}
 
@@ -431,37 +434,103 @@ def get_tasks():
     return STATE["tasks"] or {"tasks": [], "loading": True}
 
 
-def run_job(kind):
+def find_script(kind=None, index=None):
+    """badge (kind) か 並び順 (index) でボタンを1つ選ぶ。新規出品は badge を持たないので index で押す。"""
     cp = _cp()
-    script = next((s for s in cp.SCRIPTS if s.get("badge") == kind), None)
+    if index is not None:
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return None
+        if 0 <= index < len(cp.SCRIPTS):
+            return cp.SCRIPTS[index]
+        return None
+    if kind:
+        return next((s for s in cp.SCRIPTS if s.get("badge") == kind), None)
+    return None
+
+
+def build_cmd(script, params=None, amount=None):
+    """旧パネルの run_script と同じ組み立て (入力欄 → --name 値 / 金額 → --amount)。"""
+    cmd = list(script["cmd"])
+    if script.get("ask_amount"):
+        v = str(amount or "").strip().replace(",", "").replace("$", "")
+        if v:
+            float(v)                                   # 読めない文字は呼び出し側に返す
+            cmd.extend(["--amount", v])
+    for p in (script.get("params") or []):
+        v = str((params or {}).get(p["name"], "") or "").strip()
+        if v:
+            cmd.extend([p["name"], v])
+    return cmd
+
+
+def run_job(kind=None, index=None, params=None, amount=None):
+    script = find_script(kind, index)
     if not script:
         return 404, {"error": "そのボタンはありません"}
     if not runnable(script):
-        return 409, {"error": "このボタンは後処理があるので、今の出品くんで押してください"}
+        return 409, {"error": "このボタンはウィザード画面が要るので、今の出品くんで押してください"}
+    try:
+        cmd = build_cmd(script, params, amount)
+    except ValueError:
+        return 400, {"error": "金額として読めません: %s" % amount}
     with _LOCK:
         if STATE["job"] and STATE["job"].get("running"):
             return 409, {"error": "「%s」が実行中です。終わってから押してください" % STATE["job"]["label"]}
-        STATE["job"] = {"kind": kind, "label": display_label(script["label"]),
+        STATE["job"] = {"kind": kind or script.get("badge") or "", "label": display_label(script["label"]),
                         "started": datetime.datetime.now().strftime("%H:%M:%S"), "rc": None, "running": True}
-    threading.Thread(target=_run_worker, args=(script,), daemon=True).start()
+    threading.Thread(target=_run_worker, args=(script, cmd), daemon=True).start()
     return 200, {"ok": True}
 
 
-def _run_worker(script):
+def _run_worker(script, cmd=None):
+    """走る前のガード → 実行 → 後処理。**旧パネルと同じ関数** (control_panel.before_run / after_run)。"""
+    cp = _cp()
     label = display_label(script["label"])
+    cmd = list(cmd or script["cmd"])
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1", **(script.get("env") or {}))
-    _log("▶ %s  (%s)" % (label, " ".join(script["cmd"])))
-    fh = None
+    _log("▶ %s  (%s)" % (label, " ".join(cmd)))
+    fh = path = None
     try:
-        fh, path = _cp()._open_run_log(script["label"])
+        fh, path = cp._open_run_log(script["label"])
         fh.write("=== %s (%s) console ===\ncwd: %s\ncmd: %s\n\n" % (
-            script["label"], time.strftime("%Y-%m-%d %H:%M:%S"), script["cwd"], " ".join(script["cmd"])))
+            script["label"], time.strftime("%Y-%m-%d %H:%M:%S"), script["cwd"], " ".join(cmd)))
         _log("  記録: %s" % path)
     except Exception:                                          # noqa: BLE001
-        fh = None
+        fh = path = None
+
+    def _to_log(text):                                         # 後処理のログも同じ場所に出す
+        _log(text)
+        if fh and not fh.closed:
+            try:
+                fh.write(text if str(text).endswith("\n") else str(text) + "\n")
+                fh.flush()
+            except (OSError, ValueError):
+                pass
+
+    def _run_log_text():
+        """今回の走行の stdout (旧パネルの _run_log_text と同じ: run log ファイルから読む)。"""
+        if not path:
+            return ""
+        try:
+            if fh and not fh.closed:
+                fh.flush()
+            with open(path, encoding="utf-8", errors="replace") as f:
+                return f.read()
+        except OSError:
+            return ""
+
+    started = None
     rc = None
     try:
-        p = subprocess.Popen(list(script["cmd"]), cwd=script["cwd"], env=env,
+        if not cp.before_run(script, _to_log):                  # 新規生成の安全弁 (N列関数ガード等)
+            _log("🚫 走る前の確認で中止しました")
+            with _LOCK:
+                STATE["job"].update(rc=None, running=False)
+            return
+        started = time.time()      # 旧パネルと同じ位置 (今回の CSV だけを後処理の対象にする基準)
+        p = subprocess.Popen(cmd, cwd=script["cwd"], env=env,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                              encoding="utf-8", errors="replace", bufsize=1,
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -473,10 +542,14 @@ def _run_worker(script):
         rc = p.wait()
     except Exception as e:                                     # noqa: BLE001
         _log("起動できませんでした: %s" % e)
+    _log("--- 終了 (returncode=%s) ---" % rc)
+    try:
+        cp.after_run(script, rc, _to_log, run_log_text=_run_log_text, listing_start_ts=started)
+    except Exception as e:                                     # noqa: BLE001
+        _log("⚠️ 後処理で例外: %s" % e)
     finally:
-        if fh:
+        if fh and not fh.closed:
             fh.close()
-    _log(("✓ 終わりました: %s" % label) if rc == 0 else ("✗ 失敗しました (returncode=%s): %s" % (rc, label)))
     with _LOCK:
         STATE["job"].update(rc=rc, running=False)
     refresh_counts()
@@ -542,7 +615,9 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(n) or b"{}") if n else {}
         if u.path == "/api/run":
-            code, obj = run_job(str(body.get("kind") or ""))
+            code, obj = run_job(kind=str(body.get("kind") or "") or None,
+                                index=body.get("i"), params=body.get("params"),
+                                amount=body.get("amount"))
             return self._json(code, obj)
         if u.path == "/api/refresh":
             threading.Thread(target=refresh_counts, daemon=True).start()

@@ -17,7 +17,7 @@ with open(_CP, encoding="utf-8") as f:
 def test_restock_revise_detected_for_skip():
     """restock_revise ボタンを検出して skip 判定に入れている。"""
     assert "_is_restock_revise" in _SRC
-    assert 'SCRIPTS[_ridx2].get("restock_revise")' in _SRC
+    assert 'script.get("restock_revise")' in _SRC    # 2026-09-16: after_run に移した
 
 
 def test_skip_review_combines_verify_and_restock():

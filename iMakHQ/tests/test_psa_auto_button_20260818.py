@@ -57,7 +57,7 @@ def test_目視ダブルチェックを外していない():
 
 def test_締めはauto_fullのときだけ():
     s = _src()
-    assert 'if _entry_now.get("auto_full"):' in s
+    assert 'if script.get("auto_full"):' in s      # 2026-09-16: after_run に移した
     assert '"auto_full": True' in _entry()
 
 

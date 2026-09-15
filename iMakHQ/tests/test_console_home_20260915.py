@@ -24,13 +24,40 @@ def test_counts_cover_the_same_keys_as_the_panel():
     assert panel_keys == console_keys, (panel_keys ^ console_keys)
 
 
-def test_runnable_only_without_postprocess_or_inputs():
+def test_runnable_is_everything_but_the_wizard():
+    """2026-09-16 (v0.3.0): 走る前のガードと後処理を共用にしたので、後処理あり・新規生成も押せる。
+
+    残る旧パネル専用は **ウィザード画面が要る物だけ** (一番くじの新規)。
+    """
     assert S.runnable({"skip_postprocess": True, "type": "utility"})
-    assert not S.runnable({"type": "utility"})                                   # 後処理あり
-    assert not S.runnable({"skip_postprocess": True, "ask_amount": True})
-    assert not S.runnable({"skip_postprocess": True, "restock_revise": True})
-    assert not S.runnable({"skip_postprocess": True, "type": "new"})
-    assert not S.runnable({"skip_postprocess": True, "params": [{"name": "x"}]})
+    assert S.runnable({"type": "utility"})                                       # 後処理あり → after_run が回す
+    assert S.runnable({"type": "new"})                                           # 新規生成 → before_run のガードを通す
+    assert S.runnable({"ask_amount": True})                                      # 金額は画面で聞く
+    assert S.runnable({"params": [{"name": "--limit"}]})                         # 入力欄も画面で聞く
+    assert not S.runnable({"custom_buttons": "ichibankuji"})
+
+
+def test_console_uses_the_panels_own_before_and_after():
+    """二重実装の禁止: Console は control_panel の before_run / after_run を呼ぶだけ。"""
+    assert "cp.before_run(script, _to_log)" in SERVER
+    assert "cp.after_run(script, rc, _to_log" in SERVER
+    panel = PANEL
+    assert "def before_run(script, append_log)" in panel
+    assert "def after_run(script, returncode, append_log" in panel
+
+
+def test_inputs_are_passed_the_same_way_as_the_panel():
+    """入力欄は --name 値、金額は --amount (旧パネルの run_script と同じ組み立て)。"""
+    assert S.build_cmd({"cmd": ["python", "x.py"], "params": [{"name": "--limit"}]},
+                       {"--limit": "5"}) == ["python", "x.py", "--limit", "5"]
+    assert S.build_cmd({"cmd": ["python", "x.py"], "ask_amount": True},
+                       None, "1,200") == ["python", "x.py", "--amount", "1200"]
+    assert S.build_cmd({"cmd": ["python", "x.py"], "ask_amount": True}, None, "") == ["python", "x.py"]
+    try:
+        S.build_cmd({"cmd": ["python", "x.py"], "ask_amount": True}, None, "たくさん")
+        raise AssertionError("金額として読めない値は弾く")
+    except ValueError:
+        pass
 
 
 def test_summarize_states():
@@ -141,3 +168,26 @@ def test_version_and_migration_status():
     assert V.VERSION.startswith("0.") or not blocked
     log = open(os.path.join(HQ, "console", "CHANGELOG.md"), encoding="utf-8").read()
     assert V.VERSION in log                                      # 版を上げたら CHANGELOG に1行足す
+
+
+def test_after_run_closes_the_run_even_without_a_csv():
+    """共通化した後処理を実際に呼ぶ (2026-09-16)。skip_postprocess のボタンは CSV を触らず締める。"""
+    sys.path.insert(0, HQ)
+    import control_panel as cp
+    out = []
+    r = cp.after_run({"label": "テスト", "skip_postprocess": True, "type": "utility", "cmd": []},
+                     0, out.append)
+    text = "".join(str(x) for x in out)
+    assert "後処理をスキップ" in text
+    assert "🎉 全 process 完了" in text
+    assert r["latest_csv"] is None
+
+
+def test_after_run_says_failed_when_the_script_failed():
+    sys.path.insert(0, HQ)
+    import control_panel as cp
+    out = []
+    cp.after_run({"label": "テスト", "skip_postprocess": True, "type": "utility", "cmd": []}, 1, out.append)
+    text = "".join(str(x) for x in out)
+    assert "❌ 失敗しました (returncode=1)" in text
+    assert "🎉" not in text

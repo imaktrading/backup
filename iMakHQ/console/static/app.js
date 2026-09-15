@@ -59,10 +59,13 @@
   function chip(j) { return '<span class="chip ' + esc(j.state) + '">' + esc(j.state === "hold" ? "止めている " + j.hold : (STATE_LABEL[j.state] || j.state)) + "</span>"; }
   function num(j) { return j.n == null ? "—" : Number(j.n).toLocaleString("ja-JP"); }
   function verb(j) { return /目視|確認|補充|入れ替え/.test(j.label) ? "目視" : /CSV/.test(j.label) ? "CSV" : /戻す/.test(j.label) ? "戻す" : "実行"; }
-  function btn(j, hot) {
+  function btn(j, hot, text) {
     if (!j.runnable) return '<span class="else">今の出品くんで</span>';
     var busy = running && running.running;
-    return '<button class="run' + (hot ? " hot" : "") + '" type="button" data-kind="' + esc(j.kind) + '"' + (busy ? " disabled" : "") + ">" + verb(j) + "</button>";
+    return '<button class="run' + (hot ? " hot" : "") + '" type="button"' +
+      (j.kind ? ' data-kind="' + esc(j.kind) + '"' : "") +
+      (j.i != null ? ' data-i="' + j.i + '"' : "") + (busy ? " disabled" : "") + ">" +
+      esc(text || verb(j)) + "</button>";
   }
   function sum(list, f) { return list.reduce(function (a, x) { return a + (f(x) || 0); }, 0); }
   function todoOf(list) { return list.filter(function (j) { return j.state === "todo"; }); }
@@ -124,7 +127,7 @@
       return buttons.filter(function (x) { return !x.used && x.label.indexOf(name) >= 0; }).map(function (b) {
         b.used = true;
         return '<div class="rw"><span class="t">' + esc(b.label) + '</span><span class="d">' + esc((b.tip || "").split("。")[0]) + "</span>" +
-          '<span class="else">今の出品くんで</span></div>';
+          btn(b, false, "実行") + "</div>";
       }).join("");
     }).join("");
     return html + (extra || "");
@@ -174,7 +177,7 @@
     $("prods").innerHTML = Object.keys(cats).map(function (c) {
       return '<div class="prod"><span class="pn">' + esc(c) + "</span>" +
         '<span class="pd">' + esc(cats[c].map(function (b) { return b.label; }).join(" · ")) + "</span>" +
-        '<div class="pb"><span class="else">今の出品くんで</span></div></div>';
+        '<div class="pb">' + cats[c].map(function (b) { return btn(b, b.type === "auto", b.label); }).join("") + "</div></div>";
     }).join("") || '<div class="empty">読込中…</div>';
   }
   function byCategory() {
@@ -235,7 +238,7 @@
     $("other-rows").innerHTML = rest.map(function (j) {
       return '<div class="rw"><span class="t">' + esc(j.label) + '</span><span class="d">' + esc(j.tip.split("。")[0]) + "</span>" + btn(j, j.state === "todo") + "</div>";
     }).join("") + extra.map(function (b) {
-      return '<div class="rw"><span class="t">' + esc(b.label) + '</span><span class="d">' + esc((b.tip || "").split("。")[0]) + '</span><span class="else">今の出品くんで</span></div>';
+      return '<div class="rw"><span class="t">' + esc(b.label) + '</span><span class="d">' + esc((b.tip || "").split("。")[0]) + "</span>" + btn(b, false, "実行") + "</div>";
     }).join("");
   }
 
@@ -384,16 +387,65 @@
   document.querySelectorAll('[role="tab"]').forEach(function (t) {
     t.addEventListener("click", function () { show(t.dataset.page); history.replaceState(null, "", "#" + t.dataset.page); });
   });
+  // 入力欄・金額が要るボタンは、押す前に小窓で聞く (旧パネルのダイアログと同じ中身)
+  function metaOf(b) {
+    var i = b.dataset.i != null ? Number(b.dataset.i) : null;
+    var byI = i != null ? buttons.filter(function (x) { return x.i === i; })[0] : null;
+    return byI || jobs[b.dataset.kind] || {};
+  }
+  function ask(meta) {
+    return new Promise(function (resolve) {
+      var ps = meta.params || [];
+      if (!ps.length && !meta.ask_amount) { resolve({}); return; }
+      $("modal-title").textContent = meta.label || "入力";
+      $("modal-note").textContent = meta.ask_amount
+        ? "空けたい金額 ($) を入れてください。空欄のままなら「今日出品した金額と同じだけ」落とします。"
+        : "空欄のままで良い欄は、そのままにしてください。";
+      $("modal-fields").innerHTML = (meta.ask_amount
+        ? '<label>金額 ($)<input name="__amount" inputmode="decimal" autocomplete="off"></label>' : "") +
+        ps.map(function (p) {
+          return "<label>" + esc(p.label || p.name) + '<input name="' + esc(p.name) + '" value="' + esc(p.default || "") + '" autocomplete="off"></label>';
+        }).join("");
+      $("modal").hidden = false;
+      var input = $("modal-fields").querySelector("input");
+      if (input) input.focus();
+      function close(val) {
+        $("modal").hidden = true;
+        $("modal-form").onsubmit = null;
+        $("modal-cancel").onclick = null;
+        resolve(val);
+      }
+      $("modal-cancel").onclick = function () { close(null); };
+      $("modal-form").onsubmit = function (ev) {
+        ev.preventDefault();
+        var out = { params: {} }, amt = null;
+        Array.prototype.forEach.call($("modal-fields").querySelectorAll("input"), function (el) {
+          if (el.name === "__amount") amt = el.value;
+          else out.params[el.name] = el.value;
+        });
+        if (amt != null) out.amount = amt;
+        close(out);
+      };
+    });
+  }
+
   document.addEventListener("click", function (e) {
-    var b = e.target.closest("button[data-kind]");
+    var b = e.target.closest("button[data-kind],button[data-i]");
     if (!b) return;
-    b.disabled = true;
-    post("/api/run", { kind: b.dataset.kind }).then(function (r) {
-      if (!r.ok) { say(r.j.error || "実行できませんでした"); b.disabled = false; return; }
-      say("始めました");
-      drawerHidden = false;
-      $("drawer").hidden = false;
-      setTimeout(refreshJobs, 300);
+    var meta = metaOf(b);
+    ask(meta).then(function (extra) {
+      if (!extra) { say("やめました"); return; }
+      b.disabled = true;
+      var body = { kind: b.dataset.kind || null, i: b.dataset.i != null ? Number(b.dataset.i) : null };
+      if (extra.params) body.params = extra.params;
+      if (extra.amount != null) body.amount = extra.amount;
+      post("/api/run", body).then(function (r) {
+        if (!r.ok) { say(r.j.error || "実行できませんでした"); b.disabled = false; return; }
+        say("始めました");
+        drawerHidden = false;
+        $("drawer").hidden = false;
+        setTimeout(refreshJobs, 300);
+      });
     });
   });
   $("btn-refresh").addEventListener("click", function () {
