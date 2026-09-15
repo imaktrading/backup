@@ -20,32 +20,32 @@ set:
   # Promo / Misc ラベル — どれも eBay では "Promo Cards" にまとめられる想定
   - source: Promotion Card
     ebay: Promo Cards
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (全 Game) に在る値"
   - source: Other Product Card
     ebay: Promo Cards
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (全 Game) に在る値"
   - source: プロモーションカード
     ebay: Promo Cards
     note: JA 'Promotion Card'
   - source: 限定商品収録カード
     ebay: Promo Cards
-    note: JA 'Limited Product Card' — REVIEW eBay 値
+    note: "JA 'Limited Product Card' — 2026-09-15 確認: eBay master (全 Game) に在る値"
   - source: プレミアムカードコレクション -GIRLS EDITION-
     ebay: Promo Cards
     note: 2026-07-10 Premium Card Collection Girls Edition (ST07-008_GE 等 parallel)
   # 2026-07-29 live cert set_name_ebay 欠損 (214KEY残36の一部)。既存 promo/event と同じ Promo Cards バケツ。
   - source: プレミアムカードコレクション 25周年エディション
     ebay: Promo Cards
-    note: 25th Anniversary Edition Premium Card Collection (OP01-001_p1 / ST01-006_p1 等)。REVIEW eBay 値
+    note: "25th Anniversary Edition Premium Card Collection (OP01-001_p1 / ST01-006_p1 等)。2026-09-15 確認: eBay master (全 Game) に在る値"
   - source: プレミアムカードコレクション ‐ONE PIECE FILM RED ‐
     ebay: Promo Cards
     note: Premium Card Collection FILM RED (OP01-017_p2 / ST01-013_p3 等)。既存同setで Promo Cards 実績あり
   - source: スタンダードバトル 2024年1月優勝記念品
     ebay: Promo Cards
-    note: Standard Battle 優勝記念品 (event prize promo, OP03-044_p2)。REVIEW eBay 値
+    note: "Standard Battle 優勝記念品 (event prize promo, OP03-044_p2)。2026-09-15 確認: eBay master (全 Game) に在る値"
   - source: フラッグシップバトル2025 10月ベスト8記念品
     ebay: Promo Cards
-    note: Flagship Battle 記念品 (event prize promo, OP12-031_p2)。REVIEW eBay 値
+    note: "Flagship Battle 記念品 (event prize promo, OP12-031_p2)。2026-09-15 確認: eBay master (全 Game) に在る値"
   # 2026-07-31 Advisor GO: audit_catalog_fix_tcg_response.md ① — 13件に効く
   # (set_name_official='プロモーションカードセット' 全13行の set_name_ebay 空欄が埋まる)
   - source: プロモーションカードセット

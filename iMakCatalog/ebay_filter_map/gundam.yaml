@@ -15,7 +15,7 @@ set:
   # Promo / Misc ラベル
   - source: Promotion Card
     ebay: Promo Cards
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (全 Game) に在る値"
   - source: プロモーションカード
     ebay: Promo Cards
     note: JA 'Promotion Card'
@@ -33,10 +33,10 @@ set:
       selfcheck 拒否。限定商品と同じ Promo Cards バケツに正規化して整合させる。
   - source: リミテッドBOX Ver.β
     ebay: Limited Box Beta Ver.
-    note: JA-only Limited Box β — REVIEW eBay 値
+    note: "JA-only Limited Box β — 2026-09-15 確認: eBay master に ガンダムの Game が無く該当値なし → ② 自由入力 (登録簿に在る)"
   - source: Edition Beta
     ebay: Edition Beta
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master に ガンダムの Game が無く該当値なし → ② 自由入力 (登録簿に在る)"
 
 # ============================================================================
 # Set code (公式原文の角括弧内)
@@ -64,6 +64,10 @@ set:
   - source: "Deck Build Box Freedom Ascension [SC01]"
     ebay: "Deck Build Box Freedom Ascension [SC01]"
     note: "2026-09-02 自製 (プロモ商品。元の弾名が入っていたのを是正)"
+  # ----- 2026-09-15 DB の表にだけ在った行を YAML に戻す (週次監査 §4 の未検証メモ) -----
+  - source: "リミテッドBOX Ver.赤"
+    ebay: "Limited Box Red Ver."
+    note: "2026-09-15 確認: eBay master にガンダムの Game が無く該当値なし → ② 自由入力 (JA-only Limited Box Red。使用行 0)"
 set_code:
   # ----- Booster Pack (GD) -----
   - source: GD01
@@ -125,11 +129,11 @@ set_code:
   # ----- Premium Card Collection (PC) -----
   - source: PC01A
     ebay: Premium Card Collection IBO
-    note: IRON-BLOODED ORPHANS — REVIEW eBay 値
+    note: "IRON-BLOODED ORPHANS — 2026-09-15 確認: eBay master に ガンダムの Game が無く該当値なし → ② 自由入力 (登録簿に在る)"
     year: 2026
   - source: PC02A
     ebay: Premium Card Collection GQuuuuuuX
-    note: Mobile Suit Gundam GQuuuuuuX — REVIEW eBay 値
+    note: "Mobile Suit Gundam GQuuuuuuX — 2026-09-15 確認: eBay master に ガンダムの Game が無く該当値なし → ② 自由入力 (登録簿に在る)"
     year: 2026
 
 # ============================================================================

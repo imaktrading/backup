@@ -27,10 +27,18 @@ values:
     category: pokemon_tcg
     rows: 175
     jp_set: "小学館『月刊コロコロコミック』2006年12月号付録"
+  - value: "Shining Darkness"
+    category: pokemon_tcg
+    rows: 146
+    jp_set: "ポケモンカードゲームDP 拡張パック「ひかる闇」"
   - value: "Galactic's Conquest"
     category: pokemon_tcg
     rows: 146
     jp_set: "ポケモンカードゲームDPt 拡張パック「ギンガの覇道」"
+  - value: "Secret of the Lakes"
+    category: pokemon_tcg
+    rows: 145
+    jp_set: "ポケモンカードゲームDP 拡張パック「湖の秘密」"
   - value: "The Best of XY"
     category: pokemon_tcg
     rows: 144
@@ -47,6 +55,10 @@ values:
     category: pokemon_tcg
     rows: 127
     jp_set: "Vスタートデッキ草 フシギバナ"
+  - value: "Space-Time Creation: Pearl Collection"
+    category: pokemon_tcg
+    rows: 126
+    jp_set: "拡張パック「時空の創造 パールコレクション」"
   - value: "Bonds to the End of Time"
     category: pokemon_tcg
     rows: 126
@@ -71,10 +83,18 @@ values:
     category: pokemon_tcg
     rows: 116
     jp_set: "拡張パック「インフェルノX」"
+  - value: "Rising Fist"
+    category: pokemon_tcg
+    rows: 101
+    jp_set: "ポケモンカードゲームXY 拡張パック「ライジングフィスト」"
   - value: "Pokemon Card Game Classic"
     category: pokemon_tcg
     rows: 96
     jp_set: "ポケモンカードゲーム クラシック カメックス&スイクンexデッキ"
+  - value: "Phantom Gate"
+    category: pokemon_tcg
+    rows: 93
+    jp_set: "ポケモンカードゲームXY 拡張パック「ファントムゲート」"
   - value: "Mega Brave"
     category: pokemon_tcg
     rows: 92
@@ -87,18 +107,34 @@ values:
     category: pokemon_tcg
     rows: 92
     jp_set: "ポケモンチャレンジひろば 2009/9"
+  - value: "Bandit Ring"
+    category: pokemon_tcg
+    rows: 89
+    jp_set: "ポケモンカードゲームXY 拡張パック「バンデットリング」"
   - value: "Wild Blaze"
     category: pokemon_tcg
     rows: 85
     jp_set: "ポケモンカードゲームXY 拡張パック「ワイルドブレイズ」"
+  - value: "Awakening Psychic King"
+    category: pokemon_tcg
+    rows: 84
+    jp_set: "ポケモンカードゲームXY BREAK 拡張パック「めざめる超王」"
+  - value: "Rage of the Broken Heavens"
+    category: pokemon_tcg
+    rows: 84
+    jp_set: "ポケモンカードゲームXY BREAK 拡張パック「破天の怒り」"
+  - value: "Emerald Break"
+    category: pokemon_tcg
+    rows: 83
+    jp_set: "ポケモンカードゲームXY 拡張パック「エメラルドブレイク」"
   - value: "Pocket Monsters Card Game Starter Pack (20th Anniversary)"
     category: pokemon_tcg
     rows: 81
     jp_set: "ポケモンカードゲームXY BREAK 「ポケットモンスターカードゲーム スターターパック」"
-  - value: "Rage of the Broken Heavens"
+  - value: "HeartGold Collection"
     category: pokemon_tcg
-    rows: 81
-    jp_set: "ポケモンカードゲームXY BREAK 拡張パック「破天の怒り」"
+    rows: 77
+    jp_set: "ポケモンカードゲームLEGEND 拡張パック「ハートゴールドコレクション」"
   - value: "Gaia Volcano"
     category: pokemon_tcg
     rows: 76
@@ -119,22 +155,38 @@ values:
     category: pokemon_tcg
     rows: 73
     jp_set: "拡張パック「ストームエメラルダ」"
+  - value: "Dawn Dash"
+    category: pokemon_tcg
+    rows: 70
+    jp_set: "拡張パック「夜明けの疾走」"
+  - value: "SoulSilver Collection"
+    category: pokemon_tcg
+    rows: 69
+    jp_set: "ポケモンカードゲームLEGEND 拡張パック「ソウルシルバーコレクション」"
   - value: "Grass Decidueye GX Starter Set"
     category: pokemon_tcg
     rows: 68
     jp_set: "ポケモンカードゲーム サン&ムーン 「スターターセット草 ジュナイパーGX」"
-  - value: "HeartGold Collection"
+  - value: "Moonlit Pursuit"
     category: pokemon_tcg
-    rows: 68
-    jp_set: "ポケモンカードゲームLEGEND 拡張パック「ハートゴールドコレクション」"
-  - value: "SoulSilver Collection"
+    rows: 65
+    jp_set: "拡張パック「月光の追跡」"
+  - value: "Temple of Anger"
     category: pokemon_tcg
-    rows: 68
-    jp_set: "ポケモンカードゲームLEGEND 拡張パック「ソウルシルバーコレクション」"
+    rows: 65
+    jp_set: "拡張パック「怒りの神殿」"
+  - value: "Cry from the Mysterious"
+    category: pokemon_tcg
+    rows: 65
+    jp_set: "拡張パック「秘境の叫び」"
   - value: "Anytime Anywhere Battle Academy"
     category: pokemon_tcg
     rows: 63
     jp_set: "いつでもどこでも バトルアカデミー"
+  - value: "Blue Shock"
+    category: pokemon_tcg
+    rows: 62
+    jp_set: "ポケモンカードゲームXY BREAK 拡張パック「青い衝撃」"
   - value: "Collection X"
     category: pokemon_tcg
     rows: 62
@@ -147,10 +199,22 @@ values:
     category: pokemon_tcg
     rows: 61
     jp_set: "エクストラバトルの日"
+  - value: "Red Flash"
+    category: pokemon_tcg
+    rows: 60
+    jp_set: "ポケモンカードゲームXY BREAK 拡張パック「赤い閃光」"
   - value: "Family Pokemon Card Game"
     category: pokemon_tcg
     rows: 59
     jp_set: "ファミリーポケモンカードゲーム"
+  - value: "Fever-Burst Fighter"
+    category: pokemon_tcg
+    rows: 57
+    jp_set: "ポケモンカードゲームXY BREAK 拡張パック「爆熱の闘士」"
+  - value: "Cruel Traitor"
+    category: pokemon_tcg
+    rows: 56
+    jp_set: "ポケモンカードゲームXY BREAK 拡張パック「冷酷の反逆者」"
   - value: "Mega Premium Trainer Box"
     category: pokemon_tcg
     rows: 51
@@ -291,6 +355,10 @@ values:
     category: pokemon_tcg
     rows: 20
     jp_set: "ポケモンカードゲームLEGEND 構築スタンダードデッキ「ハガネール鋼」"
+  - value: "Dragon Selection"
+    category: pokemon_tcg
+    rows: 20
+    jp_set: "ポケモンカードゲームBW 拡張パック「ドラゴンセレクション」"
   - value: "Sv: Ex Starter Set Zorua & Zoroark Ex"
     category: pokemon_tcg
     rows: 20
@@ -371,6 +439,18 @@ values:
     category: pokemon_tcg
     rows: 13
     jp_set: "ポケモンカードゲーム サン&ムーン プレミアムトレーナーボックス ウルトラサン・ウルトラムーン"
+  - value: "DPt Entry Pack (Giratina)"
+    category: pokemon_tcg
+    rows: 13
+    jp_set: "ポケモンカードゲームDPt エントリーパック(ギラティナデッキ)"
+  - value: "DPt Entry Pack (Dialga)"
+    category: pokemon_tcg
+    rows: 13
+    jp_set: "ポケモンカードゲームDPt エントリーパック(ディアルガデッキ)"
+  - value: "DPt Entry Pack (Palkia)"
+    category: pokemon_tcg
+    rows: 13
+    jp_set: "ポケモンカードゲームDPt エントリーパック(パルキアデッキ)"
   - value: "CoroCoro Comic January 2017 Rockruff Deck"
     category: pokemon_tcg
     rows: 13
@@ -458,6 +538,10 @@ values:
     category: pokemon_tcg
     rows: 4
     jp_set: "スペシャルカードセット ミュウツーV-UNION、ゲッコウガV-UNION、ザシアンV-UNION"
+  - value: "Space-Time Creation: Diamond Collection"
+    category: pokemon_tcg
+    rows: 4
+    jp_set: "拡張パック「時空の創造 ダイヤモンドコレクション」"
   - value: "20th Anniversary Festa Play Point Original Card"
     category: pokemon_tcg
     rows: 4

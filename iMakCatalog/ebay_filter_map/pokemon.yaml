@@ -1074,10 +1074,12 @@ set:
     ebay: "Promo"
     note: "2026-09-02 既存値をセット単位に (埋まっている行は不変)"
   - source: "ポケモンカードゲームDP 拡張パック「ひかる闇」"
-    ebay: "Secret Wonders"
+    ebay: "Shining Darkness"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Secret Wonders' = 英語版の別セット)"
     note: "2026-09-02 既存値をセット単位に (埋まっている行は不変)"
   - source: "ポケモンカードゲームDP 拡張パック「湖の秘密」"
-    ebay: "Mysterious Treasures"
+    ebay: "Secret of the Lakes"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Mysterious Treasures' = 英語版の別セット)"
     note: "2026-09-02 既存値をセット単位に (埋まっている行は不変)"
   - source: "ポケモンカードゲームXY BREAK プレミアムチャンピオンパック「EX×M×BREAK」"
     ebay: "CP4: Premium Champion Pack"
@@ -1224,7 +1226,8 @@ set:
     ebay: "XY Promo"
     note: "2026-09-04 既存行と同じ値"
   - source: "ポケモンカードゲームXY 拡張パック「バンデットリング」"
-    ebay: "XY - Ancient Origins"
+    ebay: "Bandit Ring"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'XY - Ancient Origins' = 英語版の別セット)"
     note: "2026-09-04 既存行と同じ値"
   - source: "強化拡張パック「ダークオーダー」"
     ebay: "Sm8a: Dark Order"
@@ -1247,27 +1250,126 @@ set:
   - source: "スタートデッキ100 バトルコレクション コロちゃおVer."
     ebay: "Start Deck 100 Battle Collection Korochao Ver."
     note: "券面 001/023 の独自ナンバリング。M-P の通し番号とは別商品 (2026-09-05)"
+  # ----- 2026-09-15 日本語版の旧セット: 英語版の別セット名を自分の値に (週次監査 §5 から発見) -----
+  - source: "ポケモンカードゲームDP 拡張パック「破空の激闘」"
+    ebay: "Intense Fight in the Destroyed Sky"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Stormfront' = 英語版の別セット)。eBay master に在る値"
+  - source: "拡張パック「時空の創造 ダイヤモンドコレクション」"
+    ebay: "Space-Time Creation: Diamond Collection"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Diamond & Pearl' = 英語版の別セット)"
+  - source: "拡張パック「時空の創造 パールコレクション」"
+    ebay: "Space-Time Creation: Pearl Collection"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Diamond & Pearl' = 英語版の別セット)"
+  - source: "ポケモンカードゲームXY 拡張パック「ライジングフィスト」"
+    ebay: "Rising Fist"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'XY - Furious Fists' = 英語版の別セット)"
+  - source: "ポケモンカードゲームXY 拡張パック「ファントムゲート」"
+    ebay: "Phantom Gate"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'XY - Phantom Forces' = 英語版の別セット)"
+  - source: "ポケモンカードゲームXY 拡張パック「エメラルドブレイク」"
+    ebay: "Emerald Break"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Roaring Skies' = 英語版の別セット)"
+  - source: "ポケモンカードゲームXY BREAK 拡張パック「めざめる超王」"
+    ebay: "Awakening Psychic King"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Fates Collide' = 英語版の別セット)"
+  - source: "拡張パック「めざめる超王」"
+    ebay: "Awakening Psychic King"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Fates Collide' = 英語版の別セット)"
+  - source: "拡張パック「夜明けの疾走」"
+    ebay: "Dawn Dash"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Majestic Dawn' = 英語版の別セット)"
+  - source: "拡張パック「月光の追跡」"
+    ebay: "Moonlit Pursuit"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Great Encounters' = 英語版の別セット)"
+  - source: "拡張パック「怒りの神殿」"
+    ebay: "Temple of Anger"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Legends Awakened' = 英語版の別セット)"
+  - source: "拡張パック「秘境の叫び」"
+    ebay: "Cry from the Mysterious"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Legends Awakened' = 英語版の別セット)"
+  - source: "ポケモンカードゲームXY BREAK 拡張パック「青い衝撃」"
+    ebay: "Blue Shock"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Breakthrough' = 英語版の別セット)"
+  - source: "拡張パック「青い衝撃」"
+    ebay: "Blue Shock"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Breakthrough' = 英語版の別セット)"
+  - source: "ポケモンカードゲームXY BREAK 拡張パック「赤い閃光」"
+    ebay: "Red Flash"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Breakthrough' = 英語版の別セット)"
+  - source: "拡張パック「赤い閃光」"
+    ebay: "Red Flash"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Breakthrough' = 英語版の別セット)"
+  - source: "ポケモンカードゲームXY BREAK 拡張パック「冷酷の反逆者」"
+    ebay: "Cruel Traitor"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'XY - Steam Siege' = 英語版の別セット)"
+  - source: "拡張パック「冷酷の反逆者」"
+    ebay: "Cruel Traitor"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'XY - Steam Siege' = 英語版の別セット)"
+  - source: "ポケモンカードゲームXY BREAK 拡張パック「爆熱の闘士」"
+    ebay: "Fever-Burst Fighter"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'XY - Steam Siege' = 英語版の別セット)"
+  - source: "拡張パック「爆熱の闘士」"
+    ebay: "Fever-Burst Fighter"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'XY - Steam Siege' = 英語版の別セット)"
+  - source: "ポケモンカードゲームBW 拡張パック「ドラゴンセレクション」"
+    ebay: "Dragon Selection"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Dragon Vault' = 英語版の別セット)"
+  - source: "拡張パック「ハートゴールドコレクション」"
+    ebay: "HeartGold Collection"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Heartgold & Soulsilver' = 英語版の別セット)。登録済みの値に合わせる"
+  - source: "拡張パック「ソウルシルバーコレクション」"
+    ebay: "SoulSilver Collection"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Heartgold & Soulsilver' = 英語版の別セット)。登録済みの値に合わせる"
+  - source: "拡張パック「破天の怒り」"
+    ebay: "Rage of the Broken Heavens"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Breakpoint' = 英語版の別セット)。登録済みの値に合わせる"
+  - source: "拡張パック「頂上大激突」"
+    ebay: "L3: Clash at the Summit"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール②/③)。英訳は Bulbapedia 'List of Japanese Pokémon Trading Card Game expansions' で確認 (旧 'Triumphant' = 英語版の別セット)。eBay master に在る値"
+  - source: "ポケモンカードゲームDPtギフトボックス（ナエトルデッキ）"
+    ebay: "DPt Gift Box (Turtwig)"
+    note: "2026-09-15 日本語版の商品は自分の値 (8/23 ルール①②/③。旧 'Platinum' = 英語版セット)。eBay master に在る値"
+  - source: "ポケモンカードゲームDPtギフトボックス（ヒコザルデッキ）"
+    ebay: "DPt Gift Box (Chimchar)"
+    note: "2026-09-15 日本語版の商品は自分の値 (8/23 ルール①②/③。旧 'Platinum' = 英語版セット)。eBay master に在る値"
+  - source: "ポケモンカードゲームDPtギフトボックス（ポッチャマデッキ）"
+    ebay: "DPt Gift Box (Piplup)"
+    note: "2026-09-15 日本語版の商品は自分の値 (8/23 ルール①②/③。旧 'Platinum' = 英語版セット)。eBay master に在る値"
+  - source: "ポケモンカードゲームDPt エントリーパック(ギラティナデッキ)"
+    ebay: "DPt Entry Pack (Giratina)"
+    note: "2026-09-15 日本語版の商品は自分の値 (8/23 ルール①②/③。旧 'Platinum' = 英語版セット)。自製 (eBay 一覧に無い。master の DPt Gift Box の書き方に合わせた)"
+  - source: "ポケモンカードゲームDPt エントリーパック(ディアルガデッキ)"
+    ebay: "DPt Entry Pack (Dialga)"
+    note: "2026-09-15 日本語版の商品は自分の値 (8/23 ルール①②/③。旧 'Platinum' = 英語版セット)。自製 (eBay 一覧に無い。master の DPt Gift Box の書き方に合わせた)"
+  - source: "ポケモンカードゲームDPt エントリーパック(パルキアデッキ)"
+    ebay: "DPt Entry Pack (Palkia)"
+    note: "2026-09-15 日本語版の商品は自分の値 (8/23 ルール①②/③。旧 'Platinum' = 英語版セット)。自製 (eBay 一覧に無い。master の DPt Gift Box の書き方に合わせた)"
+
+  # ----- 2026-09-15 DB の表にだけ在った行を YAML に戻す (週次監査 §4 の未検証メモ) -----
+  - source: "拡張パック「破空の激闘」"
+    ebay: "Intense Fight in the Destroyed Sky"
+    note: "2026-09-15 日本語版セットは自分の値 (8/23 ルール①/③。旧 'Stormfront' = 英語版セット)。eBay master に在る値"
 set_code:
   # ----- Scarlet & Violet (SV / SVxx) -----
   - source: SV1V
     ebay: "Sv1v: Violet Ex"
     note: "2026-08-22 eBay master verbatim へ (旧 'Violet ex')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2023
   - source: SV1S
     ebay: "Sv1s: Scarlet Ex"
     note: "2026-08-22 eBay master verbatim へ (旧 'Scarlet ex')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2023
   - source: SV2D
     ebay: "Sv2d: Clay Burst"
     note: "2026-08-22 eBay master verbatim へ (旧 'Clay Burst')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2023
   - source: SV2P
     ebay: "Sv2p: Snow Hazard"
     note: "2026-08-22 eBay master verbatim へ (旧 'Snow Hazard')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2023
   - source: SV2a
     ebay: "Sv2a: Pokemon Card 151"
@@ -1286,18 +1388,18 @@ set_code:
   - source: SV3a
     ebay: "Sv3a: Raging Surf"
     note: "2026-08-22 eBay master verbatim へ (旧 'Raging Surf')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2023
   # SV4 は削除 (2026-08-22): JP に単独パックが無いコード。値も 1行ずれて Future Flash が入っていた。使用 0枚。HQ 依頼 Q1 で確認
   - source: SV4K
     ebay: "Sv4k: Ancient Roar"
     note: "2026-08-22 是正 (SV4K=古代の咆哮。Wild Force は SV5K の名前、旧 'Wild Force')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2024
   - source: SV4M
     ebay: "Sv4m: Future Flash"
     note: "2026-08-22 是正 (SV4M=未来の一閃。Cyber Judge は SV5M の名前、旧 'Cyber Judge')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2024
   - source: SV4a
     ebay: "Sv4a: Shiny Treasure Ex"
@@ -1307,69 +1409,69 @@ set_code:
   - source: SV5K
     ebay: "Sv5k: Wild Force"
     note: "2026-08-22 eBay master verbatim へ (旧 'Wild Force')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2024
   - source: SV5M
     ebay: "Sv5m: Cyber Judge"
     note: "2026-08-22 eBay master verbatim へ (旧 'Cyber Judge')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2024
   - source: SV5a
     ebay: "Sv5a: Crimson Haze"
     note: "2026-08-22 eBay master verbatim へ (旧 'Crimson Haze')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2024
   - source: SV6
-    ebay: Mask of Change
-    note: 拡張パック「変幻の仮面」 — REVIEW eBay 値
+    ebay: 'Sv6: Transformation Mask'
+    note: 拡張パック「変幻の仮面」 — 2026-09-15 eBay master (Pokémon TCG) の値に是正 (旧 'Mask of Change' は一覧に無く、DB 133行は既に master 値)
     year: 2024
   - source: SV6a
     ebay: "Sv6a: Night Wanderer"
     note: "2026-08-22 eBay master verbatim へ (旧 'Night Wanderer')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2024
   - source: SV7
     ebay: "Sv7: Stellar Miracle"
     note: "2026-08-22 eBay master verbatim へ (旧 'Stellar Miracle')"
-    note: 拡張パック「ステラミラクル」 — REVIEW eBay 値
+    note: "拡張パック「ステラミラクル」 — 2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2024
   - source: SV7a
     ebay: "Sv7a: Paradise Dragona"
     note: "2026-08-22 eBay master verbatim へ (旧 'Paradise Dragona')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2024
   - source: SV8
     ebay: "Sv8: Super Electric Breaker"
     note: "2026-08-22 eBay master verbatim へ (旧 'Super Electric Breaker')"
-    note: 拡張パック「超電ブレイカー」 — REVIEW eBay 値
+    note: "拡張パック「超電ブレイカー」 — 2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2024
   - source: SV8a
-    ebay: Terastal Festival ex
-    note: ハイクラスパック「テラスタルフェスex」 — REVIEW eBay 値
+    ebay: 'Sv8a: Terastal Fest Ex'
+    note: ハイクラスパック「テラスタルフェスex」 — 2026-09-15 eBay master (Pokémon TCG) の値に是正 (旧 'Terastal Festival ex' は一覧に無く、DB 237行は既に master 値)
     year: 2024
   - source: SV9
     ebay: "Sv9: Battle Partners"
     note: "2026-08-22 是正 (master verbatim (弾番号つき)、旧 'Battle Partners')"
-    note: 拡張パック「バトルパートナーズ」 — REVIEW eBay 値
+    note: "拡張パック「バトルパートナーズ」 — 2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2025
   - source: SV9a
     ebay: "Sv9a: Heat Wave Arena"
     note: "2026-08-22 eBay master verbatim へ (旧 'Heat Wave Arena')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2025
   - source: SV10
-    ebay: Rocket Gang's Glory
-    note: 拡張パック「ロケット団の栄光」 — REVIEW eBay 値
+    ebay: 'Sv10: The Glory of Team Rocket'
+    note: 拡張パック「ロケット団の栄光」 — 2026-09-15 eBay master (Pokémon TCG) の値に是正 (旧 "Rocket Gang's Glory" は一覧に無く、DB 132行は既に master 値)
     year: 2025
   - source: SV11B
     ebay: "SV11B: Black Bolt"
     note: "2026-08-22 eBay master verbatim へ (旧 'Black Bolt')"
-    note: 拡張パック「ブラックボルト」 — REVIEW eBay 値
+    note: "拡張パック「ブラックボルト」 — 2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2025
   - source: SV11W
     ebay: "SV11W: White Flare"
     note: "2026-08-22 eBay master verbatim へ (旧 'White Flare')"
-    note: 拡張パック「ホワイトフレア」 — REVIEW eBay 値
+    note: "拡張パック「ホワイトフレア」 — 2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2025
   - source: SVD
     ebay: "Sv: Ex Start Decks"
@@ -1400,7 +1502,7 @@ set_code:
   - source: S6a
     ebay: "S6a: Eevee Heroes"
     note: "2026-08-22 eBay master verbatim へ (旧 'Eevee Heroes')"
-    note: 拡張パック「イーブイヒーローズ」 — REVIEW eBay 値
+    note: "拡張パック「イーブイヒーローズ」 — 2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2021
   - source: S7R
     ebay: "S7r: Blue Sky Stream"
@@ -1425,22 +1527,22 @@ set_code:
   - source: S9a
     ebay: "S9a: Battle Region"
     note: "2026-08-22 eBay master verbatim へ (旧 'Battle Region')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2022
   - source: S10D
     ebay: "S10d: Time Gazer"
     note: "2026-08-22 eBay master verbatim へ (旧 'Time Gazer')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2022
   - source: S10P
     ebay: "S10p: Space Juggler"
     note: "2026-08-22 eBay master verbatim へ (旧 'Space Juggler')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2022
   - source: S10a
     ebay: "S10a: Dark Phantasma"
     note: "2026-08-22 eBay master verbatim へ (旧 'Dark Phantasma')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2022
   - source: S11
     ebay: "S11: Lost Abyss"
@@ -1450,7 +1552,7 @@ set_code:
   - source: S11a
     ebay: "S11a: Incandescent Arcana"
     note: "2026-08-22 eBay master verbatim へ (旧 'Incandescent Arcana')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2022
   - source: S12
     ebay: "S12: Paradigm Trigger"
@@ -1541,11 +1643,11 @@ set_code:
   - source: BW6
     ebay: "Bw6: Freeze Bolt"
     note: "2026-08-22 eBay master verbatim へ (旧 'Freeze Bolt')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2012
   - source: DPt
     ebay: Platinum
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
     year: 2009
   - source: DPt2
     ebay: Bonds to the End of Time
@@ -1561,13 +1663,13 @@ set_code:
     year: 2009
   - source: L1
     ebay: HeartGold Collection
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master に Pokémon TCG の該当値なし → ② 自由入力 (登録簿に在る)"
     year: 2010
 
   # ----- Misc / Promo / Special -----
   - source: SD
     ebay: Starter Deck
-    note: 各種 starter deck (汎用) — REVIEW eBay 値
+    note: "各種 starter deck (汎用) — 2026-09-15 確認: eBay master に Pokémon TCG の該当値なし → ② 自由入力 (登録簿に在る)"
   # MC -> 'Movie Promo' の行は削除 (2026-08-23 / HQ 裁定 2026-08-21_c36)。
   #   誤りで、素の restamp を流すと スタートデッキ100 バトルコレクション の
   #   766行を塗り潰していた。正しい MC は上の 'Start Deck 100 Battle Collection'。
@@ -1588,7 +1690,7 @@ set_code:
   - source: CP4
     ebay: "CP4: Premium Champion Pack"
     note: "2026-08-22 eBay master verbatim へ (旧 'Premium Champion Pack')"
-    note: REVIEW eBay 値
+    note: "2026-09-15 確認: eBay master (Pokémon TCG) に在る値"
   - source: CP5
     ebay: "Cp5: Mythical & Legendary Dream Shine Collection"
     note: "2026-08-22 eBay master verbatim へ (旧 'Mythical & Legendary Dream Shine Collection')"
