@@ -189,15 +189,35 @@ def load_watch_by_item(funnel_dir=None):
         return {}
 
 
-def _read_high():
+READ_RETRIES = 3
+
+
+def _read_high(retries=READ_RETRIES, sleep=None):
+    """商品管理シート HIGH を全部読む (I/O)。
+
+    ★2026-09-15: 1分あたりの読み取り上限 (429) で **その場で落ちていた**
+      (18:03 補URL③ 補充が returncode=1)。sheet_io.read_tab は待って読み直すのに、ここだけ無かった。
+      上限は「1分あたり」なので待てば開く → 20秒・40秒・60秒 待って読み直す。429 以外はそのまま落とす。
+    """
+    import time as _time
     import gspread
     from google.oauth2.service_account import Credentials
-    creds = Credentials.from_service_account_file(
-        sheet_io.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(HIGH_SHEET_ID)
-    ws = next((w for w in sh.worksheets() if w.id == HIGH_GID), None)
-    return ws.get_all_values()
+    sleep = sleep or _time.sleep
+    for attempt in range(retries + 1):
+        try:
+            creds = Credentials.from_service_account_file(
+                sheet_io.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+            gc = gspread.authorize(creds)
+            sh = gc.open_by_key(HIGH_SHEET_ID)
+            ws = next((w for w in sh.worksheets() if w.id == HIGH_GID), None)
+            return ws.get_all_values()
+        except Exception as e:                                 # noqa: BLE001
+            if not sheet_io.is_quota_error(e) or attempt == retries:
+                raise
+            wait = 20 * (attempt + 1)
+            print(f"  ⏳ Sheets 読み取り上限 (429) → {wait}秒待って読み直します "
+                  f"({attempt + 1}/{retries}) 商品管理シート", flush=True)
+            sleep(wait)
 
 
 # ---------------------------------------------------------------------------

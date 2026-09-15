@@ -5009,7 +5009,8 @@ class ListingPanel:
                         if _i is not None and _i >= 0:
                             self._remember_step_run((SCRIPTS[_i] or {}).get("badge"))
                         self.refresh_hoju_badge()
-                        self._check_badge_moved()
+                        # ★2026-09-15: 失敗した走行は何もしていないので「減らない」と騒がない (誤報だった)
+                        self._check_badge_moved(failed=item[1] not in (0, None))
                     except Exception:                             # noqa: BLE001
                         pass
                 else:
@@ -5018,16 +5019,20 @@ class ListingPanel:
             pass
         self.root.after(100, self.poll_queue)
 
-    def _check_badge_moved(self):
+    def _check_badge_moved(self, failed=False):
         """押したのに件数が減らなかったら、その場で言う (2026-09-10 ユーザー指示)。
 
         > 押したら作業できる残件数を表示して欲しい
 
         数え方を直すだけでは、また別の理由でズレる (同じボタンで4回起きた)。
         **押した結果と表示が合っているか**を毎回確かめ、合っていなければ黙らない。
+        ★2026-09-15: 走行が失敗した (returncode≠0) 時は何もしていないので突き合わせない。
+          18:03 補URL③ が 429 で落ちた時に「17件 → 17件 減りませんでした」と誤報していた。
         """
         before = getattr(self, "_badge_before", None)
         self._badge_before = None
+        if failed:
+            return
         if not before:
             return
         badge, n_before, label = before

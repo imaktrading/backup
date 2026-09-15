@@ -54,7 +54,8 @@ def test_does_not_flag_when_unknown():
 def test_panel_checks_before_and_after_each_press():
     src = open(os.path.join(HQ, "control_panel.py"), encoding="utf-8").read()
     assert "self._badge_before = (_bk, badge_number(" in src, "押す前の件数を控えること"
-    assert "self._check_badge_moved()" in src, "走行後に突き合わせること"
+    # ★2026-09-15: 失敗した走行は突き合わせない (failed= を渡す)
+    assert "self._check_badge_moved(failed=" in src, "走行後に突き合わせること"
     i = src.index("def _check_badge_moved(")
     body = src[i:src.index(chr(10) + "    def ", i + 10)]
     assert "badge_did_not_move" in body and "_record_badge_drift" in body
