@@ -10,80 +10,125 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="app">
-  <aside class="side">
-    <div class="brand"><div class="mark">出</div><div><b>出品くん</b><small>iMak Trading Japan</small></div></div>
-    <nav class="nav" aria-label="メニュー">
-      <div class="grp">今日</div>
-      <a class="on" href="#today">ホーム <span class="n" id="nav-today">…</span></a>
-      <div class="grp">仕入元</div>
-      <a href="#g-hoju">補URL <span class="n" id="nav-hoju">…</span></a>
-      <a href="#g-restock">再仕入れ <span class="n" id="nav-restock">…</span></a>
-      <div class="grp">棚</div>
-      <a href="#g-shelf">取下げ・棚 <span class="n" id="nav-shelf">…</span></a>
-      <a href="#g-seed">種・目視特定 <span class="n" id="nav-seed">…</span></a>
-      <a href="#shelf">棚割り</a>
-    </nav>
-    <div class="foot">
-      <div id="night-foot"><span class="dot wait"></span>夜間バッチ 読込中</div>
-      <div id="counts-foot">件数 —</div>
-    </div>
-  </aside>
+<div class="wrap">
+  <div class="top">
+    <div class="brand"><div class="mark">出</div><b>出品くん</b></div>
+    <div class="shop" id="shop"><span id="shop-at">件数 読込中</span></div>
+    <div class="tact"><button class="btn" id="btn-refresh" type="button">残件を数え直す</button></div>
+  </div>
 
-  <main class="main">
-    <div class="top">
-      <div>
-        <div class="crumbs" id="today-date">—</div>
-        <h1>今日やること</h1>
+  <div class="nav" role="tablist" aria-label="ページ">
+    <button class="big" role="tab" aria-selected="true" data-page="today" type="button" style="--pc:var(--p-today);--pcs:var(--p-today-soft)">
+      <span class="bn">今日やること</span><span class="bd">押さないと減らない作業だけ</span><span class="bc" id="tab-today">…</span>
+    </button>
+    <button class="big" role="tab" aria-selected="false" data-page="new" type="button" style="--pc:var(--p-new);--pcs:var(--p-new-soft)">
+      <span class="bn">新規出品</span><span class="bd">見つける → 作る → チェック</span><span class="bc" id="tab-new">…</span>
+    </button>
+    <button class="big" role="tab" aria-selected="false" data-page="maint" type="button" style="--pc:var(--p-maint);--pcs:var(--p-maint-soft)">
+      <span class="bn">在庫メンテ</span><span class="bd">出している物の 仕入元・在庫・棚</span><span class="bc" id="tab-maint">…</span>
+    </button>
+    <div class="small"><div class="smrow">
+      <button class="sm" role="tab" aria-selected="false" data-page="ana" type="button">分析・棚</button>
+      <button class="sm" role="tab" aria-selected="false" data-page="sch" type="button">定期</button>
+    </div></div>
+  </div>
+
+  <!-- ===== 今日やること ===== -->
+  <div class="page" id="p-today" style="--pc:var(--p-today);--pcs:var(--p-today-soft)">
+    <div class="hero">
+      <div><h1>今日やること</h1><div class="why">ここに無いものは、夜間で自動に減るか、残りがありません</div></div>
+      <div class="kp">
+        <div><label>要対応</label><b id="kp-todo">—</b></div>
+        <div><label>残件の合計</label><b id="kp-total">—</b></div>
+        <div><label>今の出品くんで押す</label><b id="kp-else">—</b></div>
       </div>
-      <div class="acts">
-        <button class="btn primary" id="btn-refresh" type="button">残件を数え直す</button>
+    </div>
+    <div id="alerts"></div>
+    <div id="today-lanes"><div class="empty">件数を読込中…</div></div>
+    <div class="night" id="night"><span><span class="dot"></span>夜間バッチ 読込中</span></div>
+  </div>
+
+  <!-- ===== 新規出品 ===== -->
+  <div class="page" id="p-new" hidden style="--pc:var(--p-new);--pcs:var(--p-new-soft)">
+    <div class="hero">
+      <div><h1>新規出品</h1><div class="flow"><span>① 見つける</span><i>→</i><span>② 作る</span><i>→</i><span>③ チェック</span><i>→</i><span>入稿</span></div></div>
+      <div class="kp">
+        <div><label>今月 追加した額</label><b id="kp-month">—</b></div>
+        <div><label>今月の件数</label><b id="kp-month-n">—</b></div>
+        <div><label>見つける 残件</label><b id="kp-seed">—</b></div>
       </div>
     </div>
 
-    <section class="stats" aria-label="店の状態">
-      <div class="stat"><label>出品中</label><div class="v" id="st-active">—</div><div class="s" id="st-seller">eBay 読込中</div></div>
-      <div class="stat"><label>評価</label><div class="v" id="st-fb">—</div><div class="s good" id="st-fbp">—</div></div>
-      <div class="stat"><label>今月 追加した額</label><div class="v" id="st-month">—</div><div class="s" id="st-month-n">—</div></div>
-      <div class="stat"><label>押さないと減らない残件</label><div class="v" id="st-todo">—</div><div class="s" id="st-todo-n">—</div></div>
+    <div class="step"><span>1</span>見つける</div>
+    <section class="group" id="seed" style="--gc:var(--g-seed)">
+      <div class="gh"><h3>種・目視特定</h3><span class="target">まだ出していない物</span><span class="purpose">出す物を見つけて、出品行に足す</span><span class="tot" id="seed-tot">—</span></div>
+      <div class="list" id="seed-list"><div class="empty">読込中…</div></div>
+      <div class="rows" id="scout-rows" style="border-top:1px solid var(--line)"></div>
     </section>
 
-    <div id="alerts"></div>
+    <div class="step"><span>2</span>作る</div>
+    <section class="card">
+      <div class="ch"><h3>商材ごとに CSV を作る</h3><p>「🤖自動」は目視 → 生成 → 予約出品まで続けて行う</p></div>
+      <div class="prods" id="prods"><div class="empty">読込中…</div></div>
+    </section>
 
-    <div class="grid">
-      <div class="col">
-        <section class="panel" id="today">
-          <div class="ph"><h2>押さないと減らないもの</h2><p>夜間で自動に減るものは下の表</p></div>
-          <div class="queue" id="queue"><div class="empty">件数を読込中…</div></div>
-        </section>
+    <div class="step"><span>3</span>チェック</div>
+    <section class="card">
+      <div class="ch"><h3>出品前チェック</h3><p>CSV を作った後に押す</p></div>
+      <div class="rows" id="check-rows"></div>
+    </section>
+  </div>
 
-        <section class="panel" id="jobs-panel">
-          <div class="ph"><h2>作業</h2><p>① 当日 → ② 夜に探す → ③ 目視して書く</p></div>
-          <div class="tbl" id="jobs"></div>
-        </section>
-
-        <section class="panel" id="shelf">
-          <div class="ph"><h2>棚割り</h2><p id="shelf-sub">US 価格 · 予算に対する今の棚</p></div>
-          <div class="shelf" id="shelf-bars"><div class="empty">統合シート読込中…</div></div>
-        </section>
-      </div>
-
-      <div class="col">
-        <section class="panel">
-          <div class="ph"><h2>市場の時刻</h2><p>現地</p></div>
-          <div class="clocks" id="clocks"></div>
-        </section>
-        <section class="panel">
-          <div class="ph"><h2>担当</h2><p id="crew-sub">依頼の受け渡し</p></div>
-          <div class="crew" id="crew"><div class="empty">読込中…</div></div>
-        </section>
-        <section class="panel">
-          <div class="ph"><h2>実行ログ</h2><p id="job-status">待機中</p></div>
-          <div class="log" id="log" aria-live="polite"></div>
-        </section>
+  <!-- ===== 在庫メンテ ===== -->
+  <div class="page" id="p-maint" hidden style="--pc:var(--p-maint);--pcs:var(--p-maint-soft)">
+    <div class="hero">
+      <div><h1>在庫メンテ</h1><div class="why">出している物を、売れる状態に保つ。予備の仕入元を足し、売り切れを戻し、売れない物を落とす</div></div>
+      <div class="kp">
+        <div><label>要対応</label><b id="kp-m-todo">—</b></div>
+        <div><label>止めている</label><b id="kp-m-hold">—</b></div>
+        <div><label>残件の合計</label><b id="kp-m-total">—</b></div>
       </div>
     </div>
-  </main>
+    <nav class="bar" id="maint-bar" aria-label="まとまり"></nav>
+    <section class="group" id="g-hoju" style="--gc:var(--g-hoju)"></section>
+    <section class="group" id="g-restock" style="--gc:var(--g-restock)"></section>
+    <section class="group" id="g-shelf" style="--gc:var(--g-shelf)"></section>
+    <section class="group" id="g-fix" style="--gc:var(--g-fix)">
+      <div class="gh"><h3>在庫あり・直す</h3><span class="target">出品21日以上</span><span class="purpose">見られていない・買われない出品の 値段とタイトルを直す</span><span class="tot">件数なし</span></div>
+      <div class="rows" id="fix-rows"></div>
+    </section>
+    <section class="group" id="g-other" hidden style="--gc:var(--p-other)">
+      <div class="gh"><h3>ここに置き場が無いボタン</h3><span class="purpose">出品くんに在るのに、この画面のどこにも出していないもの</span></div>
+      <div class="rows" id="other-rows"></div>
+    </section>
+  </div>
+
+  <!-- ===== 分析・棚 ===== -->
+  <div class="page" id="p-ana" hidden style="--pc:var(--p-other);--pcs:var(--p-other-soft)">
+    <div class="hero"><div><h1>分析・棚</h1><div class="why">押すと結果ファイルが開く。棚 = 出品枠の金額</div></div>
+      <div class="kp"><div><label>棚の合計</label><b id="kp-shelf">—</b></div><div><label>予算</label><b id="kp-budget">—</b></div></div></div>
+    <section class="card"><div class="rows" id="ana-rows"></div></section>
+    <section class="card">
+      <div class="ch"><h3>棚割り</h3><p id="shelf-sub">US 価格 · 予算に対する今の棚</p></div>
+      <div class="shelf" id="shelf-bars"><div class="empty">統合シート読込中…</div></div>
+    </section>
+  </div>
+
+  <!-- ===== 定期 ===== -->
+  <div class="page" id="p-sch" hidden style="--pc:var(--p-other);--pcs:var(--p-other-soft)">
+    <div class="hero"><div><h1>定期</h1><div class="why">Windows のタスクで決まった時刻に動くもの。ここは見るだけ</div></div>
+      <div class="kp"><div><label>夜間バッチ</label><b id="kp-night">—</b></div></div></div>
+    <section class="card">
+      <div class="ch"><h3>登録されているタスク</h3><p>前回の結果と次回の予定</p><span class="right" id="sch-at"></span></div>
+      <div class="rows" id="sch-rows"><div class="empty">読込中…</div></div>
+    </section>
+  </div>
+</div>
+
+<div class="drawer" id="drawer" hidden>
+  <div class="dh"><span class="live" id="live" aria-hidden="true"></span><b id="job-label">実行中</b><span class="mono" id="job-meta"></span>
+    <span class="sp"><button type="button" id="drawer-toggle" aria-expanded="true">閉じる</button><button type="button" id="drawer-hide">消す</button></span></div>
+  <pre id="log" aria-live="polite"></pre>
 </div>
 <div class="toast" id="toast" role="status"></div>
 <script src="app.js"></script>

@@ -100,3 +100,27 @@ def test_server_is_local_only_and_posts_need_the_header():
 def test_panel_itself_is_untouched_by_the_console():
     """Console は control_panel を import するだけ。control_panel 側から console を参照しない。"""
     assert "console" not in re.findall(r"^import (\w+)|^from (\w+)", PANEL)
+
+
+def test_every_button_has_a_place_on_the_screen():
+    """9/16 段階2: 商材 × 段階の格子・一覧に **全ての badge** を置く。
+
+    見本 https://claude.ai/artifact/17znRRHtq61RzUeroRxU41 の形に組み直した時、
+    どこにも出していないボタンが黙って消えないようにする (出していない物は画面の
+    「ここに置き場が無いボタン」に出るが、既知のものはここで気付けるようにする)。
+    """
+    app = open(os.path.join(HQ, "console", "static", "app.js"), encoding="utf-8").read()
+    placed = set(re.findall(r'"(\w+)"', app))
+    sys.path.insert(0, HQ)
+    import control_panel as cp
+    for s_ in cp.SCRIPTS:
+        b = s_.get("badge")
+        if b and b != "hoju_status":                     # 件数感は見るだけのボタン
+            assert b in placed, b
+
+
+def test_screen_has_no_crew_or_permanent_log_panel():
+    """ユーザー「担当・実行ログの欄は要らない」(2026-09-15)。ログは実行中・直後だけ下から出す。"""
+    html = open(os.path.join(HQ, "console", "static", "index.html"), encoding="utf-8").read()
+    assert "担当" not in html
+    assert 'id="drawer" hidden' in html                  # 既定は出さない

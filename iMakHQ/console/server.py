@@ -35,6 +35,7 @@ COUNTS_CACHE = r"C:/dev/iMak_data/hq/console_counts.json"
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 HOME_TTL = 10 * 60
 CREW_TTL = 3 * 60
+TASKS_TTL = 5 * 60
 
 # 夜間バッチが減らしてくれる種類 (control_panel の act_kind と同じ)。夜が動いている日は「夜間で自動」
 NIGHT_KINDS = {"hoju_search", "ut_search", "ut_restock_search", "kuji_search"}
@@ -207,6 +208,7 @@ STATE = {
     "counts": None, "counts_at": None, "counting": False, "counts_error": "",
     "home": None, "home_at": 0, "home_loading": False,
     "crew": None, "crew_at": 0,
+    "tasks": None, "tasks_at": 0,
     "job": None,            # {kind, label, started, rc, running}
     "log": [],              # [(seq, text)]
     "seq": 0,
@@ -353,6 +355,57 @@ def get_jobs():
             "counts_error": STATE["counts_error"]}
 
 
+def get_buttons():
+    """今の出品くんのボタン一覧 (新規出品の商材カード・各ページの表を、パネルと同じ並びで作る)。"""
+    cp = _cp()
+    out = []
+    for i, s in enumerate(cp.SCRIPTS):
+        out.append({"i": i, "type": s.get("type"), "category": s.get("category"),
+                    "label": display_label(s["label"]), "badge": s.get("badge"),
+                    "runnable": runnable(s), "tip": (s.get("tip") or "")[:160]})
+    return {"buttons": out}
+
+
+def _tasks_worker():
+    ps = ("Get-ScheduledTask | Where-Object { $_.TaskName -like '*iMak*' } | Get-ScheduledTaskInfo | "
+          "Select-Object TaskName,LastRunTime,LastTaskResult,NextRunTime | ConvertTo-Json -Compress")
+    rows = []
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=90, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        data = json.loads(r.stdout or "[]")
+        for t in (data if isinstance(data, list) else [data]):
+            rows.append({"name": t.get("TaskName"), "last": _ps_date(t.get("LastRunTime")),
+                         "next": _ps_date(t.get("NextRunTime")), "result": t.get("LastTaskResult")})
+        rows.sort(key=lambda x: x["last"] or "", reverse=True)
+    except Exception as e:                                     # noqa: BLE001
+        STATE["tasks"] = {"tasks": [], "error": str(e)}
+        STATE["tasks_at"] = time.time()
+        return
+    STATE["tasks"], STATE["tasks_at"] = {"tasks": rows}, time.time()
+
+
+def _ps_date(v):
+    """ConvertTo-Json の日付 (/Date(ミリ秒)/ または ISO 文字列) → 'MM/DD HH:MM'。"""
+    if not v:
+        return ""
+    m = re.search(r"/Date\((-?\d+)", str(v))
+    try:
+        dt = (datetime.datetime.fromtimestamp(int(m.group(1)) / 1000) if m
+              else datetime.datetime.fromisoformat(str(v)[:19]))
+    except (ValueError, OSError, OverflowError):
+        return str(v)[:16]
+    return "—" if dt.year < 2000 else dt.strftime("%m/%d %H:%M")
+
+
+def get_tasks():
+    if STATE["tasks"] is None or time.time() - STATE["tasks_at"] > TASKS_TTL:
+        STATE["tasks_at"] = time.time()
+        threading.Thread(target=_tasks_worker, daemon=True).start()
+    return STATE["tasks"] or {"tasks": [], "loading": True}
+
+
 def run_job(kind):
     cp = _cp()
     script = next((s for s in cp.SCRIPTS if s.get("badge") == kind), None)
@@ -431,6 +484,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, get_jobs())
         if u.path == "/api/crew":
             return self._json(200, get_crew())
+        if u.path == "/api/buttons":
+            return self._json(200, get_buttons())
+        if u.path == "/api/tasks":
+            return self._json(200, get_tasks())
         if u.path == "/api/log":
             after = int((parse_qs(u.query).get("after") or ["0"])[0] or 0)
             with _LOCK:
