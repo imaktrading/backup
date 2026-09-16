@@ -305,9 +305,15 @@ def count_workload(rows=None, itemid_to_cert=None):
             _blocked_iids = {i for i in _cert_of if i not in _live_iids}
             _built_iids = _live_iids & set(built)
             _actionable_iids = _live_iids - _built_iids
+            # ★2026-09-16 ユーザー指摘「③が今日やることに出てこないとダメなのでは？」。
+            #   ここで「作れない行」と「今日もう作った行」を **同じ袋** に入れて返していた。
+            #   ②にとっては どちらも「押さなくていい」で同じだが、③(確認)はこの袋を
+            #   「押しても無駄な行」として引くので、**②で作って上げた直後の行が③から必ず消える**。
+            #   上げた直後こそ③の対象なので、袋を分ける。
             return {"actionable": len(_actionable_iids), "done": done,
                     "blocked": blocked, "built_today": len(_built_iids),
-                    "blocked_iids": sorted(_blocked_iids | _built_iids),
+                    "blocked_iids": sorted(_blocked_iids),
+                    "built_today_iids": sorted(_built_iids),
                     "total": len(pending) + done}
         # cert を渡されなかった時 (= 生成可否を判定できない) も集合で数える
         _p_iids = {(p.get("itemID") or "").strip() for p in pending
@@ -315,7 +321,8 @@ def count_workload(rows=None, itemid_to_cert=None):
         _built_iids = _p_iids & set(built)
         return {"actionable": len(_p_iids - _built_iids), "done": done,
                 "blocked": blocked, "built_today": len(_built_iids),
-                "blocked_iids": sorted(_built_iids), "total": len(pending) + done}
+                "blocked_iids": [], "built_today_iids": sorted(_built_iids),
+                "total": len(pending) + done}
     except Exception as e:                                     # noqa: BLE001
         return {"error": "%s: %s" % (type(e).__name__, e)}
 
