@@ -32,6 +32,12 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from viewer_zoom import ZOOM_CSS, ZOOM_JS, ZOOM_OVERLAY, zoom_button
+
+# 「一致・見送り」の見た目 (2026-09-16)
+PASS_CSS = (".btn-pass{background:#8a6d3b;color:#fff}"
+            ".rsn{margin-left:6px;padding:4px 6px;font-size:13px}"
+            ".note{margin-left:6px;padding:4px 6px;font-size:13px;width:180px}"
+            ".target.answered-pass{opacity:.55}")
 from datetime import datetime
 
 PSA_CACHE_DIR = Path(r"C:/dev/iMak/iMakeBayAPI/cache/psa_certs")
@@ -43,6 +49,22 @@ VERIFIED_CERTS_FILE = Path(r"C:/dev/iMak_data/dedupe/verified_certs.json")
 # 目視済(NONE/NG=識別不能)cert の skip 台帳。psa_to_csv が cooldown 期間スキップに使う。
 # (パスは iMakTCG/tcg_batch_select.REVIEW_SKIP_PATH と一致させること。2026-06-23)
 REVIEW_SKIP_FILE = Path(r"C:/dev/iMak_data/dedupe/psa_review_skip.json")
+# ★2026-09-16 ユーザー要望: 識別は合っているが出さない「一致・見送り」。
+#   理由は5つ (ユーザー確定)。**出せない理由なので、一度見送った cert は永遠に目視に出さない**。
+#   戻したくなったら下の台帳 (json) から その cert を消す。
+#   ★2026-09-16 ユーザー「理由によって、永久に出さないやで」: 日数 0 = 永久に出さない。
+#     その現物が構造的に買えない理由 (まとめ売り / 出品者が不安) は 0。
+#     時間で変わる理由 (値段・売り切れ) は日数を置いて また目視に出す。
+#   ★「仕入元が売り切れ」は入れない (2026-09-16 ユーザー指摘「これも要らんやろ？」)。
+#     売り切れは 監視くんが毎日見ていて、入稿前にも「仕入元が売り切れた行を除外」が走る。
+#     人が手で見送ると、自動で戻せるはずの物を隠してしまう。
+PASS_REASONS = (
+    ("bundle", "仕入元が複数枚・まとめ売り (1枚だけ買えない)", 0),
+    ("seller", "出品者が不安 (評価・取引条件)", 0),
+    ("price", "仕入値が高い (採算が合わない)", 30),
+    ("other", "その他 (メモを書く)", 30),
+)
+PASS_FILE = Path(r"C:/dev/iMak_data/hq/psa_review_passed.json")
 SERVER_PORT = 8765
 
 # ---- promo (配布元) レビュー: iMakTCG の promo store/抽出を流用 (catalog外 per-card override) ----
@@ -994,6 +1016,7 @@ def _generate_html(targets: list[dict]) -> None:
         '.prior-note{background:#3a3320;border:1px solid #b8952e;color:#ffe08a;'
         'padding:6px 10px;border-radius:5px;font-size:13px;margin:6px 0}',
         ZOOM_CSS,
+        PASS_CSS,
         'h1{color:#ffd700}',
         '.toolbar{position:sticky;top:0;background:#1a1a1a;padding:10px;border-bottom:1px solid #444;z-index:100;display:flex;gap:14px;align-items:center}',
         '.toolbar #status{font-size:16px;color:#ffd700;font-weight:bold}',
@@ -1020,8 +1043,17 @@ def _generate_html(targets: list[dict]) -> None:
         '  }',
         '} catch(e) {}',
         '',
+        'function setReason(cert, v) {',
+        '  var a = ANSWERS[cert] || {}; a.reason = v;',
+        '  if (v) { a.choice = "PASS"; }',
+        '  ANSWERS[cert] = a; refreshCount();',
+        '}',
+        'function setNote(cert, v) {',
+        '  var a = ANSWERS[cert] || {}; a.note = v; ANSWERS[cert] = a;',
+        '}',
         'function answer(cert, choice) {',
-        '  ANSWERS[cert] = {choice: choice};',
+        '  var keep = ANSWERS[cert] || {};',
+        '  ANSWERS[cert] = {choice: choice, reason: keep.reason, note: keep.note};',
         '  var target = document.getElementById("target_" + cert);',
         '  target.className = "target answered-" + choice.toLowerCase();',
         '  document.querySelectorAll("#btns_" + cert + " .btn").forEach(b => b.classList.remove("active"));',
@@ -1192,6 +1224,16 @@ def _generate_html(targets: list[dict]) -> None:
             html.append(f'<button id="btn_{cert}_OK" class="btn btn-ok" onclick="answer(\'{cert}\', \'OK\')">✅ 合ってる</button>')
             html.append(f'<button id="btn_{cert}_NG" class="btn btn-ng" onclick="answer(\'{cert}\', \'NG\')">❌ 違う (候補から選択)</button>')
         html.append(f'<button id="btn_{cert}_NONE" class="btn btn-none" onclick="answer(\'{cert}\', \'NONE\')">該当なし</button>')
+        # ★2026-09-16: 識別は合っているが今回は出さない (仕入元がまとめ売り 等)。
+        #   理由を選ぶまで送信に含めない (理由なしで永久に消さない)。
+        html.append(f'<button id="btn_{cert}_PASS" class="btn btn-pass" onclick="answer(\'{cert}\', \'PASS\')">⏭ 一致・見送り</button>')
+        html.append(f'<select id="rsn_{cert}" class="rsn" onchange="setReason(\'{cert}\', this.value)">')
+        html.append('<option value="">見送りの理由を選ぶ</option>')
+        for _k, _lbl, _d in PASS_REASONS:
+            html.append(f'<option value="{_k}">{_lbl}</option>')
+        html.append('</select>')
+        html.append(f'<input id="note_{cert}" class="note" placeholder="メモ (任意)" '
+                    f'oninput="setNote(\'{cert}\', this.value)">')
         html.append('</div>')
 
         # promo (配布元) 欄: promo 系カードのみ。PSA ラベル文字を見て OK/編集/消す(空=promo無し)。
@@ -1337,6 +1379,7 @@ class _ReviewHandler(BaseHTTPRequestHandler):
                     _PRE_BUILD_RESULTS = data
                     _record_verified(data)
                     _record_review_skip(data)   # NONE/NG を cooldown スキップ台帳へ (再表示防止)
+                    _record_passed_from_results(data)   # 一致・見送り (理由ごとの日数。0=永久)
                     # JS が参照する key を 0 で埋める (build 側で実処理するため此処では書込なし)
                     summary = {"mode": "pre_build", "count": len(data),
                                "spreadsheet_writes": 0, "skipped": 0}
@@ -1346,6 +1389,7 @@ class _ReviewHandler(BaseHTTPRequestHandler):
                     summary = _apply_user_judgments(data)
                     _record_verified(data)
                     _record_review_skip(data)   # NONE/NG を cooldown スキップ台帳へ (再表示防止)
+                    _record_passed_from_results(data)   # 一致・見送り (理由ごとの日数。0=永久)
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")
@@ -1385,6 +1429,70 @@ def _find_high_row_by_cert(ws, cert: str) -> int | None:
         if str(v).strip() == str(cert).strip():
             return i
     return None
+
+
+def load_passed(path=None) -> dict:
+    """永久見送りの台帳 {cert: {at, reason, note, pid}}。読めなければ空。"""
+    p = path or PASS_FILE
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except Exception:                                              # noqa: BLE001
+        return {}
+
+
+def record_passed(results, passed=None, now=None):
+    """viewer の回答 → 永久見送り台帳 (純関数・test 可)。
+
+    choice == "PASS" の cert だけを足す。理由が空の回答は **足さない**
+    (理由なしで永久に消すと、後から why が分からなくなるため)。
+    """
+    out = dict(passed or {})
+    now = now or datetime.now().isoformat(timespec="seconds")
+    reasons = {k: lbl for k, lbl, _d in PASS_REASONS}
+    for r in (results or []):
+        cert = str(r.get("cert") or "").strip()
+        if not cert or (r.get("choice") or "") != "PASS":
+            continue
+        key = (r.get("reason") or "").strip()
+        if key not in reasons:
+            continue
+        out[cert] = {"at": now, "reason": key, "label": reasons[key],
+                     "note": (r.get("note") or "").strip()[:80],
+                     "pid": (r.get("expected") or "")}
+    return out
+
+
+def passed_active(passed, today=None):
+    """まだ見送り中の cert (純関数・test 可)。
+
+    理由ごとの日数を過ぎたら また目視に出す。日数 0 の理由 (まとめ売り / 出品者が不安) は
+    **永久に出さない** (ユーザー 2026-09-16「理由によって、永久に出さないやで」)。
+    """
+    days = {k: d for k, _lbl, d in PASS_REASONS}
+    t = datetime.fromisoformat(today) if isinstance(today, str) else (today or datetime.now())
+    out = {}
+    for cert, rec in (passed or {}).items():
+        d = days.get((rec or {}).get("reason"), 0)
+        if d <= 0:
+            out[cert] = rec
+            continue
+        try:
+            at = datetime.fromisoformat(str(rec.get("at"))[:19])
+        except (TypeError, ValueError):
+            out[cert] = rec                                    # 日付が読めない物は出さない側に倒す
+            continue
+        if (t - at).days < d:
+            out[cert] = rec
+    return out
+
+
+def save_passed(passed, path=None) -> None:
+    p = path or PASS_FILE
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(passed, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _load_verified_certs() -> dict:
@@ -1430,6 +1538,15 @@ def _record_review_skip(results: list[dict]) -> None:
             REVIEW_SKIP_FILE.write_text(json.dumps(skips, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception:
             pass
+
+
+def _record_passed_from_results(results: list[dict]) -> int:
+    """viewer の回答から「一致・見送り」を台帳に足す。足した件数を返す。"""
+    before = load_passed()
+    after = record_passed(results, before)
+    if after != before:
+        save_passed(after)
+    return len(after) - len(before)
 
 
 def _record_verified(results: list[dict]) -> None:
@@ -2199,6 +2316,22 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
     #   target_<cert> / cand_<cert>_*) が1枚目と衝突し、クリックが1枚目に効く =
     #   **押しても何も起きないカード**になる。件数も 15/16 とズレて「未回答1件」が
     #   永久に消えない。cert は現物1枚に1つなので、並び順を保って1つに畳む。
+    # ★2026-09-16: 「一致・見送り」で断った cert は目視に出さない (理由ごとの日数。0=永久)
+    try:
+        _passed = passed_active(load_passed())
+    except Exception:                                          # noqa: BLE001
+        _passed = {}
+    _pass_skip = [c for c in _viewer_certs if c in _passed]
+    if _pass_skip:
+        _viewer_certs = [c for c in _viewer_certs if c not in _passed]
+        _why = {}
+        for c in _pass_skip:
+            _lbl = (_passed.get(c) or {}).get("label") or "(理由なし)"
+            _why[_lbl] = _why.get(_lbl, 0) + 1
+        append_log_func("  ⏭ 一致・見送り済 → 目視に出しません: %d件 (%s)%s"
+                        % (len(_pass_skip),
+                           " / ".join("%s %d件" % (k, v) for k, v in sorted(_why.items())), chr(10)))
+
     _uniq_c = dedupe_certs_keep_order(_viewer_certs)
     if len(_uniq_c) != len(_viewer_certs):
         append_log_func("  🧹 同じ cert が重複 %d件 → 1つに畳みました%s" % (len(_viewer_certs) - len(_uniq_c), chr(10)))
