@@ -93,6 +93,22 @@ def contract_authoritative_cols(contract=None, cols=None):
     return out or set(_ALWAYS_OVERWRITE_FALLBACK)
 
 
+def forced_key_conflict(forced_card_id, bare_fields, bare_err):
+    """RESTOCK の forced KEY と、KEY 無しの決定論解決が **別のカード**を指すか (純関数)。
+
+    食い違えば素の解決の product_id を返す / 一致・素で解決できない時は "" (= forced を使ってよい)。
+    ★2026-09-15 実害: cert 163004996 がシート KEY `ST26-005_OP15` (通常版 SR) で出た。
+      現物 (PSA Subject = SPECIAL ALTERNATE ART) からの解決は `ST26-005_p1` (Special)。
+      forced は初回出品時に書かれた値なので、初回の取り違えを再仕入れのたびに再生産していた。
+      依頼書: hq/requests/2026-09-15_act_code_proposals_tcg.md 提案①
+    """
+    if not forced_card_id or bare_err or not bare_fields:
+        return ""
+    bare = str(bare_fields.get("_card_id") or "").strip()
+    forced = str(forced_card_id).split(":", 1)[-1].strip()
+    return bare if (bare and bare != forced) else ""
+
+
 def always_overwrite_cols():
     """`contract_authoritative_cols` の結果を1走行ぶん cache して返す。"""
     global _AUTH_COLS_CACHE

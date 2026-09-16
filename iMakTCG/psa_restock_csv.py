@@ -2493,6 +2493,19 @@ def main():
                     from tcg_listing_fields import build_listing_fields as _blf
                     _gi = headers.index("C:Game") if "C:Game" in headers else None
                     _game = row[_gi] if (_gi is not None and _gi < len(row)) else ""
+                    # ★2026-09-15 提案①: シート KEY (forced) と現物からの解決が別カードなら出さない。
+                    #   どちらが正か決められない = 誤った版の値で出すより見送る (fail-closed)。
+                    #   `(build skip)` 形式で出す = 監査くんの「繰り返し見送り」に載り、シートを直す出口になる
+                    if _restock_forced.get(cert):
+                        from tcg_new_gen_override import forced_key_conflict
+                        _bare, _berr = _blf(str(cert), _game or "")
+                        _conf = forced_key_conflict(_forced, _bare, _berr)
+                        if _conf:
+                            print(f"    ⚠️ cert {cert}: シートの KEY={_forced} と現物からの解決={_conf} が"
+                                  f"別カード → 出さない (商品管理シートの KEY 列を確認) (build skip)")
+                            errors.append(cert)
+                            card_info.append((cert, None))
+                            continue
                     _chk, _cerr = _blf(str(cert), _game or "", forced_card_id=_forced)
                     if _cerr:
                         print(f"    ⏭️ Skip (catalog未登録→入稿しない・catalog依頼): #{cert} ({_cerr})")
