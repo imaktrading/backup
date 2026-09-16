@@ -333,3 +333,19 @@ def test_console_port_does_not_collide_with_the_viewers():
         src = open(os.path.join(HQ, name), encoding="utf-8").read()
         used |= {int(x) for x in _re.findall(r"(?:SERVER_PORT|port)\s*=\s*(\d{4})", src)}
     assert port not in used, "Console のポート %d が 目視画面と衝突している (%s)" % (port, sorted(used))
+
+
+def test_console_can_stop_a_run_left_by_the_previous_server():
+    """前のサーバが残した走行も止められる (2026-09-16 実害)。
+
+    ユーザー「再走するから、止めるボタン押したけど、止まらんけど」。
+    18:20 に走り出した PSA は前の Console の子で、入れ替えた後の Console は知らないため、
+    「止める」を押しても何も起きなかった (画面にも走行中と出ていなかった)。
+    起動時に 出品くんの道具のプロセスを探して拾い、pid で止められるようにする。
+    """
+    assert "def find_orphan_run():" in SERVER
+    assert "def adopt_orphan_run():" in SERVER
+    assert "threading.Thread(target=adopt_orphan_run, daemon=True).start()" in SERVER
+    assert '"orphan_pid"' in SERVER
+    assert '["taskkill", "/PID", str(pid), "/T", "/F"]' in SERVER
+    assert "psa_to_csv.py" in SERVER                     # 主な道具は手掛かりに入れておく

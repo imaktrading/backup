@@ -572,15 +572,75 @@ def run_job(kind=None, index=None, params=None, amount=None):
     return 200, {"ok": True}
 
 
+# 出品くんが動かす道具 (前のサーバが残した走行を見つける手掛かり)
+ORPHAN_HINTS = ("psa_to_csv.py", "tshirt_listing.py", "gshock_to_csv.py", "psa_hoju_fill.py",
+                "ut_hoju_fill.py", "ut_identify.py", "ichibankuji_restock.py", "sold_restock.py",
+                "cull_end.py", "shelf_evict.py", "newcand_confirm.py", "psa_restock_build.py",
+                "psa_resource_gate.py", "mercari_to_ebay_csv.py", "workman_listing.py",
+                "montbell_listing.py", "csv_auditor.py")
+
+
+def find_orphan_run():
+    """前のサーバが残した走行 (pid, 何を動かしているか)。無ければ None。"""
+    if sys.platform != "win32":
+        return None
+    ps = ("Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | "
+          "Select-Object ProcessId,CommandLine,@{n='at';e={$_.CreationDate.ToString('s')}} | ConvertTo-Json -Compress")
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        data = json.loads(r.stdout or "[]")
+    except Exception:                                          # noqa: BLE001
+        return None
+    for p in (data if isinstance(data, list) else [data]):
+        cl = str((p or {}).get("CommandLine") or "")
+        if "console" in cl.replace("\\", "/"):               # Console 自身は除く
+            continue
+        for hint in ORPHAN_HINTS:
+            if hint in cl:
+                return {"pid": int(p.get("ProcessId")), "what": hint,
+                        "at": str(p.get("at") or "")[11:19]}
+    return None
+
+
+def adopt_orphan_run():
+    """前の走行を拾って「実行中」として扱う (止めるボタンを効かせるため)。"""
+    o = find_orphan_run()
+    if not o:
+        return
+    with _LOCK:
+        if STATE["job"] and STATE["job"].get("running"):
+            return
+        STATE["job"] = {"kind": "", "label": "%s (前のサーバの走行)" % o["what"],
+                        "started": o["at"], "rc": None, "running": True, "orphan_pid": o["pid"]}
+    _log("↻ 前のサーバが残した走行を見つけました: %s (pid %s)。止めるボタンで止められます"
+         % (o["what"], o["pid"]))
+
+
 def stop_job():
     """走っている処理を止める (旧パネルの「停止」と同じ止め方 = 子プロセスごと)。"""
     with _LOCK:
         job = dict(STATE["job"]) if STATE["job"] else None
         p = STATE["proc"]
-    if not job or not job.get("running") or p is None:
+    if not job or not job.get("running"):
         return 409, {"error": "今は何も走っていません"}
     _log("■ 止めます: %s" % job.get("label", ""))
     STATE["stopping"] = True
+    if p is None:                                              # 前のサーバの走行 (pid だけ分かる)
+        pid = job.get("orphan_pid")
+        if not pid:
+            return 409, {"error": "止め方が分かりません (前のサーバの走行で pid 不明)"}
+        try:
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True,
+                           timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception as e:                                 # noqa: BLE001
+            return 500, {"error": "止められませんでした: %s" % e}
+        with _LOCK:
+            STATE["job"].update(rc=None, running=False)
+            STATE["stopping"] = False
+        _log("■ 止めました (前のサーバの走行)")
+        return 200, {"ok": True}
     try:
         _cp()._kill_process_tree(p, _log)                      # control_panel と同じ関数を使う
     except Exception as e:                                     # noqa: BLE001
@@ -834,6 +894,7 @@ def main():
     _load_counts_cache()
     threading.Thread(target=get_home, daemon=True).start()
     threading.Thread(target=_watcher_loop, daemon=True).start()
+    threading.Thread(target=adopt_orphan_run, daemon=True).start()
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     if "--no-open" not in sys.argv:
         threading.Timer(0.6, open_window).start()
