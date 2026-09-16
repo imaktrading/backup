@@ -2,7 +2,8 @@
 """カタログ権威の列を契約表から決める (2026-08-25 提案4 / 2026-08-26 実装)。
 
 守るもの:
-  1. 契約表で `source: specs.*` の項目に当たる列は **全部** カタログ権威
+  1. 契約表で `owner: catalog` の項目に当たる列は **全部** カタログ権威
+     (2026-09-16 までは `source: specs.*` 基準。column.name_en の Card Name が漏れた)
      (= 新コアが空なら CSV も空。旧コアの値を残さない)
   2. 表が読めない時は 8/22 に直した 4列だけの退避値に戻る (fail-safe)
   3. 実際に出た誤値 (8/23〜8/26 の入稿) が override 後に消えること
@@ -27,34 +28,42 @@ import tcg_new_gen_override as O  # noqa: E402
 
 # 実際の表と同じ形の最小 fixture (表そのものには依存しない = 純関数テスト)
 _CONTRACT = {
-    "Attack/Power":        {"emit": True,  "source": "specs.attack_power_ebay"},
-    "Cost":                {"emit": True,  "source": "specs.cost"},
-    "Attribute/MTG:Color": {"emit": True,  "source": "specs.color_ebay"},
-    "HP":                  {"emit": True,  "source": "specs.hp_ebay"},
-    "Card Name":           {"emit": True,  "source": "column.name_en"},   # specs. でない
-    "Year Manufactured":   {"emit": True,  "source": "psa_cert"},         # specs. でない
-    "Finish":              {"emit": False, "source": None},               # 出さない
+    "Attack/Power":        {"emit": True,  "source": "specs.attack_power_ebay", "owner": "catalog"},
+    "Cost":                {"emit": True,  "source": "specs.cost", "owner": "catalog"},
+    "Attribute/MTG:Color": {"emit": True,  "source": "specs.color_ebay", "owner": "catalog"},
+    "HP":                  {"emit": True,  "source": "specs.hp_ebay", "owner": "catalog"},
+    "Card Name":           {"emit": True,  "source": "column.name_en", "owner": "catalog"},  # specs. でないが catalog 持ち
+    "Year Manufactured":   {"emit": True,  "source": "psa_cert", "owner": "listing"},       # 出品くん持ち
+    "Finish":              {"emit": False, "source": None, "owner": "catalog"},             # 出さない
 }
 _COLS = ["C:Attack/Power", "C:Cost", "C:Attribute/MTG:Color", "C:HP",
          "C:Card Name", "C:Year Manufactured", "C:Finish"]
 
 
-def test_specs_sourced_columns_are_authoritative():
+def test_catalog_owned_columns_are_authoritative():
+    # ★2026-09-16: `source: specs.*` 基準 → `owner: catalog` 基準 (Card Name が漏れていた)
+    #   依頼書: hq/requests/2026-09-15_act_code_proposals_tcg.md 提案②
     got = O.contract_authoritative_cols(contract=_CONTRACT, cols=_COLS)
-    assert got == {"C:Attack/Power", "C:Cost", "C:Attribute/MTG:Color", "C:HP"}, got
+    assert got == {"C:Attack/Power", "C:Cost", "C:Attribute/MTG:Color", "C:HP",
+                   "C:Card Name"}, got
 
 
-def test_non_specs_and_emit_false_are_not_authoritative():
+def test_listing_owned_and_emit_false_are_not_authoritative():
     got = O.contract_authoritative_cols(contract=_CONTRACT, cols=_COLS)
-    for col in ("C:Card Name", "C:Year Manufactured", "C:Finish"):
-        assert col not in got, f"{col} は catalog の specs 由来ではない (空欄化してはいけない)"
+    for col in ("C:Year Manufactured", "C:Finish"):
+        assert col not in got, f"{col} は catalog 持ちで出す列ではない (空欄化してはいけない)"
+
+
+def test_live_contract_includes_card_name():
+    """実際の表で Card Name が漏れないこと (9月 314行中 43行が 'Keldeo Ex' 等の旧コア綴りだった)。"""
+    assert "C:Card Name" in O.contract_authoritative_cols()
 
 
 def test_falls_back_when_contract_unreadable():
     # 表が読めない (= None) / 1列も当たらない → 8/22 に直した 4列は権威のまま
     assert O.contract_authoritative_cols(contract={}, cols=_COLS) == \
         O._ALWAYS_OVERWRITE_FALLBACK
-    assert O.contract_authoritative_cols(contract=_CONTRACT, cols=["C:Card Name"]) == \
+    assert O.contract_authoritative_cols(contract=_CONTRACT, cols=["C:Year Manufactured"]) == \
         O._ALWAYS_OVERWRITE_FALLBACK
 
 

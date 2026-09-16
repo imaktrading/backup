@@ -75,6 +75,8 @@ def contract_authoritative_cols(contract=None, cols=None):
     if not contract:
         return set(_ALWAYS_OVERWRITE_FALLBACK)
     try:
+        if _HQ_TOOLS not in sys.path:          # 表を引数で渡された時も import できるように
+            sys.path.insert(0, _HQ_TOOLS)
         from aspect_contract import aspect_of
     except Exception:                           # noqa: BLE001
         return set(_ALWAYS_OVERWRITE_FALLBACK)
@@ -83,7 +85,10 @@ def contract_authoritative_cols(contract=None, cols=None):
         rec = contract.get(aspect_of(col))
         if not rec or not rec.get("emit"):
             continue
-        if str(rec.get("source") or "").startswith("specs."):
+        # ★2026-09-16: 前置き (`specs.`) で見ると `column.name_en` の Card Name が漏れた
+        #   (9月 314行中 43行が 'Keldeo Ex' 等の旧コア綴り)。表の持ち主で決める。
+        #   依頼書: hq/requests/2026-09-15_act_code_proposals_tcg.md 提案②
+        if str(rec.get("owner") or "").strip() == "catalog":
             out.add(col)
     return out or set(_ALWAYS_OVERWRITE_FALLBACK)
 
