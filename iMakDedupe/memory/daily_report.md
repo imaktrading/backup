@@ -278,3 +278,9 @@
 - 決定: grep 網羅で行削除(delete_rows/deleteDimension/clear/resize等)・全体書き戻し(ws.update範囲/append/insert)ともに 0件。書込は全て単一セル(D/AI/AJ/ヘッダ)で行を消せない。CSV物理除外はCSVファイル対象でシート非書戻。重複くんは84件消失の原因でない・実装不要
 - 変更: なし (調査回答のみ: 2026-09-16_sheet_rows_vanished_response.md)
 - 検証: dedupe/*.py grep で delete系/clear/resize/append/insert/ws.update(範囲) 全て0件確認。9/9 の test_no_wide_write_over_n_column が append/広範囲を源流禁止済も再確認
+
+### 保留していた /doctor の CLAUDE.md trim を commit
+
+- 決定: 9/12 /doctor で削除した古い(実体と乖離した)ディレクトリツリー27行を、レビュー期間を経て commit
+- 変更: CLAUDE.md (dir ツリー27行削除、~176 est tokens/session 削減)
+- 検証: git diff で27行削除のみ・他ルール(worktree/役割/Phase計画/正確性原則)は不変を確認

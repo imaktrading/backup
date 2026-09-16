@@ -42,33 +42,6 @@ iMak Trading Japan の **出品候補 ↔ 既存出品 重複突合** 専属 wor
 
 ---
 
-## ディレクトリ構成
-
-```
-iMakDedupe/
-├── CLAUDE.md                       # このファイル
-├── .PROJECT_LOCKED.md              # 他 worktree からの touch 禁止 明示
-├── dedupe/
-│   ├── __init__.py
-│   ├── checker.py                  # main logic
-│   ├── sheet_io.py                 # 中間スプシ + 既存スプシ読書 helper
-│   └── extractors/
-│       ├── __init__.py
-│       ├── tcg.py                  # TCG (One Piece / Pokemon / Yu-Gi-Oh!) regex
-│       ├── gshock.py               # G-shock 型番 regex
-│       └── url.py                  # mercari URL regex
-├── tests/
-│   ├── test_extractors_tcg.py
-│   ├── test_extractors_gshock.py
-│   ├── test_extractors_url.py
-│   └── test_checker.py
-├── pytest.ini
-├── requirements.txt
-└── .gitignore
-```
-
----
-
 ## Phase 計画
 
 | Phase | 内容 |
