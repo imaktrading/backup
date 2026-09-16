@@ -841,7 +841,7 @@ def build_html(items, catalog):
              "KEY が無いと重複くんが二重出品を止められません。"
              "<b>仕入元が売り切れでも中古でも、商品さえ決めれば目的は果たせます</b>"
              " (だからこの行では「売り切れ」「中古」の理由は出しません)。</li>"
-             "<li><b>出品待ちの行</b> = これから出す商品を決めるため。"
+             "<li><b>出品待ちの行</b> と <b>新しい候補</b> = これから出す商品を決めるため。"
              "出せない物 (売り切れ・中古・タグ無し) はここで対象外にします。</li>"
              "</ul></div>",
              f"<div class='sum'>全 {len(items)}件。写真と同じ柄の商品を選んで「この商品」"
@@ -1133,10 +1133,28 @@ def only_new(rows):
 
     ★2026-09-13 ユーザー「目視が入るから、自動で動かそう」: 🤖自動 は出品のためのボタン。
       KEY 埋め (出品済み79件) が先頭に並ぶので、そのままだと最初の数回は出品0件になる。
-      KEY 埋めは手動の 🩹 UT 新品 目視特定 に残す。
+      KEY 埋めは手動の 🩹 UT 目視特定 (KEY埋め+候補) に残す。
     """
     return [t for t in rows
             if not (t[2] == "sheet" and len(t[1]) > 1 and (t[1][1] or "").strip())]
+
+
+def rest_breakdown(rows):
+    """目視に残っている行の内訳 (純関数)。戻り: {"new":…, "waiting":…, "key":…}。
+
+    new     … 抽出くんが集めた新しい候補 (中間タブ)
+    waiting … シートに在るがまだ出していない行
+    key     … 出品済みなのに KEY が無い行 (出品は増えない。重複くんのための作業)
+    """
+    out = {"new": 0, "waiting": 0, "key": 0}
+    for _i, r, src in rows:
+        if src != "sheet":
+            out["new"] += 1
+        elif (r[1] or "").strip():
+            out["key"] += 1
+        else:
+            out["waiting"] += 1
+    return out
 
 
 def load_items(limit=DEFAULT_LIMIT, new_only=False, stats=None):
@@ -1153,6 +1171,9 @@ def load_items(limit=DEFAULT_LIMIT, new_only=False, stats=None):
     official = load_official_l1()
     stats = stats if stats is not None else {}
     stats["official"] = 0
+    # ★2026-09-16 ユーザー「そんなにないやろ」: 「残り全部で N件」だけだと、その N が
+    #   KEY 埋めの数に見える (実際は 620件中 KEY 埋めは 38件だった)。内訳を出す。
+    stats["rest"] = rest_breakdown(rows)
     items = []
     for i, r, _src in rows:
         if limit and len(items) >= limit:
@@ -1268,7 +1289,9 @@ def main():
     items, n_all = load_items(a.limit, new_only=a.new_only, stats=_stats)
     n_listed = sum(1 for it in items
                    if it.get("src") == "sheet" and (it["row"][1] or "").strip())
-    print(f"目視に出す UT: {len(items)}件 (残り全部で {n_all}件)")
+    _rest = _stats.get("rest") or {}
+    print(f"目視に出す UT: {len(items)}件 (残り全部で {n_all}件 — 新しい候補 {_rest.get('new', 0)}件 / "
+          f"出品待ち {_rest.get('waiting', 0)}件 / 出品済みで KEY 無し {_rest.get('key', 0)}件)")
     if _stats.get("official"):
         print(f"  公式仕入で出品中の商品と同じ出品 {_stats['official']}件を外しました "
               "(現役商品・出すと重複出品になる)")

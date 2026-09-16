@@ -207,6 +207,13 @@ class TestParse:
         assert "no_tag" in dict(U.OUT_REASONS)   # 2026-09-15 タグ無しは NWT で出せない
         assert all(k.startswith("skip_") for k, _ in U.SKIP_REASONS)
 
+    def test_rest_breakdown_20260916(self):
+        """「残り全部で N件」だけだと N が KEY 埋めの数に見える (実際は 620件中 38件だった)."""
+        new = [""] * 36
+        listed = [""] * 36; listed[1] = "35890001"
+        rows = [(2, new, "tab"), (3, new, "tab"), (4, new, "sheet"), (5, listed, "sheet")]
+        assert U.rest_breakdown(rows) == {"new": 2, "waiting": 1, "key": 1}
+
     def test_listed_rows_have_no_supply_or_condition_reasons_20260916(self):
         """出品済みの行の目的は KEY を入れること。売り切れ・中古で閉じると KEY が入らないまま終わる。
         実害 (2026-09-16): 11件が「対象外(売り切れ10/中古1)」で決着し、二度と画面に出なくなった."""

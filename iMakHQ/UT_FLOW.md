@@ -8,7 +8,7 @@ PSA と同じ運用にする = 出品は通過点で、**補URL・二重出品�
 | 段 | UT | PSA | 動かすもの |
 |---|---|---|---|
 | ① 集める | 抽出くん: カタログの**公式売切**コラボ名で検索 | mercari PSA10 収集 | 夜間 (抽出くん) |
-| ② 目視で特定 | `ut_identify.py` (公式画像と見比べて商品+色) | `newcand_confirm` (絵柄で版) | 🩹 UT 新品 目視特定 |
+| ② 目視で特定 | `ut_identify.py` (公式画像と見比べて商品+色) | `newcand_confirm` (絵柄で版) | 🩹 UT 目視特定 (KEY埋め+候補) |
 | ③ 出品行に足す | 商品管理シート Tシャツ行 (B空) + 台帳 | `plan_high_rows` | ② の確定時 |
 | ④ 出品 | `tshirt_listing` (カタログの値を写す) | `psa_to_csv` | Tシャツ 新規 |
 | ⑤ itemID 書戻し | `itemid_writeback_audit` (SKU=メルカリID) | 同じ | 🤖自動 / 入稿後 |
