@@ -424,9 +424,21 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
     lang_ja = fields.get("C:Language") == "Japanese"
     chara = fields.get("C:Character", "")
 
+    def _norm_words(text):
+        """比べる用の語 (小文字・記号落とし)。'Monkey D. Luffy' と 'Monkey D Luffy' を同じにする。"""
+        return [w for w in re.sub(r"[.,'’\-—–:()]", " ", str(text or "").lower()).split() if w]
+
+    def _all_words_in(candidate, text):
+        """candidate の語が **全部** text に出ているか (純関数・大小無視・記号無視)。"""
+        have = set(_norm_words(text))
+        words = _norm_words(candidate)
+        return bool(words) and all(w in have for w in words)
+
     def _core_tokens(set_disp):
         core = ["PSA", str(grade)]
-        if game:
+        # ★2026-09-16: ゲーム名がセット名に入っているなら2回出さない
+        #   (例 "Pokemon Japanese **Pokemon** Card Game Classic")。語はセット名の中に残る。
+        if game and not _all_words_in(game, set_disp):
             core.append(game)
         if lang_ja:
             core.append("Japanese")
@@ -434,7 +446,12 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
             core.append(set_disp)
         if num:
             core.append(f"#{num}")
-        if chara:
+        # ★2026-09-16 ユーザー指摘: キャラ名が **セット名に丸ごと入っている** 時は出さない。
+        #   実害: "Starter Deck Frieza #FS04-01 **Frieza** Leader" / "Wish for Shenron #FB07-097 **Shenron**"
+        #   と同じ語が2回出て、監査が「タイトル内で重複」と指摘していた。
+        #   名前はセット名の中に残るので同定は落ちない。空いた分は レアリティ/年号 が埋める。
+        #   一部だけ被る物 (Set"Mega Brave" + Chara"Mega Venusaur") は今までどおり出す。
+        if chara and not _all_words_in(chara, set_disp):
             core.append(chara)
         return core
 
@@ -454,7 +471,7 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
         #   実例: Rarity 'Art Rare' を足した後に Features 'Art' が通り、
         #   「… Bronzor Art Rare Art 2024」になっていた (4文字未満は素通りだった)。
         #   'Art Rare' のように新しい語を含む物は今までどおり足す。
-        return bool(words) and all(w in ex for w in words)
+        return _all_words_in(candidate, existing_text)
 
     optional = []
     core_text = " ".join(core)
