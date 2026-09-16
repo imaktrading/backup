@@ -447,7 +447,14 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
     #   core(Set/Character/番号=同定語)は触らない (例 "Mega Brave"+"Mega Venusaur" は正当な重複)。
     def _word_overlap(candidate, existing_text):
         ex = set(existing_text.lower().split())
-        return any(len(w) >= 4 and w in ex for w in candidate.lower().split())
+        words = [w for w in candidate.lower().split() if w]
+        if any(len(w) >= 4 and w in ex for w in words):
+            return True
+        # ★2026-09-16: 3文字以下でも **全部すでに出ている** なら足す意味がない。
+        #   実例: Rarity 'Art Rare' を足した後に Features 'Art' が通り、
+        #   「… Bronzor Art Rare Art 2024」になっていた (4文字未満は素通りだった)。
+        #   'Art Rare' のように新しい語を含む物は今までどおり足す。
+        return bool(words) and all(w in ex for w in words)
 
     optional = []
     core_text = " ".join(core)

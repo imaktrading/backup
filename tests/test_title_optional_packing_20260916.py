@@ -39,3 +39,25 @@ def test_core_is_never_cut_for_an_optional():
     t = T.build_title_from_fields(SV8A)
     for must in ("PSA 10", "Japanese", "#223/187", "Eevee ex"):
         assert must in t, must
+
+
+def test_a_word_that_is_already_there_is_not_added_again():
+    """3文字以下でも「全部すでに出ている」語は足さない (2026-09-16 ユーザー指摘)。
+
+    実例: Rarity 'Art Rare' を足した後に Features 'Art' が通り、
+    「… Bronzor Art Rare Art 2024」になっていた (重複チェックが4文字以上しか見ていなかった)。
+    """
+    f = {"C:Game": "Pokémon TCG", "C:Language": "Japanese", "C:Set": "Sv5k: Wild Force",
+         "C:Card Number": "074/071", "C:Character": "Bronzor", "C:Rarity": "Art Rare",
+         "C:Features": "Art", "C:Year Manufactured": "2024"}
+    t = T.build_title_from_fields(f)
+    assert t.lower().split().count("art") == 1, t                       # Art は1回だけ
+    assert "Art Rare" in t and t.endswith("2024")
+
+
+def test_a_new_word_is_still_added_even_if_part_overlaps():
+    """一部だけ被る物 (Art Rare) は今までどおり足す — 'rare' は新しい語。"""
+    f = {"C:Game": "Pokémon TCG", "C:Language": "Japanese", "C:Set": "Sv5k: Art Collection",
+         "C:Card Number": "074/071", "C:Character": "Bronzor", "C:Rarity": "Art Rare",
+         "C:Features": "", "C:Year Manufactured": "2024"}
+    assert "Rare" in T.build_title_from_fields(f)
