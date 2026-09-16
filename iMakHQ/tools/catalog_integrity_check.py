@@ -147,6 +147,31 @@ def check_unverified_filtermap(con):
     return out
 
 
+# ★2026-09-17: カタログが分類した「潰れて正しい組」(プロモ集約 7 / 同じ弾の表記ゆれ 51) を読む。
+#   **控えた元の値に無い値が同じ eBay 値に加わったら許可しない** (新しい潰れは必ず再検出する)。
+#   出典: catalog/requests/2026-09-15_integrity_weekly_backlog_done.md 「HQ にお願いすること」2
+ALLOW_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "catalog_collision_allow.json")
+
+
+def load_collision_allow(path=ALLOW_FILE):
+    """{(category, field, ebay_value): 許可した元の値の集合}。読めなければ {} (= 全部検出)。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f) or {}
+    except Exception:
+        return {}
+    return {(a["category"], a["field"], a["ebay_value"]): set(a.get("sources") or [])
+            for a in doc.get("allow") or []}
+
+
+def collision_allowed(cat, field, ev, sources, allow):
+    """潰れを許可するか (純関数)。手書きの COLLISION_ALLOW は従来どおり無条件。"""
+    if (cat, field, ev) in COLLISION_ALLOW:
+        return True
+    ok = allow.get((cat, field, ev))
+    return ok is not None and set(sources) <= ok
+
+
 def check_filtermap_collision(con):
     """複数の公式値が同じ eBay 値に潰れている組 (ST-18/26 と同型)。
 
@@ -154,13 +179,15 @@ def check_filtermap_collision(con):
     確認できたものだけ `COLLISION_ALLOW` に入れて除外する。**残りは要検証**。
     """
     rows = con.execute(
-        "SELECT category, field, ebay_value, COUNT(*) n, GROUP_CONCAT(source_value) "
+        "SELECT category, field, ebay_value, COUNT(*) n, GROUP_CONCAT(source_value, char(31)) "
         "FROM ebay_filter_map GROUP BY category, field, ebay_value "
         "HAVING n > 1 ORDER BY category, field, n DESC").fetchall()
+    allow = load_collision_allow()
     out = {}
     for cat, field, ev, n, srcs in rows:
-        if (cat, field, ev) in COLLISION_ALLOW:
+        if collision_allowed(cat, field, ev, (srcs or "").split(chr(31)), allow):
             continue
+        srcs = (srcs or "").replace(chr(31), ",")
         out.setdefault(cat, []).append((field, ev, n, srcs))
     return out
 

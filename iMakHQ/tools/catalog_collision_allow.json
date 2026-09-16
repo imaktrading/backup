@@ -1,0 +1,959 @@
+{
+ "_note": "catalog_integrity_check の map潰れ 許可一覧。出典: catalog/requests/2026-09-15_integrity_weekly_backlog_done.md (カタログが分類) / 2026-09-17 HQ が現在の ebay_filter_map と突合して作成。sources に無い値が同じ eBay 値に加わったら許可しない (再検出)。",
+ "allow": [
+  {
+   "category": "pokemon_tcg",
+   "field": "set",
+   "ebay_value": "XY Promo",
+   "sources": [
+    "「カリン」のナイトバトル",
+    "エネルギーカード付きカードボックス ゼルネアス・イベルタル",
+    "カメックスメガバトル",
+    "スペシャルセット ホウオウ+ルギア",
+    "セブンイレブン限定サマーキャンペーン2014",
+    "ダブルメガBREAKセット 「メガプテラEX+メガクチートEX+レントラーBREAK」",
+    "バトルフェスタ2014",
+    "バトルフェスタ2015 プレイポイント オリジナルカード",
+    "プロモーションカードパック（2016/5）",
+    "ポケモン 白いメガゲンガーキャンペーン",
+    "ポケモンカードゲーム 20周年記念カウントダウン",
+    "ポケモンカードゲーム バトルフェスタ",
+    "ポケモンカードゲーム プロモーションカードパック(2014/10)",
+    "ポケモンカードゲーム プロモーションカードパック(2014/2)",
+    "ポケモンカードゲーム プロモーションカードパック(2014/5)",
+    "ポケモンカードゲーム プロモーションカードパック(2015/11)",
+    "ポケモンカードゲーム プロモーションカードパック(2015/2)",
+    "ポケモンカードゲーム プロモーションカードパック(2015/5)",
+    "ポケモンカードゲーム リザードンメガバトル",
+    "ポケモンパン プロモカード 2016年9月",
+    "ポケモンパン「チョコパン」・「ハムマヨネーズパン」 プロモカード",
+    "メガボーマンダジムバトル",
+    "レックウザメガバトル オリジナルキラカード",
+    "丸美屋 スペシャルカード",
+    "熱戦にそなえろ！黒いメガサーナイトキャンペーン"
+   ],
+   "reason": "プロモの集約 (多数の配布物を1つの eBay 値にまとめる仕様)"
+  },
+  {
+   "category": "pokemon_tcg",
+   "field": "set",
+   "ebay_value": "Sm-P: Sun & Moon Promos",
+   "sources": [
+    "SM Promo",
+    "Sun & Moon Promo",
+    "Sun and Moon Promo",
+    "ポケモンカードゲーム サン&ムーン ウェルカムフェスタ",
+    "ポケモンカードゲーム チャンピオンズリーグ2017 大阪",
+    "ポケモンカードゲーム チャンピオンズリーグ2018 公認大会1st"
+   ],
+   "reason": "プロモの集約 (多数の配布物を1つの eBay 値にまとめる仕様)"
+  },
+  {
+   "category": "pokemon_tcg",
+   "field": "set",
+   "ebay_value": "Sv-P Promotional Cards",
+   "sources": [
+    "エネルギーカードセット",
+    "ポケモンカードゲーム チャンピオンシップシリーズ2023"
+   ],
+   "reason": "プロモの集約 (多数の配布物を1つの eBay 値にまとめる仕様)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Promo Cards",
+   "sources": [
+    "1st ANNIVERSARY SET",
+    "2nd ANNIVERSARY SET",
+    "3rd ANNIVERSARY SET",
+    "3周年！ワンピースカードトレジャーキャンペーンパック",
+    "8パックバトル 2023年優勝記念品",
+    "8パックバトル 2024年優勝記念品",
+    "8パックバトル 2025年10月",
+    "8パックバトル 2025年優勝記念品",
+    "8パックバトル 2026年10月",
+    "8パックバトル 2026年4月",
+    "BANDAI CARD GAMES Fest 24-25 World Tour 来場記念品",
+    "BANDAI CARD GAMES Fest23-24 World Tour　TOUR FINAL in JAPAN 来場記念品",
+    "ONE PIECE CARD GAME 3rd ANNIVERSARY COMPLETE GUIDE付録",
+    "ONE PIECE DAY'23来場者特典",
+    "ONE PIECE DAY’24 来場者特典",
+    "ONE PIECE ODYSSEYデラックスエディション",
+    "ONE PIECE magazine Vol.17付録（2023年9月4日売）",
+    "ONE PIECE magazine 特集 週刊少年ジャンプとONE PIECE 020​ 付録",
+    "ONE PIECE magazine別冊 Focus on〝ONE PIECE FAN LETTER〟付録",
+    "ONE PIECE カードゲーム 3rd ANNIVERSARY SET",
+    "ONE PIECE カードゲーム China 2nd ANNIVERSARY SET",
+    "ONE PIECE カードゲーム English 2nd ANNIVERSARY SET",
+    "ONE PIECEカードゲーム BASE SHOPリミテッドカードコレクションvol.1",
+    "ONE PIECEカードゲーム SOUND LOADER Volume.1 特典カード",
+    "ONE PIECEカードゲーム SOUND LOADER Volume.2 特典カード",
+    "ONE PIECEカードゲーム オフィシャルプレイマット リミテッドエディション vol.3",
+    "ONE PIECEカードゲーム プロモーションパック2022",
+    "ONE PIECEカードゲーム プロモーションパック2022 Vol.2",
+    "ONE PIECEカードゲーム プロモーションパックVol.3",
+    "ONE PIECEカードゲーム プロモーションパックVol.4",
+    "ONE PIECEカードゲーム プロモーションパックVol.5",
+    "ONE PIECEカードゲーム プロモーションパックVol.6",
+    "ONE PIECEカードゲーム プロモーションパックVol.7",
+    "Other Product Card",
+    "Promo Cards",
+    "Promotion Card",
+    "Vジャンプ10月特大号 応募者全員サービス",
+    "Vジャンプ10月特大号付録（2023年8月21日売）",
+    "Vジャンプ10月特大号付録（2024年8月21日売）",
+    "Vジャンプ10月特大号付録（2025年8月21日売）",
+    "Vジャンプ10月特大号応募者全員サービス（2024年8月21日売）",
+    "Vジャンプ12月特大号付録（2022年10月21日売）",
+    "Vジャンプ1月特大号付録（2023年11月21日売）",
+    "Vジャンプ1月特大号付録（2024年11月21日売）",
+    "Vジャンプ2026年1月特大号（2025年11月20日売）",
+    "Vジャンプ3月特大号付録（2023年1月20日売）",
+    "Vジャンプ4月特大号付録（2024年2月21日売）",
+    "Vジャンプ4月特大号付録（2025年2月20日売）",
+    "Vジャンプ4月特大号付録（2026年2月20日売）",
+    "Vジャンプ7月特大号付録（2023年5月19日売）",
+    "Vジャンプ7月特大号付録（2024年5月21日売）",
+    "Vジャンプ7月特大号付録（2025年5月21日売）",
+    "Vジャンプ7月特大号付録（2026年5月21日売）",
+    "Vジャンプ9月特大号付録（2022年7月21日売）",
+    "「ONE PIECE CARD GAME 1st ANNIVERSARY COMPLETE GUIDE」限定特典カード",
+    "「ONE PIECE CARD GAME 2nd ANNIVERSARY COMPLETE GUIDE」限定特典カード",
+    "「プロモーションカードセット2025」ゲットキャンペーン",
+    "『MONSTERS 一百三情飛龍侍極』セットBOX特典",
+    "『ONE PIECE CHOPPER’s 1』付録",
+    "『ONE PIECE FILM RED』入場者プレゼント アンコールパック",
+    "『ONE PIECE FILM RED』入場者プレゼント フィナーレセット",
+    "『ONE PIECE FILM RED』第2弾入場者プレゼント チュートリアルデッキ",
+    "『ONE PIECE学園 10巻』付録",
+    "エクストラグランドバトル2026 10月上位記念品",
+    "エクストラグランドバトル2026 10月優勝記念品",
+    "エクストラグランドバトル2026 4月上位記念品",
+    "エクストラグランドバトル2026 4月優勝記念品",
+    "オフィシャルプレイマット ネフェルタリ・ビビ",
+    "オフィシャルプレイマット リミテッドエディション vol.4",
+    "オフィシャルプレイマット リミテッドエディション vol.5",
+    "オフィシャルプレイマット&カードセット-メラメラの実争奪戦Edition-",
+    "シリアルナンバー入りナミ ゲットキャンペーン",
+    "ジャンプGIGA 2023 SPRING 応募者全員サービス",
+    "ジャンプGIGA 2023 WINTER付録（2022年12月26日売）",
+    "スタンダードバトル 12月優勝記念品",
+    "スタンダードバトル 2023年10月優勝記念品",
+    "スタンダードバトル 2024年12月優勝記念品",
+    "スタンダードバトル 2024年1月優勝記念品",
+    "スタンダードバトル 2024年3月優勝記念品",
+    "スタンダードバトル 2024年9月優勝記念品",
+    "スタンダードバトル 2025年3月優勝記念品",
+    "スタンダードバトル 2025年6月優勝記念品",
+    "スタンダードバトル 2025年9月~11月優勝記念品",
+    "スタンダードバトル 2026年3月優勝記念品",
+    "スタンダードバトル 2026年9月優勝記念品",
+    "スタンダードバトル 6月優勝記念品",
+    "スタンダードバトル 9月優勝記念品",
+    "スタンダードバトル3月優勝記念品",
+    "スタンダードバトルパック Vol.13",
+    "スタンダードバトルパック Vol.14",
+    "スタンダードバトルパック Vol.15",
+    "スタンダードバトルパック Vol.3",
+    "スタンダードバトルパック2022 Vol.1",
+    "スタンダードバトルパック2022 Vol.2",
+    "スタンダードバトルパックVol.10",
+    "スタンダードバトルパックVol.11",
+    "スタンダードバトルパックVol.12",
+    "スタンダードバトルパックVol.17",
+    "スタンダードバトルパックVol.4",
+    "スタンダードバトルパックVol.5",
+    "スタンダードバトルパックVol.6",
+    "スタンダードバトルパックVol.7",
+    "スタンダードバトルパックVol.8",
+    "スタンダードバトルパックVol.9",
+    "セブンイレブンタイアップキャンペーン オリジナルカード",
+    "チャンピオンシップ2022 予選 ベスト16記念品",
+    "チャンピオンシップ2022 予選 ベスト32記念品",
+    "チャンピオンシップ2023 1次予選エリア大会 ベスト16記念品",
+    "チャンピオンシップ2023 1次予選エリア大会 ベスト8記念品",
+    "チャンピオンシップ2023 1次予選決勝大会 ベスト32記念品",
+    "チャンピオンシップ2023 2次予選エリア大会 ベスト16記念品",
+    "チャンピオンシップ2023 2次予選エリア大会 ベスト8記念品",
+    "チャンピオンシップ2023 2次予選決勝大会 ベスト16記念品",
+    "チャンピオンシップ2024 WAVE1 エリア大会 ベスト16記念品",
+    "チャンピオンシップ2024 WAVE1 エリア大会 ベスト8記念品",
+    "チャンピオンシップ2024 WAVE2 3on3 Autumn ベスト16記念品",
+    "チャンピオンシップ2024 WAVE2 3on3 Autumn ベスト8記念品",
+    "チャンピオンシップ2024 WAVE2 決勝大会 ベスト32記念品",
+    "チャンピオンシップ25-26 Season 1 エリア決勝大会 ベスト32記念品",
+    "チャンピオンシップ25-26 Season2 決勝大会 ベスト32記念品",
+    "チャンピオンシップ25-26Season 2 エリア決勝大会権利獲得記念品",
+    "チャンピオンシップ25-26Season 2 決勝トーナメント上位記念品",
+    "チャンピオンシップセット2022",
+    "チャンピオンシップセット2023(旧四皇)",
+    "チャンピオンシップセット2023（エース・サボ・ルフィ）",
+    "ファミリーデッキセット",
+    "フラッグシップバトル2022 ベスト8記念品",
+    "フラッグシップバトル2022 優勝記念品",
+    "フラッグシップバトル2023 10月ベスト8記念品",
+    "フラッグシップバトル2023 10月優勝記念品",
+    "フラッグシップバトル2023 4月ベスト8記念品",
+    "フラッグシップバトル2023 4月優勝記念品",
+    "フラッグシップバトル2023 7月ベスト8記念品",
+    "フラッグシップバトル2023 7月優勝記念品",
+    "フラッグシップバトル2024 10月ベスト8記念品",
+    "フラッグシップバトル2024 10月優勝記念品",
+    "フラッグシップバトル2024 1月ベスト8記念品",
+    "フラッグシップバトル2024 1月優勝記念品",
+    "フラッグシップバトル2024 4月ベスト8記念品",
+    "フラッグシップバトル2024 4月優勝記念品",
+    "フラッグシップバトル2024 7月ベスト8記念品",
+    "フラッグシップバトル2025 10月ベスト8記念品",
+    "フラッグシップバトル2025 10月優勝記念品",
+    "フラッグシップバトル2025 1月ベスト8記念品",
+    "フラッグシップバトル2025 1月優勝記念品",
+    "フラッグシップバトル2025 4月ベスト8記念品",
+    "フラッグシップバトル2025 4月優勝記念品",
+    "フラッグシップバトル2026 10月上位記念品",
+    "フラッグシップバトル2026 10月優勝記念品",
+    "フラッグシップバトル2026 1月 ベスト8記念品",
+    "フラッグシップバトル2026 1月 優勝記念品",
+    "フラッグシップバトル2026 4月上位記念品",
+    "フラッグシップバトル2026 4月優勝記念品",
+    "フラッグシップバトル2026 7月ベスト8記念品",
+    "フラッグシップバトル2026 7月優勝記念品",
+    "プレミアムカードコレクション -GIRLS EDITION-",
+    "プレミアムカードコレクション 25周年エディション",
+    "プレミアムカードコレクション ‐ONE PIECE FILM RED ‐",
+    "プレミアムカードコレクション-Live Action Edition vol.2 バロックワークス-",
+    "プレミアムカードコレクション-Live Action Edition vol.2 麦わらの一味-",
+    "プレミアムカードコレクション-Live Action Edition-",
+    "プレミアムカードコレクション-ONE PIECE DAY’25-",
+    "プレミアムカードコレクション-ウタ-",
+    "プレミアムカードコレクション-メラメラの実争奪戦Edition-",
+    "プレミアムブースター ONE PIECE CARD THE BEST ストレージボックスセット",
+    "プロモーションカード",
+    "プロモーションカードセット",
+    "プロモーションカードセット2026",
+    "プロモーションパックEX Vol.1",
+    "プロモーションパックEX Vol.2",
+    "プロモーションパックEX Vol.3",
+    "プロモーションパックEX Vol.4",
+    "プロモーションパックVol.8",
+    "プロモーションパックVol.9",
+    "メラメラの実争奪戦 上位記念品",
+    "モスバーガータイアップキャンペーン オリジナルカード",
+    "ワンピース・マガジン Vol.16付録（2023年3月2日売）",
+    "一番くじ ONE PIECE CARD GAME 購入者特典",
+    "交流会 2023年12月開催記念品",
+    "交流会 2023年9月開催記念品",
+    "交流会 2024年11月開催記念品",
+    "交流会 2024年3月開催記念品",
+    "交流会 2024年5月開催記念品",
+    "交流会 2024年7月開催記念品",
+    "交流会 2024年9月開催記念品",
+    "交流会 2025年11月開催記念品",
+    "交流会 2025年1月開催記念品",
+    "交流会 2025年3月開催記念品",
+    "交流会 2025年5月開催記念品",
+    "交流会 2025年7月開催記念品",
+    "交流会 2025年9月開催記念品",
+    "交流会 2026年1月開催記念品",
+    "交流会 2026年3月開催記念品",
+    "交流会 2026年5月開催記念品",
+    "交流会 2026年7月開催記念品",
+    "交流会 2026年9月開催記念品",
+    "交流会 9月開催記念品",
+    "交流会(小学生以下限定含む)",
+    "交流会12月開催記念品",
+    "交流会3月開催記念品",
+    "交流会6月開催記念品",
+    "勉タメジャンプ2024 WINTER付録（2023年12月8日売）",
+    "始めようキャンペーン プロモーションパック",
+    "最強ジャンプ10月号付録（2024年9月4日売）",
+    "最強ジャンプ10月号付録（2025年9月4日売）",
+    "最強ジャンプ12月号付録（2022年11月2日売）",
+    "最強ジャンプ1月号付録（2023年12月4日売）",
+    "最強ジャンプ1月号付録（2025年12月4日売）",
+    "最強ジャンプ2月特大号付録（2025年1月4日売）",
+    "最強ジャンプ3月号付録（2023年2月3日売）",
+    "最強ジャンプ4月号付録（2024年3月4日売）",
+    "最強ジャンプ4月号付録（2026年3月4日売）",
+    "最強ジャンプ4月特大号付録（2025年3月4日売）",
+    "最強ジャンプ5月号​ 応募者全員大サービス（2026年4月3日売）",
+    "最強ジャンプ5月号応募者全員サービス（2024年4月4日売）",
+    "最強ジャンプ5月号応募者全員サービス（2025年4月4日売）",
+    "最強ジャンプ6月号付録（2023年5月2日売）",
+    "最強ジャンプ7月号付録（2025年6月4日売）",
+    "最強ジャンプ7月号付録（2026年6月4日売）",
+    "最強ジャンプ8月号付録（2024年7月4日売）",
+    "最強ジャンプ9月号付録（2022年8月4日売）",
+    "最強ジャンプ9月号付録（2023年8月4日売）",
+    "週刊少年ジャンプ19号応募者全員サービス（2025年4月7日売）",
+    "週刊少年ジャンプ33号付録応募者全員サービス（2026年7月13日売）",
+    "週刊少年ジャンプ33号付録（2026年7月13日売）",
+    "週刊少年ジャンプ付録（2023年1月7日売）",
+    "週刊少年ジャンプ付録（2023年8月7日売）",
+    "週刊少年ジャンプ付録（2024年10月15日売）",
+    "週刊少年ジャンプ付録（2024年10月7日売）",
+    "週刊少年ジャンプ応募者全員サービス",
+    "限定商品収録カード"
+   ],
+   "reason": "プロモの集約 (多数の配布物を1つの eBay 値にまとめる仕様)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "DON Card",
+   "sources": [
+    "DON",
+    "DON Card",
+    "DON!!",
+    "DON!! Card",
+    "Don Card",
+    "Grand Asia Open",
+    "ONE PIECE DAY '24 SPECIAL LIVE Day1",
+    "ONE PIECE DAY '24 SPECIAL LIVE Day2",
+    "ONE PIECE DAY '25 promo",
+    "ONE PIECE Heroines Special Set",
+    "イベント配布",
+    "イベント配布 (= 黄色)",
+    "オフィシャルカードケース リミテッドエディション付属",
+    "スタンダードバトルパック Vol.1 (= 赤黒)",
+    "ストレージボックス×ドンカードセット (= teal)",
+    "ストレージボックス×ドンカードセット (= 橙)",
+    "ストレージボックス×ドンカードセット (= 紫 X)",
+    "ストレージボックス×ドンカードセット (= 紫 variant 2)",
+    "ストレージボックス×ドンカードセット (= 緑)",
+    "ストレージボックス×ドンカードセット (= 赤)",
+    "ストレージボックス×ドンカードセット (= 金月)",
+    "ストレージボックス×ドンカードセット (= 青)",
+    "ストレージボックス×ドンカードセット (= 黄)",
+    "ストレージボックス×ドンカードセット (= 黒)",
+    "チャンピオンシップ2023 ワールドファイナル参加記念品",
+    "ドン!!カード",
+    "ドンカード",
+    "プレミアムカードコレクション -熊本復興スペシャル- (BROOK)",
+    "プレミアムカードコレクション -熊本復興スペシャル- (FRANKY)",
+    "プレミアムカードコレクション -熊本復興スペシャル- (JINBEI)",
+    "プレミアムカードコレクション -熊本復興スペシャル- (KUMAMON & LUFFY)",
+    "プレミアムカードコレクション -熊本復興スペシャル- (NAMI)",
+    "プレミアムカードコレクション -熊本復興スペシャル- (NICO ROBIN)",
+    "プレミアムカードコレクション -熊本復興スペシャル- (RORONOA ZORO)",
+    "プレミアムカードコレクション -熊本復興スペシャル- (SANJI)",
+    "プレミアムカードコレクション -熊本復興スペシャル- (TONY TONY CHOPPER)",
+    "プレミアムカードコレクション -熊本復興スペシャル- (USOPP)",
+    "プレミアムドンコレクション -ONE PIECE DAY '25-",
+    "プレミアムドンコレクション -ONE PIECE DAY'24-",
+    "プロモーション×ドンカードパック vol.1",
+    "通常デザイン"
+   ],
+   "reason": "プロモの集約 (多数の配布物を1つの eBay 値にまとめる仕様)"
+  },
+  {
+   "category": "dragonball_scg",
+   "field": "set",
+   "ebay_value": "Promo Cards",
+   "sources": [
+    "Promotion Cards",
+    "プロモーションカード"
+   ],
+   "reason": "プロモの集約 (多数の配布物を1つの eBay 値にまとめる仕様)"
+  },
+  {
+   "category": "gundam_tcg",
+   "field": "set",
+   "ebay_value": "Promo Cards",
+   "sources": [
+    "Promotion Card",
+    "プレミアムグッズセット-新機動戦記ガンダムW-[PB01]",
+    "プロモーションカード",
+    "限定商品収録カード"
+   ],
+   "reason": "プロモの集約 (多数の配布物を1つの eBay 値にまとめる仕様)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Wings of the Captain",
+   "sources": [
+    "BOOSTER PACK -WINGS OF THE CAPTAIN- [OP-06]",
+    "ブースターパック 双璧の覇者 [OP-06]",
+    "ブースターパック 双璧の覇者【OP-06】",
+    "双璧の覇者【OP-06】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "GREEN/YELLOW Yamato",
+   "sources": [
+    "STARTER DECK -GREEN/YELLOW Yamato- [ST-28]",
+    "スタートデッキ 緑黄 ヤマト【ST-28】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "25th Anniversary Collection",
+   "sources": [
+    "EXTRA BOOSTER -Anime 25th Collection- [EB-02]",
+    "エクストラブースター Anime 25th collection [EB-02]",
+    "エクストラブースター Anime 25th collection [EB-02] variant",
+    "エクストラブースター Anime 25th collection【EB-02】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Premium Booster Vol.2",
+   "sources": [
+    "ONE PIECE CARD THE BEST vol.2【PRB-02】",
+    "PREMIUM BOOSTER -ONE PIECE CARD THE BEST Vol.2- [PRB-02]",
+    "PREMIUM BOOSTER -ONE PIECE CARD THE BEST- VOL.2",
+    "PREMIUM BOOSTER ONE PIECE CARD THE BEST VOL.2",
+    "プレミアムブースター ONE PIECE CARD THE BEST Vol.2 [PRB-02]",
+    "プレミアムブースター ONE PIECE CARD THE BEST vol.2【PRB-02】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "GREEN Uta",
+   "sources": [
+    "STARTER DECK -GREEN Uta- [ST-16]",
+    "スタートデッキ 緑 ウタ【ST-16】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Egghead Crisis",
+   "sources": [
+    "エクストラブースター EGGHEAD CRISIS [EB-04]",
+    "エクストラブースター EGGHEAD CRISIS【EB-04】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Adventure on Kami's Island",
+   "sources": [
+    "BOOSTER PACK -ADVENTURE ON KAMI’S ISLAND- [OP15-EB04]",
+    "ブースターパック 神の島の冒険 [OP-15]",
+    "ブースターパック 神の島の冒険 [OP-15] variant",
+    "ブースターパック 神の島の冒険【OP-15】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set_code",
+   "ebay_value": "Adventure on Kami's Island",
+   "sources": [
+    "OP-15",
+    "OP15-EB04"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "The Azure Sea's Seven Heroes",
+   "sources": [
+    "BOOSTER PACK THE AZURE SEA’S SEVEN- [OP14-EB04]",
+    "ブースターパック 最強の七皇 [OP-14]",
+    "ブースターパック 蒼海の七傑【OP-14】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set_code",
+   "ebay_value": "The Azure Sea's Seven Heroes",
+   "sources": [
+    "OP-14",
+    "OP14-EB04"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Carrying On His Will",
+   "sources": [
+    "BOOSTER PACK -CARRYING ON HIS WILL-[OP-13]",
+    "ブースターパック 受け継がれる意志 [OP-13]",
+    "ブースターパック 受け継がれる意志【OP-13】",
+    "受け継がれる意志【OP-13】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Legacy of the Master",
+   "sources": [
+    "BOOSTER PACK -LEGACY OF THE MASTER- [OP-12]",
+    "ブースターパック 師弟の絆【OP-12】",
+    "ブースターパック 謀略の卵 [OP-12]",
+    "師弟の絆【OP-12】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "A Fist of Divine Speed",
+   "sources": [
+    "BOOSTER -A FIST OF DIVINE SPEED- [OP-11]",
+    "ブースターパック 神速の拳【OP-11】",
+    "ブースターパック 神龍の咆哮 [OP-11]"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Royal Blood",
+   "sources": [
+    "BOOSTER -ROYAL BLOOD-[OP-10]",
+    "ブースターパック 王族の血統【OP-10】",
+    "ブースターパック 王者の咆哮 [OP-10]",
+    "ブースターパック 王者の咆哮 [OP-10] variant"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Emperors in the New World",
+   "sources": [
+    "BOOSTER -EMPERORS IN THE NEW WORLD- [OP-09]",
+    "ブースターパック 新たなる皇帝 [OP-09]",
+    "ブースターパック 新たなる皇帝【OP-09】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Two Legends",
+   "sources": [
+    "BOOSTER -TWO LEGENDS-[OP-08]",
+    "ブースターパック 二つの伝説 [OP-08]",
+    "ブースターパック 二つの伝説【OP-08】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Awakening of the New Era",
+   "sources": [
+    "BOOSTER PACK -AWAKENING OF THE NEW ERA- [OP-05]",
+    "ブースターパック 新時代の主役 [OP-05]",
+    "ブースターパック 新時代の主役【OP-05】",
+    "新時代の主役【OP-05】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Kingdoms of Intrigue",
+   "sources": [
+    "BOOSTER PACK -KINGDOMS OF INTRIGUE- [OP-04]",
+    "ブースターパック 謀略の王国 [OP-04]",
+    "ブースターパック 謀略の王国【OP-04】",
+    "謀略の王国【OP-04】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Pillars of Strength",
+   "sources": [
+    "BOOSTER PACK -PILLARS OF STRENGTH- [OP-03]",
+    "ブースターパック 強大な敵 [OP-03]",
+    "ブースターパック 強大な敵【OP-03】",
+    "強大な敵【OP-03】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Paramount War",
+   "sources": [
+    "BOOSTER PACK -PARAMOUNT WAR- [OP-02]",
+    "ブースターパック 頂上決戦 [OP-02]",
+    "ブースターパック 頂上決戦【OP-02】",
+    "頂上決戦【OP-02】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Romance Dawn",
+   "sources": [
+    "BOOSTER PACK -ROMANCE DAWN- [OP-01]",
+    "OP-01",
+    "ROMANCE DAWN【OP-01】",
+    "ブースターパック ROMANCE DAWN [OP-01]",
+    "ブースターパック ROMANCE DAWN【OP-01】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Egghead",
+   "sources": [
+    "STARTER DECK -Egghead- [ST-29]",
+    "スタートデッキ EGGHEAD【ST-29】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "BLACK Marshall D. Teach",
+   "sources": [
+    "STARTER DECK -BLACK Marshall.D.Teach- [ST-27]",
+    "スタートデッキ 黒 マーシャル・Ｄ・ティーチ【ST-27】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "PURPLE/BLACK Monkey D. Luffy",
+   "sources": [
+    "STARTER DECK -PURPLE/BLACK Monkey.D.Luffy- [ST-26]",
+    "スタートデッキ 紫黒 モンキー・D・ルフィ【ST-26】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Buggy",
+   "sources": [
+    "STARTER DECK -BLUE Buggy- [ST-25]",
+    "スタートデッキ 青 バギー【ST-25】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Jewelry Bonney",
+   "sources": [
+    "STARTER DECK -GREEN Jewelry Bonney- [ST-24]",
+    "スタートデッキ 緑 ジュエリー・ボニー【ST-24】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Shanks",
+   "sources": [
+    "STARTER DECK -RED Shanks- [ST-23]",
+    "スタートデッキ 赤 シャンクス【ST-23】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Ace & Newgate",
+   "sources": [
+    "STARTER DECK -Ace & Newgate- [ST-22]",
+    "スタートデッキ エース&ニューゲート【ST-22】",
+    "スタートデッキ 青 エース＆ニューゲート【ST-22】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Gear 5",
+   "sources": [
+    "STARTER DECK EX -GEAR5- [ST-21]",
+    "スタートデッキEX ギア5【ST-21】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "YELLOW Charlotte Katakuri",
+   "sources": [
+    "STARTER DECK -YELLOW Charlotte Katakuri- [ST-20]",
+    "スタートデッキ 黄 シャーロット・カタクリ【ST-20】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Smoker",
+   "sources": [
+    "STARTER DECK -BLACK Smoker- [ST-19]",
+    "スタートデッキ 黒 スモーカー【ST-19】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "PURPLE Monkey D. Luffy",
+   "sources": [
+    "STARTER DECK -PURPLE Monkey.D.Luffy- [ST-18]",
+    "スタートデッキ 紫 モンキー・D・ルフィ【ST-18】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Donquixote Doflamingo",
+   "sources": [
+    "STARTER DECK -BLUE Donquixote Doflamingo- [ST-17]",
+    "スタートデッキ 青 ドンキホーテ・ドフラミンゴ【ST-17】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Edward Newgate",
+   "sources": [
+    "STARTER DECK -RED Edward.Newgate- [ST-15]",
+    "スタートデッキ 赤 エドワード・ニューゲート【ST-15】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "The Three Brothers",
+   "sources": [
+    "3兄弟の絆【ST-13】",
+    "ULTRA DECK -The Three Brothers- [ST-13]"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Uta",
+   "sources": [
+    "STARTER DECK -Uta- [ST-11]",
+    "Side ウタ【ST-11】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Yamato",
+   "sources": [
+    "STARTER DECK -Yamato- [ST-09]",
+    "Side ヤマト【ST-09】",
+    "スタートデッキ Side ヤマト【ST-09】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Monkey D. Luffy",
+   "sources": [
+    "STARTER DECK -Monkey.D.Luffy- [ST-08]",
+    "Side モンキー・D・ルフィ【ST-08】",
+    "スタートデッキ Side モンキー･D･ルフィ【ST-08】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Big Mom Pirates",
+   "sources": [
+    "STARTER DECK -Big Mom Pirates- [ST-07]",
+    "スタートデッキ ビッグ・マム海賊団【ST-07】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Absolute Justice",
+   "sources": [
+    "STARTER DECK -Absolute Justice- [ST-06]",
+    "スタートデッキ 海軍【ST-06】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "ONE PIECE FILM edition",
+   "sources": [
+    "ONE PIECE FILM edition【ST-05】",
+    "STARTER DECK -ONE PIECE FILM edition- [ST-05]",
+    "スタートデッキ ONE PIECE FILM edition【ST-05】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Animal Kingdom Pirates",
+   "sources": [
+    "STARTER DECK -Animal Kingdom Pirates- [ST-04]",
+    "スタートデッキ 百獣海賊団【ST-04】",
+    "百獣海賊団【ST-04】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "The Seven Warlords of the Sea",
+   "sources": [
+    "STARTER DECK -The Seven Warlords of the Sea- [ST-03]",
+    "スタートデッキ 王下七武海【ST-03】",
+    "王下七武海【ST-03】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Worst Generation",
+   "sources": [
+    "STARTER DECK -Worst Generation- [ST-02]",
+    "スタートデッキ 最悪の世代【ST-02】",
+    "最悪の世代【ST-02】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Straw Hat Crew",
+   "sources": [
+    "STARTER DECK -Straw Hat Crew- [ST-01]",
+    "スタートデッキ 麦わらの一味【ST-01】",
+    "麦わらの一味【ST-01】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Premium Booster One Piece The Best",
+   "sources": [
+    "ONE PIECE CARD THE BEST【PRB-01】",
+    "PREMIUM BOOSTER -ONE PIECE CARD THE BEST-",
+    "PREMIUM BOOSTER -ONE PIECE CARD THE BEST- [PRB01]",
+    "PREMIUM BOOSTER ONE PIECE CARD THE BEST",
+    "プレミアムブースター ONE PIECE CARD THE BEST [PRB-01]",
+    "プレミアムブースター ONE PIECE CARD THE BEST【PRB-01】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set_code",
+   "ebay_value": "Premium Booster One Piece The Best",
+   "sources": [
+    "PRB-01",
+    "PRB01"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "ONE PIECE Heroines Edition",
+   "sources": [
+    "EXTRA BOOSTER -ONE PIECE HEROINES EDITION- [EB-03]",
+    "エクストラブースター ONE PIECE Heroines Edition [EB-03]",
+    "エクストラブースターONE PIECE Heroines Edition【EB-03】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Memorial Collection",
+   "sources": [
+    "EXTRA BOOSTER -MEMORIAL COLLECTION- [EB-01]",
+    "エクストラブースター メモリアルコレクション【EB-01】",
+    "メモリアルコレクション【EB-01】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "Luffy & Ace",
+   "sources": [
+    "STARTER DECK EX -Luffy & Ace- [ST-30]",
+    "スタートデッキEX ルフィ&エース【ST-30】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "The Time of Battle",
+   "sources": [
+    "BOOSTER PACK -THE TIME OF BATTLE- [OP-16]",
+    "ブースターパック 決戦の刻【OP-16】",
+    "ブースターパック 決断の刻 [OP-16]"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "one_piece_tcg",
+   "field": "set",
+   "ebay_value": "The World’s Strongest Warriors",
+   "sources": [
+    "BOOSTER PACK -THE WORLD’S STRONGEST WARRIORS- [OP-17]",
+    "ブースターパック 世界最強の戦士【OP-17】"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "dragonball_scg",
+   "field": "set",
+   "ebay_value": "Rivals Clash",
+   "sources": [
+    "BOOSTER PACK -RIVALS CLASH- [FB06]",
+    "ブースターパック 迫り来る脅威[FB06]",
+    "ブースターパック　迫り来る脅威[FB06]"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  },
+  {
+   "category": "dragonball_scg",
+   "field": "set",
+   "ebay_value": "Brightness of Hope",
+   "sources": [
+    "BOOSTER PACK BRIGHTNESS OF HOPE [FB11]",
+    "ブースターパック BRIGHTNESS OF HOPE [FB11]"
+   ],
+   "reason": "同じ弾の表記ゆれ (弾コード1つ)"
+  }
+ ]
+}
