@@ -11,7 +11,7 @@
 押せるのは **後処理の無いボタンだけ** (runnable)。CSV の後処理 (除外・タイトル補強・重複チェック) を
 持つボタンは、同じ流れを移すまで「今のパネルで」と出す。
 
-起動: pythonw server.py  (Edge のアプリ窓で http://127.0.0.1:8765/ を開く。既に動いていれば窓だけ開く)
+起動: pythonw server.py  (Edge のアプリ窓で http://127.0.0.1:8770/ を開く。既に動いていれば窓だけ開く)
 """
 import datetime
 import json
@@ -33,7 +33,11 @@ HQ = os.path.dirname(HERE)
 TOOLS = os.path.join(HQ, "tools")
 STATIC = os.path.join(HERE, "static")
 HOST = "127.0.0.1"                      # 自分の PC からだけ開ける
-PORT = int(os.environ.get("CONSOLE_PORT", "8765"))
+PORT = int(os.environ.get("CONSOLE_PORT", "8770"))
+# ★2026-09-16: 8765 は **PSA 目視 (post_psa_review)** の物。ここを 8765 にしていたため、
+#   PSA の 🤖自動 が目視画面を開いた時に Console が出てしまい、目視ができなかった
+#   (Windows は同じポートに後から割り込めるので、エラーも出ずに入れ替わる)。
+#   既に使われている: 8765=PSA目視 / 8766=一番くじ / 8788=別の確認画面 / 5324x=単一起動の印
 COUNTS_CACHE = r"C:/dev/iMak_data/hq/console_counts.json"
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 HOME_TTL = 10 * 60

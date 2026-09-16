@@ -315,3 +315,21 @@ def test_running_job_is_not_killed_when_the_server_restarts():
     assert "CREATE_BREAKAWAY_FROM_JOB" in SERVER
     ps1 = open(os.path.join(HQ, "console", "restart.ps1"), encoding="utf-8-sig").read()
     assert "running -and -not $Force" in ps1        # 走行中は入れ替えない
+
+
+def test_console_port_does_not_collide_with_the_viewers():
+    """Console のポートが 目視画面のポートとぶつからない (2026-09-16 実害)。
+
+    8765 は PSA 目視 (post_psa_review.SERVER_PORT)、8766 は一番くじ。Console を 8765 に置いたため、
+    PSA の 🤖自動 が目視画面を開いた時に **Console が出てしまい、目視ができなかった**
+    (Windows は後から同じポートに割り込めるので、エラーも出ずに入れ替わる)。
+    """
+    import re as _re
+    m = _re.search(r'PORT = int\(os\.environ\.get\("CONSOLE_PORT", "(\d+)"\)\)', SERVER)
+    assert m, "Console のポートが読めない"
+    port = int(m.group(1))
+    used = set()
+    for name in ("tools/post_psa_review.py", "tools/ichibankuji_restock.py"):
+        src = open(os.path.join(HQ, name), encoding="utf-8").read()
+        used |= {int(x) for x in _re.findall(r"(?:SERVER_PORT|port)\s*=\s*(\d{4})", src)}
+    assert port not in used, "Console のポート %d が 目視画面と衝突している (%s)" % (port, sorted(used))
