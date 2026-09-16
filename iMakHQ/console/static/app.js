@@ -401,7 +401,7 @@
     var CODE = { 0: ["done", "正常"], 267009: ["night", "実行中"], 267011: ["night", "未実行"],
                  1073807364: ["hold", "途中で止まった"], 267014: ["hold", "止めた"] };
     $("sch-rows").innerHTML = rows.length ? rows.map(function (t) {
-      var c = CODE[t.result] || ["error", "前回 失敗 (" + t.result + ")"];
+      var c = t.disabled ? ["hold", "停止中"] : (CODE[t.result] || ["error", "前回 失敗 (" + t.result + ")"]);
       return '<div class="rw"><span class="t">' + esc(t.name) + "</span>" +
         '<span class="d">前回 ' + esc(t.last || "—") + " · 次回 " + esc(t.next || "—") + "</span>" +
         '<span class="chip ' + c[0] + '">' + esc(c[1]) + "</span></div>";

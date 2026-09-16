@@ -435,8 +435,12 @@ def _read_text(path, limit=8000):
 
 
 def _tasks_worker():
-    ps = ("Get-ScheduledTask | Where-Object { $_.TaskName -like '*iMak*' } | Get-ScheduledTaskInfo | "
-          "Select-Object TaskName,LastRunTime,LastTaskResult,NextRunTime | ConvertTo-Json -Compress")
+    # ★2026-09-17: State も取る。Get-ScheduledTaskInfo は **無効化したタスクにも次回時刻を返す**ので、
+    #   廃止した DispatchWatch が「前回 失敗 / 次回 09:00」と赤で出ていた (止めてあるだけで異常ではない)。
+    ps = ("Get-ScheduledTask | Where-Object { $_.TaskName -like '*iMak*' } | ForEach-Object { "
+          "$i = $_ | Get-ScheduledTaskInfo; [pscustomobject]@{ TaskName = $_.TaskName; "
+          "State = [string]$_.State; LastRunTime = $i.LastRunTime; LastTaskResult = $i.LastTaskResult; "
+          "NextRunTime = $i.NextRunTime } } | ConvertTo-Json -Compress")
     rows = []
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
@@ -444,8 +448,10 @@ def _tasks_worker():
                            timeout=90, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         data = json.loads(r.stdout or "[]")
         for t in (data if isinstance(data, list) else [data]):
+            disabled = str(t.get("State") or "") == "Disabled"
             rows.append({"name": t.get("TaskName"), "last": _ps_date(t.get("LastRunTime")),
-                         "next": _ps_date(t.get("NextRunTime")), "result": t.get("LastTaskResult")})
+                         "next": "" if disabled else _ps_date(t.get("NextRunTime")),
+                         "result": t.get("LastTaskResult"), "disabled": disabled})
         rows.sort(key=lambda x: x["last"] or "", reverse=True)
     except Exception as e:                                     # noqa: BLE001
         STATE["tasks"] = {"tasks": [], "error": str(e)}
