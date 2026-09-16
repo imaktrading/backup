@@ -428,3 +428,24 @@ class TestPanel:
     def test_badge_counts_and_turns_blue(self):
         assert "d['ut_identify']=UI.count_workload()" in self.SRC
         assert '"ut_identify": bool(_ui.get("pending"))' in self.SRC
+
+
+def test_catalog_request_takes_several_reference_urls():
+    """参考URLは複数入れられる (2026-09-16 ユーザー「参考URLは、複数入れれないのかな」)。
+
+    スペース / 改行 / カンマ区切りで受け、URL でない文字列は捨てる。
+    """
+    import ut_identify as U
+    d = U.parse_result({"nocat": [3], "nocat_info": {"3": {
+        "work": "ドラえもん",
+        "ref": "https://a.example/x  https://b.example/y, https://c.example/z メモ書き"}}})
+    assert d["nocat_info"][3]["ref"] == "https://a.example/x https://b.example/y https://c.example/z"
+
+
+def test_catalog_request_box_is_not_dimmed():
+    """「カタログに無い」を押した枠は薄くしない (2026-09-16: 入力欄が使えないように見えた)。"""
+    import os
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "tools", "ut_identify.py"), encoding="utf-8").read()
+    assert "btn.dataset.a!=='go'&&btn.dataset.a!=='cat'" in src
+    assert ".it.done{opacity:.45}" in src        # 他の判定では今までどおり薄くする

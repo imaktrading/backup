@@ -402,6 +402,7 @@
         if (was && !running.running) { say(running.rc === 0 ? "終わりました — 件数を数え直しています" : "失敗しました — ログを確認してください"); drawerHidden = false; }
         if (!drawerHidden) $("drawer").hidden = false;
         $("live").className = "live" + (running.running ? "" : " off");
+        $("drawer-stop").hidden = !running.running;
         $("job-label").textContent = (running.running ? "実行中: " : running.rc === 0 ? "終わりました: " : "失敗: ") + running.label;
         $("job-meta").textContent = running.started + "〜" + (running.running ? "" : " (returncode=" + running.rc + ")");
       }
@@ -520,6 +521,14 @@
     this.setAttribute("aria-expanded", String(!open));
   });
   $("drawer-hide").addEventListener("click", function () { drawerHidden = true; $("drawer").hidden = true; });
+  $("drawer-stop").addEventListener("click", function () {
+    var b = this;
+    b.disabled = true;
+    post("/api/stop").then(function (r) {
+      say(r.ok ? "止めています…" : (r.j.error || "止められませんでした"));
+      b.disabled = false;
+    });
+  });
 
   var h = (location.hash || "").slice(1);
   if ($("p-" + h)) show(h);

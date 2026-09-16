@@ -220,6 +220,8 @@ button.rw:disabled{opacity:.5;cursor:default}
 .drawer .dh b{color:#fff;font-weight:600}
 .drawer .dh .mono{font:12px var(--f-mono);color:#8FA0C0}
 .drawer .dh .sp{margin-left:auto;display:flex;gap:6px}
+.drawer button.stop{border-color:#8B3A3A;color:#FFD5D5}
+.drawer button.stop:hover{background:#3A1E1E}
 .drawer button{background:transparent;border:1px solid #33415E;color:var(--drawer-ink);border-radius:6px;padding:3px 10px;font:12px var(--f-ui);cursor:pointer}
 .drawer pre{max-width:1200px;margin:0 auto;padding:0 24px 12px;font:12px/1.65 var(--f-mono);color:#AEB8CB;white-space:pre-wrap;max-height:180px;overflow:auto}
 .drawer pre .ok{color:#4FC08D}

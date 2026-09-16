@@ -519,8 +519,9 @@ def parse_result(data):
             continue
         v = v if isinstance(v, dict) else {}
         work = " ".join(str(v.get("work") or "").split())[:60]
-        ref = str(v.get("ref") or "").strip()
-        ref = ref if re.match(r"^https?://\S+$", ref) else ""      # URL でない物は捨てる
+        # ★2026-09-16: 参考URLは複数可 (スペース/改行/カンマ区切り)。1本ずつ見て URL だけ残す
+        ref = " ".join(u for u in re.split(r"[\s,、]+", str(v.get("ref") or ""))
+                       if re.match(r"^https?://\S+$", u))[:500]
         if work or ref:
             info[idx] = {"work": work, "ref": ref}
     return {"picks": picks, "skips": skips, "nocat": _ints(data.get("nocat")),
@@ -775,7 +776,9 @@ function setAct(btn){var box=btn.closest('.it');
     if(btn.dataset.a==='skip'&&s.value&&!isSkip)s.value='';
     if(btn.dataset.a!=='out'&&btn.dataset.a!=='skip')s.value='';}
   var ci=box.querySelector('.catinfo');if(ci)ci.style.display=btn.dataset.a==='cat'?'':'none';
-  box.classList.toggle('done',btn.dataset.a!=='go');}
+  // ★2026-09-16: 「カタログに無い」はこれから入力する枠なので薄くしない
+  box.classList.toggle('done',btn.dataset.a!=='go'&&btn.dataset.a!=='cat');
+  if(btn.dataset.a==='cat'){var cu=box.querySelector('input.cu');if(cu)cu.focus();}}
 function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason=0,nocatInfo={};
   document.querySelectorAll('.it').forEach(function(b){var a=b.dataset.act||'';var idx=parseInt(b.dataset.idx,10);
     var c=(b.querySelector('select.col')||{}).value||'';var r=(b.querySelector('select.rsn')||{}).value||'';
@@ -867,7 +870,8 @@ def build_html(items, catalog):
             "カタログに無い→追加依頼</button>"
             "<span class='catinfo' style='display:none'>"
             "作品名 <input class='cw' placeholder='任意: 分かれば' style='width:120px'> "
-            "参考URL <input class='cu' placeholder='任意: 公式ページ等' style='width:200px'>"
+            "参考URL <input class='cu' placeholder='任意: 公式ページ等 (複数可・スペース区切り)' "
+            "style='width:320px'>"
             "</span>"
             "<button class='ng' data-a='out' onclick='setAct(this)'>対象外</button>"
             "<select class='rsn' onchange='pickRsn(this)'><option value=''>理由を選ぶ</option>"

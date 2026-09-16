@@ -201,3 +201,16 @@ def test_post_run_log_goes_to_the_screen_only():
     """
     body = SERVER.split("def _to_log(text):")[1].split("def _run_log_text")[0]
     assert "fh.write" not in body
+
+
+def test_stop_button_uses_the_panels_kill():
+    """止めるボタン (2026-09-16 ユーザー「確かに停止ボタンがないね」)。
+
+    止め方は旧パネルと同じ (_kill_process_tree = 子プロセスごと)。走っていない時は 409。
+    """
+    assert "_kill_process_tree(p, _log)" in SERVER
+    assert '"/api/stop"' in SERVER
+    html = open(os.path.join(HQ, "console", "static", "index.html"), encoding="utf-8").read()
+    assert 'id="drawer-stop"' in html
+    app = open(os.path.join(HQ, "console", "static", "app.js"), encoding="utf-8").read()
+    assert '$("drawer-stop").hidden = !running.running;' in app   # 走っている時だけ出す

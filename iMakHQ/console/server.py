@@ -213,6 +213,8 @@ STATE = {
     "crew": None, "crew_at": 0,
     "tasks": None, "tasks_at": 0,
     "job": None,            # {kind, label, started, rc, running}
+    "proc": None,           # 走らせている subprocess (止めるボタン用)
+    "stopping": False,      # 止めるボタンで止めた走行か (締めの文言用)
     "log": [],              # [(seq, text)]
     "seq": 0,
 }
@@ -484,6 +486,22 @@ def run_job(kind=None, index=None, params=None, amount=None):
     return 200, {"ok": True}
 
 
+def stop_job():
+    """走っている処理を止める (旧パネルの「停止」と同じ止め方 = 子プロセスごと)。"""
+    with _LOCK:
+        job = dict(STATE["job"]) if STATE["job"] else None
+        p = STATE["proc"]
+    if not job or not job.get("running") or p is None:
+        return 409, {"error": "今は何も走っていません"}
+    _log("■ 止めます: %s" % job.get("label", ""))
+    STATE["stopping"] = True
+    try:
+        _cp()._kill_process_tree(p, _log)                      # control_panel と同じ関数を使う
+    except Exception as e:                                     # noqa: BLE001
+        return 500, {"error": "止められませんでした: %s" % e}
+    return 200, {"ok": True}
+
+
 def _run_worker(script, cmd=None):
     """走る前のガード → 実行 → 後処理。**旧パネルと同じ関数** (control_panel.before_run / after_run)。"""
     cp = _cp()
@@ -534,6 +552,7 @@ def _run_worker(script, cmd=None):
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                              encoding="utf-8", errors="replace", bufsize=1,
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        STATE["proc"] = p                                      # 止めるボタン用
         for line in p.stdout:
             _log(line)
             if fh:
@@ -550,8 +569,12 @@ def _run_worker(script, cmd=None):
     finally:
         if fh and not fh.closed:
             fh.close()
+    if STATE.get("stopping"):
+        _log("■ 止めました (途中で終了しました)")
     with _LOCK:
         STATE["job"].update(rc=rc, running=False)
+        STATE["proc"] = None
+        STATE["stopping"] = False
     refresh_counts()
 
 
@@ -618,6 +641,9 @@ class Handler(BaseHTTPRequestHandler):
             code, obj = run_job(kind=str(body.get("kind") or "") or None,
                                 index=body.get("i"), params=body.get("params"),
                                 amount=body.get("amount"))
+            return self._json(code, obj)
+        if u.path == "/api/stop":
+            code, obj = stop_job()
             return self._json(code, obj)
         if u.path == "/api/refresh":
             threading.Thread(target=refresh_counts, daemon=True).start()
