@@ -179,7 +179,10 @@ button.li:disabled{opacity:.5;cursor:default}
 .step span{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--pc);color:#fff;font:600 11px var(--f-mono)}
 
 /* 商材カード / 表 */
-.prods{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;padding:14px 16px 16px}
+.prods{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;padding:14px 16px 16px}
+@media (max-width:1100px){.prods{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:720px){.prods{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:460px){.prods{grid-template-columns:1fr}}
 .prod{border:1px solid var(--line);border-radius:9px;padding:11px 13px;display:grid;gap:8px}
 .prod .pn{font:700 14px var(--f-head)}
 .prod .pd{font-size:12px;color:var(--ink-3)}

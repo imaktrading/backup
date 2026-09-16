@@ -22,7 +22,7 @@
       <span class="bn">今日やること</span><span class="bd">押さないと減らない作業だけ</span><span class="bc" id="tab-today">…</span>
     </button>
     <button class="big" role="tab" aria-selected="false" data-page="new" type="button" style="--pc:var(--p-new);--pcs:var(--p-new-soft)">
-      <span class="bn">新規出品</span><span class="bd">見つける → 作る → チェック</span><span class="bc" id="tab-new">…</span>
+      <span class="bn">新規出品</span><span class="bd">見つける → 作る → 入稿</span><span class="bc" id="tab-new">…</span>
     </button>
     <button class="big" role="tab" aria-selected="false" data-page="maint" type="button" style="--pc:var(--p-maint);--pcs:var(--p-maint-soft)">
       <span class="bn">在庫メンテ</span><span class="bd">出している物の 仕入元・在庫・棚</span><span class="bc" id="tab-maint">…</span>
@@ -52,7 +52,7 @@
   <!-- ===== 新規出品 ===== -->
   <div class="page" id="p-new" hidden style="--pc:var(--p-new);--pcs:var(--p-new-soft)">
     <div class="hero">
-      <div><h1>新規出品</h1><div class="flow"><span>① 見つける</span><i>→</i><span>② 作る</span><i>→</i><span>③ チェック</span><i>→</i><span>入稿</span></div></div>
+      <div><h1>新規出品</h1><div class="flow"><span>① 見つける</span><i>→</i><span>② 作る (監査まで込み)</span><i>→</i><span>入稿</span></div></div>
       <div class="kp">
         <div><label>今月 追加した額</label><b id="kp-month">—</b></div>
         <div><label>今月の件数</label><b id="kp-month-n">—</b></div>
@@ -69,14 +69,9 @@
 
     <div class="step"><span>2</span>作る</div>
     <section class="card">
-      <div class="ch"><h3>商材ごとに CSV を作る</h3><p>「🤖自動」は目視 → 生成 → 予約出品まで続けて行う</p></div>
+      <div class="ch"><h3>商材ごとに CSV を作る</h3><p>作ると同時に監査 (CSV監査くん) と 除外・重複・タイトルの後処理まで走る。「🤖自動」は予約出品まで続けて行う</p></div>
       <div class="prods" id="prods"><div class="empty">読込中…</div></div>
-    </section>
-
-    <div class="step"><span>3</span>チェック</div>
-    <section class="card">
-      <div class="ch"><h3>出品前チェック</h3><p>CSV を作った後に押す</p></div>
-      <div class="rows" id="check-rows"></div>
+      <div class="rows" id="check-rows" style="border-top:1px solid var(--line)"></div>
     </section>
   </div>
 

@@ -185,15 +185,23 @@
       sum(sl, function (j) { return j.n; }).toLocaleString("ja-JP");
     $("kp-seed").textContent = sum(sl, function (j) { return j.n; }).toLocaleString("ja-JP");
     $("scout-rows").innerHTML = rowsFor(ROWS.scout);
-    $("check-rows").innerHTML = rowsFor(ROWS.check);
+    $("check-rows").innerHTML = rowsFor(ROWS.check);     // 生成に含まれる。単体で回したい時だけ押す
     $("tab-new").innerHTML = "要対応 <b>" + todoOf(sl).length + "</b> · 商材 " +
       Object.keys(byCategory()).length;
 
+    // 商材 × 動作 を1枠1ボタンに (2026-09-16 ユーザー「作るボタンが枠ごとボタンじゃない」)
     var cats = byCategory();
     $("prods").innerHTML = Object.keys(cats).map(function (c) {
-      return '<div class="prod"><span class="pn">' + esc(c) + "</span>" +
-        '<span class="pd">' + esc(cats[c].map(function (b) { return b.label; }).join(" · ")) + "</span>" +
-        '<div class="pb">' + cats[c].map(function (b) { return btn(b, b.type === "auto", b.label); }).join("") + "</div></div>";
+      return cats[c].map(function (b) {
+        var auto = b.type === "auto";
+        return openTag(b, "task", ' style="--gc:var(' + (auto ? "--g-restock" : "--g-seed") + ');--pc:var(--p-new)"',
+                       ' title="' + esc(b.tip || "") + '"') +
+          '<span class="tag"><span class="pg">' + esc(b.label) + "</span>" +
+          '<span class="gp">' + (auto ? "目視 → 生成 → 予約出品" : "CSV を作る") + "</span></span>" +
+          '<span class="nm">' + esc(c) + "</span>" +
+          '<span class="row"><span class="note">' + (auto ? "続けて出品まで" : "作って入稿は手で") + "</span>" +
+          goMark(b, auto ? "自動" : "作る") + "</span>" + closeTag(b);
+      }).join("");
     }).join("") || '<div class="empty">読込中…</div>';
   }
   function byCategory() {
