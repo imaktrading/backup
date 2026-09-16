@@ -457,11 +457,15 @@
     }).join("") : '<div class="empty">読込中…</div>';
   }
   function refreshWatcher() {
-    return getJSON("/api/watcher").then(function (d) { paintWatcher(d); if (d.loading) setTimeout(refreshWatcher, 4000); });
+    return getJSON("/api/watcher").then(function (d) { paintWatcher(d); if (d.loading) setTimeout(refreshWatcher, 4000); })
+      .catch(function () { setTimeout(refreshWatcher, 10000); });     // 繋がらない時もあきらめない
   }
 
-  function refreshJobs() { return getJSON("/api/jobs").then(paintJobs); }
-  function refreshHome() { return getJSON("/api/home").then(function (d) { paintHome(d); if (d.loading || !d.home) setTimeout(refreshHome, 3000); }); }
+  function refreshJobs() { return getJSON("/api/jobs").then(paintJobs); }   // 失敗は bootstrap 側で拾う
+  function refreshHome() {
+    return getJSON("/api/home").then(function (d) { paintHome(d); if (d.loading || !d.home) setTimeout(refreshHome, 3000); })
+      .catch(function () { setTimeout(refreshHome, 5000); });
+  }
   function refreshTasks() { return getJSON("/api/tasks").then(function (d) { paintTasks(d); if (d.loading) setTimeout(refreshTasks, 3000); }); }
 
   // ---------------------------------------------------------------- 操作
@@ -553,8 +557,7 @@
   // ログをまるごとコピー (2026-09-16 ユーザー要望。貼って相談する時に使う)
   $("drawer-copy").addEventListener("click", function () {
     var head = ($("job-label").textContent || "") + " " + ($("job-meta").textContent || "");
-    var text = head.trim() + "
-" + $("log").innerText;
+    var text = head.trim() + String.fromCharCode(10) + $("log").innerText;
     var b = this;
     function done(ok) { b.textContent = ok ? "コピーしました" : "コピーできません"; setTimeout(function () { b.textContent = "ログをコピー"; }, 1800); }
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -580,7 +583,21 @@
   getJSON("/api/version").then(paintVersion);
   refreshWatcher();
   setInterval(refreshWatcher, 120000);        // 巡回の状況は2分ごと
-  getJSON("/api/buttons").then(function (d) { buttons = d.buttons || []; return refreshJobs(); }).then(refreshHome);
-  setInterval(refreshJobs, 60000);
+  // ★2026-09-16 ユーザー「件数読み込み中で固まってる」: 最初の読み込みが1回きりで、
+  //   サーバの入れ替え中などに失敗すると **そのまま止まっていた**。失敗したら数秒後にやり直す。
+  function bootstrap() {
+    return getJSON("/api/buttons").then(function (d) {
+      buttons = d.buttons || [];
+      return refreshJobs();
+    }).then(refreshHome).catch(function () {
+      $("shop-at").textContent = "サーバーに繋がりません — 3秒後にやり直します";
+      setTimeout(bootstrap, 3000);
+    });
+  }
+  bootstrap();
+  setInterval(function () {                    // 定期の更新でも、取れていなければ組み直す
+    if (!buttons.length || !jobList.length) { bootstrap(); return; }
+    refreshJobs();
+  }, 60000);
   pollLog();
 })();

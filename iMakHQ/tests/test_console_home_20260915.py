@@ -236,3 +236,30 @@ def test_log_has_a_copy_button():
     assert 'id="drawer-copy"' in html
     app = open(os.path.join(HQ, "console", "static", "app.js"), encoding="utf-8").read()
     assert "navigator.clipboard" in app and "execCommand" in app   # 控えの手も用意する
+
+
+def test_screen_retries_when_the_server_is_restarting():
+    """最初の読み込みが失敗しても、そのまま止まらない (2026-09-16 実害)。
+
+    ユーザー「出品君が件数読み込み中で、固まってる気がする」。
+    サーバ側は正常 (件数は取れていた) で、画面の最初の読み込みが1回きりだったため、
+    サーバ入れ替え中に失敗したページがそのまま「読み込み中」で固まっていた。
+    """
+    app = open(os.path.join(HQ, "console", "static", "app.js"), encoding="utf-8").read()
+    assert "function bootstrap()" in app
+    assert "setTimeout(bootstrap, 3000)" in app                       # 失敗したらやり直す
+    assert "if (!buttons.length || !jobList.length) { bootstrap(); return; }" in app
+
+
+def test_app_js_has_no_raw_newline_inside_a_string():
+    """画面の JS が構文エラーで丸ごと止まらないようにする (2026-09-16 実害)。
+
+    「ログをコピー」を足した時に、文字列の中に **生の改行** が入って SyntaxError になり、
+    画面が「件数 読込中」のまま固まった。行の途中で引用符が閉じていない行を弾く。
+    """
+    path = os.path.join(HQ, "console", "static", "app.js")
+    for i, line in enumerate(open(path, encoding="utf-8").read().split("\n"), 1):
+        code = re.sub(r"\.", "", line)                    # \" などのエスケープは外す
+        code = re.sub(r"//.*$", "", code)
+        assert code.count('"') % 2 == 0, "%s:%d 二重引用符が閉じていない" % (path, i)
+        assert code.count("'") % 2 == 0, "%s:%d 引用符が閉じていない" % (path, i)
