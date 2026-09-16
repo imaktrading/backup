@@ -576,6 +576,43 @@ CONSISTENCY_COLS = {
 }
 
 
+_COLOR_ALIAS_CACHE = None
+
+
+def _catalog_color_aliases():
+    """カタログの `color_variants` から eBay 色 → 公式色名 の集合を作る (1走行 cache)。
+
+    ★2026-09-16 (9/15 mercari 提案①): タイトルは公式色名 (Navy)、C:Color は eBay 値 (Blue) で
+      出す設計なので、素の部分一致だと必ず外れていた。対応は **カタログが持っている値**を使い、
+      監査くんに表を持たせない (whitelist の normalize 表とは CREAM/KHAKI が食い違う)。
+    読めない時は {} = 従来どおりの照合 (誤検出が出るだけで見逃しは増えない)。
+    """
+    global _COLOR_ALIAS_CACHE
+    if _COLOR_ALIAS_CACHE is not None:
+        return _COLOR_ALIAS_CACHE
+    out = {}
+    try:
+        import sqlite3
+        con = sqlite3.connect(f"file:{CATALOG_DB}?mode=ro", uri=True)
+        try:
+            for (sp,) in con.execute("SELECT specs FROM products WHERE specs LIKE '%ebay_color%'"):
+                try:
+                    variants = (json.loads(sp or "{}") or {}).get("color_variants") or []
+                except Exception:                       # noqa: BLE001
+                    continue
+                for v in variants:
+                    name = str(v.get("name") or "").strip().lower()
+                    ec = str(v.get("ebay_color") or "").strip().lower()
+                    if ec and len(name) >= 3 and any(ch.isalpha() for ch in name):
+                        out.setdefault(ec, set()).add(name)
+        finally:
+            con.close()
+    except Exception:                                   # noqa: BLE001
+        out = {}
+    _COLOR_ALIAS_CACHE = out
+    return out
+
+
 def title_spec_consistency(headers, row, project):
     """タイトルが Item Specifics の重要ファクトを反映してるか検証。
     spec に値が在るのにタイトルに反映されてない → 生成ロジック逸脱の疑い (報告)。"""
@@ -617,8 +654,11 @@ def title_spec_consistency(headers, row, project):
             tok = _parts[0] if _parts else val
             hit = tok.lower() in title
         else:  # whole: 複数値 "A, B / C" は各 part で判定。1つでも在れば一致。
-            parts = [p.strip() for p in re.split(r"[,/&]", val) if p.strip()]
-            hit = any(p.lower() in title for p in parts)
+            parts = [p.strip().lower() for p in re.split(r"[,/&]", val) if p.strip()]
+            if col == "C:Color":
+                _al = _catalog_color_aliases()
+                parts = parts + [a for p in parts for a in sorted(_al.get(p, ()))]
+            hit = any(p in title for p in parts)
         if not hit:
             out.append(f"タイトル↔spec不一致: {col}='{val}' がタイトルに反映されてない(生成ロジック逸脱疑い)")
     return out
@@ -2471,12 +2511,35 @@ def _count_error_signal(lines):
     return len(matched)
 
 
+# ★2026-09-16 (9/15 mercari 提案②): check_csv の「🤖 AI総合レビュー」節は助言で、`❌` を印に使う。
+#   error に数えると 9/15 は 13件/13件が偽 (Theme/Character は埋まっていた) = 本物が埋もれる。
+#   節は `🤖 AI総合レビュー` から `チェック完了` まで (iMakTCG / iMakMercari の check_csv.py 共通)。
+_AI_REVIEW_START = "🤖 AI総合レビュー"
+_AI_REVIEW_END = "チェック完了"
+
+
+def _strip_ai_review_section(txt):
+    """ログ本文から AI総合レビュー節を落とす (純関数, test可)。終わりが無ければ末尾まで落とす。"""
+    out, skip = [], False
+    for ln in (txt or "").splitlines():
+        s = ln.strip()
+        if s == _AI_REVIEW_START:
+            skip = True
+            continue
+        if skip and s == _AI_REVIEW_END:
+            skip = False
+            continue
+        if not skip:
+            out.append(ln)
+    return "\n".join(out)
+
+
 def _signal_line_samples(txt, limit=3, maxlen=80):
     """digest 用: シグナルに当たった行の実文を先頭 limit 件、各 maxlen 字で返す (純関数, test可)。
 
     Act が digest (JSON) だけを見て処分を書けるように、ログを読み直させない。
     """
-    lines = (txt or "").splitlines()
+    lines = _strip_ai_review_section(txt).splitlines()
     pats = [_CATALOG_MISS_RE] + [p for _, p in _SCAN_PATS]
     out = []
     for ln in lines:
@@ -2489,7 +2552,7 @@ def _signal_line_samples(txt, limit=3, maxlen=80):
 
 def scan_log_lines(txt):
     """生成ログ本文 → logシグナル list (純関数, test可)。"""
-    lines = [ln for ln in (txt or "").splitlines() if not _is_self_output_line(ln)]
+    lines = [ln for ln in _strip_ai_review_section(txt).splitlines() if not _is_self_output_line(ln)]
     sig = []
     n_miss = sum(1 for ln in lines
                  for m in [_CATALOG_MISS_RE.search(ln)] if m and int(m.group(1)) > 0)
