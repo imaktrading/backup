@@ -133,8 +133,17 @@ def summarize(d, nightly_ok=False):
         put("ut_restock_confirm", _num(u.get("restock_confirm")), bool(u.get("restock_confirm")))
         put("ut_restore", _num(u.get("restore")), bool(u.get("restore")))
 
-    for key, kind, field in (("ut_identify", "ut_identify", "pending"),
-                             ("newcand_high", "newcand_high", "pending")):
+    # ★2026-09-16: UT 目視は3種類が混ざる (新しい候補 / 出品待ち / 出品済みで KEY 無し)。
+    #   合計だけ出すと「KEY 埋めが何百件も残っている」と読めてしまうので内訳を添える
+    ui = d.get("ut_identify") or {}
+    if ui.get("error"):
+        err(("ut_identify",), ui)
+    elif ui:
+        put("ut_identify", _num(ui.get("pending")), bool(ui.get("pending")),
+            "新候補 %d / 出品待ち %d / KEY無し %d"
+            % (_num(ui.get("new")), _num(ui.get("waiting")), _num(ui.get("key"))))
+
+    for key, kind, field in (("newcand_high", "newcand_high", "pending"),):
         p = d.get(key) or {}
         if p.get("error"):
             err((kind,), p)

@@ -207,6 +207,16 @@ class TestParse:
         assert "no_tag" in dict(U.OUT_REASONS)   # 2026-09-15 タグ無しは NWT で出せない
         assert all(k.startswith("skip_") for k, _ in U.SKIP_REASONS)
 
+    def test_count_workload_counts_what_the_screen_shows_20260916(self, monkeypatch):
+        """★2026-09-16「正しい数値にして」: 以前は未決着の行を数えるだけで、画面に出さない
+        (公式仕入で出品中と同じ) 行まで入っていた → 620 と出るのに画面は 521 だった."""
+        new = [""] * 36
+        listed = [""] * 36; listed[1] = "35890001"
+        items = [{"idx": 2, "row": new, "src": "tab"}, {"idx": 3, "row": new, "src": "sheet"},
+                 {"idx": 4, "row": listed, "src": "sheet"}]
+        monkeypatch.setattr(U, "load_items", lambda limit=0, **k: (items, 99))
+        assert U.count_workload() == {"pending": 3, "new": 1, "waiting": 1, "key": 1, "error": ""}
+
     def test_rest_breakdown_20260916(self):
         """「残り全部で N件」だけだと N が KEY 埋めの数に見える (実際は 620件中 38件だった)."""
         new = [""] * 36
