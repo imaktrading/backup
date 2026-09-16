@@ -11,7 +11,9 @@
 
 列(0-indexed): A0=url / B1=itemID / D3=sold / I8=cert / AC28..AG32=補URL / AI34=KEY
 """
+import json
 import os, sys
+from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # tools/
 import sheet_io
@@ -76,6 +78,37 @@ def drop_known_dead(urls):
 #   上限に達したら、残りは **確認せずに通す** (driver が起きない時と同じ fail-open)。
 #   確認できた分だけ得をする形にして、全部を落とさない。
 VERIFY_BUDGET_SEC = 300
+# ★2026-09-16: 溢れて確認できなかった分は覚えておき、次回いちばん先に確認する
+#   (毎回 同じ尻尾が「未確認のまま通る」ことになるため)。
+PENDING_VERIFY_FILE = Path(r"C:/dev/iMak_data/hq/hoju_verify_pending.json")
+# 判定に要るのは詳細ページのボタンだけ。出たらそれ以上待たない (旧: 必ず3秒待っていた)
+VERIFY_MARKERS = ('data-testid="checkout-button"', 'data-testid="bid-button"')
+VERIFY_MAX_WAIT = 3.0
+
+
+def load_pending_verify(path=None):
+    """前回 確認しきれなかった URL (無ければ空)。"""
+    p = path or PENDING_VERIFY_FILE
+    try:
+        return list(json.loads(p.read_text(encoding="utf-8")))
+    except Exception:                                          # noqa: BLE001
+        return []
+
+
+def save_pending_verify(urls, path=None):
+    p = path or PENDING_VERIFY_FILE
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(list(urls or []), ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def verify_order(urls, pending):
+    """確認する順番 (純関数)。前回 溢れた分を先に、残りは元の順。"""
+    pend = [u for u in (pending or []) if u in set(urls or [])]
+    rest = [u for u in (urls or []) if u not in set(pend)]
+    return pend + rest
 
 
 def verify_alive(urls, verbose=True, budget_sec=VERIFY_BUDGET_SEC, now=None):
@@ -90,6 +123,7 @@ def verify_alive(urls, verbose=True, budget_sec=VERIFY_BUDGET_SEC, now=None):
     urls = list(urls or [])
     if not urls:
         return [], []
+    urls = verify_order(urls, load_pending_verify())           # 前回 溢れた分から確認する
     _t0 = now()
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -106,13 +140,21 @@ def verify_alive(urls, verbose=True, budget_sec=VERIFY_BUDGET_SEC, now=None):
                 rest = urls[n:]
                 if verbose:
                     print(f"  ⏱ 時間切れ ({budget_sec}秒) — 残り {len(rest)}本 は確認せず通します "
-                          f"(確認済 {n}本)。落とすより、補URLが1本も入らない方が危険")
+                          f"(確認済 {n}本)。落とすより、補URLが1本も入らない方が危険"
+                          f"{chr(10)}     → この {len(rest)}本 は次回いちばん先に確認します")
+                save_pending_verify(rest)
                 alive.extend(rest)
                 break
             try:
                 drv.get(u)
-                _t.sleep(3)
-                ok = mp.buyable_from_detail(drv.page_source)
+                # ★判定に要るボタンが出たら、それ以上待たない (旧: 必ず3秒)。
+                #   出ない (売り切れ等) 時だけ 3秒まで待つ。
+                _w0 = now()
+                src = drv.page_source
+                while not any(m in src for m in VERIFY_MARKERS) and now() - _w0 < VERIFY_MAX_WAIT:
+                    _t.sleep(0.25)
+                    src = drv.page_source
+                ok = mp.buyable_from_detail(src)
             except Exception as e:                             # noqa: BLE001
                 if verbose:
                     print(f"  ⚠ {u[:50]} 開けず ({type(e).__name__}) → 落とさない")
@@ -123,6 +165,8 @@ def verify_alive(urls, verbose=True, budget_sec=VERIFY_BUDGET_SEC, now=None):
             else:
                 dead.append((u, "詳細ページで『買えない』(売切/オークション)"))
                 mp.remember_not_buyable(u, "補URL書込み直前の確認で売切/オークション")
+        else:
+            save_pending_verify([])                            # 全部確認できた = 持ち越しなし
     finally:
         try:
             drv.quit()

@@ -29,7 +29,11 @@ if _TOOLS not in sys.path:
 from tcg_catalog_audit import _resolve_card_id, _detect_franchise, PSA_CACHE_DIR, CATALOG_DB  # noqa: E402
 
 # forced_card_id 経路の名前照合は自動解決経路と同じ関数を再利用 (2026-09-14・2箇所に別実装を作らない)
-_CATALOG_ROOT = r"C:/dev/iMak/iMakCatalog"
+# ★2026-09-14: master の iMakCatalog は古い (psa_to_csv.py +4060行差)。catalog worktree を
+# 優先し、無い時だけ master にフォールバック (psa_to_csv.py:24-29 と同じ形)。
+_CATALOG_ROOT = r"C:/dev/iMak_catalog/iMakCatalog"
+if not os.path.isdir(_CATALOG_ROOT):
+    _CATALOG_ROOT = r"C:/dev/iMak/iMakCatalog"
 if _CATALOG_ROOT not in sys.path:
     sys.path.insert(0, _CATALOG_ROOT)
 from integrations.psa_to_csv import _record_name_matches_subject  # noqa: E402
@@ -488,15 +492,22 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
         for i in range(1, len(base_words)):
             set_variants.append(" ".join(base_words[i:]))
 
-    # 各 Set 候補 × (Year→Features→Rarity の順に落とす) で最初に 80字へ収まる組を採用。
-    # 全部収まる通常ケースは 1 周目 (= フル Set + 全 optional) で従来と同一結果。
+    # 各 Set 候補で、**入る任意要素だけを順に拾う** (高情報順)。
+    # ★2026-09-16: それまでは「末尾からまとめて捨てる」作りで、1つ長い要素があると
+    #   その後ろの短い要素まで道連れに落ちていた。実害 (9/16 の走行):
+    #     本体64字 + Rarity'Special Art Rare'(17) = 81字 → 1字超過 →
+    #     **Rarity も Year も捨てて 64字** で確定。Year'2024' だけなら 69字で入る。
+    #   16件中7件が70字未満になり、監査が「キーワード不足」を指摘していた。
+    #   全部収まる通常ケースの結果は今までと同じ。
     for set_disp in set_variants:
         ctoks = _core_tokens(set_disp)
-        for drop in range(len(optional) + 1):
-            opts = optional[: len(optional) - drop] if drop else optional
-            title = _assemble(ctoks + opts)
-            if len(title) <= _TITLE_MAX:
-                return title
+        if len(_assemble(ctoks)) > _TITLE_MAX:
+            continue                       # 本体だけで超過 → 次の短い Set 候補へ
+        picked = []
+        for opt in optional:
+            if len(_assemble(ctoks + picked + [opt])) <= _TITLE_MAX:
+                picked.append(opt)
+        return _assemble(ctoks + picked)
     # 最終手段 (Set を最短化しても core が超過): 従来の語境界 truncate
     title = _assemble(_core_tokens(set_variants[-1] if set_variants else ""))
     if len(title) > _TITLE_MAX:
