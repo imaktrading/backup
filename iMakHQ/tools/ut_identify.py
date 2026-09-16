@@ -88,6 +88,21 @@ SKIP_REASONS = [
     ("skip_other", "その他"),
 ]
 
+# ★2026-09-16 ユーザー「売り切れと理由を選んだら意味ないのでは?」— そのとおり。
+#   **出品済みの行** (B列に itemID / KEY が無い) にこの画面が用があるのは **KEY を入れること** だけ。
+#   仕入元が売り切れ・中古・タグ無しは「これから出すか」の話で、KEY には関係しない。
+#   なのに理由に出していたため、9/16 は 11件が「対象外(売り切れ10 / 中古1)」で閉じ、
+#   KEY が入らないまま二度と画面に出ない状態になった (= 重複くんが二重出品を止められない)。
+#   出品済みの行では、商品が決まらない理由だけを出す。見送り (出さない判断) も意味がないので出さない。
+_LISTED_OUT_KEYS = ("unclear", "not_tee", "other")
+
+
+def reasons_for(listed):
+    """その行で選べる理由 (対象外, 見送り)。listed=出品済み なら供給・状態の理由を出さない。純関数。"""
+    if not listed:
+        return OUT_REASONS, SKIP_REASONS
+    return [(k, v) for k, v in OUT_REASONS if k in _LISTED_OUT_KEYS], []
+
 # メルカリの色 (日本語) → カタログの色名に含まれる語
 _COLOR_JP = {"ホワイト": "WHITE", "白": "WHITE", "オフホワイト": "OFF WHITE",
              "ブラック": "BLACK", "黒": "BLACK", "グレー": "GRAY", "グレイ": "GRAY",
@@ -818,6 +833,17 @@ def build_html(items, catalog):
              "border:1px dashed #bbb;border-radius:8px;color:#888;font-size:13px}"
              ".nop span{font-size:11px}</style>",
              "<h1>メルカリの新品 UT → カタログの商品を選ぶ</h1>",
+             # ★2026-09-16 ユーザー「目的をわかるように HTML に書いておいて」
+             "<div class='sum' style='background:#eef6ff;border:1px solid #9cc'>"
+             "<b>この画面の目的</b> — 行によって目的が違います。"
+             "<ul style='margin:6px 0 0 18px;padding:0'>"
+             "<li><b style='color:#06a'>出品中</b> と書いてある行 = <b>KEY を入れる</b>ため。"
+             "KEY が無いと重複くんが二重出品を止められません。"
+             "<b>仕入元が売り切れでも中古でも、商品さえ決めれば目的は果たせます</b>"
+             " (だからこの行では「売り切れ」「中古」の理由は出しません)。</li>"
+             "<li><b>出品待ちの行</b> = これから出す商品を決めるため。"
+             "出せない物 (売り切れ・中古・タグ無し) はここで対象外にします。</li>"
+             "</ul></div>",
              f"<div class='sum'>全 {len(items)}件。写真と同じ柄の商品を選んで「この商品」"
              "(同じ柄で色違いがある商品だけ、色を選ぶ欄が出ます)。"
              "候補は<b>公式で買えない物だけ</b>。無ければ検索欄に作品名・キャラ名・商品番号(6桁)。"
@@ -844,6 +870,8 @@ def build_html(items, catalog):
                   "メルカリで開く</a></div>")
         photos_json = json.dumps([prc._proxied(u) for u in photos[:10]])
         price = f"¥{int(r[C_PRICE]):,}" if str(r[C_PRICE]).isdigit() else (r[C_PRICE] or "")
+        # 出品済みの行は KEY を入れるのが目的 = 供給・状態の理由は出さない (reasons_for 参照)
+        outs_r, skips_r = reasons_for(bool((r[1] or "").strip()))
         parts.append(
             f"<div class='it' data-idx='{it['idx']}' data-pid='' data-color=\"{_html.escape(r[C_COLOR])}\" "
             f"data-photo=\"{_html.escape(main)}\" data-photos=\"{_html.escape(photos_json)}\" "
@@ -855,7 +883,8 @@ def build_html(items, catalog):
             + (" ｜ <b>出品待ちの行</b>" if it.get("src") == "sheet" and not (r[1] or "").strip()
                else "")
             + (f" ｜ <b style='color:#06a'>出品中 ({_html.escape((r[1] or '').strip())}) "
-               "— KEY を入れるための特定</b>" if (r[1] or "").strip() else "")
+               "— KEY を入れるための特定 (売り切れ・中古でも商品を決める)</b>"
+               if (r[1] or "").strip() else "")
             + (" ｜ <b style='color:#a40'>仕入元は売り切れ済み</b> (商品が分かれば後で探し直せる)"
                if (r[C_SOLD] or "").strip() else "")
             + (f" ｜ 見つけた語 <b>{_html.escape(r[C_KW])}</b>" if r[C_KW] else "")
@@ -875,23 +904,26 @@ def build_html(items, catalog):
             "<span class='colwrap' style='display:none'>色違いあり → 色 "
             "<select class='col'><option value=''></option></select></span>"
             "<button class='go' data-a='go' onclick='setAct(this)'>この商品</button>"
-            "<button class='skip' data-a='skip' onclick='setAct(this)' "
-            "title='商品と色は合っているが、今回は出さない (高い / 出品者が不安)'>一致・見送り</button>"
-            "<button class='cat' data-a='cat' onclick='setAct(this)' "
-            "title='カタログに追加依頼を出す。追加されたら1週間後にまたこの画面に出ます'>"
-            "カタログに無い→追加依頼</button>"
-            "<span class='catinfo' style='display:none'>"
+            + ("<button class='skip' data-a='skip' onclick='setAct(this)' "
+               "title='商品と色は合っているが、今回は出さない (高い / 出品者が不安)'>一致・見送り</button>"
+               if skips_r else "")
+            + ("<button class='cat' data-a='cat' onclick='setAct(this)' "
+               "title='カタログに追加依頼を出す。追加されたら1週間後にまたこの画面に出ます'>"
+               "カタログに無い→追加依頼</button>")
+            + "<span class='catinfo' style='display:none'>"
             "作品名 <input class='cw' placeholder='任意: 分かれば' style='width:120px'> "
             "参考URL <input class='cu' placeholder='任意: 公式ページ等 (複数可・スペース区切り)' "
             "style='width:320px'>"
             "</span>"
-            "<button class='ng' data-a='out' onclick='setAct(this)'>対象外</button>"
+            + "<button class='ng' data-a='out' onclick='setAct(this)'>対象外</button>"
             "<select class='rsn' onchange='pickRsn(this)'><option value=''>理由を選ぶ</option>"
             "<optgroup label='対象外 (商品が決まらない・材料にならない)'>"
-            + "".join(f"<option value='{k}'>{_html.escape(v)}</option>" for k, v in OUT_REASONS)
-            + "</optgroup><optgroup label='一致・見送り (商品と色は合っている)'>"
-            + "".join(f"<option value='{k}'>{_html.escape(v)}</option>" for k, v in SKIP_REASONS)
-            + "</optgroup></select><button class='hold' data-a='hold' onclick='setAct(this)'>保留</button>"
+            + "".join(f"<option value='{k}'>{_html.escape(v)}</option>" for k, v in outs_r)
+            + "</optgroup>"
+            + ("<optgroup label='一致・見送り (商品と色は合っている)'>"
+               + "".join(f"<option value='{k}'>{_html.escape(v)}</option>" for k, v in skips_r)
+               + "</optgroup>" if skips_r else "")
+            + "</select><button class='hold' data-a='hold' onclick='setAct(this)'>保留</button>"
             "</div></div></div>")
     parts.append("<div id='zov' onclick='if(event.target===this)zclose()'>"
                  "<div class='zcol' id='zl'></div><div class='zcol' id='zr'></div>"

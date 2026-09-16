@@ -206,6 +206,28 @@ class TestParse:
         assert "gone" in dict(U.OUT_REASONS)
         assert "no_tag" in dict(U.OUT_REASONS)   # 2026-09-15 タグ無しは NWT で出せない
         assert all(k.startswith("skip_") for k, _ in U.SKIP_REASONS)
+
+    def test_listed_rows_have_no_supply_or_condition_reasons_20260916(self):
+        """出品済みの行の目的は KEY を入れること。売り切れ・中古で閉じると KEY が入らないまま終わる。
+        実害 (2026-09-16): 11件が「対象外(売り切れ10/中古1)」で決着し、二度と画面に出なくなった."""
+        outs, skips = U.reasons_for(listed=True)
+        keys = dict(outs)
+        assert "gone" not in keys and "used" not in keys and "no_tag" not in keys
+        assert "unclear" in keys and skips == []          # 見送りも意味がない
+        assert U.reasons_for(listed=False) == (U.OUT_REASONS, U.SKIP_REASONS)
+
+    def test_html_hides_those_reasons_for_listed_rows_20260916(self):
+        r = [""] * 36
+        r[0] = "https://jp.mercari.com/item/m1"
+        listed = list(r); listed[1] = "35890001"
+        it = {"idx": 2, "row": listed, "cands": []}
+        html = U.build_html([it], []).decode("utf-8")
+        assert "value='gone'" not in html and "value='used'" not in html
+        assert "data-a='skip'" not in html                  # 見送りのボタンも出さない
+        assert "value='unclear'" in html                    # 商品が決まらない理由は残す
+        assert "この画面の目的" in html                      # 目的を画面に書く (ユーザー指示)
+        html2 = U.build_html([{"idx": 2, "row": r, "cands": []}], []).decode("utf-8")
+        assert "value='gone'" in html2 and "data-a='skip'" in html2
         assert not any(k.startswith("skip_") for k, _ in U.OUT_REASONS)
 
 
