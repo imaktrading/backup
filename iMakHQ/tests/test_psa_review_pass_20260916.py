@@ -60,3 +60,23 @@ def test_viewer_drops_passed_certs_and_says_so():
     assert "一致・見送り済 → 目視に出しません" in src
     assert "_record_passed_from_results(data)" in src
     assert 'btn_{cert}_PASS' in src and "見送りの理由を選ぶ" in src
+
+
+def test_can_search_candidates_by_card_number():
+    """候補に無い時は カード番号で探し直せる (2026-09-16 ユーザー要望・UT と同じ口)。
+
+    候補は set_code や期待値の prefix から出しているので、そこから外れた変種は一覧に出ない。
+    """
+    got = R.search_candidates("pokemon_tcg", "SV8a-218")
+    assert got and got[0][0] == "SV8a-218"
+    assert R.search_candidates("pokemon_tcg", "a") == []        # 1文字では探さない
+    assert R.search_candidates("", "SV8a-218") == []
+
+
+def test_search_uses_the_same_card_drawing():
+    """検索結果も 最初の一覧と同じ描き方 (2か所に書くと片方だけ直る)。"""
+    src = open(os.path.join(HQ, "tools", "post_psa_review.py"), encoding="utf-8").read()
+    assert "def candidate_card_html(" in src
+    assert src.count("candidate_card_html(cert, cand, t, i") >= 2   # 一覧と検索の両方から呼ぶ
+    assert '"/api/search"' in src or '"/api/search")' in src
+    assert "_TARGETS_BY_CERT" in src                                # 検索が category を引くための控え

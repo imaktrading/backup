@@ -34,6 +34,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from viewer_zoom import ZOOM_CSS, ZOOM_JS, ZOOM_OVERLAY, zoom_button
 
 # 「一致・見送り」の見た目 (2026-09-16)
+FIND_CSS = (".findbox{display:flex;gap:6px;align-items:center;margin:6px 0}"
+            ".findq{flex:1;max-width:420px;padding:5px 8px;font-size:13px}"
+            ".btn-find{background:#31708f;color:#fff}"
+            ".findmsg{font-size:12px;color:#9fd}")
 PASS_CSS = (".btn-pass{background:#8a6d3b;color:#fff}"
             ".rsn{margin-left:6px;padding:4px 6px;font-size:13px}"
             ".note{margin-left:6px;padding:4px 6px;font-size:13px;width:180px}"
@@ -951,6 +955,92 @@ def run_storage_key(targets) -> str:
     return hashlib.sha1(certs.encode("utf-8")).hexdigest()[:12]
 
 
+def search_candidates(category, query, brand="", limit=30):
+    """カード番号 (SV8a-218 / 218-165 等) や名前で catalog を探す。
+
+    ★2026-09-16 ユーザー「候補にない場合、カード番号を入れて候補を再度出す風には出来ないの？」
+      候補は set_code や期待値の prefix から出しているので、そこから外れた変種は一覧に出ない。
+      人が番号を読んで探し直せる口を作る。戻りは _get_candidates と同じ (pid, 画像, セット名)。
+    """
+    q = " ".join(str(query or "").split())
+    if not category or len(q) < 2:
+        return []
+    like = "%" + q.replace("/", "-").replace(" ", "%").upper() + "%"
+    conn = sqlite3.connect(str(CATALOG_DB))
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT product_id FROM products WHERE category=? AND ("
+            "  upper(product_id) LIKE ? OR upper(ifnull(name,'')) LIKE ?"
+            "  OR upper(ifnull(name_en,'')) LIKE ?) ORDER BY product_id LIMIT ?",
+            (category, like, like, like, int(limit)))
+        rows = [r[0] for r in cur.fetchall()]
+    except Exception:                                          # noqa: BLE001
+        rows = []
+    finally:
+        conn.close()
+    if not rows:
+        return []
+    # 画像・セット名の引き方は 1か所 (_get_candidates) と同じにする
+    out = []
+    for pid in rows:
+        got = _get_candidates(category, None, None, brand=brand, expected_product_id=pid)
+        out.extend([c for c in got if c[0] == pid][:1])
+    return out
+
+
+def candidate_card_html(cert, cand, t, i, html=None):
+    """候補カード1枚分の HTML (最初の一覧と、番号で探し直した結果で共用する)。
+
+    ★2026-09-16: 「候補に無い時は番号で探し直せるように」(ユーザー要望・UT と同じ口) を
+      足すにあたり、描き方を **ここ1か所** にまとめた。2か所に書くと片方だけ直る。
+    """
+    import re as _re
+    html = [] if html is None else html
+    # 候補は (pid, 画像, セット名)。古い2要素も読めるようにしておく
+    pid, img_path = cand[0], cand[1]
+    set_label = cand[2] if len(cand) > 2 else ""
+    # ★2026-08-27 カタログ依頼: PSA ラベルとセット名が食い違う候補は目立たせる。
+    #   判定できない (日本語だけ / 一般語だけ) 時は印を出さない。消しはしない。
+    label_ok = set_matches_psa_label(t.get("brand", ""), set_label)
+    css_class = "cand expected-pid" if pid == t.get("csv_expected") else "cand"
+    if label_ok is False:
+        css_class += " label-miss"
+    safe_pid_id = _re.sub(r'[^a-zA-Z0-9]', '_', pid)
+    html.append(f'<div id="cand_{cert}_{safe_pid_id}" class="{css_class}" onclick="selectCand(\'{cert}\', \'{pid}\')">')
+    html.append(f'<div class=num>#{i}</div>')
+    if img_path and (img_path.startswith("http") or Path(img_path).exists()):
+        html.append(f'<img src="{_img_url(img_path)}">')
+        # ★両面カード (FW の LEADER 等) は裏面も並べる。catalog は表面しか
+        #   持っていないので URL 規則から導く (公式で 200 実測済)
+        _cb = back_face_url(img_path)
+        if _cb:
+            html.append(f'<img src="{_img_url(_cb)}">')
+    else:
+        # ★catalog に画像が無い = 人は照合できない。「no image」とだけ出すと
+        #   毎回「該当なし」を押させることになるので、理由を書く (2026-08-09)
+        html.append('<div style="padding:24px;color:#e57373;font-size:11px">'
+                    '画像なし<br>(catalog 未収録)<br>→ 照合不能</div>')
+    # 現物(cert画像)と並べて拡大。カード自体は選択トグルなので、
+    # ボタン側で preventDefault/stopPropagation して誤選択を防ぐ(viewer_zoom)。
+    if img_path and (img_path.startswith("http") or Path(img_path).exists()):
+        html.append(zoom_button(_img_url(img_path), _img_url(t.get("cert_image_url") or "")))
+    html.append(f'<div class=pid>{pid}</div>')
+    # ★セット名 (2026-08-24)。PSA ラベルと文字で突き合わせられる唯一の手掛かり。
+    #   絵が無い候補ほど効くので、画像の有無にかかわらず必ず出す。
+    if set_label:
+        html.append(f'<div class=setname title="{_esc_attr(set_label)}">'
+                    f'{_esc_attr(set_label)}</div>')
+    if label_ok is False:
+        html.append('<div class=setmiss>⚠ ラベルと違う商品</div>')
+    html.append('</div>')
+    return html
+
+
+# 今 目視に出している対象 (cert → target)。/api/search が category / brand を引くのに使う
+_TARGETS_BY_CERT: dict = {}
+
+
 def _generate_html(targets: list[dict]) -> None:
     # JS で targets info (= cert / expected) を保持、 結果 collect 用
     targets_json = json.dumps([{
@@ -1018,6 +1108,7 @@ def _generate_html(targets: list[dict]) -> None:
         'padding:6px 10px;border-radius:5px;font-size:13px;margin:6px 0}',
         ZOOM_CSS,
         PASS_CSS,
+        FIND_CSS,
         'h1{color:#ffd700}',
         '.toolbar{position:sticky;top:0;background:#1a1a1a;padding:10px;border-bottom:1px solid #444;z-index:100;display:flex;gap:14px;align-items:center}',
         '.toolbar #status{font-size:16px;color:#ffd700;font-weight:bold}',
@@ -1044,6 +1135,20 @@ def _generate_html(targets: list[dict]) -> None:
         '  }',
         '} catch(e) {}',
         '',
+        'function findCands(cert) {',
+        '  var q = (document.getElementById("q_" + cert).value || "").trim();',
+        '  var msg = document.getElementById("qmsg_" + cert);',
+        '  if (q.length < 2) { msg.textContent = "2文字以上で"; return; }',
+        '  msg.textContent = "探しています…";',
+        '  fetch("/api/search?cert=" + encodeURIComponent(cert) + "&q=" + encodeURIComponent(q))',
+        '    .then(function (r) { return r.json(); })',
+        '    .then(function (d) {',
+        '      if (!d.n) { msg.textContent = "見つかりません (" + q + ")"; return; }',
+        '      document.getElementById("grid_" + cert).innerHTML = d.html;',
+        '      msg.textContent = d.n + "件 出しました (選ぶと「違う→この候補」になります)";',
+        '    })',
+        '    .catch(function () { msg.textContent = "探せませんでした"; });',
+        '}',
         'function setReason(cert, v) {',
         '  var a = ANSWERS[cert] || {}; a.reason = v;',
         '  if (v) { a.choice = "PASS"; }',
@@ -1265,52 +1370,24 @@ def _generate_html(targets: list[dict]) -> None:
         html.append(f'<div class=candidates-toggle onclick="toggleCands(\'{cert}\')">▼ 候補 {len(t["candidates"])} 件 表示/非表示</div>')
         cls = "candidates show" if is_open else "candidates"
         html.append(f'<div id="cands_{cert}" class="{cls}">')
-        html.append('<div class=grid>')
+        # ★2026-09-16: 候補に無い時は番号で探し直す (UT の目視と同じ口)
+        html.append('<div class=findbox>'
+                    f'<input id="q_{cert}" class="findq" placeholder="候補に無い時: カード番号や名前で探す (例 SV8a-218)" '
+                    f'onkeydown="if(event.key===\'Enter\'){{findCands(\'{cert}\');}}">'
+                    f'<button class="btn btn-find" onclick="findCands(\'{cert}\')">探す</button>'
+                    f'<span id="qmsg_{cert}" class=findmsg></span></div>')
+        html.append(f'<div class=grid id="grid_{cert}">')
         import re as _re
         for i, cand in enumerate(t["candidates"], 1):
-            # 候補は (pid, 画像, セット名)。古い2要素も読めるようにしておく
-            pid, img_path = cand[0], cand[1]
-            set_label = cand[2] if len(cand) > 2 else ""
-            # ★2026-08-27 カタログ依頼: PSA ラベルとセット名が食い違う候補は目立たせる。
-            #   判定できない (日本語だけ / 一般語だけ) 時は印を出さない。消しはしない。
-            label_ok = set_matches_psa_label(t.get("brand", ""), set_label)
-            css_class = "cand expected-pid" if pid == t.get("csv_expected") else "cand"
-            if label_ok is False:
-                css_class += " label-miss"
-            safe_pid_id = _re.sub(r'[^a-zA-Z0-9]', '_', pid)
-            html.append(f'<div id="cand_{cert}_{safe_pid_id}" class="{css_class}" onclick="selectCand(\'{cert}\', \'{pid}\')">')
-            html.append(f'<div class=num>#{i}</div>')
-            if img_path and (img_path.startswith("http") or Path(img_path).exists()):
-                html.append(f'<img src="{_img_url(img_path)}">')
-                # ★両面カード (FW の LEADER 等) は裏面も並べる。catalog は表面しか
-                #   持っていないので URL 規則から導く (公式で 200 実測済)
-                _cb = back_face_url(img_path)
-                if _cb:
-                    html.append(f'<img src="{_img_url(_cb)}">')
-            else:
-                # ★catalog に画像が無い = 人は照合できない。「no image」とだけ出すと
-                #   毎回「該当なし」を押させることになるので、理由を書く (2026-08-09)
-                html.append('<div style="padding:24px;color:#e57373;font-size:11px">'
-                            '画像なし<br>(catalog 未収録)<br>→ 照合不能</div>')
-            # 現物(cert画像)と並べて拡大。カード自体は選択トグルなので、
-            # ボタン側で preventDefault/stopPropagation して誤選択を防ぐ(viewer_zoom)。
-            if img_path and (img_path.startswith("http") or Path(img_path).exists()):
-                html.append(zoom_button(_img_url(img_path), _img_url(t.get("cert_image_url") or "")))
-            html.append(f'<div class=pid>{pid}</div>')
-            # ★セット名 (2026-08-24)。PSA ラベルと文字で突き合わせられる唯一の手掛かり。
-            #   絵が無い候補ほど効くので、画像の有無にかかわらず必ず出す。
-            if set_label:
-                html.append(f'<div class=setname title="{_esc_attr(set_label)}">'
-                            f'{_esc_attr(set_label)}</div>')
-            if label_ok is False:
-                html.append('<div class=setmiss>⚠ ラベルと違う商品</div>')
-            html.append('</div>')
+            candidate_card_html(cert, cand, t, i, html)
         html.append('</div></div>')
         html.append('</div>')
 
     html.append(ZOOM_OVERLAY)
     html.append(f'<script>{ZOOM_JS}</script>')
     html.append('</body></html>')
+    _TARGETS_BY_CERT.clear()
+    _TARGETS_BY_CERT.update({str(t.get("cert")): t for t in targets})
     HTML_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     HTML_OUTPUT.write_text('\n'.join(html), encoding="utf-8")
 
@@ -1326,6 +1403,23 @@ class _ReviewHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()
                 self.wfile.write(HTML_OUTPUT.read_bytes())
+            elif self.path.startswith("/api/search"):
+                # ★2026-09-16: 候補に無い時、カード番号や名前で探し直す (UT の目視と同じ)
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                cert = (q.get("cert") or [""])[0]
+                text = (q.get("q") or [""])[0]
+                t = _TARGETS_BY_CERT.get(cert) or {}
+                found = search_candidates(t.get("category", ""), text, brand=t.get("brand", ""))
+                html = []
+                for i, cand in enumerate(found, 1):
+                    candidate_card_html(cert, cand, t, i, html)
+                body = json.dumps({"n": len(found), "html": "".join(html)},
+                                  ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
             elif self.path.startswith("/img/"):
                 # /img/<urlencoded local path or http URL>
                 encoded = self.path[len("/img/"):]
