@@ -812,7 +812,11 @@ def build_html(items, catalog):
     import newcand_confirm as NC
     save_js = NC.SAVE_JS.replace("'imak_confirm_draft_'+location.port", "'imak_confirm_draft_ut_identify'")
     parts = ["<!doctype html><meta charset='utf-8'><title>UT 目視特定</title>",
-             f"<style>{_CSS}</style>",
+             f"<style>{_CSS}"
+             ".ph.nophoto{display:grid;gap:6px;place-items:center}"
+             ".nop{width:150px;height:150px;display:grid;place-items:center;text-align:center;"
+             "border:1px dashed #bbb;border-radius:8px;color:#888;font-size:13px}"
+             ".nop span{font-size:11px}</style>",
              "<h1>メルカリの新品 UT → カタログの商品を選ぶ</h1>",
              f"<div class='sum'>全 {len(items)}件。写真と同じ柄の商品を選んで「この商品」"
              "(同じ柄で色違いがある商品だけ、色を選ぶ欄が出ます)。"
@@ -826,10 +830,18 @@ def build_html(items, catalog):
         sm = "".join(f"<a href='{_html.escape(r[C_URL])}' target='_blank'>"
                      f"<img src='{_html.escape(prc._proxied(u))}' loading='lazy' onerror='imgFail(this)'></a>"
                      for u in photos[1:10])
-        ph = (f"<div class='ph'><a href='{_html.escape(r[C_URL])}' target='_blank'>"
-              f"<img src='{_html.escape(main)}' loading='lazy' onerror='imgFail(this)'></a>"
-              f"<div class='sm'>{sm}</div>"
-              "<button class='zall' onclick='zoom(event,this)'>🔍 全部の写真を並べて見比べる</button></div>")
+        if photos:
+            ph = (f"<div class='ph'><a href='{_html.escape(r[C_URL])}' target='_blank'>"
+                  f"<img src='{_html.escape(main)}' loading='lazy' onerror='imgFail(this)'></a>"
+                  f"<div class='sm'>{sm}</div>"
+                  "<button class='zall' onclick='zoom(event,this)'>🔍 全部の写真を並べて見比べる</button></div>")
+        else:
+            # ★2026-09-16: 写真が無い行 (収集時に取れていない)。押す物が無いと判断できないので、
+            #   メルカリを開くボタンを出す。並びでも後ろに回している。
+            ph = (f"<div class='ph nophoto'><div class='nop'>写真なし<br>"
+                  "<span>収集時に取れていません</span></div>"
+                  f"<a class='zall' href='{_html.escape(r[C_URL])}' target='_blank'>"
+                  "メルカリで開く</a></div>")
         photos_json = json.dumps([prc._proxied(u) for u in photos[:10]])
         price = f"¥{int(r[C_PRICE]):,}" if str(r[C_PRICE]).isdigit() else (r[C_PRICE] or "")
         parts.append(
@@ -1050,6 +1062,12 @@ def demand_rank(r, demand):
     return len(demand or [])
 
 
+def has_photo(r):
+    """その行に写真URLが1本でもあるか (純関数)。列が空 = 収集時に写真を取れていない行。"""
+    cell = (r[C_PHOTOS] if len(r) > C_PHOTOS else "") or ""
+    return any(u.strip() for u in cell.split("|"))
+
+
 def order_rows(rows, demand=None):
     """目視に出す順番 (純関数・test 可)。
 
@@ -1069,9 +1087,12 @@ def order_rows(rows, demand=None):
     def rank(t):
         _i, r, src = t
         listed = len(r) > 1 and (r[1] or "").strip()
+        # ★2026-09-16: 写真が無い行は見比べられないので、同じ優先度の中では後ろに回す
+        #   (消しはしない。メルカリを開いて判断できるし、写真が入れば次回また前に出る)
+        no_photo = 0 if has_photo(r) else 1
         if src == "sheet" and listed:
-            return (0, 0)
-        return (1, demand_rank(r, demand))
+            return (0, no_photo, 0)
+        return (1, no_photo, demand_rank(r, demand))
     return sorted(rows, key=rank)
 
 

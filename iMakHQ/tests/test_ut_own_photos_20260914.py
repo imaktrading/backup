@@ -55,3 +55,34 @@ def test_review_screen_request_and_listing_all_filter():
     assert src.count("photos = _own_photos(r)") == 2          # 目視画面 / カタログにない の依頼
     tl = open(r"C:\dev\iMak\iMakMercari\tshirt_listing.py", encoding="utf-8").read()
     assert 'photo_urls = "|".join(UCV.own_item_photos(target["url"]' in tl
+
+
+def test_rows_without_photos_go_last():
+    """写真の無い行は目視の後ろに回す (2026-09-16 ユーザー「後半画像無しが多い」)。
+
+    実測: 目視候補 553件のうち写真なし 24件。並びが ①出品済みKEY無し → ②売れ筋 → ③その他 だけで
+    写真の有無を見ていなかったため、売れ筋の写真なし行が上位に混ざり、
+    先頭20件のうち10件が「見比べられない行」になっていた。
+    """
+    import ut_identify as U
+    def row(title, photos):
+        r = [""] * 40
+        r[U.C_URL] = "https://jp.mercari.com/item/x"
+        r[U.C_TITLE] = title
+        r[U.C_PHOTOS] = photos
+        return r
+    rows = [(1, row("鬼滅 UT XL", ""), "tab"),            # 売れ筋だが写真なし
+            (2, row("その他 UT M", "https://a/1.jpg"), "tab")]
+    got = [t[0] for t in U.order_rows(rows, demand=[])]
+    assert got == [2, 1]
+    assert U.has_photo(row("x", "https://a/1.jpg|"))
+    assert not U.has_photo(row("x", " | "))
+
+
+def test_no_photo_card_still_opens_mercari():
+    """写真が無い行でも押す物を出す (メルカリで開く)。"""
+    import os
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "tools", "ut_identify.py"), encoding="utf-8").read()
+    assert "メルカリで開く" in src
+    assert "ph.nophoto" in src
