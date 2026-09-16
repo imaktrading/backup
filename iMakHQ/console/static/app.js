@@ -550,6 +550,22 @@
     this.setAttribute("aria-expanded", String(!open));
   });
   $("drawer-hide").addEventListener("click", function () { drawerHidden = true; $("drawer").hidden = true; });
+  // ログをまるごとコピー (2026-09-16 ユーザー要望。貼って相談する時に使う)
+  $("drawer-copy").addEventListener("click", function () {
+    var head = ($("job-label").textContent || "") + " " + ($("job-meta").textContent || "");
+    var text = head.trim() + "
+" + $("log").innerText;
+    var b = this;
+    function done(ok) { b.textContent = ok ? "コピーしました" : "コピーできません"; setTimeout(function () { b.textContent = "ログをコピー"; }, 1800); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+      return;
+    }
+    var ta = document.createElement("textarea");          // 古い環境向けの控え
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    try { done(document.execCommand("copy")); } catch (e) { done(false); }
+    document.body.removeChild(ta);
+  });
   $("drawer-stop").addEventListener("click", function () {
     var b = this;
     b.disabled = true;

@@ -214,3 +214,25 @@ def test_stop_button_uses_the_panels_kill():
     assert 'id="drawer-stop"' in html
     app = open(os.path.join(HQ, "console", "static", "app.js"), encoding="utf-8").read()
     assert '$("drawer-stop").hidden = !running.running;' in app   # 走っている時だけ出す
+
+
+def test_sold_restock_button_actually_sends():
+    """「売れた分を補充」は押したら実際に戻す (2026-09-16 ユーザー「押したんだけど・・・」)。
+
+    それまでは --write が無く **下見だけ**で、見ている注文も古い OrdersReport の CSV だった。
+    夜間バッチと同じ呼び方 (--orders-api --write --max=10) に揃える。
+    """
+    sys.path.insert(0, HQ)
+    import control_panel as cp
+    e = next(s for s in cp.SCRIPTS if s.get("badge") == "sold_restock")
+    assert e["cmd"] == ["python", "sold_restock.py", "--orders-api", "--write", "--max=10"]
+    bat = open(os.path.join(HQ, "tools", "run_hoju_search.bat"), encoding="utf-8", errors="replace").read()
+    assert "--orders-api --write --max=10" in bat          # 夜間と同じ形
+
+
+def test_log_has_a_copy_button():
+    """ログをコピー (2026-09-16 ユーザー要望。貼って相談する時に使う)。"""
+    html = open(os.path.join(HQ, "console", "static", "index.html"), encoding="utf-8").read()
+    assert 'id="drawer-copy"' in html
+    app = open(os.path.join(HQ, "console", "static", "app.js"), encoding="utf-8").read()
+    assert "navigator.clipboard" in app and "execCommand" in app   # 控えの手も用意する

@@ -1957,15 +1957,19 @@ SCRIPTS = [
         # 売れた分を入口にする唯一のボタン (2026-08-28)。他の補充系は全部ファネル起点で、
         # 売れて閉じた出品は RESTOCK に乗らないため一覧に出てこなかった (実測: 8/27 の PSA 4枚)。
         # 作り直さない = Relist/Revise で qty=1 + 仕入値から出した価格/送料ポリシーを送るだけ。
-        # 既定は「何をやるか出すだけ」。実行は --write (パネルからは params で渡す)。
+        # ★2026-09-16 ユーザー「売れた分を補充を押したんだけど・・・」:
+        #   押しても **下見だけ** で何も送っていなかった (--write が無く、見ている注文も
+        #   古い OrdersReport の CSV だった)。夜間バッチと同じ呼び方に揃える:
+        #   --orders-api (今の注文) / --write (実際に戻す) / --max=10 (1回10件まで)。
         "category": None, "type": "utility",
         "label": "🔁 売れた分を補充",
         "label_fg": "blue",
         "badge": "sold_restock",
         "tip": "PSA/G-Shock/一番くじで売れた分を、作り直さず qty=1 に戻すだけで補充します。"
+               "押すと実際に戻します (1回10件まで)。"
                "対象外(アパレル等)は監視くんが在庫を見て自動で戻します。",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "sold_restock.py"],
+        "cmd": ["python", "sold_restock.py", "--orders-api", "--write", "--max=10"],
         "params": [],
     },
     {
