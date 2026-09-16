@@ -375,3 +375,16 @@ def test_search_buttons_are_not_checked_for_not_moving():
     assert "badge not in SEARCH_KINDS and cp.badge_did_not_move" in SERVER
     for k in ("hoju_search", "ut_search", "psa_gate", "kuji_search"):
         assert k in SERVER.split("SEARCH_KINDS = {")[1].split("}")[0], k
+
+
+def test_a_job_without_a_step_does_not_hide_the_others():
+    """段の無い作業が「①」扱いになって ②③ を隠していた (2026-09-16)。
+
+    ユーザー「棚②は今日やることに追加しないの？」で発覚。JS の indexOf("") は **0** を返すので、
+    段が空の作業まで rank 1 になり、同じまとまりの 棚② (rank 2) が順番待ちに落ちていた。
+    """
+    app = open(os.path.join(HQ, "console", "static", "app.js"), encoding="utf-8").read()
+    body = app.split("function rankOf(j) {")[1].split("function firstStepOnly")[0]
+    assert 'var s = j.step || "";' in body
+    assert "if (!s) return 9;" in body                      # 段が無ければ順番待ちにしない
+    assert body.index("if (!s) return 9;") < body.index('indexOf(s)')   # indexOf より先に弾く

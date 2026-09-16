@@ -222,8 +222,13 @@
     return item + "/" + j.group;                      // 例: PSA/hoju
   }
   function rankOf(j) {
-    var n = "①②③④⑤".indexOf(j.step || "") + 1;
-    if (!n) return 9;                                  // 段の無い作業は順番待ちにしない
+    // ★2026-09-16 ユーザー「棚②は今日やることに追加しないの？」で発覚:
+    //   段が空の時 indexOf("") は **0** を返すので、段の無い作業まで「①」扱いになり、
+    //   同じまとまりの ②③ を順番待ちに押し下げていた (取下げ=段なし が 棚② を隠していた)。
+    var s = j.step || "";
+    if (!s) return 9;                                  // 段の無い作業は順番待ちにしない
+    var n = "①②③④⑤".indexOf(s) + 1;
+    if (!n) return 9;
     return n + (/入れ替え/.test(j.label) ? 0.5 : 0);    // 入れ替えは補充のあと
   }
   function firstStepOnly(list) {
