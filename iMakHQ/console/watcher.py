@@ -110,26 +110,47 @@ def status(runs, running_now, next_runs, now):
     return out
 
 
+def _span(r):
+    """1本の巡回の時間帯 ("19:30〜21:00" / 所要が分からなければ "19:30〜")。純関数。"""
+    hm = (r.get("next") or "").split(" ")[-1]
+    return hm + "〜" + (r.get("next_eta") or "")
+
+
 def headline(rows, now=None):
-    """画面の1行 (純関数)。走っていれば残り時間、走っていなければ次の巡回まで。"""
+    """画面の1行 (純関数)。
+
+    ★2026-09-16 ユーザー「〜22:45 の表示がないけど」: 一番近い1本しか出していなかった。
+      **このあと控えている巡回を全部**出す (時間帯で分かるように)。
+    """
+    # 今走っている本人と、時刻が過ぎている物は「このあと」に出さない
+    nxt = sorted([r for r in rows if r.get("next_in_min") is not None
+                  and not r["running"] and r["next_in_min"] > 0],
+                 key=lambda x: x["next_in_min"])
+
+    def _tail(skip):
+        later = " / ".join(_span(r) for r in nxt[skip:skip + 3])
+        return ("  このあと " + later) if later else ""
+
     run = [r for r in rows if r["running"]]
     if run:
         r = run[0]
+        # 走っている時は、控えている巡回を **1本目から** 全部出す
         if r.get("eta"):
-            return ("巡回中 %s〜 · 終了めやす %s (あと約%d分) — 重い作業は避ける"
-                    % (r["started"], r["eta"], r.get("left_min", 0)))
-        return "巡回中 %s〜 (所要はまだ分かりません) — 重い作業は避ける" % r["started"]
-    nxt = [r for r in rows if r.get("next_in_min") is not None]
+            return ("巡回中 %s〜%s (あと約%d分) — 重い作業は避ける%s"
+                    % (r["started"], r["eta"], r.get("left_min", 0), _tail(0)))
+        return "巡回中 %s〜 (所要はまだ分かりません) — 重い作業は避ける%s" % (r["started"], _tail(0))
     if not nxt:
         return "巡回の予定が読めません"
-    r = min(nxt, key=lambda x: x["next_in_min"])
+    tail = _tail(1)                                   # 先頭は見出しに出すので、2本目から
+    r = nxt[0]
     hm = r["next"].split(" ")[-1]
-    tail = (" (約%d分かかります)" % r["avg_min"]) if r.get("avg_min") else ""
-    if r["next_in_min"] <= 0:
-        return "次の巡回はまもなく (%s)%s" % (hm, tail)
-    if r["next_in_min"] < 60:
-        return "次の巡回 %s — あと%d分%s" % (hm, r["next_in_min"], tail)
-    return "次の巡回 %s — あと%.1f時間%s" % (hm, r["next_in_min"] / 60.0, tail)
+    when = ("まもなく" if r["next_in_min"] <= 0
+            else ("あと%d分" % r["next_in_min"]) if r["next_in_min"] < 60
+            else "あと%.1f時間" % (r["next_in_min"] / 60.0))
+    head = "次の巡回 %s〜%s (%s)" % (hm, r.get("next_eta") or "", when)
+    if not r.get("next_eta"):
+        head += " ※所要はまだ記録中"
+    return head + tail
 
 
 def load_runs(path=RUNS_PATH):

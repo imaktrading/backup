@@ -55,15 +55,27 @@ def test_shows_end_estimate_while_running():
     r = [x for x in rows if x["name"] == "iMakInventory_Cycle"][0]
     assert r["running"] and r["avg_min"] == 90
     assert r["eta"] == "16:00" and r["left_min"] == 60
-    assert "巡回中 14:30〜" in W.headline(rows, NOW) and "終了めやす 16:00" in W.headline(rows, NOW)
+    assert "巡回中 14:30〜16:00" in W.headline(rows, NOW)
 
 
-def test_shows_next_start_when_idle():
-    runs = {"iMakInventory_Cycle": {"open": None, "done": [{"min": 90}]}}
-    nxt = {"iMakInventory_Cycle": datetime.datetime(2026, 9, 16, 19, 30, 0)}
+def test_shows_every_cycle_left_today():
+    """このあと控えている巡回を全部出す (2026-09-16 ユーザー「〜22:45 の表示がないけど」)。"""
+    runs = {k: {"open": None, "done": [{"min": 90}]} for k in W.TASKS}
+    nxt = {"iMakInventory_Monitor_Daily": datetime.datetime(2026, 9, 16, 19, 0, 0),
+           "iMakInventory_Cycle": datetime.datetime(2026, 9, 16, 19, 30, 0),
+           "iMakInventory_Cycle_LOW": datetime.datetime(2026, 9, 16, 22, 45, 0)}
     rows = W.status(runs, {}, nxt, NOW)
     line = W.headline(rows, NOW)
-    assert "次の巡回 19:30" in line and "4.5時間" in line and "約90分" in line
+    assert "次の巡回 19:00〜20:30" in line and "4.0時間" in line
+    assert "19:30〜21:00" in line and "22:45〜00:15" in line      # 残り2本も出す
+
+
+def test_running_line_also_lists_the_rest():
+    runs = {k: {"open": None, "done": [{"min": 90}]} for k in W.TASKS}
+    started = datetime.datetime(2026, 9, 16, 14, 30, 0)
+    nxt = {"iMakInventory_Cycle_LOW": datetime.datetime(2026, 9, 16, 22, 45, 0)}
+    line = W.headline(W.status(runs, {"iMakInventory_Cycle": started}, nxt, NOW), NOW)
+    assert "巡回中 14:30〜16:00" in line and "22:45〜00:15" in line
 
 
 def test_console_records_even_with_the_window_closed():
