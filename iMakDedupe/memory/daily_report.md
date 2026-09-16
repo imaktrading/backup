@@ -268,3 +268,13 @@
 - 決定: UT は1点もので catalog product_id 無しだが、入稿CSV の C:Model/C:Color/C:Size から出品くんと同一 KEY を生成できる。eBay category 15687/53159 の行を short-circuit で uniqlo_ut:<6桁>:<COLOR>:<SIZE> 化
 - 変更: dedupe/resolver_io.py (_ut_key_from_csv_row + resolve_csv_row/_with_category 短絡) / tests/test_ut_key_from_csv.py 新規13件 (実例 480691:BLUE:2XL / 486159:WHITE:L pin)。commit 3992e2b
 - 検証: UT13 + 全 476 passed。3列揃わない/対象外カテゴリは "" で素通り (fail-closed)。KEY形は出品くん ut_catalog_values と同形を複製 (越境importでなくpin test)。回答2件 + HQ skip gate撤去の合図済
+
+---
+
+## 2026-09-17
+
+### 商品管理シート84行消失 調査依頼 (HQ・高) → 重複くんは犯人でない
+
+- 決定: grep 網羅で行削除(delete_rows/deleteDimension/clear/resize等)・全体書き戻し(ws.update範囲/append/insert)ともに 0件。書込は全て単一セル(D/AI/AJ/ヘッダ)で行を消せない。CSV物理除外はCSVファイル対象でシート非書戻。重複くんは84件消失の原因でない・実装不要
+- 変更: なし (調査回答のみ: 2026-09-16_sheet_rows_vanished_response.md)
+- 検証: dedupe/*.py grep で delete系/clear/resize/append/insert/ws.update(範囲) 全て0件確認。9/9 の test_no_wide_write_over_n_column が append/広範囲を源流禁止済も再確認
