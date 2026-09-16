@@ -631,7 +631,50 @@ def _port_in_use(port):
         return s.connect_ex((HOST, port)) == 0
 
 
+WINDOW_TITLE = "出品くん Console"          # index.html の <title> と同じ
+
+
+def _console_windows():
+    """既に開いている「出品くん Console」の窓 (Windows 以外・失敗時は空)。
+
+    ★Edge のアプリ窓は既存の msedge プロセスに相乗りするため、プロセス一覧では見つからない
+      (コマンドラインに URL が残らない)。窓の題名で探す。
+    """
+    if sys.platform != "win32":
+        return []
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        found = []
+        proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+        def _cb(hwnd, _lparam):
+            if user32.IsWindowVisible(hwnd):
+                n = user32.GetWindowTextLengthW(hwnd)
+                if n:
+                    buf = ctypes.create_unicode_buffer(n + 1)
+                    user32.GetWindowTextW(hwnd, buf, n + 1)
+                    if WINDOW_TITLE in buf.value:
+                        found.append(hwnd)
+            return True
+
+        user32.EnumWindows(proc(_cb), 0)
+        return found
+    except Exception:                                          # noqa: BLE001
+        return []
+
+
 def open_window():
+    """窓を開く。既に開いていれば **前に出すだけ** (二重に開かない)。"""
+    wins = _console_windows()
+    if wins:
+        try:
+            import ctypes
+            ctypes.windll.user32.ShowWindow(wins[0], 9)        # 9 = SW_RESTORE
+            ctypes.windll.user32.SetForegroundWindow(wins[0])
+            return
+        except Exception:                                      # noqa: BLE001
+            return                                             # 前に出せなくても二重には開かない
     url = "http://%s:%d/" % (HOST, PORT)
     try:
         subprocess.Popen([EDGE, "--app=" + url])

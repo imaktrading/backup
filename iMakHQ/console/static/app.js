@@ -67,6 +67,20 @@
       (j.i != null ? ' data-i="' + j.i + '"' : "") + (busy ? " disabled" : "") + ">" +
       esc(text || verb(j)) + "</button>";
   }
+  // 枠ごとボタンにする (2026-09-16 ユーザー「実行ボタンが小さい / 枠がそのままボタンみたいなのがいい」)
+  function openTag(j, cls, style, title) {
+    var busy = running && running.running;
+    if (!j.runnable) return '<div class="' + cls + ' off"' + style + title + ">";
+    return '<button type="button" class="' + cls + '"' + style + title +
+      (j.kind ? ' data-kind="' + esc(j.kind) + '"' : "") +
+      (j.i != null ? ' data-i="' + j.i + '"' : "") + (busy ? " disabled" : "") + ">";
+  }
+  function closeTag(j) { return j.runnable ? "</button>" : "</div>"; }
+  function goMark(j, text) {
+    return j.runnable ? '<span class="go">' + esc(text || verb(j)) + " →</span>"
+                      : '<span class="else">今の出品くんで</span>';
+  }
+
   function sum(list, f) { return list.reduce(function (a, x) { return a + (f(x) || 0); }, 0); }
   function todoOf(list) { return list.filter(function (j) { return j.state === "todo"; }); }
 
@@ -89,20 +103,21 @@
     var body = m.rows.map(function (r, ri) {
       var tds = r[1].map(function (k) {
         var j = k && job(k);
-        if (!j) return '<td><div class="cell na">この段は無し</div></td>';
+        if (!j) return '<td class="pad"><div class="cell na">この段は無し</div></td>';
         var hot = j.state === "todo";
-        return '<td' + (hot ? ' class="hot"' : "") + ' title="' + esc(j.tip) + '"><div class="cell">' +
+        return '<td class="pad' + (hot ? " hot" : "") + '">' + openTag(j, "cell", "", ' title="' + esc(j.tip) + '"') +
           '<span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" +
           '<span class="meta">' + chip(j) + "</span>" +
-          '<span class="act">' + btn(j, hot) + "</span></div></td>";
+          '<span class="act">' + goMark(j) + "</span>" + closeTag(j) + "</td>";
       }).join("");
       if (m.side && ri === 0) {
         var s = job(m.side.kind);
         var shot = s && s.state === "todo";
-        tds += '<td rowspan="' + m.rows.length + '"' + (shot ? ' class="hot"' : "") + '><div class="cell">' +
-          '<span class="n ' + (shot ? "todo" : "zero") + '">' + (s ? num(s) : "—") + "</span>" +
-          '<span class="meta">' + (s ? chip(s) : "") + "</span>" +
-          '<span class="act">' + (s ? btn(s, shot) : "") + "</span></div>" +
+        tds += '<td class="pad' + (shot ? " hot" : "") + '" rowspan="' + m.rows.length + '">' +
+          (s ? openTag(s, "cell", "", "") +
+               '<span class="n ' + (shot ? "todo" : "zero") + '">' + num(s) + "</span>" +
+               '<span class="meta">' + chip(s) + "</span>" +
+               '<span class="act">' + goMark(s) + "</span>" + closeTag(s) : "") +
           '<div class="note" style="margin-top:6px">' + esc(m.side.note) + "</div></td>";
       }
       return '<tr><td class="item">' + esc(r[0]) + "</td>" + tds + "</tr>";
@@ -115,10 +130,11 @@
 
   function liCard(j) {
     var hot = j.state === "todo";
-    return '<div class="li' + (hot ? " hot" : "") + '" title="' + esc(j.tip) + '"><div class="t">' + esc(j.label) + "</div>" +
-      '<div class="note">' + esc(INFO[j.kind] || j.note || "") + "</div>" +
-      '<div class="row"><span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" +
-      chip(j) + btn(j, hot) + "</div></div>";
+    return openTag(j, "li" + (hot ? " hot" : ""), "", ' title="' + esc(j.tip) + '"') +
+      '<span class="t">' + esc(j.label) + "</span>" +
+      '<span class="note">' + esc(INFO[j.kind] || j.note || "") + "</span>" +
+      '<span class="row"><span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" +
+      chip(j) + goMark(j) + "</span>" + closeTag(j);
   }
 
   function rowsFor(names, extra) {
@@ -126,8 +142,8 @@
     var html = (names || []).map(function (name) {
       return buttons.filter(function (x) { return !x.used && x.label.indexOf(name) >= 0; }).map(function (b) {
         b.used = true;
-        return '<div class="rw"><span class="t">' + esc(b.label) + '</span><span class="d">' + esc((b.tip || "").split("。")[0]) + "</span>" +
-          btn(b, false, "実行") + "</div>";
+        return openTag(b, "rw", "", "") + '<span class="t">' + esc(b.label) + '</span><span class="d">' +
+          esc((b.tip || "").split("。")[0]) + "</span>" + goMark(b, "実行") + closeTag(b);
       }).join("");
     }).join("");
     return html + (extra || "");
@@ -191,6 +207,27 @@
   }
 
   // ---------------------------------------------------------------- 今日
+  // ②→③ のように順番があるものは、**今やる段だけ**出す (終わったら次の段が出る)。
+  // 2026-09-16 ユーザー:「②をやったあとで③みたいな順番が影響するのは、②だけ表示して終わったら③」
+  function chainOf(j) {
+    var item = (/^(PSA|UT|くじ|一番くじ|G-SHOCK)/.exec(j.label) || [, "全商材"])[1];
+    return item + "/" + j.group;                      // 例: PSA/hoju
+  }
+  function rankOf(j) {
+    var n = "①②③④⑤".indexOf(j.step || "") + 1;
+    if (!n) return 9;                                  // 段の無い作業は順番待ちにしない
+    return n + (/入れ替え/.test(j.label) ? 0.5 : 0);    // 入れ替えは補充のあと
+  }
+  function firstStepOnly(list) {
+    var best = {};
+    list.forEach(function (j) {
+      var k = chainOf(j), r = rankOf(j);
+      if (best[k] == null || r < best[k]) best[k] = r;
+    });
+    var now = list.filter(function (j) { return rankOf(j) === best[chainOf(j)] || rankOf(j) === 9; });
+    return { now: now, waiting: list.length - now.length };
+  }
+
   function paintToday() {
     var todo = todoOf(jobList);
     var elsewhere = todo.filter(function (j) { return !j.runnable; }).length;
@@ -200,20 +237,26 @@
 
     var lanes = [["maint", "在庫メンテ", "--p-maint", ["hoju", "restock", "shelf"]],
                  ["new", "新規出品", "--p-new", ["seed"]]];
+    var waiting = 0;
     var html = lanes.map(function (L) {
-      var list = todo.filter(function (j) { return L[3].indexOf(j.group) >= 0; })
-        .sort(function (a, b) { return (b.n || 0) - (a.n || 0); });
+      var picked = firstStepOnly(todo.filter(function (j) { return L[3].indexOf(j.group) >= 0; }));
+      waiting += picked.waiting;
+      var list = picked.now.sort(function (a, b) { return (b.n || 0) - (a.n || 0); });
       if (!list.length) return "";
       return '<div class="lane" style="--pc:var(' + L[2] + ')"><h2>' + esc(L[1]) + " <small>" + list.length + "</small></h2>" +
         '<div class="tasks">' + list.map(function (j) {
-          return '<div class="task" style="--gc:var(--g-' + esc(j.group) + ');--pc:var(' + L[2] + ')" title="' + esc(j.tip) + '">' +
+          return openTag(j, "task", ' style="--gc:var(--g-' + esc(j.group) + ');--pc:var(' + L[2] + ')"', ' title="' + esc(j.tip) + '"') +
             '<span class="tag"><span class="pg">' + esc(groupName(j.group)) + '</span><span class="gp">' + esc(tagOf(j)) + "</span></span>" +
             '<span class="nm">' + esc(shortName(j.label)) + "</span>" +
-            '<div class="row"><span class="n">' + num(j) + "<small>件</small></span>" + btn(j, true) + "</div></div>";
+            '<span class="row"><span class="n">' + num(j) + "<small>件</small></span>" + goMark(j) + "</span>" + closeTag(j);
         }).join("") + "</div></div>";
     }).join("");
     $("today-lanes").innerHTML = html || '<div class="card"><div class="empty">押さないと減らない残件はありません</div></div>';
-    $("tab-today").innerHTML = "要対応 <b>" + todo.length + "</b> · 残件 " + sum(todo, function (j) { return j.n; }).toLocaleString("ja-JP");
+    $("today-wait").textContent = waiting
+      ? "順番待ち " + waiting + "件 — 上の段が終わると出ます (全体は「在庫メンテ」の表)" : "";
+    $("kp-todo").textContent = todo.length - waiting;
+    $("tab-today").innerHTML = "いま押す <b>" + (todo.length - waiting) + "</b> · 残件 " +
+      sum(todo, function (j) { return j.n; }).toLocaleString("ja-JP");
   }
   function groupName(g) { return { hoju: "補URL", restock: "再仕入れ", shelf: "取下げ・棚", seed: "見つける" }[g] || g; }
   function tagOf(j) {
@@ -236,9 +279,11 @@
     var extra = buttons.filter(function (b) { return !b.used && !b.badge; });
     $("g-other").hidden = !rest.length && !extra.length;
     $("other-rows").innerHTML = rest.map(function (j) {
-      return '<div class="rw"><span class="t">' + esc(j.label) + '</span><span class="d">' + esc(j.tip.split("。")[0]) + "</span>" + btn(j, j.state === "todo") + "</div>";
+      return openTag(j, "rw", "", "") + '<span class="t">' + esc(j.label) + '</span><span class="d">' +
+        esc(j.tip.split("。")[0]) + "</span>" + goMark(j) + closeTag(j);
     }).join("") + extra.map(function (b) {
-      return '<div class="rw"><span class="t">' + esc(b.label) + '</span><span class="d">' + esc((b.tip || "").split("。")[0]) + "</span>" + btn(b, false, "実行") + "</div>";
+      return openTag(b, "rw", "", "") + '<span class="t">' + esc(b.label) + '</span><span class="d">' +
+        esc((b.tip || "").split("。")[0]) + "</span>" + goMark(b, "実行") + closeTag(b);
     }).join("");
   }
 
@@ -308,8 +353,11 @@
     else line = '<span><span class="dot bad"></span>夜間バッチ 記録なし</span>';
     $("night").innerHTML = line;
     $("kp-night").textContent = n.done ? "完走" : n.date ? "途中で停止" : "—";
-    (h.errors || []).forEach(function (e) { alerts.push(["", "読込", e]); });
-    $("alerts").innerHTML = alerts.map(function (a) { return '<div class="alert ' + a[0] + '" role="status"><b>' + esc(a[1]) + "</b><span>" + esc(a[2]) + "</span></div>"; }).join("");
+    // 夜間の話は「定期」タブに置く (2026-09-16 ユーザー「今日やること に夜間バッチはいらない」)
+    $("night-alerts").innerHTML = alerts.map(function (a) { return '<div class="alert ' + a[0] + '" role="status"><b>' + esc(a[1]) + "</b><span>" + esc(a[2]) + "</span></div>"; }).join("");
+    $("alerts").innerHTML = (h.errors || []).map(function (e) {
+      return '<div class="alert" role="status"><b>読込</b><span>' + esc(e) + "</span></div>";
+    }).join("");
   }
 
   function paintTasks(d) {

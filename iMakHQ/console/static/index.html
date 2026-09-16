@@ -46,7 +46,7 @@
     </div>
     <div id="alerts"></div>
     <div id="today-lanes"><div class="empty">件数を読込中…</div></div>
-    <div class="night" id="night"><span><span class="dot"></span>夜間バッチ 読込中</span></div>
+    <p class="note" id="today-wait"></p>
   </div>
 
   <!-- ===== 新規出品 ===== -->
@@ -119,6 +119,8 @@
   <div class="page" id="p-sch" hidden style="--pc:var(--p-other);--pcs:var(--p-other-soft)">
     <div class="hero"><div><h1>定期</h1><div class="why">Windows のタスクで決まった時刻に動くもの。ここは見るだけ</div></div>
       <div class="kp"><div><label>夜間バッチ</label><b id="kp-night">—</b></div></div></div>
+    <div class="night" id="night"><span><span class="dot"></span>夜間バッチ 読込中</span></div>
+    <div id="night-alerts"></div>
     <section class="card">
       <div class="ch"><h3>登録されているタスク</h3><p>前回の結果と次回の予定</p><span class="right" id="sch-at"></span></div>
       <div class="rows" id="sch-rows"><div class="empty">読込中…</div></div>
