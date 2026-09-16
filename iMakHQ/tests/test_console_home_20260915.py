@@ -277,3 +277,28 @@ def test_log_can_be_opened_anytime():
     body = app[i:i + 700]
     assert '$("drawer").hidden = false' in body
     assert "直近のログ" in body                      # 走っていない時の見出し
+
+
+def test_console_watches_for_counts_that_do_not_move():
+    """押しても件数が減らないボタンを、新画面でも毎回見張る (2026-09-16)。
+
+    ユーザー「こういうの、頻発している。他のボタンも含めてちゃんとやってよ。
+    これを見て作業しているんだから！」
+    旧パネルにしか見張り (_check_badge_moved) が無く、新画面で作業している間は
+    ずれても記録すら残らなかった (badge_drift.jsonl は6件しか無かった)。
+    """
+    assert "before = count_of(script.get(\"badge\"))" in SERVER
+    assert "cp.badge_did_not_move(before, after)" in SERVER
+    assert "cp._record_badge_drift(badge, label, before, after)" in SERVER
+    assert "if rc in (0, None) and not stopped:" in SERVER      # 失敗・停止は突き合わせない
+
+
+def test_sold_restock_count_uses_the_same_orders_as_the_button():
+    """件数と実行が別の物を見ていた (2026-09-16 ユーザー「件数が変わってないけど」)。
+
+    ボタンは注文API、件数はデスクの古い CSV を見ていたので、補充しても件数が動かなかった。
+    """
+    src = open(os.path.join(HQ, "tools", "sold_restock.py"), encoding="utf-8").read()
+    body = src.split("def count_workload()")[1].split("\ndef ")[0]
+    assert "orders_from_api()" in body                          # まず注文API
+    assert body.index("orders_from_api()") < body.index("_find_desk_report()")   # CSV は控え

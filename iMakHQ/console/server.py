@@ -584,6 +584,14 @@ def stop_job():
     return 200, {"ok": True}
 
 
+def count_of(kind):
+    """今の件数 (種類ごと)。数えていなければ None。"""
+    if not kind or not STATE.get("counts"):
+        return None
+    info = summarize(STATE["counts"]).get(kind)
+    return info.get("n") if info else None
+
+
 def _run_worker(script, cmd=None):
     """走る前のガード → 実行 → 後処理。**旧パネルと同じ関数** (control_panel.before_run / after_run)。"""
     cp = _cp()
@@ -623,6 +631,7 @@ def _run_worker(script, cmd=None):
 
     started = None
     rc = None
+    before = count_of(script.get("badge"))        # 押す前の件数 (走行後に減ったか見る)
     try:
         if not cp.before_run(script, _to_log):                  # 新規生成の安全弁 (N列関数ガード等)
             _log("🚫 走る前の確認で中止しました")
@@ -656,8 +665,22 @@ def _run_worker(script, cmd=None):
     with _LOCK:
         STATE["job"].update(rc=rc, running=False)
         STATE["proc"] = None
+        stopped = STATE["stopping"]
         STATE["stopping"] = False
     refresh_counts()
+    # ★押したのに件数が減らなかったら、その場で言う (旧パネルと同じ判定を使う)。
+    #   失敗した走行・止めた走行は何もしていないので突き合わせない。
+    if rc in (0, None) and not stopped:
+        badge = script.get("badge")
+        after = count_of(badge)
+        try:
+            if badge and cp.badge_did_not_move(before, after):
+                _log("⚠️ 押しても件数が減りませんでした (%s: %s件 → %s件)。"
+                     "表示が『作業できる件数』になっていない可能性があります"
+                     % (label, before, after))
+                cp._record_badge_drift(badge, label, before, after)
+        except Exception:                                      # noqa: BLE001
+            pass
 
 
 # ---------------------------------------------------------------- HTTP

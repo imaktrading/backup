@@ -443,12 +443,20 @@ def count_workload():
     out = {"report": False, "actionable": 0, "unknown": 0, "done": 0,
            "blocked": 0, "error": ""}
     try:
-        src = W._find_desk_report()
-        if not src:
-            out["error"] = "注文レポートがありません (reports フォルダに ebay-all-orders-report-*.csv)"
-            return out
-        out["report"] = True
-        pairs = [(o, W.category_of(o.get("Item Title") or "")) for o in W.read_orders(src)]
+        # ★2026-09-16: ボタンと同じ **注文API** を見る。以前はデスクの古い CSV を見ていたため、
+        #   補充しても件数が動かなかった (ユーザー「件数が変わってないけど」)。
+        #   API が読めない時だけ CSV に落ちる (件数が出ないより、古くても出す方がまし)。
+        try:
+            orders = orders_from_api()
+            out["report"] = True
+        except Exception:                                          # noqa: BLE001
+            src = W._find_desk_report()
+            if not src:
+                out["error"] = "注文が読めません (注文API も reports フォルダの CSV も)"
+                return out
+            out["report"] = True
+            orders = W.read_orders(src)
+        pairs = [(o, W.category_of(o.get("Item Title") or "")) for o in orders]
         want = [(o, c) for o, c in pairs if c]
         if not want:
             return out

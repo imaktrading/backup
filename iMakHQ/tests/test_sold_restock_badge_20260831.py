@@ -24,10 +24,32 @@ _SRC = open(_PANEL, encoding="utf-8").read()
 
 
 def test_missing_report_is_reported_not_hidden(monkeypatch):
+    """注文が1つも読めない時は、黙って0にせず「読めません」と出す。
+
+    ★2026-09-16: 件数の元を **注文API** に変えた (ボタンと同じ物を見るため)。
+      デスクの CSV は控え。両方ダメな時だけ report=False。
+    """
+    def _boom(*a, **k):
+        raise RuntimeError("API 不可")
+    monkeypatch.setattr(SR, "orders_from_api", _boom)
     monkeypatch.setattr(SR.W, "_find_desk_report", lambda: "")
     got = SR.count_workload()
     assert got["report"] is False
     assert got["error"]
+
+
+def test_count_prefers_the_same_orders_as_the_button(monkeypatch):
+    """件数とボタンが同じ注文を見る (2026-09-16 ユーザー「件数が変わってないけど」)。"""
+    called = {"api": 0, "csv": 0}
+
+    def _api(*a, **k):
+        called["api"] += 1
+        return []
+
+    monkeypatch.setattr(SR, "orders_from_api", _api)
+    monkeypatch.setattr(SR.W, "_find_desk_report", lambda: called.__setitem__("csv", called["csv"] + 1))
+    SR.count_workload()
+    assert called["api"] == 1 and called["csv"] == 0      # API が主・CSV は読まない
 
 
 def test_never_calls_per_item_ebay_status():
