@@ -45,6 +45,7 @@
       </div>
     </div>
     <div id="alerts"></div>
+    <div class="watch" id="watch" hidden><span class="dot"></span><b id="watch-line">巡回を確認中…</b><span id="watch-sub"></span></div>
     <div id="today-lanes"><div class="empty">件数を読込中…</div></div>
     <p class="note" id="today-wait"></p>
   </div>
@@ -115,6 +116,10 @@
     <div class="hero"><div><h1>定期</h1><div class="why">Windows のタスクで決まった時刻に動くもの。ここは見るだけ</div></div>
       <div class="kp"><div><label>夜間バッチ</label><b id="kp-night">—</b></div></div></div>
     <div class="night" id="night"><span><span class="dot"></span>夜間バッチ 読込中</span></div>
+    <section class="card">
+      <div class="ch"><h3>監視くんの巡回</h3><p>この時間帯は PC が重くなります (仕入元を見るブラウザを何本も開くため)</p></div>
+      <div class="rows" id="watch-rows"><div class="empty">読込中…</div></div>
+    </section>
     <div id="night-alerts"></div>
     <section class="card">
       <div class="ch"><h3>登録されているタスク</h3><p>前回の結果と次回の予定</p><span class="right" id="sch-at"></span></div>

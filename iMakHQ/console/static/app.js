@@ -438,6 +438,28 @@
     $("ver-log").textContent = d.changelog || "";
   }
 
+  function paintWatcher(d) {
+    var rows = d.rows || [];
+    var run = rows.filter(function (r) { return r.running; })[0];
+    $("watch").hidden = !rows.length;
+    $("watch").className = "watch" + (run ? " on" : "");
+    $("watch-line").textContent = "監視くん — " + (d.line || "");
+    $("watch-sub").textContent = d.at ? "(" + d.at + " 時点)" : "";
+    $("watch-rows").innerHTML = rows.length ? rows.map(function (r) {
+      var now = r.running
+        ? "巡回中 " + r.started + "〜" + (r.eta ? " · 終了めやす " + r.eta + " (あと約" + r.left_min + "分)" : "")
+        : "止まっています";
+      var nxt = r.next ? "次 " + r.next + (r.next_eta ? " 〜 " + r.next_eta : "") : "次の予定なし";
+      var avg = r.avg_min ? "1回 約" + r.avg_min + "分 (" + r.runs + "回の平均)" : "所要はまだ記録中";
+      return '<div class="rw"><span class="t">' + esc(r.label) + "</span>" +
+        '<span class="d">' + esc(now + " · " + nxt) + "</span>" +
+        '<span class="chip ' + (r.running ? "todo" : "done") + '">' + esc(avg) + "</span></div>";
+    }).join("") : '<div class="empty">読込中…</div>';
+  }
+  function refreshWatcher() {
+    return getJSON("/api/watcher").then(function (d) { paintWatcher(d); if (d.loading) setTimeout(refreshWatcher, 4000); });
+  }
+
   function refreshJobs() { return getJSON("/api/jobs").then(paintJobs); }
   function refreshHome() { return getJSON("/api/home").then(function (d) { paintHome(d); if (d.loading || !d.home) setTimeout(refreshHome, 3000); }); }
   function refreshTasks() { return getJSON("/api/tasks").then(function (d) { paintTasks(d); if (d.loading) setTimeout(refreshTasks, 3000); }); }
@@ -540,6 +562,8 @@
   var h = (location.hash || "").slice(1);
   if ($("p-" + h)) show(h);
   getJSON("/api/version").then(paintVersion);
+  refreshWatcher();
+  setInterval(refreshWatcher, 120000);        // 巡回の状況は2分ごと
   getJSON("/api/buttons").then(function (d) { buttons = d.buttons || []; return refreshJobs(); }).then(refreshHome);
   setInterval(refreshJobs, 60000);
   pollLog();

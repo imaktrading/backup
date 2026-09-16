@@ -26,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import version
+import watcher
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HQ = os.path.dirname(HERE)
@@ -222,6 +223,7 @@ STATE = {
     "home": None, "home_at": 0, "home_loading": False,
     "crew": None, "crew_at": 0,
     "tasks": None, "tasks_at": 0,
+    "watcher": None, "watcher_at": 0,
     "job": None,            # {kind, label, started, rc, running}
     "proc": None,           # 走らせている subprocess (止めるボタン用)
     "stopping": False,      # 止めるボタンで止めた走行か (締めの文言用)
@@ -446,6 +448,69 @@ def _ps_date(v):
     return "—" if dt.year < 2000 else dt.strftime("%m/%d %H:%M")
 
 
+def _watcher_probe():
+    """巡回中のプロセスと、監視くんタスクの次回開始を1回で取る (PowerShell 1回)。"""
+    ps = (
+        "$p = Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | "
+        "  Where-Object { $_.CommandLine -match 'run_cycle|monitor' } | "
+        "  ForEach-Object { @{ cmd = $_.CommandLine; start = $_.CreationDate.ToString('s') } };"
+        "$t = Get-ScheduledTask | Where-Object { $_.TaskName -like 'iMakInventory*' } | "
+        "  Get-ScheduledTaskInfo | ForEach-Object { @{ name = $_.TaskName; "
+        "    next = $(if ($_.NextRunTime) { $_.NextRunTime.ToString('s') } else { '' }) } };"
+        "@{ procs = @($p); tasks = @($t) } | ConvertTo-Json -Depth 4 -Compress"
+    )
+    r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       timeout=90, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return json.loads(r.stdout or "{}")
+
+
+def _watcher_worker():
+    now = datetime.datetime.now()
+    try:
+        d = _watcher_probe()
+        running = {}
+        for p in (d.get("procs") or []):
+            task = watcher.task_of_cmdline(p.get("cmd"))
+            st = watcher._parse(p.get("start"))
+            if task and st:
+                running[task] = st
+        nexts = {}
+        for t in (d.get("tasks") or []):
+            if t.get("name") in watcher.TASKS:
+                nexts[t["name"]] = watcher._parse(t.get("next"))
+        runs = watcher.update_runs(watcher.load_runs(), running, now)
+        watcher.save_runs(runs)
+        rows = watcher.status(runs, running, nexts, now)
+        STATE["watcher"] = {"rows": rows, "line": watcher.headline(rows, now),
+                            "at": now.strftime("%H:%M")}
+    except Exception as e:                                     # noqa: BLE001
+        STATE["watcher"] = {"rows": [], "line": "巡回の状況が取れません (%s)" % e, "at": ""}
+    STATE["watcher_at"] = time.time()
+
+
+def get_watcher():
+    """監視くんの巡回 (巡回中か / 終了めやす / 次回)。記録は _watcher_loop が2分ごとに回す。"""
+    if STATE["watcher"] is None and time.time() - STATE["watcher_at"] > 30:
+        STATE["watcher_at"] = time.time()
+        threading.Thread(target=_watcher_worker, daemon=True).start()
+    return STATE["watcher"] or {"rows": [], "line": "読込中…", "loading": True}
+
+
+def _watcher_loop():
+    """画面を閉じていても巡回を記録し続ける (2分ごと)。
+
+    ★画面のポーリング任せにすると、窓を閉じている間の巡回が記録されず、
+      「1回だいたい何分か」がいつまでも出ない。
+    """
+    while True:
+        try:
+            _watcher_worker()
+        except Exception:                                      # noqa: BLE001
+            pass
+        time.sleep(120)
+
+
 def get_tasks():
     if STATE["tasks"] is None or time.time() - STATE["tasks_at"] > TASKS_TTL:
         STATE["tasks_at"] = time.time()
@@ -626,6 +691,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, get_buttons())
         if u.path == "/api/tasks":
             return self._json(200, get_tasks())
+        if u.path == "/api/watcher":
+            return self._json(200, get_watcher())
         if u.path == "/api/version":
             return self._json(200, get_version())
         if u.path == "/api/log":
@@ -733,6 +800,7 @@ def main():
         return
     _load_counts_cache()
     threading.Thread(target=get_home, daemon=True).start()
+    threading.Thread(target=_watcher_loop, daemon=True).start()
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     if "--no-open" not in sys.argv:
         threading.Timer(0.6, open_window).start()
