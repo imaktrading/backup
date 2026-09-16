@@ -137,5 +137,39 @@ def main() -> int:
     return 1 if failed else 0
 
 
+class _Tee:
+    """print を 画面とログの両方へ。pythonw (Task Scheduler) は画面が無いのでログが本体。"""
+
+    def __init__(self, *streams):
+        self.streams = [s for s in streams if s is not None]
+
+    def write(self, text):
+        for st in self.streams:
+            try:
+                st.write(text)
+            except Exception:
+                pass
+
+    def flush(self):
+        for st in self.streams:
+            try:
+                st.flush()
+            except Exception:
+                pass
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    # ★ 2026-09-16: 1 時間おきの自動実行 (iMakInventory_DrainTakedowns_Hourly) を追加。
+    #   pythonw で走るため print が捨てられる = 何をしたか残らないので、必ずログに書く。
+    from datetime import datetime as _dt  # noqa: PLC0415
+    from pathlib import Path as _Path  # noqa: PLC0415
+    _log = _Path(__file__).resolve().parent.parent / "logs" / "drain_hourly.log"
+    try:
+        _log.parent.mkdir(parents=True, exist_ok=True)
+        with open(_log, "a", encoding="utf-8") as _f:
+            _f.write("===== " + _dt.now().strftime("%Y-%m-%d %H:%M:%S") + " =====" + chr(10))
+            sys.stdout = _Tee(sys.__stdout__, _f)
+            _rc = main()
+    except Exception:
+        _rc = main()          # ログに書けなくても本体は動かす
+    sys.exit(_rc)
