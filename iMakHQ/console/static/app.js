@@ -323,7 +323,8 @@
     if (!h) return;
     var s = h.stats || {}, m = h.month || {}, shop = [];
     if (s.total_active != null) {
-      shop.push("出品中 <b>" + s.total_active + "</b>");
+      shop.push("出品中 <b>" + Number(s.total_active).toLocaleString("ja-JP") + "</b>" +
+                (s.active_is_us ? " <small>US</small>" : ""));
       shop.push("評価 <b>" + s.feedback_score + "</b> (" + s.feedback_percentage + "%)");
     }
     if (!h.shelf_unread && m.usd != null) shop.push("今月追加 <b>" + money(m.usd) + "</b>");

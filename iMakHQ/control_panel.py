@@ -2743,8 +2743,19 @@ def _fetch_seller_stats(token):
             total_active = data.get("total", 0)
             items = data.get("itemSummaries", [])
             seller_info = items[0].get("seller", {}) if items else {}
+            # ★2026-09-16 ユーザー指摘「出品中 585 これって違うよね？」:
+            #   q="Japan" の検索件数を「出品中」として出していたため、タイトルに Japan が
+            #   入らない出品 (G-SHOCK / モンベル / ガチャ 等) が抜けていた (US 実数 1,027 → 585)。
+            #   出品中は **毎朝のスナップショットの US 出品数** を使う (ユーザー選択: US だけ)。
+            us_n, us_at = None, None
+            try:
+                us_n, us_at = _funnel_io().us_active_count()
+            except Exception:                                  # noqa: BLE001
+                pass
             return {
-                "total_active": total_active,
+                "total_active": us_n if us_n is not None else total_active,
+                "active_source": ("スナップショット %s" % us_at) if us_n is not None else "q=Japan の検索",
+                "active_is_us": us_n is not None,
                 "feedback_score": seller_info.get("feedbackScore", "?"),
                 "feedback_percentage": seller_info.get("feedbackPercentage", "?"),
             }

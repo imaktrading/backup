@@ -107,3 +107,43 @@ def latest_funnel_prices(funnel_dir=None):
     if not p:
         return {}, None
     return price_map_from_funnel_rows(read_funnel_rows(p)), p
+
+
+def latest_snapshot_path(snapshot_dir=None):
+    """直近の eBay 出品スナップショット (毎朝4:30に全出品を取っている物)。無ければ None。"""
+    hits = sorted(glob.glob(os.path.join(snapshot_dir or SNAPSHOT_DIR, "ebay_active_*.csv")),
+                  key=os.path.getmtime, reverse=True)
+    return hits[0] if hits else None
+
+
+def us_active_from_snapshot_rows(rows):
+    """スナップショットの行 → US の出品の itemID (純関数)。
+
+    ★2026-09-16 ユーザー指摘「出品中 585 これって違うよね？」:
+      それまで画面の「出品中」は **q="Japan" で検索した件数** を出していた。
+      タイトルに Japan が入らない出品 (G-SHOCK / モンベル / ガチャ 等) が丸ごと抜け、
+      US 実数 1,027件 に対し 585 と出ていた。ミラー (UK/AU/CA/DE) は自分で増減させる物では
+      ないので数に入れない (ユーザー選択: US だけ)。
+    """
+    out = set()
+    for r in rows or []:
+        iid = (r.get("Item number") or r.get("item_id") or "").strip()
+        site = (r.get("Listing site") or r.get("site") or "").strip().upper()
+        if iid and site in ("US", "EBAY.COM"):
+            out.add(iid)
+    return out
+
+
+def us_active_count(snapshot_dir=None):
+    """US の出品数と、その材料の日時 (取れなければ (None, None))。"""
+    p = latest_snapshot_path(snapshot_dir)
+    if not p:
+        return None, None
+    try:
+        with io.open(p, encoding="utf-8-sig", newline="") as f:
+            n = len(us_active_from_snapshot_rows(list(csv.DictReader(f))))
+    except OSError:
+        return None, None
+    import datetime
+    at = datetime.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%m/%d %H:%M")
+    return n, at
