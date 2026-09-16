@@ -639,10 +639,16 @@ def _run_worker(script, cmd=None):
                 STATE["job"].update(rc=None, running=False)
             return
         started = time.time()      # 旧パネルと同じ位置 (今回の CSV だけを後処理の対象にする基準)
+        # ★2026-09-16: サーバを入れ替えた時に **走行中の作業を道連れにしない**。
+        #   実害: 18:11 にサーバを再起動して、走っていた 🤖自動 (PSA) を落とした。
+        #   別のプロセスグループで起こす (止めるボタンは今までどおりツリーごと止める)。
+        _flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                  | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                  | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0))
         p = subprocess.Popen(cmd, cwd=script["cwd"], env=env,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                              encoding="utf-8", errors="replace", bufsize=1,
-                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                             creationflags=_flags)
         STATE["proc"] = p                                      # 止めるボタン用
         for line in p.stdout:
             _log(line)

@@ -302,3 +302,16 @@ def test_sold_restock_count_uses_the_same_orders_as_the_button():
     body = src.split("def count_workload()")[1].split("\ndef ")[0]
     assert "orders_from_api()" in body                          # まず注文API
     assert body.index("orders_from_api()") < body.index("_find_desk_report()")   # CSV は控え
+
+
+def test_running_job_is_not_killed_when_the_server_restarts():
+    """サーバを入れ替えても、走っている作業を道連れにしない (2026-09-16 実害)。
+
+    18:11 にサーバを再起動して、走っていた 🤖自動 (PSA) を落とした
+    (ログは「📷2 ✓」で切れ、生成に進まなかった)。
+    子は別のプロセスグループで起こす + 入れ替え用スクリプトは走行中に止める。
+    """
+    assert "CREATE_NEW_PROCESS_GROUP" in SERVER
+    assert "CREATE_BREAKAWAY_FROM_JOB" in SERVER
+    ps1 = open(os.path.join(HQ, "console", "restart.ps1"), encoding="utf-8-sig").read()
+    assert "running -and -not $Force" in ps1        # 走行中は入れ替えない
