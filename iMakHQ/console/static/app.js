@@ -327,16 +327,22 @@
       shop.map(function (x) { return "<span>" + x + "</span>"; }).join("") +
       '<span id="shop-ver" class="ver">' + esc(ver) + "</span>";
 
-    $("kp-month").textContent = h.shelf_unread ? "—" : money(m.usd);
-    $("kp-month-n").textContent = h.shelf_unread ? "読込中" : (m.count || 0) + "件";
-    $("kp-shelf").textContent = h.shelf_unread ? "—" : money(m.shelf_usd);
+    var noMoney = h.shelf_unread || h.price_missing;
+    $("kp-month").textContent = noMoney ? "—" : money(m.usd);
+    $("kp-month-n").textContent = noMoney ? (h.price_missing ? "価格なし" : "読込中") : (m.count || 0) + "件";
+    $("kp-shelf").textContent = noMoney ? "—" : money(m.shelf_usd);
     $("kp-budget").textContent = money(m.shelf_budget);
 
-    if (h.shelf_unread) {
+    if (h.price_missing) {
+      $("shelf-sub").textContent = "金額が出せません";
+      $("shelf-bars").innerHTML = '<div class="empty">ファネル (funnel_output/funnel_*.csv) が無いので、出品価格が分かりません。ファネル分析を1回走らせてください</div>';
+    } else if (h.shelf_unread) {
       $("shelf-sub").textContent = "読み直し待ち";
       $("shelf-bars").innerHTML = '<div class="empty">統合シートを読めませんでした。1分後に読み直します</div>';
     } else {
-      $("shelf-sub").textContent = "棚 " + money(m.shelf_usd) + " / 予算 " + money(m.shelf_budget);
+      var ps = h.price_source || {};
+      $("shelf-sub").textContent = "棚 " + money(m.shelf_usd) + " / 予算 " + money(m.shelf_budget) +
+        (ps.path ? " · 価格は " + String(ps.path).replace(/^.*funnel_/, "ファネル ").replace(/\.csv$/, "") : "");
       var bars = (h.shelf || []).filter(function (r) { return r.budget || r.usd; }).map(function (r) {
         var cls = "none", pct = 100, amt = money(r.usd);
         if (r.budget) {
@@ -346,8 +352,9 @@
           else if (r.usd / r.budget < 0.9) { cls = "under"; amt = "−" + money(gap); }
           else { cls = ""; amt = "予算どおり"; }
         }
-        return '<div class="sb" title="' + esc(r.cat) + " 現在 " + money(r.usd) + (r.budget ? " / 予算 " + money(r.budget) : " / 予算なし") + " · " + r.count + '件"><span>' + esc(r.cat) +
-          '</span><div class="track"><div class="fill ' + cls + '" style="width:' + pct.toFixed(1) + '%"></div></div><span class="amt ' + cls + '">' + amt + "</span></div>";
+        var np = r.no_price ? " · 価格不明 " + r.no_price + "件 (ファネル未反映)" : "";
+        return '<div class="sb" title="' + esc(r.cat) + " 現在 " + money(r.usd) + (r.budget ? " / 予算 " + money(r.budget) : " / 予算なし") + " · " + r.count + "件" + np + '"><span>' + esc(r.cat) +
+          '</span><div class="track"><div class="fill ' + cls + '" style="width:' + pct.toFixed(1) + '%"></div></div><span class="amt ' + cls + '">' + amt + (r.no_price ? '<small style="color:var(--ink-3)"> (不明' + r.no_price + ')</small>' : "") + "</span></div>";
       });
       if (bars.length) $("shelf-bars").innerHTML = bars.join("");
     }

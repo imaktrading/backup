@@ -2581,6 +2581,8 @@ def _month_start_iso():
 
 
 _CACHED_SHEET_COUNTS = {"data": None, "ts": 0}
+# 棚割りの金額をどこから取ったか (画面に出す用)。path=None ならファネルが無い = 金額を出せない
+PRICE_SOURCE = {"path": None, "n": 0}
 
 def _empty_cat():
     return {'current': 0, 'monthly': 0, 'usd': 0.0, 'monthly_usd': 0.0, 'no_price': 0}
@@ -2593,6 +2595,44 @@ def _to_usd(text):
         return float(t)
     except ValueError:
         return 0.0
+
+
+def price_map_from_funnel_rows(rows):
+    """ファネルの行 → {itemID: US$}。US の行だけ (純関数)。
+
+    ★2026-09-16: 棚割りの金額はここから取る。統合シートの M列は「現在価格(円)=仕入元の値」で、
+      US の出品価格ではない (見出しで確認済)。円を $ として合計していたので桁が狂っていた。
+    ミラー (UK/AU/CA/DE) は親の US を写した別 itemID なので、二重に数えないよう US だけ使う。
+    """
+    out = {}
+    for r in rows or []:
+        if (r.get("site") or "").strip().upper() != "US":
+            continue
+        item_id = (r.get("item_id") or "").strip()
+        if not item_id:
+            continue
+        try:
+            usd = float(str(r.get("price") or "").replace("$", "").replace(",", "").strip() or 0)
+        except ValueError:
+            usd = 0.0
+        if usd > 0:
+            out[item_id] = usd
+    return out
+
+
+def latest_funnel_prices(funnel_dir=None):
+    """直近のファネルから {itemID: US$} を読む。無ければ ({}, None)。"""
+    import csv
+    import glob as _g
+    funnel_dir = funnel_dir or os.path.join(WORKSPACE, "iMakHQ", "funnel_output")
+    hits = sorted(_g.glob(os.path.join(funnel_dir, "funnel_*.csv")), key=os.path.getmtime, reverse=True)
+    if not hits:
+        return {}, None
+    try:
+        with open(hits[0], encoding="utf-8-sig", newline="") as f:
+            return price_map_from_funnel_rows(list(csv.DictReader(f))), hits[0]
+    except OSError:
+        return {}, None
 
 
 def _fetch_consolidated_counts(month_yyyymm, cache_seconds=60):
@@ -2629,6 +2669,10 @@ def _fetch_consolidated_counts(month_yyyymm, cache_seconds=60):
         for key, data in ex.map(_read, args_list):
             sheet_data[key] = data
 
+    _funnel_prices, _funnel_path = latest_funnel_prices()
+    PRICE_SOURCE["path"] = _funnel_path
+    PRICE_SOURCE["n"] = len(_funnel_prices)
+
     # R列で自動グルーピング。★2026-09-05: 件数だけでなく **US価格の合計** も持つ
     #   (棚割りの単位が金額なので、金額が無いと進捗が出せない)。M列 = 今の出品価格。
     result = {}  # category → {current, monthly, usd, monthly_usd}
@@ -2639,14 +2683,15 @@ def _fetch_consolidated_counts(month_yyyymm, cache_seconds=60):
             url      = row[0].strip()
             item_id  = row[1].strip()
             sold     = row[3].strip()
-            price    = row[12].strip()          # M列 = 今の出品価格 (US$)
             cat      = row[17].strip()
             added    = row[20].strip()
             if not url or not cat:
                 continue
             if cat not in result:
                 result[cat] = _empty_cat()
-            usd = _to_usd(price)
+            # ★2026-09-16: 金額は **ファネルの US 出品価格**。M列は「現在価格(円)=仕入元の値」で
+            #   US の出品価格ではない (円を $ として合計し、棚が35倍に見えていた)
+            usd = float(_funnel_prices.get(item_id, 0.0))
             if item_id and not sold:
                 result[cat]['current'] += 1
                 result[cat]['usd'] += usd
@@ -2667,11 +2712,15 @@ def _fetch_consolidated_counts(month_yyyymm, cache_seconds=60):
             if not item_id or item_id in seen_ids:
                 continue
             cat = _official_stock_category(src_url)
-            # ★このシートには出品価格の列が無いので **件数だけ**足す。金額に入らない分は
-            #   no_price として数え、画面に「金額に入っていない件数」を出す (黙って過少にしない)。
+            # ★2026-09-16: このシートに価格の列は無いが、**ファネルに itemID があれば US 価格が引ける**。
+            #   引けた分は金額に入れ、引けない分だけ no_price として数える (黙って過少にしない)。
             _c = result.setdefault(cat, _empty_cat())
             _c['current'] += 1
-            _c['no_price'] += 1
+            _usd = float(_funnel_prices.get(item_id, 0.0))
+            if _usd:
+                _c['usd'] += _usd
+            else:
+                _c['no_price'] += 1
             seen_ids.add(item_id)
     except Exception as e:
         print(f"⚠️ 公式在庫シート読込失敗: {e}")

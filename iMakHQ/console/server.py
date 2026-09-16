@@ -289,6 +289,7 @@ def _home_worker():
             m_cnt += int(sc.get("monthly", 0) or 0)
             home["shelf"].append({"cat": c, "budget": cp.CATEGORY_BUDGET_USD.get(c), "usd": usd,
                                   "count": int(sc.get("current", 0) or 0),
+                                  "no_price": int(sc.get("no_price", 0) or 0),
                                   "monthly_usd": float(sc.get("monthly_usd", 0.0) or 0),
                                   "monthly": int(sc.get("monthly", 0) or 0)})
         home["month"] = {"usd": m_usd, "count": m_cnt, "shelf_usd": total_usd,
@@ -304,7 +305,13 @@ def _home_worker():
         home["stats"]["seller"] = cp.EBAY_SELLER
     except Exception as e:                                     # noqa: BLE001
         home["errors"].append("eBay: %s" % e)
-    home["shelf_unread"] = shelf_looks_unread(home["shelf"])
+    try:
+        home["price_source"] = dict(cp.PRICE_SOURCE)           # 棚割りの金額の出どころ (ファネル)
+    except Exception:                                          # noqa: BLE001
+        home["price_source"] = {}
+    # ファネルが無い = 金額を出せない (シートが読めなかったのとは別物として出す)
+    home["price_missing"] = not (home.get("price_source") or {}).get("path")
+    home["shelf_unread"] = (not home["price_missing"]) and shelf_looks_unread(home["shelf"])
     retry_at = time.time()
     if home["shelf_unread"]:
         cp._CACHED_SHEET_COUNTS["data"] = None      # パネルの1分キャッシュに空の結果を残さない
