@@ -235,6 +235,7 @@ def select_targets(rows2d, max_backups=AUX_MAX, category=CATEGORY, sold_out=Fals
     """
     import sheet_io
     B, SOLD, TITLE, URL = sheet_io.PRODUCT_COL_ITEMID, 3, 2, 0
+    LISTED = 20                                   # U列 = 出品日時
     CAT = sheet_io.PRODUCT_COL_CATEGORY
     AUX = sheet_io.PRODUCT_COL_AUX_START
 
@@ -259,6 +260,7 @@ def select_targets(rows2d, max_backups=AUX_MAX, category=CATEGORY, sold_out=Fals
         out.append({"row": n, "itemID": cell(r, B), "title": title,
                     "size": hint.get("size") or jp_size_of(title), "have": have,
                     "keyword": hint.get("kw") or build_keyword(title),
+                    "listed_at": cell(r, LISTED),          # U列 = 出品日時 (① 当日分の判定用)
                     "from_catalog": bool(hint.get("kw"))})
     # ★2026-09-15 ユーザー「そうしとこ」(PSA 補URL③ と同じ並び順に):
     #   補充 (補0〜3本) は 補が少ない順 → ウォッチの多い順。入れ替え (補4〜5本) と再仕入れは ウォッチの多い順。
@@ -713,7 +715,7 @@ def count_workload(today=None):
     戻り: {"search", "confirm", "restock_search", "restock_confirm", "error"}
     """
     import datetime
-    out = {"search": 0, "confirm": 0, "swap_search": 0, "swap_confirm": 0,
+    out = {"search": 0, "search_today": 0, "confirm": 0, "swap_search": 0, "swap_confirm": 0,
            "restock_search": 0, "restock_confirm": 0, "restore": 0, "error": ""}
     try:
         import sheet_io
@@ -726,8 +728,13 @@ def count_workload(today=None):
                                         ("swap_", False, CACHE_PATH, AUX_MAX - 1, AUX_MAX + 1),
                                         ("restock_", True, RESTOCK_CACHE_PATH, 0, AUX_MAX)):
             targets = select_targets(vals, sold_out=sold, min_backups=lo, max_backups=hi)
-            out[key + "search"] = sum(1 for t in targets
-                                      if t["keyword"] and t["size"] and t["size"] != "KIDS")
+            _can = [t for t in targets if t["keyword"] and t["size"] and t["size"] != "KIDS"]
+            out[key + "search"] = len(_can)
+            if key == "":
+                # ★2026-09-16: 「① 当日分」= **今日出した分だけ** (PSA の today_can と同じ)。
+                #   ここを ② と同じ数にしていたため、同じ対象を二度押すことになっていた。
+                out["search_today"] = sum(1 for t in _can
+                                          if (t.get("listed_at") or "")[:10] == today)
             ids = {t["itemID"] for t in targets}
             cache = load_cache(path)
             out[key + "confirm"] = sum(1 for iid, c in cache.items()

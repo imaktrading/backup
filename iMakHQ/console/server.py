@@ -124,7 +124,8 @@ def summarize(d, nightly_ok=False):
         err(uk, u)
     elif u:
         put("ut_search", _num(u.get("search")), bool(u.get("search")))
-        put("ut_search_now", _num(u.get("search")), bool(u.get("search")), "出した直後に押す分")
+        put("ut_search_now", _num(u.get("search_today")), bool(u.get("search_today")),
+            "今日出した分")
         put("ut_confirm", _num(u.get("confirm")), bool(u.get("confirm")))
         put("ut_swap_confirm", _num(u.get("swap_confirm")), bool(u.get("swap_confirm")))
         put("ut_restock_search", _num(u.get("restock_search")), bool(u.get("restock_search")),

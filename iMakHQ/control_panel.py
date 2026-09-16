@@ -4750,7 +4750,8 @@ class ListingPanel:
                 if not _ut.get("confirm"):
                     ut_c_txt += " (先に ② 夜に探す を押す)"
                 # ★2026-09-13: PSA と同じ4ボタン構成 (①当日分 / ②夜に探す / ③補充 / ③入れ替え)
-                ut_sn_txt = ut_s_txt + chr(10) + "(出した直後に押す分)"
+                # ★2026-09-16: ① 当日分は **今日出した分**を数える (② と同じ数字を出していた)
+                ut_sn_txt = self.todo_line("ut_search_now", _ut.get("search_today", 0), "探します")
                 ut_sw_txt = self.todo_line("ut_swap_confirm",
                                            _ut.get("swap_confirm", 0), "目視します")
                 if not _ut.get("swap_search"):
@@ -4814,7 +4815,7 @@ class ListingPanel:
                         #   なので、夜間が動いていても残っていれば青にする (2026-09-06)。
                         "hoju_search_now": bool(s.get("today_can")),
                         "ut_search": bool(_ut.get("search")) and not _auto,
-                        "ut_search_now": bool(_ut.get("search")),
+                        "ut_search_now": bool(_ut.get("search_today")),
                         "ut_swap_confirm": bool(_ut.get("swap_confirm")),
                         "ut_restock_search": bool(_ut.get("restock_search")) and not _auto,
                         "kuji_search": bool((kj.get("search") or {}).get("can")) and not _auto,

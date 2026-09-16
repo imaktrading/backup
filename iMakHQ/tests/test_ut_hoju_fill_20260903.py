@@ -188,3 +188,31 @@ def test_restore_verifies_before_calling_it_done():
     # 戻せた分だけキャッシュから外す (bad は残す)
     j = body.index("done = [iid for iid in ok if iid not in bad]")
     assert "cache.pop(iid, None)" in body[j:j + 400]
+
+
+def test_today_row_is_marked_for_the_same_day_button():
+    """「① 当日分」は **今日出した行だけ** (2026-09-16)。
+
+    ユーザー指摘の元: UT の ①当日分 が ②夜に探す と同じ数字 (42/42) を出していた。
+    PSA は listed_at が今日の行だけを数える (today_can)。UT も同じ形に揃える。
+    """
+    rows = [["", "itemID", "タイトル", "売切", "", "", "", "", "", "", "", "", "", "", "", "",
+             "", "カテゴリ", "", "", "出品日時"],
+            ["", "111", "推しの子 UT B小町 XXL", "", "", "", "", "", "", "", "", "", "",
+             "", "", "", "", "Tシャツ", "", "", "2026-09-16 07:00"],
+            ["", "222", "怪獣8号 UT XL", "", "", "", "", "", "", "", "", "", "",
+             "", "", "", "", "Tシャツ", "", "", "2026-09-10"]]
+    got = {t["itemID"]: t["listed_at"][:10] for t in U.select_targets(rows, sold_out=False)}
+    assert got == {"111": "2026-09-16", "222": "2026-09-10"}
+
+
+def test_same_day_count_is_not_the_night_count():
+    """数え方と、それを使う2つの画面の配線 (旧パネル / 新 Console)。"""
+    src = open(os.path.join(_HQ_TOOLS, "ut_hoju_fill.py"), encoding="utf-8").read()
+    assert 'out["search_today"]' in src
+    assert '(t.get("listed_at") or "")[:10] == today' in src
+    hq = os.path.dirname(_HQ_TOOLS)
+    panel = open(os.path.join(hq, "control_panel.py"), encoding="utf-8").read()
+    assert '"ut_search_now": bool(_ut.get("search_today"))' in panel
+    server = open(os.path.join(hq, "console", "server.py"), encoding="utf-8").read()
+    assert 'put("ut_search_now", _num(u.get("search_today"))' in server
