@@ -470,6 +470,14 @@ def count_workload():
         except Exception:                                          # noqa: BLE001
             cache_raw = {}
         already = live_keys(sheets, cache_raw) if cache_raw else set()
+        # ★2026-09-16: UK/AU/CA/DE のミラーは走行が必ず飛ばす ("US 以外 → 触らない")。
+        #   件数にも入れない (押しても絶対に減らない物を「要対応」と出していた)。
+        #   サイトはファネルの site 列で分かる (API を叩かない)。
+        try:
+            import funnel_io
+            _mirror = funnel_io.non_us_item_ids()
+        except Exception:                                          # noqa: BLE001
+            _mirror = set()
         pending = pending_rows(want, sheets)
         _nb = _load_not_buyable() if pending else {}
         seen = set()
@@ -487,6 +495,8 @@ def count_workload():
                 out["unknown"] += 1
                 continue
             target = restock_target(state, row, iid)
+            if str(target) in _mirror:  # ミラー (US 以外) → 走行が触らないので数えない
+                continue
             if target in seen:          # 同じ出品が2回売れた (注文は2行) → 1回だけ
                 continue
             seen.add(target)

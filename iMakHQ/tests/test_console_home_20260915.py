@@ -349,3 +349,29 @@ def test_console_can_stop_a_run_left_by_the_previous_server():
     assert '"orphan_pid"' in SERVER
     assert '["taskkill", "/PID", str(pid), "/T", "/F"]' in SERVER
     assert "psa_to_csv.py" in SERVER                     # 主な道具は手掛かりに入れておく
+
+
+def test_restock_count_is_only_what_the_button_can_do():
+    """件数は「押して動かせる分」だけ (2026-09-16 見張りが捕まえた実害)。
+
+    「売れた分を補充」が 要対応2件と出ていたが、押すと「対象 0」。中身は
+    **売れて終了した UK ミラー2件** で、走行は「US 以外 → 触らない」と必ず飛ばす。
+    判定できない分は件数から外し、note に出す。
+    """
+    s = S.summarize({"restock": {"actionable": 0, "unknown": 2, "done": 11, "blocked": 0}})
+    assert s["sold_restock"]["n"] == 0 and s["sold_restock"]["state"] == "done"
+    assert "判定できない 2件" in s["sold_restock"]["note"]
+    s2 = S.summarize({"restock": {"actionable": 3, "unknown": 2, "done": 11, "blocked": 0}})
+    assert s2["sold_restock"]["n"] == 3 and s2["sold_restock"]["state"] == "todo"
+    assert 'bool(sr.get("actionable")) and not _auto' in PANEL      # 旧パネルも同じ数え方
+
+
+def test_search_buttons_are_not_checked_for_not_moving():
+    """「探す」系は押すと候補が増えるのが正常なので突き合わせない (2026-09-16)。
+
+    実測: PSA 再仕入れ①探す が 3件 → 38件 になり、見張りが「減らなかった」と誤記録した。
+    """
+    assert "SEARCH_KINDS" in SERVER
+    assert "badge not in SEARCH_KINDS and cp.badge_did_not_move" in SERVER
+    for k in ("hoju_search", "ut_search", "psa_gate", "kuji_search"):
+        assert k in SERVER.split("SEARCH_KINDS = {")[1].split("}")[0], k

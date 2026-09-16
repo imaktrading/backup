@@ -2605,42 +2605,23 @@ def _to_usd(text):
         return 0.0
 
 
-def price_map_from_funnel_rows(rows):
-    """ファネルの行 → {itemID: US$}。US の行だけ (純関数)。
+def _funnel_io():
+    """ファネルの読み口 (tools/funnel_io.py)。棚割りと『売れた分を補充』で共用する。"""
+    _t = os.path.join(WORKSPACE, "iMakHQ", "tools")
+    if _t not in sys.path:
+        sys.path.insert(0, _t)
+    import funnel_io
+    return funnel_io
 
-    ★2026-09-16: 棚割りの金額はここから取る。統合シートの M列は「現在価格(円)=仕入元の値」で、
-      US の出品価格ではない (見出しで確認済)。円を $ として合計していたので桁が狂っていた。
-    ミラー (UK/AU/CA/DE) は親の US を写した別 itemID なので、二重に数えないよう US だけ使う。
-    """
-    out = {}
-    for r in rows or []:
-        if (r.get("site") or "").strip().upper() != "US":
-            continue
-        item_id = (r.get("item_id") or "").strip()
-        if not item_id:
-            continue
-        try:
-            usd = float(str(r.get("price") or "").replace("$", "").replace(",", "").strip() or 0)
-        except ValueError:
-            usd = 0.0
-        if usd > 0:
-            out[item_id] = usd
-    return out
+
+def price_map_from_funnel_rows(rows):
+    """行 → {itemID: US$} (US のみ)。中身は tools/funnel_io.py。"""
+    return _funnel_io().price_map_from_funnel_rows(rows)
 
 
 def latest_funnel_prices(funnel_dir=None):
-    """直近のファネルから {itemID: US$} を読む。無ければ ({}, None)。"""
-    import csv
-    import glob as _g
-    funnel_dir = funnel_dir or os.path.join(WORKSPACE, "iMakHQ", "funnel_output")
-    hits = sorted(_g.glob(os.path.join(funnel_dir, "funnel_*.csv")), key=os.path.getmtime, reverse=True)
-    if not hits:
-        return {}, None
-    try:
-        with open(hits[0], encoding="utf-8-sig", newline="") as f:
-            return price_map_from_funnel_rows(list(csv.DictReader(f))), hits[0]
-    except OSError:
-        return {}, None
+    """直近のファネルから {itemID: US$} と path。無ければ ({}, None)。"""
+    return _funnel_io().latest_funnel_prices(funnel_dir)
 
 
 def _fetch_consolidated_counts(month_yyyymm, cache_seconds=60):
@@ -4843,7 +4824,8 @@ class ListingPanel:
                         "shelf_evict": bool(se.get("picked")),
                         # ★2026-09-15: 補充は夜が送る (1aedc64)。補URL 夜間検索と同じく
                         #   夜が動いている日は黒・止まった日だけ青
-                        "sold_restock": bool(sr.get("actionable") or sr.get("unknown")) and not _auto,
+                        # ★2026-09-16: 判定できない分 (unknown) では青くしない。押しても動かせないため
+                        "sold_restock": bool(sr.get("actionable")) and not _auto,
                         # 変種の確認だけが残っている時も押せば人が見る = 青にする (2026-09-08)
                         "psa_gate": bool(pg.get("actionable") or pg.get("variant_todo")),
                         "restock_build": bool(rb.get("actionable")),

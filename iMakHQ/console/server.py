@@ -44,6 +44,11 @@ HOME_TTL = 10 * 60
 CREW_TTL = 3 * 60
 TASKS_TTL = 5 * 60
 
+# 「探す」系 = 押すと候補が **増える** のが正常。減らなくても おかしくないので突き合わせない
+#   (2026-09-16: PSA 再仕入れ①探す が 3件 → 38件 になり、見張りが誤って記録した)
+SEARCH_KINDS = {"hoju_search", "hoju_search_now", "ut_search", "ut_search_now",
+                "ut_restock_search", "kuji_search", "kuji_supply", "psa_gate", "newcand"}
+
 # 夜間バッチが減らしてくれる種類 (control_panel の act_kind と同じ)。夜が動いている日は「夜間で自動」
 NIGHT_KINDS = {"hoju_search", "ut_search", "ut_restock_search", "kuji_search"}
 STEP_RE = re.compile(r"[①②③④⑤]")
@@ -175,7 +180,10 @@ def summarize(d, nightly_ok=False):
     for key, kind, fields, hold_field in (
             ("cull", "cull_end", ("remaining",), None),
             ("shelf", "shelf_evict", ("picked",), None),
-            ("restock", "sold_restock", ("actionable", "unknown"), "blocked"),
+            # ★2026-09-16: 「判定できない分」は件数に入れない。押しても動かせないため
+            #   (実測: 要対応2件と出ていたが、中身は売れて終了した UK ミラーで、走行は必ず飛ばす)。
+            #   件数は **押して動かせる分だけ**。判定できない分は下の note に出す。
+            ("restock", "sold_restock", ("actionable",), "blocked"),
             ("psa_gate", "psa_gate", ("actionable", "variant_todo"), None),
             ("restock_build", "restock_build", ("actionable",), "blocked"),
             ("restock_wb", "restock_wb", ("actionable",), None)):
@@ -185,7 +193,10 @@ def summarize(d, nightly_ok=False):
         elif p:
             n = sum(_num(p.get(f)) for f in fields)
             hold = _num(p.get(hold_field)) if hold_field else 0
-            put(kind, n, n > 0, ("止めている %d件" % hold) if hold and not n else "", hold)
+            note = ("止めている %d件" % hold) if hold and not n else ""
+            if kind == "sold_restock" and _num(p.get("unknown")):
+                note = (note + " / " if note else "") + "判定できない %d件 (押しても動きません)" % _num(p.get("unknown"))
+            put(kind, n, n > 0, note, hold)
     return out
 
 
@@ -744,7 +755,7 @@ def _run_worker(script, cmd=None):
         badge = script.get("badge")
         after = count_of(badge)
         try:
-            if badge and cp.badge_did_not_move(before, after):
+            if badge and badge not in SEARCH_KINDS and cp.badge_did_not_move(before, after):
                 _log("⚠️ 押しても件数が減りませんでした (%s: %s件 → %s件)。"
                      "表示が『作業できる件数』になっていない可能性があります"
                      % (label, before, after))

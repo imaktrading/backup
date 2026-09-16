@@ -70,7 +70,9 @@ def test_panel_counts_and_paints():
     #   ユーザーは青いものしか押さないので、黒にすると永遠に押されない。
     # ★2026-09-15: 補充は夜が送るようになった (1aedc64)。夜が動いている日は黒、止まった日だけ青
     #   (補URL 夜間検索と同じ決まり)。
-    assert '"sold_restock": bool(sr.get("actionable") or sr.get("unknown")) and not _auto' in _SRC
+    # ★2026-09-16: 判定できない分 (unknown) では青くしない。押しても動かせないため
+    #   (実測: 要対応2件と出ていたが、中身は売れて終了した UK ミラーで、走行は必ず飛ばす)。
+    assert '"sold_restock": bool(sr.get("actionable")) and not _auto' in _SRC
 
 
 def test_hint_does_not_claim_the_button_sends():
