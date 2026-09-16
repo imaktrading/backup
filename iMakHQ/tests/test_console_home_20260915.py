@@ -66,12 +66,14 @@ def test_summarize_states():
          "restock_build": {"actionable": 0, "blocked": 14},
          "ut": {"error": "APIError: 429"}}
     s = S.summarize(d, nightly_ok=True)
-    assert s["hoju_search"]["state"] == "night"            # 夜間が動いている日は夜に任せる
+    assert s["hoju_search"]["state"] == "night"            # 夜が動かす物は作業カードにしない
     assert s["hoju_confirm"] == {"n": 20, "state": "todo", "note": s["hoju_confirm"]["note"], "hold": 0}
     assert s["hoju_swap"]["state"] == "done"
     assert s["restock_build"]["state"] == "hold" and s["restock_build"]["hold"] == 14
     assert s["ut_confirm"]["state"] == "error"
-    assert S.summarize(d, nightly_ok=False)["hoju_search"]["state"] == "todo"   # 夜が転んだ日は青に戻す
+    # ★2026-09-16 ユーザー「今日やることは、私がボタンを押すものだけにした方が良くない？」
+    #   夜が転んだ日も **夜の担当は作業カードにしない**。止まったことは知らせ (alert) で出す。
+    assert S.summarize(d, nightly_ok=False)["hoju_search"]["state"] == "night"
 
 
 def test_night_kinds_match_panel():
@@ -388,3 +390,17 @@ def test_a_job_without_a_step_does_not_hide_the_others():
     assert 'var s = j.step || "";' in body
     assert "if (!s) return 9;" in body                      # 段が無ければ順番待ちにしない
     assert body.index("if (!s) return 9;") < body.index('indexOf(s)')   # indexOf より先に弾く
+
+
+def test_today_is_only_my_todo():
+    """今日やること = 私が押す物だけ (2026-09-16 ユーザー「私の TO DO という理解をしている」)。
+
+    夜が担当する物 (夜に探す 等) は、夜が止まった日でも作業カードにしない。
+    代わりに「夜間バッチが途中で止まりました — 今夜また走ります」と知らせを出す。
+    """
+    for kind in S.NIGHT_KINDS:
+        assert "state = \"night\"" in SERVER
+    assert "if todo and kind in NIGHT_KINDS:" in SERVER          # nightly_ok を条件にしない
+    app = open(os.path.join(HQ, "console", "static", "app.js"), encoding="utf-8").read()
+    assert "今夜また走ります" in app
+    assert 'notes.push(["crit", "夜間バッチ"' in app

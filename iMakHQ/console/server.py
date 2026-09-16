@@ -100,7 +100,11 @@ def summarize(d, nightly_ok=False):
     out = {}
 
     def put(kind, n, todo, note="", hold=0):
-        if todo and kind in NIGHT_KINDS and nightly_ok:
+        # ★2026-09-16 ユーザー「今日やることは、私がボタンを押すものだけにした方が良くない？
+        #   本来動くべきが動いていなかったのは分かった方がいいけど、だからと言って私が何かする
+        #   わけでもないし」: 夜が動かす物は **夜が転んだ日も** 作業カードにしない (灰のまま)。
+        #   夜が止まったことは 今日やること の上に「知らせ」として1行出す (画面側)。
+        if todo and kind in NIGHT_KINDS:
             state = "night"
         elif todo:
             state = "todo"

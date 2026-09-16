@@ -375,8 +375,21 @@
     $("kp-night").textContent = n.done ? "完走" : n.date ? "途中で停止" : "—";
     // 夜間の話は「定期」タブに置く (2026-09-16 ユーザー「今日やること に夜間バッチはいらない」)
     $("night-alerts").innerHTML = alerts.map(function (a) { return '<div class="alert ' + a[0] + '" role="status"><b>' + esc(a[1]) + "</b><span>" + esc(a[2]) + "</span></div>"; }).join("");
-    $("alerts").innerHTML = (h.errors || []).map(function (e) {
-      return '<div class="alert" role="status"><b>読込</b><span>' + esc(e) + "</span></div>";
+    // ★夜が止まった時は「知らせ」を今日やることに出す (作業カードにはしない)。
+    //   押すのは自分の仕事ではないが、動くべき物が動かなかったのは分かるようにする。
+    var notes = [];
+    if (!n.done) {
+      var nightN = jobList.filter(function (j) { return j.state === "night"; })
+        .reduce(function (a, j) { return a + (j.n || 0); }, 0);
+      notes.push(["crit", "夜間バッチ",
+                  (n.error ? n.error
+                   : (esc(n.date || "") + " " + hm(n.start) + " に走り出して 途中で止まりました"
+                      + (n.last_step ? " (最後の段: " + esc(n.last_step) + ")" : "")))
+                  + " — 今夜また走ります" + (nightN ? " (夜が担当する残り " + nightN + "件)" : "")]);
+    }
+    (h.errors || []).forEach(function (e) { notes.push(["", "読込", e]); });
+    $("alerts").innerHTML = notes.map(function (x) {
+      return '<div class="alert ' + x[0] + '" role="status"><b>' + esc(x[1]) + "</b><span>" + x[2] + "</span></div>";
     }).join("");
   }
 
