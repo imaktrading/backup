@@ -954,8 +954,12 @@ def emit_consolidated_request(con, category, out_dir, today, held_out=None, veri
     catalog 反映は Catalog が裏取りして実施 (SSOT/fail-closed)。Returns: 発行件数。
     発行は **当該 project(category)に属す項目のみ**(他カテゴリ混入防止=Catalog 誤ルーティング根治)。
     """
+    # ★2026-09-16: layer="code" (出品くんのコード修正 = HQ が直す分) は catalog に送らない。
+    #   混ざると層A/B とも0件の空依頼が出て、catalog が閉じると HQ の修正件まで done になっていた
+    #   (catalog/requests/2026-09-14_pdca_catalog_queue_mercari.md = queue_id 642 のみ)。
     pend_all = [r for r in list_queue(con, status="pending", limit=10000)
-                if r.get("source") != "md_import" and category_in_project(r.get("category"), category)]
+                if r.get("source") != "md_import" and r.get("layer") != "code"
+                and category_in_project(r.get("category"), category)]
     # ★2026-08-28: **発行の直前に catalog を読み直す**。画像や行はその日のうちに入ることが
     #   あり (OP12-079_AN03 は 18:49 投入済なのに 19:12 に起票された)、
     #   走行の頭で作った判定のまま送ると「もう在るもの」を聞くことになる。
