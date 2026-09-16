@@ -84,7 +84,9 @@ def build_restock_input(restock_rows, itemid_to_cert, itemid_to_key, sold_out_su
             continue
         cert = itemid_to_cert.get(iid)
         if not cert:
-            skipped.append((iid, "cert#未解決(商品管理シートI列に無い)→生成不可"))
+            # ★2026-09-17: 実測では「I列が空」ではなく **商品管理シートに itemID の行が無い**
+            #   (シート導入前の古い出品) だった。旧文言だと「I列に cert を入れれば動く」と誤読される
+            skipped.append((iid, "cert#未解決(商品管理シートに itemID の行が無い / I列が空)→生成不可"))
             continue
         if undeliverable_ids and iid in undeliverable_ids:
             _why = undeliverable_ids.get(iid, "") if isinstance(undeliverable_ids, dict) else ""
