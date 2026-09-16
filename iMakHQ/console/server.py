@@ -500,14 +500,14 @@ def _run_worker(script, cmd=None):
     except Exception:                                          # noqa: BLE001
         fh = path = None
 
-    def _to_log(text):                                         # 後処理のログも同じ場所に出す
+    def _to_log(text):
+        """後処理のログは **画面だけ** に出す (run log ファイルには書かない)。
+
+        ★ここを「記録にも書く」にすると旧パネルと動きが変わる: 後処理は run log を
+          「今回の stdout」として読み直すので、後処理自身が書いた文 (問題提起の引用など) が
+          次の段の入力に混ざり、NO-GO 行を二重に拾う。旧パネルは画面にしか出していない。
+        """
         _log(text)
-        if fh and not fh.closed:
-            try:
-                fh.write(text if str(text).endswith("\n") else str(text) + "\n")
-                fh.flush()
-            except (OSError, ValueError):
-                pass
 
     def _run_log_text():
         """今回の走行の stdout (旧パネルの _run_log_text と同じ: run log ファイルから読む)。"""

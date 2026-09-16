@@ -191,3 +191,13 @@ def test_after_run_says_failed_when_the_script_failed():
     text = "".join(str(x) for x in out)
     assert "❌ 失敗しました (returncode=1)" in text
     assert "🎉" not in text
+
+
+def test_post_run_log_goes_to_the_screen_only():
+    """後処理のログを run log に書き足さない (2026-09-16 実測で気づいた差)。
+
+    後処理は run log を「今回の stdout」として読み直す。そこに後処理自身の文
+    (問題提起の引用など) が入ると NO-GO 行を二重に拾う。旧パネルは画面にしか出していない。
+    """
+    body = SERVER.split("def _to_log(text):")[1].split("def _run_log_text")[0]
+    assert "fh.write" not in body
