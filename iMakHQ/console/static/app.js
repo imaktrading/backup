@@ -554,6 +554,21 @@
     this.setAttribute("aria-expanded", String(!open));
   });
   $("drawer-hide").addEventListener("click", function () { drawerHidden = true; $("drawer").hidden = true; });
+  // ★2026-09-16 ユーザー「ログ画面消えてない？」: 実行中と直後しか出していなかった。
+  //   いつでも開けるようにする (走っていない時は直近のログが出る)
+  $("btn-log").addEventListener("click", function () {
+    drawerHidden = false;
+    $("drawer").hidden = false;
+    $("log").hidden = false;
+    $("drawer-toggle").textContent = "閉じる";
+    if (!running) {
+      $("job-label").textContent = "直近のログ";
+      $("job-meta").textContent = "";
+      $("live").className = "live off";
+      $("drawer-stop").hidden = true;
+    }
+    $("log").scrollTop = $("log").scrollHeight;
+  });
   // ログをまるごとコピー (2026-09-16 ユーザー要望。貼って相談する時に使う)
   $("drawer-copy").addEventListener("click", function () {
     var head = ($("job-label").textContent || "") + " " + ($("job-meta").textContent || "");

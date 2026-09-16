@@ -263,3 +263,17 @@ def test_app_js_has_no_raw_newline_inside_a_string():
         code = re.sub(r"//.*$", "", code)
         assert code.count('"') % 2 == 0, "%s:%d 二重引用符が閉じていない" % (path, i)
         assert code.count("'") % 2 == 0, "%s:%d 引用符が閉じていない" % (path, i)
+
+
+def test_log_can_be_opened_anytime():
+    """ログはいつでも開ける (2026-09-16 ユーザー「ログ画面消えてない？」)。
+
+    実行中と直後しか出していなかったので、終わった後に見返せなかった。
+    """
+    html = open(os.path.join(HQ, "console", "static", "index.html"), encoding="utf-8").read()
+    assert 'id="btn-log"' in html
+    app = open(os.path.join(HQ, "console", "static", "app.js"), encoding="utf-8").read()
+    i = app.index('$("btn-log").addEventListener')
+    body = app[i:i + 700]
+    assert '$("drawer").hidden = false' in body
+    assert "直近のログ" in body                      # 走っていない時の見出し
