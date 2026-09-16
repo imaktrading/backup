@@ -66,3 +66,48 @@ def test_build_ng_digest_recurring_dropped_defaults_empty_when_omitted():
     d = ca._build_ng_digest("tcg", [("sku1", "msg1")], ["error: 2件"], [])
     assert d["recurring_dropped"] == []
     assert d["counts"]["recurring_dropped"] == 0
+
+
+# ---- 2026-09-16: 窓 / 理由 / 前段の除外行 / 再仕入れの itemID 行 / プロジェクト絞り ----
+# 依頼書: hq/requests/2026-09-14_act_code_proposals_tcg.md 提案① (GO) /
+#         2026-09-14_act_code_proposals_mercari.md 提案2 (GO) / 2026-09-15_act_code_proposals_tcg.md 提案③
+
+_LOG_STAGE = (
+    "  ⏭️ 枠を選ぶ前に除外 [OUT-OF-SCOPE=参入しないゲーム]: 2件 → ['140273536', '146117881']\n"
+    "  ⏭️ 枠を選ぶ前に除外 [COST-CAP=仕入値が上限を超えている(目視しても最後に落ちる)]: 1件 → ['123143536']\n"
+    "  🚫 PSA に写真が無い個体を除外: 1件 → ['15123139']\n"
+    "  ⏭ ('358609093013', 'cert#未解決(商品管理シートI列に無い)→生成不可')\n"
+    "  ⏭ ('358604221711', '仕入値が上限を超えている ¥132,500 (上限 ¥70,000)→生成不可')\n"
+    "  ⏭ ('358887214446', '仕入元が生きている (D列が空) = 売れた分の補充 / 監視くんの担当→生成不可')\n"
+)
+
+
+def _by_key(out):
+    return {(r.get("cert") or r.get("item_id")): r for r in out}
+
+
+def test_stage_and_item_lines_are_counted_with_reason():
+    got = _by_key(ca.recurring_dropped_certs({f"2026091{d}": _LOG_STAGE for d in range(3)}))
+    assert got["140273536"]["reason"] == "OUT-OF-SCOPE"
+    assert got["123143536"]["reason"] == "COST-CAP"
+    assert got["15123139"]["reason"] == "写真なし"
+    assert got["358609093013"]["reason"] == "cert#未解決" and "item_id" in got["358609093013"]
+    assert got["358604221711"]["reason"] == "COST-CAP"
+    assert "358887214446" not in got, "他の担当に回す正常な振り分けは詰まりではない"
+
+
+def test_days_outside_window_are_not_counted():
+    by_date = {"20260801": _LOG_936643273, "20260802": _LOG_936643273, "20260803": _LOG_936643273}
+    assert ca.recurring_dropped_certs(by_date, since="20260902") == []
+
+
+def test_psa_not_found_cert_gets_its_own_reason():
+    by_date = {f"2026091{d}": _LOG_936643273 for d in range(3)}
+    got = _by_key(ca.recurring_dropped_certs(by_date, not_found={"936643273"}))
+    assert got["936643273"]["reason"] == "PSA照会失敗"
+    assert got["152977069"]["reason"] != "PSA照会失敗"
+
+
+def test_non_tcg_project_gets_no_psa_drops(tmp_path):
+    (tmp_path / "x_20990101_000000.log").write_text(_LOG_936643273, encoding="utf-8")
+    assert ca._scan_run_logs_dropped(str(tmp_path), min_days=1, project="mercari") == []

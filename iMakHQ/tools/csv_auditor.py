@@ -1185,14 +1185,15 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     #   これをしないと、既に片づいた件が毎日 `pending` として digest に載り続ける。
     _pdca_prune_resolved(dry_run)
     recurring = filter_recurring_for_project(recurring_findings(_load_pdca_recurring()), project)
-    recurring_dropped = _scan_run_logs_dropped()
+    recurring_dropped = _scan_run_logs_dropped(project=project)
     digest = _build_ng_digest(project, program_items, log_signals, recurring, log_signal_lines,
                               recurring_dropped)
     digest_path = _write_ng_digest(project, digest, dry_run)
     if recurring_dropped:
         top = recurring_dropped[0]
+        _who = f"cert {top['cert']}" if "cert" in top else f"itemID {top.get('item_id')}"
         print(f"  🔁 再発drop(台帳未経由・build skip等) {len(recurring_dropped)}件 "
-              f"/ 筆頭 cert {top['cert']} ×{top['days']}日")
+              f"/ 筆頭 {_who} ×{top['days']}日 [{top.get('reason', '')}]")
     # --- PDCA spiral-up: 改善キュー蓄積 → 集約発行 → 完了同期 (write-only・絶対に監査を壊さない) ---
     _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku,
                      audited_rows=len(rows),
@@ -2262,27 +2263,78 @@ def _scan_log_samples(log_path="", csv_path="", run_logs_dir=""):
 _DROP_CERT_RE = re.compile(r"⚠️ cert (\d+): .*\(build skip\)")
 _DROP_LIST_RE = re.compile(r"出品見送り:\s*\d+\s*件\s*\[([^\]]*)\]")
 _LOG_DATE_RE = re.compile(r"(\d{8})_\d{6}\.log$", re.I)
+# ★2026-09-16 (9/14 提案① GO / 9/15 提案③): 前段の除外行と再仕入れの itemID 行も拾い、理由を付ける。
+#   理由が無いと OUT-OF-SCOPE (永久に対象外で正しい) と「直す手段が要る」物が同じ行に見える。
+_DROP_STAGE_RE = re.compile(r"枠を選ぶ前に除外 \[([A-Z-]+)=[^\]]*\]:\s*\d+件 → \[([^\]]*)\]")
+_DROP_NOPHOTO_RE = re.compile(r"PSA に写真が無い個体を除外:\s*\d+件 → \[([^\]]*)\]")
+_DROP_ITEM_RE = re.compile(r"⏭ \('(\d+)', '([^']*)→生成不可'\)")
+# 再仕入れで「別の担当に回すのが正しい」振り分け = 詰まりではない
+_DROP_ITEM_ROUTED = ("仕入元が生きている", "監視くんで売り切れ")
+DROP_WINDOW_DAYS = 14
+PSA_NOT_FOUND_PATH = os.path.join(WORKSPACE, "iMakeBayAPI", "cache", "psa_cert_not_found.json")
+
+
+def _item_drop_reason(text: str) -> str:
+    t = (text or "").strip()
+    if t.startswith("cert#未解決"):
+        return "cert#未解決"
+    if t.startswith("仕入値が上限"):
+        return "COST-CAP"
+    return t.split("(")[0].strip()[:30] or "生成不可"
+
+
+def _extract_drops_from_log(text: str) -> dict:
+    """走行ログ本文から落ちた物を拾う (純関数)。戻り: {("cert"|"item_id", 番号): 理由}。
+    同じ物に複数理由が付く時は先に当たった方 (具体的な理由) を残す。"""
+    out: dict = {}
+    text = text or ""
+    for st, lst in _DROP_STAGE_RE.findall(text):
+        for c in re.findall(r"\d+", lst):
+            out.setdefault(("cert", c), st)
+    for lst in _DROP_NOPHOTO_RE.findall(text):
+        for c in re.findall(r"\d+", lst):
+            out.setdefault(("cert", c), "写真なし")
+    for iid, why in _DROP_ITEM_RE.findall(text):
+        if any(k in why for k in _DROP_ITEM_ROUTED):
+            continue
+        out.setdefault(("item_id", iid), _item_drop_reason(why))
+    for c in _DROP_CERT_RE.findall(text):
+        out.setdefault(("cert", c), "build skip")
+    for m in _DROP_LIST_RE.findall(text):
+        for c in re.findall(r"\d+", m):
+            out.setdefault(("cert", c), "出品見送り")
+    return out
 
 
 def _extract_dropped_certs_from_log(text: str) -> set:
-    """走行ログ本文から「build skip」「出品見送り」に載った cert 番号を拾う (純関数, test可)。"""
-    certs = set(_DROP_CERT_RE.findall(text or ""))
-    for m in _DROP_LIST_RE.findall(text or ""):
-        certs.update(re.findall(r"\d+", m))
-    return certs
+    """走行ログ本文から落ちた cert 番号を拾う (純関数, test可)。itemID 行は含めない。"""
+    return {k for (kind, k) in _extract_drops_from_log(text) if kind == "cert"}
 
 
-def recurring_dropped_certs(log_text_by_date: dict, min_days: int = 3):
-    """日付別ログ束から、複数日 build skip/出品見送りに載り続けている cert を返す (純関数, test可)。
+def recurring_dropped_certs(log_text_by_date: dict, min_days: int = 3, since: str = "",
+                            not_found=None):
+    """日付別ログ束から、複数日落ち続けている cert / itemID を返す (純関数, test可)。
 
     log_text_by_date: {"20260901": "<その日の走行ログ全部連結>", ...}。
-    戻り: [{"cert": "...", "days": N}, ...] days(出現日数) 降順。
+    since: "YYYYMMDD"。これより前の日は数えない (= 解決した物は窓から消える)。
+    not_found: PSA にページが無い cert の集合 → 理由を `PSA照会失敗` に (打ち間違いの疑い)。
+    戻り: [{"cert"|"item_id": "...", "days": N, "reason": "..."}, ...] days 降順。
     """
-    cert_days: dict = {}
-    for date, text in (log_text_by_date or {}).items():
-        for cert in _extract_dropped_certs_from_log(text):
-            cert_days.setdefault(cert, set()).add(date)
-    out = [{"cert": c, "days": len(days)} for c, days in cert_days.items() if len(days) >= min_days]
+    days_by: dict = {}
+    reason_by: dict = {}
+    for date in sorted(log_text_by_date or {}):
+        if since and date < since:
+            continue
+        for key, why in _extract_drops_from_log(log_text_by_date[date]).items():
+            days_by.setdefault(key, set()).add(date)
+            reason_by[key] = why                       # 一番新しい日の理由
+    nf = set(not_found or ())
+    out = []
+    for (kind, k), days in days_by.items():
+        if len(days) < min_days:
+            continue
+        why = "PSA照会失敗" if (kind == "cert" and k in nf) else reason_by[(kind, k)]
+        out.append({kind: k, "days": len(days), "reason": why})
     out.sort(key=lambda r: r["days"], reverse=True)
     return out
 
@@ -2308,9 +2360,22 @@ def _run_logs_by_date(run_logs_dir=""):
     return by_date
 
 
-def _scan_run_logs_dropped(run_logs_dir="", min_days=3):
-    """recurring_dropped_certs の I/O 側 (本番は run_logs_dir 省略で既定ディレクトリ)。"""
-    return recurring_dropped_certs(_run_logs_by_date(run_logs_dir), min_days)
+def _scan_run_logs_dropped(run_logs_dir="", min_days=3, project="tcg", window_days=DROP_WINDOW_DAYS):
+    """recurring_dropped_certs の I/O 側 (本番は run_logs_dir 省略で既定ディレクトリ)。
+
+    ★2026-09-16 (9/14 mercari 提案2): 拾う行は全部 PSA (TCG) の生成・再仕入れの出力なので、
+      TCG 以外の監査には載せない (mercari の digest に PSA の cert が16件積まれていた)。
+    """
+    if (project or "").strip().lower() != "tcg":
+        return []
+    import datetime as _dt
+    since = (_dt.date.today() - _dt.timedelta(days=window_days)).strftime("%Y%m%d")
+    try:
+        with open(PSA_NOT_FOUND_PATH, encoding="utf-8") as f:
+            nf = set((json.load(f) or {}).keys())
+    except Exception:                                   # noqa: BLE001
+        nf = set()
+    return recurring_dropped_certs(_run_logs_by_date(run_logs_dir), min_days, since, nf)
 
 
 # ★2026-08-21: 「ラベルの出現」ではなく「**0でない件数**」を数える。
