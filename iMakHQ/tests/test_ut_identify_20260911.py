@@ -215,7 +215,8 @@ class TestParse:
         items = [{"idx": 2, "row": new, "src": "tab"}, {"idx": 3, "row": new, "src": "sheet"},
                  {"idx": 4, "row": listed, "src": "sheet"}]
         monkeypatch.setattr(U, "load_items", lambda limit=0, **k: (items, 99))
-        assert U.count_workload() == {"pending": 3, "new": 1, "waiting": 1, "key": 1, "error": ""}
+        # ★件数は「そのボタンでしか片づかない分」= KEY 埋めだけ (新候補・出品待ちは🤖自動が拾う)
+        assert U.count_workload() == {"pending": 1, "new": 1, "waiting": 1, "key": 1, "error": ""}
 
     def test_rest_breakdown_20260916(self):
         """「残り全部で N件」だけだと N が KEY 埋めの数に見える (実際は 620件中 38件だった)."""

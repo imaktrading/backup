@@ -140,8 +140,8 @@ def summarize(d, nightly_ok=False):
         err(("ut_identify",), ui)
     elif ui:
         put("ut_identify", _num(ui.get("pending")), bool(ui.get("pending")),
-            "新候補 %d / 出品待ち %d / KEY無し %d"
-            % (_num(ui.get("new")), _num(ui.get("waiting")), _num(ui.get("key"))))
+            "出品済みの KEY 埋め (🤖自動が拾う 新候補 %d / 出品待ち %d は別)"
+            % (_num(ui.get("new")), _num(ui.get("waiting"))))
 
     for key, kind, field in (("newcand_high", "newcand_high", "pending"),):
         p = d.get(key) or {}

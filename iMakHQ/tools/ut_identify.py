@@ -1205,13 +1205,17 @@ def count_workload():
 
     ★2026-09-16 ユーザー「正しい数値にして」: 以前は「未決着の行」を数えるだけで、
       **公式仕入で出品中の商品と同じ行** (画面には出さない) が入っていた → 620 と出るのに
-      画面に出るのは 521 だった。画面を作るのと同じ道 (load_items) で数える (約13秒)。
-      内訳も返す: new=新しい候補 / waiting=出品待ち / key=出品済みで KEY 無し。
+      画面に出るのは 521 だった。画面を作るのと同じ道 (load_items) で数える (約10秒)。
+
+    ★2026-09-16 ユーザー「件数は、やるべき数字だけにすると決めなかったっけ?」(2026-09-06 の
+      『そのボタンで処理する件数が何件残っているか』と同じ): **pending = このボタンでしか
+      片づかない分 = 出品済みで KEY が無い行** だけにする。新しい候補と出品待ちは
+      🤖自動 の目視が20件ずつ拾うので、このボタンの「やるべき件数」ではない (内訳として返す)。
     """
     try:
         items, _n_all = load_items(limit=0)
         rest = rest_breakdown([(it["idx"], it["row"], it["src"]) for it in items])
-        return {"pending": len(items), **rest, "error": ""}
+        return {"pending": rest["key"], **rest, "error": ""}
     except Exception as e:                                         # noqa: BLE001
         return {"pending": 0, "error": f"{type(e).__name__}: {e}"[:60]}
 
