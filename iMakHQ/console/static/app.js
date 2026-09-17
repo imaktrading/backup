@@ -628,6 +628,78 @@
       setTimeout(bootstrap, 3000);
     });
   }
+  // ---------------------------------------------------------------- リサーチ
+  // 条件 (カテゴリ・形式・セラー国・並び) は tools/market_ledger.py が唯一の口。
+  // ここで持つのは「どれを選んだか」だけ。
+  var rsPreset = null, rsDays = null;
+
+  function rsChips(box, items, get, set) {
+    $(box).innerHTML = items.map(function (it) {
+      var cls = get() === it.v ? "chip on" : "chip";
+      return '<button type="button" class="' + cls + '" data-v="' + esc(it.v) + '">' +
+             esc(it.t) + "</button>";
+    }).join("");
+    [].forEach.call($(box).querySelectorAll("button"), function (b) {
+      b.onclick = function () {
+        set(b.dataset.v);
+        rsChips(box, items, get, set);
+      };
+    });
+  }
+
+  function rsOut(text) {
+    var o = $("rs-out");
+    o.hidden = !text;
+    o.textContent = text || "";
+  }
+
+  function rsBusy(on, what) {
+    ["rs-open", "rs-ingest", "rs-report"].forEach(function (id) { $(id).disabled = on; });
+    if (on) $("rs-note").textContent = what + "…";
+  }
+
+  function initResearch() {
+    getJSON("/api/research").then(function (d) {
+      if (d.error) { $("rs-note").textContent = "使えません: " + d.error; return; }
+      rsPreset = rsPreset || d.presets[0];
+      rsDays = rsDays || String(d.default_days);
+      rsChips("rs-presets", d.presets.map(function (p) { return { v: p, t: p }; }),
+              function () { return rsPreset; }, function (v) { rsPreset = v; });
+      rsChips("rs-ranges", Object.keys(d.ranges).map(function (k) {
+        return { v: String(d.ranges[k]), t: k };
+      }), function () { return rsDays; }, function (v) { rsDays = v; });
+      $("rs-note").textContent = "台帳 " + Number(d.rows).toLocaleString("ja-JP") + "行";
+    }).catch(function () { $("rs-note").textContent = "台帳を読めません"; });
+
+    $("rs-open").onclick = function () {
+      var tabs = [];
+      if ($("rs-sold").checked) tabs.push("SOLD");
+      if ($("rs-active").checked) tabs.push("ACTIVE");
+      if (!tabs.length) { rsOut("売れた / 出ている のどちらかを選んでください"); return; }
+      rsBusy(true, "開いています");
+      post("/api/research/open", { preset: rsPreset, tabs: tabs, days: Number(rsDays) })
+        .then(function (r) {
+          var d = r.j || {};
+          rsBusy(false);
+          if (d.error) { rsOut("開けませんでした: " + d.error); return; }
+          $("rs-note").textContent = "開きました (" + tabs.join(" / ") + ")";
+          rsOut("ブラウザで「まとめて取る」を押してください。終わったら CSV で出して「取り込む」。");
+        });
+    };
+    ["ingest", "report"].forEach(function (cmd) {
+      $("rs-" + cmd).onclick = function () {
+        rsBusy(true, cmd === "ingest" ? "取り込み中" : "集計中");
+        post("/api/research/run", { cmd: cmd }).then(function (r) {
+          var d = r.j || {};
+          rsBusy(false);
+          rsOut(d.text || d.error || "(何も返りませんでした)");
+          if (d.rows != null) $("rs-note").textContent = "台帳 " + Number(d.rows).toLocaleString("ja-JP") + "行";
+        });
+      };
+    });
+  }
+  initResearch();
+
   bootstrap();
   setInterval(function () {                    // 定期の更新でも、取れていなければ組み直す
     if (!buttons.length || !jobList.length) { bootstrap(); return; }

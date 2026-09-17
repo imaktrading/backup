@@ -461,6 +461,49 @@ def get_version():
             "changelog": _read_text(os.path.join(HERE, "CHANGELOG.md"))}
 
 
+def _market_ledger():
+    """リサーチの道具 (tools/market_ledger.py) を読み込む。条件セットはあちらが唯一の口。"""
+    if TOOLS not in sys.path:
+        sys.path.insert(0, TOOLS)
+    import market_ledger
+    return market_ledger
+
+
+def research_meta():
+    """画面に出す選択肢 (商材 / 期間 / 既定)。"""
+    m = _market_ledger()
+    return {
+        "presets": list(m.PRESETS.keys()),
+        "ranges": m.DAY_RANGES,
+        "default_days": m.DEFAULT_DAYS,
+        "ledger": m.LEDGER,
+        "rows": len(m.load_ledger()),
+    }
+
+
+def research_open(preset, tabs, days):
+    """条件を焼いた Research の URL をブラウザで開く (SOLD / ACTIVE を選べる)。"""
+    import webbrowser
+    m = _market_ledger()
+    urls = []
+    for tab in tabs or ["SOLD"]:
+        url = m.build_url(preset, tab=tab, days=int(days or m.DEFAULT_DAYS))
+        webbrowser.open(url)
+        urls.append(url)
+    return {"ok": True, "urls": urls}
+
+
+def research_run(cmd):
+    """ingest / report を走らせて、画面に出す文字を返す。"""
+    m = _market_ledger()
+    import io
+    import contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = (m.cmd_ingest([]) if cmd == "ingest" else m.cmd_report([]))
+    return {"ok": code == 0, "text": buf.getvalue(), "rows": len(m.load_ledger())}
+
+
 def _read_text(path, limit=8000):
     try:
         with open(path, encoding="utf-8") as f:
@@ -845,6 +888,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, get_watcher())
         if u.path == "/api/version":
             return self._json(200, get_version())
+        if u.path == "/api/research":
+            try:
+                return self._json(200, research_meta())
+            except Exception as e:                       # noqa: BLE001 画面に出して知らせる
+                return self._json(200, {"error": str(e)})
         if u.path == "/api/log":
             after = int((parse_qs(u.query).get("after") or ["0"])[0] or 0)
             with _LOCK:
@@ -879,6 +927,17 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/stop":
             code, obj = stop_job()
             return self._json(code, obj)
+        if u.path == "/api/research/open":
+            try:
+                return self._json(200, research_open(body.get("preset"), body.get("tabs"),
+                                                     body.get("days")))
+            except Exception as e:                       # noqa: BLE001
+                return self._json(200, {"ok": False, "error": str(e)})
+        if u.path == "/api/research/run":
+            try:
+                return self._json(200, research_run(str(body.get("cmd") or "report")))
+            except Exception as e:                       # noqa: BLE001
+                return self._json(200, {"ok": False, "error": str(e)})
         if u.path == "/api/refresh":
             threading.Thread(target=refresh_counts, daemon=True).start()
             STATE["crew_at"] = 0                     # ホームは数え終わってから読む (refresh_counts)

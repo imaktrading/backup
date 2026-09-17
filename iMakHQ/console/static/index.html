@@ -107,6 +107,31 @@
       <div class="kp"><div><label>棚の合計</label><b id="kp-shelf">—</b></div><div><label>予算</label><b id="kp-budget">—</b></div></div></div>
     <section class="card"><div class="rows" id="ana-rows"></div></section>
     <section class="card">
+      <div class="ch"><h3>リサーチ (市場で何が売れているか)</h3><p>条件は固定。選んで開く → 画面右下の「まとめて取る」→ 取り込む</p></div>
+      <div class="rsrch">
+        <div class="rsrch-row">
+          <label>商材</label><span id="rs-presets" class="chips"></span>
+        </div>
+        <div class="rsrch-row">
+          <label>取るもの</label><span class="chips">
+            <label class="chip"><input type="checkbox" id="rs-sold" checked> 売れた (SOLD)</label>
+            <label class="chip"><input type="checkbox" id="rs-active"> 出ている (ACTIVE)</label>
+          </span>
+        </div>
+        <div class="rsrch-row">
+          <label>期間</label><span id="rs-ranges" class="chips"></span>
+        </div>
+        <div class="rsrch-btns">
+          <button class="go" id="rs-open" type="button">Research を開く</button>
+          <button id="rs-ingest" type="button">取り込む</button>
+          <button id="rs-report" type="button">集計を見る</button>
+          <span class="rsrch-note" id="rs-note">台帳 …</span>
+        </div>
+        <pre class="rsrch-out" id="rs-out" hidden></pre>
+      </div>
+    </section>
+
+    <section class="card">
       <div class="ch"><h3>棚割り</h3><p id="shelf-sub">US 価格 · 予算に対する今の棚</p></div>
       <div class="shelf" id="shelf-bars"><div class="empty">統合シート読込中…</div></div>
     </section>

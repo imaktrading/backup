@@ -73,3 +73,50 @@ def test_サマリーCSVは取り込まない(tmp_path):
     (tmp_path / "terapeak_summary_20260918_0702.csv").write_text("x", encoding="utf-8")
     found = [os.path.basename(p) for p in M.find_files([str(tmp_path)])]
     assert found == ["terapeak_20260918_0702.csv"]
+
+
+import datetime
+import urllib.parse
+
+
+def _q(url):
+    return urllib.parse.parse_qs(urllib.parse.urlparse(url).query, keep_blank_values=True)
+
+
+NOW = datetime.datetime(2026, 9, 18, 9, 0, 0)
+
+
+def test_条件は毎回同じものが焼かれる():
+    q = _q(M.build_url("ポケモン", now=NOW))
+    assert q["categoryId"] == ["183454"]
+    assert sorted(q["format"]) == ["BEST_OFFER", "FIXED_PRICE"]
+    assert q["sellerCountry"] == ["JP"]
+    assert q["keywords"] == ["PSA"]
+    assert q["sorting"] == ["-itemssold"]
+    assert q["dayRange"] == ["90"]
+    assert "buyerCountry" not in q          # 買い手の国で絞るのは誤り (2026-09-18)
+    assert "price" not in q                 # 価格の下限は入れない
+
+
+def test_ドラゴンボールはGameを2つ入れる():
+    q = _q(M.build_url("ドラゴンボール", now=NOW))
+    assert q["aspect"] == ["Game:::Dragon Ball Super Card Game", "Game:::Dragon Ball CCG"]
+
+
+def test_ACTIVEには売れた数の並びを付けない():
+    assert "sorting" not in _q(M.build_url("ポケモン", tab="ACTIVE", now=NOW))
+    assert _q(M.build_url("ポケモン", tab="ACTIVE", now=NOW))["tabName"] == ["ACTIVE"]
+
+
+def test_期間は開始日にも効く():
+    q = _q(M.build_url("ポケモン", days=365, now=NOW))
+    span = (int(q["endDate"][0]) - int(q["startDate"][0])) / 86400000
+    assert round(span) == 365
+
+
+def test_知らない商材やタブは弾く():
+    import pytest
+    with pytest.raises(KeyError):
+        M.build_url("ガンダム")
+    with pytest.raises(ValueError):
+        M.build_url("ポケモン", tab="BOTH")

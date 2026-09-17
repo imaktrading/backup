@@ -12,8 +12,8 @@
 import os
 import subprocess
 
-VERSION = "0.6.4"
-RELEASED = "2026-09-17"
+VERSION = "0.7.0"
+RELEASED = "2026-09-18"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # 押せない理由 (移行の残り作業)。control_panel の script の形から判定する

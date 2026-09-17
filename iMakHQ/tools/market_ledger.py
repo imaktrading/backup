@@ -33,6 +33,66 @@ SEARCH_DIRS = [
 # 台帳の鍵: 同じ検索で同じ出品なら1行 (取り直したら新しい方で上書き)
 KEY_COLS = ("種別", "検索語", "itemId", "期間")
 
+# ---- 条件セット (ここが唯一の口。手打ちしない) ----
+# 2026-09-18 ユーザー確定。変える時はここだけ変える。
+#   共通: CCG Individual Cards / 即決+オファー承諾 (オークション除外) / 日本人セラー /
+#         売れた数の多い順 / 1ページ50件。価格の下限は入れない ($40未満は実測で4%)
+#   Game は URL の aspect に入る (aspect=Game:::One Piece CCG)。実機で確認済み
+RESEARCH_BASE = "https://www.ebay.com/sh/research"
+CATEGORY_CCG = "183454"
+
+PRESETS = {
+    "ポケモン": ["Pokémon TCG"],
+    "ワンピース": ["One Piece CCG"],
+    # ★2026-09-18: 市場側で Game が2つに割れている (Super Card Game 116 / CCG 66)。
+    #   片方だけだと半分落ちるので両方
+    "ドラゴンボール": ["Dragon Ball Super Card Game", "Dragon Ball CCG"],
+}
+
+DAY_RANGES = {
+    "7日": 7, "30日": 30, "90日": 90, "6ヶ月": 180,
+    "1年": 365, "2年": 730, "3年": 1095,
+}
+DEFAULT_DAYS = 90
+
+
+def build_url(preset, tab="SOLD", days=DEFAULT_DAYS, keywords="PSA", now=None):
+    """条件セットから Research の URL を作る。
+
+    tab は "SOLD" か "ACTIVE"。days は DAY_RANGES の値 (既定 90)。
+    """
+    import urllib.parse
+    if preset not in PRESETS:
+        raise KeyError(f"知らない条件セット: {preset}")
+    tab = tab.upper()
+    if tab not in ("SOLD", "ACTIVE"):
+        raise ValueError(f"tab は SOLD か ACTIVE: {tab}")
+    now = now or datetime.datetime.now()
+    end = int(now.timestamp() * 1000)
+    start = int((now - datetime.timedelta(days=days)).timestamp() * 1000)
+    q = [
+        ("marketplace", "EBAY-US"),
+        ("keywords", keywords),
+        ("dayRange", str(days)),
+        ("endDate", str(end)),
+        ("startDate", str(start)),
+        ("categoryId", CATEGORY_CCG),
+        ("format", "BEST_OFFER"),
+        ("format", "FIXED_PRICE"),
+    ]
+    q += [("aspect", f"Game:::{g}") for g in PRESETS[preset]]
+    q += [
+        ("sellerCountry", "JP"),
+        ("offset", "0"),
+        ("limit", "50"),
+        ("tabName", tab),
+        ("tz", "Asia/Tokyo"),
+    ]
+    if tab == "SOLD":
+        q.append(("sorting", "-itemssold"))   # 売れた数の多い順 (ACTIVE には無い並び)
+    return RESEARCH_BASE + "?" + urllib.parse.urlencode(q)
+
+
 _CARD_NO = re.compile(r"\b(\d{1,3}\s*/\s*(?:\d{1,3}|[A-Z]{1,3}-?[A-Z]?))\b")
 
 
