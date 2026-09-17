@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Terapeak 抜き出し",
+  "version": "1.0",
+  "description": "eBay Seller Hub の Research で今表示している一覧を取って CSV にする (自動でページは捲らない)",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.ebay.com/sh/research*",
+        "https://*.ebay.com/sh/research*"
+      ],
+      "js": ["content.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
