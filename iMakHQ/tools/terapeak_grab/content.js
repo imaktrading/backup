@@ -165,6 +165,31 @@
     }
   }
 
+  // ---- More filters の選択肢を吸い出す ----
+  // 選択肢は閉じたままでも DOM に入っている (2026-09-18 実機確認)。開かずに読む。
+  async function dumpFilters() {
+    const blocks = show(".aspect-filter-multiselect");
+    if (!blocks.length) {
+      return msg("More filters を開いてから押してください", true);
+    }
+    const out = [];
+    for (const blk of blocks) {
+      const name = txt(blk.querySelector(".aspect-label")) || "?";
+      for (const it of blk.querySelectorAll(".filter-menu__item")) {
+        const label = txt(it.querySelector(".filter-menu__text"));
+        const m = /^(.*)\s*\((\d+)\)$/.exec(label);
+        out.push({
+          項目: name,
+          選択肢: (it.getAttribute("data") || "").split(":::").pop() || (m ? m[1].trim() : label),
+          件数: m ? m[2] : "",
+        });
+      }
+    }
+    if (!out.length) return msg("選択肢が読めませんでした", true);
+    download(`terapeak_filters_${stamp()}.csv`, toCsv(out));
+    msg(`${blocks.length}項目 / 選択肢 ${out.length}件 を出しました`);
+  }
+
   // ---- CSV ----
   function toCsv(rows) {
     const cols = [];
@@ -252,6 +277,7 @@
         <button class="tpg-btn sub" id="tpg-take">この画面だけ取る</button>
         <button class="tpg-btn sub" id="tpg-csv">CSVで出す</button>
         <button class="tpg-btn sub" id="tpg-clip">コピー (貼り付け用)</button>
+        <button class="tpg-btn sub" id="tpg-filters">フィルタの選択肢を出す</button>
         <label id="tpg-auto"><input type="checkbox" id="tpg-auto-cb"> ページを捲ったら自動で取る</label>
         <button class="tpg-btn danger" id="tpg-clear">全部消す</button>
         <div id="tpg-msg"></div>
@@ -263,6 +289,7 @@
 
     panel.querySelector("#tpg-take").onclick = () => capture(false);
     panel.querySelector("#tpg-all").onclick = runAll;
+    panel.querySelector("#tpg-filters").onclick = dumpFilters;
     panel.querySelector("#tpg-csv").onclick = exportCsv;
     panel.querySelector("#tpg-clip").onclick = copyClip;
     panel.querySelector("#tpg-clear").onclick = clearAll;
