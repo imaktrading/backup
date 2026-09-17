@@ -3637,9 +3637,12 @@ def main():
             # ★2026-09-08 ユーザー確定「ポケモン70%、売れ筋優先。それ以外は適当でいい」。
             #   売れ筋 = ファネル(自分の出品の実績)のセット別スコア。
             #   点を付けられない物 (鍵が無い/形が違う) は後ろにランダムのまま置く。
-            from tcg_batch_select import build_demand_of
+            # ★2026-09-17 ユーザー承認: 人気キャラ → 仕入値の安い順 (2割ランダム) / 同じカードは1枠1枚。
+            #   セット単位の売れ筋点 (build_demand_of) は同じ弾に偏らせたので並べ順に使わない。
+            from tcg_batch_select import build_popular_of
             cert_numbers = balanced_sample(cert_numbers, mercari_title_map, PSA_BATCH_LIMIT,
-                                           demand_of=build_demand_of(cert_numbers))
+                                           cost_of=cost_map.get,
+                                           popular_of=build_popular_of(cert_numbers, mercari_title_map))
             _dist = _collections.Counter(classify_franchise(mercari_title_map.get(c, "")) for c in cert_numbers)
             print(f"⚠️ {total}件中 franchise均等 {PSA_BATCH_LIMIT} 件を処理 "
                   f"(内訳 {dict(_dist)} / 残 {total-PSA_BATCH_LIMIT} 件は次回再走)")

@@ -341,7 +341,8 @@ def _one_per_card(order, card_of):
 
 
 def balanced_sample(certs, title_map, limit, shuffle=None, cost_of=None,
-                    pokemon_share=None, explore=0.2, demand_of=None, card_of=None):
+                    pokemon_share=None, explore=0.2, demand_of=None, card_of=None,
+                    popular_of=None):
     """franchise 比率つきで limit 件選ぶ (既定: ポケモン7割 / 残り3割は他を順ぐり)。
 
     各グループ内の順番 (2026-09-08 ユーザー確定):
@@ -363,7 +364,25 @@ def balanced_sample(certs, title_map, limit, shuffle=None, cost_of=None,
         groups.setdefault(classify_franchise((title_map or {}).get(c, "")), []).append(c)
     for g in groups.values():
         shuffle(g)                      # 探索枠 (安い順を当てる前の並びをランダムにしておく)
-    if demand_of is not None:
+    if popular_of is not None:
+        # ★2026-09-17 ユーザー承認: **人気キャラ → 仕入値の安い順** (2割はランダム)。
+        #   9/08 のセット単位の売れ筋点は使わない。同じ弾がまとめて上に来て、19:03 の20枠が
+        #   S8b だけで11枠 (うちゼクロム6) に偏った = 「出していない種類を増やす」目的に反する。
+        #   安い順の根拠: 出品価格 $100未満の売却率 5.2% / $400超 1.6%、同じ枠で多く出せる。
+        #   人気キャラの根拠: 自社出品で 1出品あたり販売 3.4% vs 2.2%・ウォッチ 0.84 vs 0.51。
+        n_explore = max(0, int(round(limit * explore)))
+        for name, g in groups.items():
+            keep_random = g[:n_explore]              # ランダムのまま残す分 (順位で永久に殺さない)
+            _known = getattr(popular_of, "known", None)
+            rest = sorted(g[n_explore:], key=lambda c: (
+                # カードを特定できていない物 (PSA データ未取得) は目視前の除外が効かず、
+                # 開けてみたら重複・対象外で枠を潰しやすいので後ろ (ランダム枠で出番は残る)
+                bool(_known) and not _known(c),
+                not popular_of(c),
+                cost_of is None or cost_of(c) is None,
+                (cost_of(c) or 0) if cost_of is not None else 0))
+            groups[name] = keep_random + rest
+    elif demand_of is not None:
         # ★売れ筋優先 (2026-09-08 ユーザー確定)。順位を付けられない物 (鍵が無い/形が違う)
         #   は **後ろにランダムのまま** 置く (「それ以外は適当でいい」)。
         #   出品が進んで順位付きが減れば、そのぶん出番が回る。
@@ -380,8 +399,8 @@ def balanced_sample(certs, title_map, limit, shuffle=None, cost_of=None,
             rest = g[n_explore:]
             rest.sort(key=lambda c: (cost_of(c) is None, cost_of(c) or 0))
             groups[name] = keep_random + rest
-    if card_of is None and demand_of is not None:
-        card_of = getattr(demand_of, "card_of", None)
+    if card_of is None:
+        card_of = getattr(popular_of, "card_of", None) or getattr(demand_of, "card_of", None)
     if card_of is not None:
         groups = {name: _one_per_card(g, card_of) for name, g in groups.items()}
     if share and "Pokemon" in groups:
@@ -418,6 +437,175 @@ def _sample_with_share(groups, limit, share):
 
 
 FUNNEL_GLOB = r"C:/dev/iMak/iMakHQ/funnel_output/funnel_*.csv"
+POPULAR_PATH = r"C:/dev/iMak/iMakTCG/popular_characters.json"
+_TCG_CATS = ("pokemon_tcg", "one_piece_tcg", "dragonball_scg", "gundam_tcg", "yugioh_tcg")
+
+
+def load_popular_names(path=None):
+    """popular_characters.json → (英名の集合, 和名の集合)。読めなければ空 (= 人気の印なし・安い順だけ)。"""
+    try:
+        with open(path or POPULAR_PATH, encoding="utf-8") as f:
+            doc = json.load(f) or {}
+    except Exception:                                          # noqa: BLE001
+        return set(), set()
+    en, ja = set(), set()
+    for game in ("pokemon", "one_piece"):
+        for r in doc.get(game) or []:
+            if r.get("en"):
+                en.add(str(r["en"]).strip().upper())
+            if r.get("ja"):
+                ja.add(str(r["ja"]).strip())
+    return en, ja
+
+
+def _has_word(text_upper, name_upper):
+    t = re.sub(r"[^A-Z0-9]+", " ", text_upper or "")
+    return re.search(r"(?<![A-Z0-9])" + re.escape(name_upper) + r"(?![A-Z0-9])", t) is not None
+
+
+def is_popular_name(char_en, name_ja, title, en_names, ja_names):
+    """カードが人気キャラか (純関数)。
+
+    - 英名: カタログの character_name に **単語として** 含まれるか (MEW は MEWTWO に当てない)
+    - 和名: カタログの name に含まれるか
+    - カードがまだ特定できない時だけ、メルカリのタイトルの和名 (3文字以上) で見る
+      (2文字の「ゾロ」「ナミ」はゾロアーク等に当たるので、タイトルでは使わない)
+    """
+    ce = str(char_en or "").upper()
+    if ce and any(_has_word(ce, n) for n in en_names):
+        return True
+    nj = str(name_ja or "")
+    if nj and any(n in nj for n in ja_names):
+        return True
+    if not ce and not nj:
+        t = str(title or "")
+        return any(len(n) >= 3 and n in t for n in ja_names)
+    return False
+
+
+def _sold_item_ids(funnel_rows):
+    """ファネルから、1件でも売れた US の PSA10 出品の itemID (純関数)。"""
+    out = set()
+    for r in funnel_rows or []:
+        if (r.get("site") or "US") != "US" or "PSA 10" not in (r.get("title") or ""):
+            continue
+        try:
+            sold = float(r.get("sold_qty") or 0)
+        except ValueError:
+            sold = 0
+        if sold >= 1 and (r.get("item_id") or "").strip():
+            out.add(r["item_id"].strip())
+    return out
+
+
+_FRACTION = re.compile(r"(?<![0-9])([0-9]{1,3})\s*/\s*([0-9]{2,3}|[A-Z]{1,3}-P)(?![0-9])", re.I)
+
+
+def title_card_key(title):
+    """カードを特定できていない候補どうしで、同じ物を見分ける鍵 (純関数)。
+
+    番号 (`101/184` / `P-011` 等) が読めればそれ、無ければ空白・記号を除いたタイトル。
+    ★これは **1回の枠に同じ物を2枚入れない** ためだけに使う。出品の正しさには使わない
+      (取り違えても、その回に入らないだけ = 次回に回る)。
+    """
+    t = str(title or "")
+    m = _FRACTION.search(t)
+    if m:
+        return f"T:{int(m.group(1)):03d}/{m.group(2).upper()}"
+    m = re.search(r"\b((?:OP|ST|EB|PRB)\d{2}-\d{3}|P-\d{3})\b", t, re.I)
+    if m:
+        return "T:" + m.group(1).upper()
+    norm = re.sub(r"[\s　【】\[\]（）()〈〉「」・,，、。!！?？★☆#＃]+", "", t).upper()
+    return ("T:" + norm) if norm else ""
+
+
+def build_popular_of(certs, title_map, key_map=None, fallback_key_of=None, funnel_glob=None):
+    """cert → 人気キャラか を返す関数を作る (I/O)。`.card_of` にカードの鍵も載せる。
+
+    人気キャラ = popular_characters.json + **自社で売れたキャラ** (ファネルから毎回)。
+    カードの特定は build_demand_of と同じ (シートの KEY → PSA データの手元キャッシュ)。
+    何か読めなくても落とさない (人気の印が付かない = 安い順だけで並ぶ)。
+    """
+    import csv as _csv
+    import glob as _glob
+    import os as _os
+    import sqlite3 as _sq3
+    import sys as _sys
+    en_names, ja_names = load_popular_names()
+    item_key = {}
+    if key_map is None:
+        try:
+            _sys.path.insert(0, r"C:/dev/iMak/iMakHQ/tools")
+            _sys.path.insert(0, r"C:/dev/iMak/iMakeBayAPI")
+            import sheet_io as _sio
+            vals = _sio._product_ws().get_all_values()
+            kc, ic, bc = _sio.PRODUCT_COL_KEY, 8, _sio.PRODUCT_COL_ITEMID
+            key_map = {(r[ic] or "").strip(): (r[kc] if len(r) > kc else "")
+                       for r in vals[1:] if len(r) > ic and (r[ic] or "").strip()}
+            item_key = {(r[bc] or "").strip(): (r[kc] if len(r) > kc else "")
+                        for r in vals[1:] if len(r) > max(bc, kc) and (r[bc] or "").strip()}
+        except Exception as e:                                 # noqa: BLE001
+            print(f"  ⚠ シートの KEY を読めませんでした ({type(e).__name__}) → PSA データだけで特定します")
+            key_map = {}
+    if fallback_key_of is None:
+        _need = [c for c in certs if not (key_map.get(c) or "").strip()]
+        fallback_key_of = _pid_from_psa_cache(_need).get
+
+    def catalog_key(c):
+        return (key_map.get(c) or "").strip() or (fallback_key_of(c) or "")
+
+    def key_of(c):
+        return catalog_key(c) or title_card_key((title_map or {}).get(c, ""))
+
+    chars = {}
+    try:
+        _sys.path.insert(0, r"C:/dev/iMak/iMakHQ/tools")
+        import psa_preflight as _pf
+        con = _sq3.connect(f"file:{_pf.CATALOG_DB}?mode=ro", uri=True)
+        try:
+            ph = ",".join("?" * len(_TCG_CATS))
+
+            def _char(pid):
+                if pid not in chars:
+                    row = con.execute(
+                        "SELECT json_extract(specs,'$.character_name'), name FROM products "
+                        f"WHERE product_id=? AND category IN ({ph}) LIMIT 1", (pid, *_TCG_CATS)).fetchone()
+                    chars[pid] = ((row[0] or ""), (row[1] or "")) if row else ("", "")
+                return chars[pid]
+            for c in certs:
+                pid = catalog_key(c).split(":")[-1]
+                if pid:
+                    _char(pid)
+            # 自社で売れたキャラ = 売れた出品の itemID → シートの KEY → カタログのキャラ名
+            #   (タイトルの英単語で拾うと「May 2024」の MAY 等が混ざった)
+            files = _glob.glob(funnel_glob or FUNNEL_GLOB)
+            if files and item_key:
+                with open(max(files, key=_os.path.getmtime), encoding="utf-8") as f:
+                    sold_ids = _sold_item_ids(list(_csv.DictReader(f)))
+                sold = set()
+                for iid in sold_ids:
+                    pid = (item_key.get(iid) or "").split(":")[-1]
+                    ce = _char(pid)[0] if pid else ""
+                    if ce:
+                        sold.add(ce.strip().upper())
+                if sold - en_names:
+                    print(f"  ⭐ 自社で売れたキャラを人気に追加: {sorted(sold - en_names)[:12]}")
+                en_names = en_names | sold
+        finally:
+            con.close()
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ キャラ名を引けませんでした ({type(e).__name__}) → タイトルの和名だけで判定します")
+
+    def popular_of(c):
+        ce, nj = chars.get(catalog_key(c).split(":")[-1], ("", ""))
+        return is_popular_name(ce, nj, (title_map or {}).get(c, ""), en_names, ja_names)
+
+    n = sum(1 for c in certs if popular_of(c))
+    nk = sum(1 for c in certs if catalog_key(c))
+    print(f"  ⭐ 並べ順: カード特定済 {nk}/{len(certs)}件 → 人気キャラ {n}件 → 仕入値の安い順 (2割はランダム)")
+    popular_of.card_of = key_of
+    popular_of.known = lambda c: bool(catalog_key(c))
+    return popular_of
 
 
 def _pid_from_psa_cache(certs):
