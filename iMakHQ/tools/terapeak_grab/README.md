@@ -15,9 +15,7 @@ eBay Seller Hub の **Research (Terapeak)** で画面に出ている一覧を、
 1. Research で検索する (期間・フィルタは好きに)
 2. 右下のパネルの **この画面を取る** を押す → 表示中の50件が溜まる
 3. 次のページに捲って、また押す (「ページを捲ったら自動で取る」を ON にすると押さなくてよい)
-4. **CSVで出す** → ダウンロードに2本落ちる
-   - `terapeak_YYYYMMDD_HHMM.csv` … 一覧 (Sold / Active)
-   - `terapeak_summary_*.csv` … 上の帯 (平均落札・Sell-through 等)
+4. **CSVで出す** → `terapeak_YYYYMMDD_HHMM.csv` がダウンロードに落ちる
    - **コピー (貼り付け用)** はスプレッドシートにそのまま貼れる形 (タブ区切り)
 
 同じ出品は何回押しても1行にしかならない (itemId + 検索語で重複を落とす)。
@@ -41,11 +39,13 @@ eBay Seller Hub の **Research (Terapeak)** で画面に出ている一覧を、
 | Active 行 | `tr.active-listing-row` |
 | セルの値 / 補足 | `td 内の div > div` / `.format` |
 | itemId | `[data-item-id]` |
-| 上の帯 | `.aggregates .aggregate-metric` の `.subtitle` と `.metric-value` |
 | 期間 | `.results-header__left span` |
 
 隠れているタブ (Sold を見ている時の Active) は中身が空なので、見えている行だけ拾う。
 出品が終わっていてリンクが無い行は、題名を画像の alt から取る。
 
 検証: 2026-09-18 に保存した実ページ (365日窓 / PSA10 pokemon) を Chrome に読ませて、
-Sold 50件・上の帯6項目が取れ、隠れた Active 50件は拾わないことを確認済み。
+Sold 50件が取れ、隠れた Active 50件は拾わないことを確認済み。
+
+上の帯 (平均落札・Sell-through 等) は 2026-09-18 に「使い道が分からない」で出すのをやめた
+(ユーザー判断)。一覧の `条件` 列に検索条件が入っているので、必要なら検索し直せば見られる。

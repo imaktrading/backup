@@ -4,7 +4,6 @@
   "use strict";
 
   const ROWS_KEY = "tpg_rows_v1";
-  const SUM_KEY = "tpg_summary_v1";
 
   const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
   // セルは <div><div>値</div><div class="format">補足</div></div> の形
@@ -78,16 +77,6 @@
     });
   }
 
-  function parseSummary(ctx) {
-    const metrics = show(".aggregates .aggregate-metric");
-    if (!metrics.length) return null;
-    const row = { ...ctx };
-    for (const m of metrics) {
-      const name = txt(m.querySelector(".subtitle"));
-      if (name) row[name] = txt(m.querySelector(".metric-value"));
-    }
-    return row;
-  }
 
   // ---- 保存 (重複は itemId + 種別 + 検索語 で落とす) ----
   const load = (key) =>
@@ -114,15 +103,6 @@
     }
     await save(ROWS_KEY, kept);
 
-    const sum = parseSummary(ctx);
-    if (sum) {
-      const sums = await load(SUM_KEY);
-      const k = `${sum.検索語}|${sum.期間}|${sum.条件}`;
-      if (!sums.some((s) => `${s.検索語}|${s.期間}|${s.条件}` === k)) {
-        sums.push(sum);
-        await save(SUM_KEY, sums);
-      }
-    }
     await refresh();
     if (added || !silent) {
       msg(added ? `${added}件 取りました` : "新しい行はありません (取得済み)", !added);
@@ -162,8 +142,6 @@
     const rows = await load(ROWS_KEY);
     if (!rows.length) return msg("まだ1件も取っていません", true);
     download(`terapeak_${stamp()}.csv`, toCsv(rows));
-    const sums = await load(SUM_KEY);
-    if (sums.length) download(`terapeak_summary_${stamp()}.csv`, toCsv(sums));
     msg(`${rows.length}件を CSV に出しました (ダウンロード)`);
   }
 
@@ -187,7 +165,6 @@
   async function clearAll() {
     if (!confirm("溜めた行を全部消します。よろしいですか?")) return;
     await save(ROWS_KEY, []);
-    await save(SUM_KEY, []);
     await refresh();
     msg("消しました");
   }
