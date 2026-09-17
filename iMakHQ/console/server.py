@@ -303,6 +303,33 @@ def refresh_counts():
         STATE["home_at"] = 0                         # 数え終わってからホームを読み直す
 
 
+BACKUP_STATUS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "review_logs",
+                             "data_backup_last.json")
+BACKUP_STALE_H = 36
+
+
+def backup_notice(st, now=None):
+    """毎朝の共有データ バックアップ (tools/data_backup.py) の結果 → 知らせ1行 / 問題なければ "" (純関数)。
+
+    ★2026-09-17: SSD 不調でブルースクリーンが続いた日に作った。iMak_data は git 管理外で
+      複製がどこにも無かった。**止まっても誰も気づかない**のが一番危ないので、失敗と
+      36時間更新なしの両方を出す。
+    """
+    now = now or datetime.datetime.now()
+    if not st:
+        return "バックアップ: 結果がありません (data_backup.py が一度も走っていない)"
+    if not st.get("ok"):
+        return "バックアップ: 失敗 — %s" % (st.get("error") or "理由不明")[:120]
+    try:
+        at = datetime.datetime.fromisoformat(st.get("at") or "")
+    except ValueError:
+        return "バックアップ: 結果の時刻が読めません"
+    hours = (now - at).total_seconds() / 3600
+    if hours > BACKUP_STALE_H:
+        return "バックアップ: %d時間 更新されていません (最後 %s)" % (hours, at.strftime("%m/%d %H:%M"))
+    return ""
+
+
 def _home_worker():
     cp = _cp()
     home = {"shelf": [], "month": {}, "stats": {}, "nightly": {}, "errors": []}
@@ -327,6 +354,14 @@ def _home_worker():
                          "shelf_budget": cp.SHELF_BUDGET_TOTAL_USD}
     except Exception as e:                                     # noqa: BLE001
         home["errors"].append("棚割り: %s" % e)
+    try:
+        with open(BACKUP_STATUS, encoding="utf-8") as f:
+            _bk = json.load(f)
+    except Exception:                                          # noqa: BLE001
+        _bk = None
+    _bn = backup_notice(_bk)
+    if _bn:
+        home["errors"].append(_bn)
     try:
         home["nightly"] = cp.nightly_last_run() or {}
     except Exception as e:                                     # noqa: BLE001
