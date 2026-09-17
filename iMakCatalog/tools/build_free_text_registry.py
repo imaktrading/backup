@@ -36,6 +36,10 @@ except Exception:
 
 MASTER = Path(r"C:/dev/iMak_data/catalog/_input/ebay_aspects_183454_latest.json")
 OUT = ROOT / "ebay_filter_map" / "_free_text_set_values.yaml"
+# 共有領域にも同じ物を置く。HQ の週次検査 (§2) が「正規の値」として読むため。
+# 作り直すたびにここも更新する (片方だけ古いと検査が誤検出する)。
+# 依頼書: iMak_data/hq/requests/2026-09-17_opcg_dump_refresh_manual_run_response.md §2
+SHARED_OUT = Path(r"C:/dev/iMak_data/catalog/_free_text_set_values.yaml")
 GAME_OF = {"pokemon_tcg": "Pokémon TCG", "one_piece_tcg": "One Piece CCG",
            "dragonball_scg": "Dragon Ball Super Card Game", "gundam_tcg": None}
 # 英語版シリーズ名で始まる値は登録できない (ルール③)
@@ -97,8 +101,16 @@ def main():
             if jp.get((cat, v)):
                 lines.append(f"    jp_set: {json.dumps(jp[(cat, v)], ensure_ascii=False)}")
             n += 1
-    OUT.write_text(NL.join(lines) + NL, encoding="utf-8")
+    body = NL.join(lines) + NL
+    OUT.write_text(body, encoding="utf-8")
     print(f"登録簿を書きました: {OUT}  ({n} 値)")
+    try:
+        SHARED_OUT.parent.mkdir(parents=True, exist_ok=True)
+        SHARED_OUT.write_text(body, encoding="utf-8")
+        print(f"共有領域にも置きました: {SHARED_OUT}")
+    except OSError as e:
+        # 共有領域に置けなくても本体は書けている。落とさずに知らせる。
+        print(f"⚠️ 共有領域に置けませんでした ({e}) — HQ の検査が §2 を誤検出します")
 
 
 if __name__ == "__main__":
