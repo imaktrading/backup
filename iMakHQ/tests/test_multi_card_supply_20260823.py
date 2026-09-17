@@ -137,3 +137,28 @@ def test_precheck_is_wired_before_upload(G):
     assert "taken = supply_url_taken_by_live(rows, header, vals)" in src, \
         "入稿前チェックから呼ばれていない (出品後の棚卸しだけに戻っている)"
     assert "pre_upload_stripped_shared_url" in src, "除外した記録が残らない"
+
+
+# ── 2026-09-17: 「〜の3点」と、補URL③ の画面に出す直前の門 ──────────────
+def test_lot_listed_names_then_count_is_caught(P):
+    # 実データ (PSA 補URL③ の候補に出ていた)
+    assert P.supply_lot_hint("【PSA10 ヌイコグマ AR 】SRウッウV 、SSRテツノワダチexの3点") == "の3点"
+
+
+@pytest.mark.parametrize("title", [
+    "【PSA10】ナミ ST01-007 ストレージボックスセット",      # 商品名の「セット」は単品
+    "【PSA10】リーフィアVSTAR P スペシャルカードセット 草のリーフィア",
+    "一番くじ A賞 残り2点",
+])
+def test_product_set_names_are_not_lots(P, title):
+    assert P.supply_lot_hint(title) is None, title
+
+
+def test_visual_candidates_drop_cached_lots():
+    """補URL③ と 再仕入れ① が共通で使う候補一覧から、キャッシュ済みのまとめ売りが落ちる。"""
+    import psa_resource_gate as gate
+    mr = {"all_cands": [[9000, "https://jp.mercari.com/item/m1", "カイドウ SR-P [OP01-094] PSA10 777連番"],
+                        [9500, "https://jp.mercari.com/item/m2", "【PSA10】カイドウ SR-P OP01-094"]],
+          "loose_cands": [[8000, "https://jp.mercari.com/item/m3", "ヌイコグマ AR 、ウッウV 、テツノワダチexの3点"]]}
+    urls = [x["url"] for x in gate._build_visual_candidates(mr, {})]
+    assert urls == ["https://jp.mercari.com/item/m2"], urls

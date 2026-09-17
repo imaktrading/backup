@@ -197,13 +197,22 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
     #   **正変種**) に載っている URL を先頭へ寄せ、各候補に variant_ok を持たせて UI で
     #   区別できるようにする。cands が空(mercari の出品名にセット名が無くて確証できない場合)は
     #   全部 variant_ok=False = 「変種未確認だから絵柄をよく見て」を人に伝える。
+    # ★2026-09-17: まとめ売り/連番も **ここで** 落とす (補URL③ と 再仕入れ① の両方がこの一覧)。
+    #   検索時の判定 (2026-09-04〜) より前に貯めた候補がキャッシュに残り、「3連番」「777連番」
+    #   「〜の3点」が補URL③ の画面に出ていた (ユーザー報告)。判定は listing_common の1か所。
+    try:
+        import mercari_psa_resource as _mpl
+        _is_lot = _mpl._is_lot
+    except Exception:                                          # noqa: BLE001
+        _is_lot = (lambda _n: False)
     verified = {t[1] for t in (mr.get("cands") or []) if t and len(t) > 1 and t[1]}
     merc = mr.get("all_cands") or mr.get("cands") or []
     merc = sorted(merc, key=lambda t: 0 if (t and len(t) > 1 and t[1] in verified) else 1)
     for t in merc[:max_mercari]:
         url = t[1] if (t and len(t) > 1) else ""
         _p = t[0] if (t and isinstance(t[0], int)) else None
-        if url and url not in seen and url not in _ng_urls and _ok(_p):
+        if (url and url not in seen and url not in _ng_urls and _ok(_p)
+                and not _is_lot(t[2] if len(t) > 2 else "")):
             seen.add(url)
             out.append({"channel": "mercari", "url": url, "price": _p,
                         "name": (t[2] if len(t) > 2 else ""),
@@ -215,7 +224,8 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
     for t in (mr.get("loose_cands") or [])[:max_mercari]:
         url = t[1] if (t and len(t) > 1) else ""
         _p = t[0] if (t and isinstance(t[0], int)) else None
-        if url and url not in seen and url not in _ng_urls and _ok(_p):
+        if (url and url not in seen and url not in _ng_urls and _ok(_p)
+                and not _is_lot(t[2] if len(t) > 2 else "")):
             seen.add(url)
             out.append({"channel": "mercari", "url": url, "price": _p,
                         "name": (t[2] if len(t) > 2 else ""),
@@ -223,8 +233,10 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
     # ★最後の逃げ道も同じ門を通す (2026-09-04)。ここを抜いていたため、上の枠で
     #   全部落ちて out が空になった時に、**落としたはずの URL が入り直していた**
     #   (ユーザー報告「補URL③に AUC がまだ出てる」の実体)。
+    _best = mr.get("best") or []
     if (not out and c.get("mercari_url") and c["mercari_url"] not in _ng_urls
-            and _ok(c.get("mercari_jpy"))):
+            and _ok(c.get("mercari_jpy"))
+            and not _is_lot(_best[2] if (len(_best) > 2 and _best[1] == c["mercari_url"]) else "")):
         out.append({"channel": "mercari", "url": c["mercari_url"], "price": c.get("mercari_jpy")})
     for d in (c.get("snkrdunk_urls") or [])[:max_snkr]:
         if (d.get("url") and d["url"] not in seen
