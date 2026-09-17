@@ -10,7 +10,7 @@ $ws = New-Object -ComObject WScript.Shell
 $s = $ws.CreateShortcut($link)
 $s.TargetPath = Join-Path $here 'start_console.vbs'   # 二重起動しない (動いていれば窓だけ開く)
 $s.WorkingDirectory = $here
-$s.IconLocation = '%USERPROFILE%\Documents\icons\Iconarchive-Wild-Camping-Tree.ico,0'  # 旧出品くんと同じ木
+$s.IconLocation = (Join-Path $here 'static\icon.ico') + ',0'  # 店舗ロゴのうさぎ (窓アイコンと同じ・2026-09-17)
 $s.Description = '出品くん Console (新しい画面・Edge のアプリ窓で開く)'
 $s.Save()
 Write-Output ("作成: " + $link)
