@@ -110,6 +110,61 @@
     return added;
   }
 
+  // ---- まとめて取る (人が押した時だけ、開いているタブでだけ動く) ----
+  const MAX_PAGES = 50;
+  let running = false;
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const nextBtn = () =>
+    show("button.pagination__next").find((b) => !b.disabled && b.getAttribute("aria-disabled") !== "true");
+  const pageLabel = () => show(".pagination__item").map((e) => txt(e)).join("/");
+  const rowIds = () =>
+    show("tr.research-table-row, tr.active-listing-row")
+      .map((tr) => (tr.querySelector("[data-item-id]") || {}).getAttribute?.("data-item-id") || "")
+      .join(",");
+
+  async function runAll() {
+    if (running) {
+      running = false;
+      return;
+    }
+    running = true;
+    const search0 = location.search;
+    const btn = panel.querySelector("#tpg-all");
+    btn.textContent = "止める";
+    let pages = 0;
+    try {
+      for (; pages < MAX_PAGES && running; pages++) {
+        await capture(true);
+        msg(`まとめて取得中… ${pages + 1}ページ目`);
+        const b = nextBtn();
+        if (!b) {
+          msg(`最後まで取りました (${pages + 1}ページ)`);
+          break;
+        }
+        const before = pageLabel() + "|" + rowIds();
+        b.click();
+        // 表が入れ替わるのを待つ (最大15秒)
+        for (let i = 0; i < 60 && running; i++) {
+          await sleep(250);
+          if (pageLabel() + "|" + rowIds() !== before) break;
+        }
+        if (location.search !== search0) {
+          msg("検索条件が変わったので止めました", true);
+          break;
+        }
+        // 人が捲るのと同じ間合いを空ける
+        await sleep(5000 + Math.floor(Math.random() * 3000));
+      }
+      if (pages >= MAX_PAGES) msg(`${MAX_PAGES}ページで打ち止めにしました`, true);
+      else if (!running) msg(`止めました (${pages}ページ)`, true);
+    } finally {
+      running = false;
+      btn.textContent = "まとめて取る";
+      await refresh();
+    }
+  }
+
   // ---- CSV ----
   function toCsv(rows) {
     const cols = [];
@@ -193,7 +248,8 @@
       <div id="tpg-head"><span>Terapeak 抜き出し</span><button id="tpg-fold" title="たたむ">–</button></div>
       <div class="tpg-body">
         <div id="tpg-count">0<small>件</small></div>
-        <button class="tpg-btn" id="tpg-take">この画面を取る</button>
+        <button class="tpg-btn" id="tpg-all">まとめて取る</button>
+        <button class="tpg-btn sub" id="tpg-take">この画面だけ取る</button>
         <button class="tpg-btn sub" id="tpg-csv">CSVで出す</button>
         <button class="tpg-btn sub" id="tpg-clip">コピー (貼り付け用)</button>
         <label id="tpg-auto"><input type="checkbox" id="tpg-auto-cb"> ページを捲ったら自動で取る</label>
@@ -206,6 +262,7 @@
     autoBox = panel.querySelector("#tpg-auto-cb");
 
     panel.querySelector("#tpg-take").onclick = () => capture(false);
+    panel.querySelector("#tpg-all").onclick = runAll;
     panel.querySelector("#tpg-csv").onclick = exportCsv;
     panel.querySelector("#tpg-clip").onclick = copyClip;
     panel.querySelector("#tpg-clear").onclick = clearAll;
