@@ -2113,6 +2113,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     #   (`_build_visual_candidates` が既に読んでいる台帳)。出品側は「見送り」ではなく
     #   「売り切れ」で記録し、新しい供給が出た時だけ戻す (9/06 からの既存の戻し方と同じ)。
     solds = {d.get("idx") for d in (res.get("sold") or []) if d.get("idx") is not None}
+    bundles = {d.get("idx") for d in (res.get("bundle") or []) if d.get("idx") is not None}
     _sold_urls = [(d.get("url") or "").strip() for d in (res.get("sold") or [])
                   if (d.get("url") or "").strip()]
     if _sold_urls:
@@ -2123,13 +2124,25 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             print(f"  🚫 仕入元が売り切れ: {len(_sold_urls)}本 → 以後どの候補画面にも出しません")
         except Exception as _e_sold:                            # noqa: BLE001
             print(f"  ⚠ 売り切れの記録skip ({type(_e_sold).__name__})")
+    # ★2026-09-17: まとめ売り・複数枚 も同じ台帳へ (1枚だけ買えない = 仕入元にできない)
+    _bundle_urls = [(d.get("url") or "").strip() for d in (res.get("bundle") or [])
+                    if (d.get("url") or "").strip()]
+    if _bundle_urls:
+        try:
+            import mercari_psa_resource as _mpr
+            for _bu in _bundle_urls:
+                _mpr.remember_not_buyable(_bu, "まとめ売り・複数枚 (補URL③ 目視)")
+            print(f"  🚫 まとめ売り・複数枚: {len(_bundle_urls)}本 → 以後どの候補画面にも出しません")
+        except Exception as _e_b:                               # noqa: BLE001
+            print(f"  ⚠ まとめ売りの記録skip ({type(_e_b).__name__})")
     shown = set(range(len(items)))
     not_confirmed = shown - set(confirmed.keys())
     if not_confirmed:
         new_skip = []
         for idx in sorted(not_confirmed):
             t = item_targets[idx]
-            reason = "違う" if idx in diffs else ("売り切れ" if idx in solds else "見送り")
+            reason = ("違う" if idx in diffs else "売り切れ" if idx in solds
+                      else "まとめ売り" if idx in bundles else "見送り")
             # ★その時に見せた候補URLを残す。次回「新しい供給が出たか」を判定する唯一の材料。
             # これが無いと cooldown 明けに同じ候補をまた見せることになる。
             _shown = " | ".join(c.get("url", "") for c in (items[idx].get("candidates") or [])

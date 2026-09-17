@@ -1625,6 +1625,16 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
             print(f"  🚫 仕入元が売り切れ: {len(_sold_urls)}本 → 以後どの候補画面にも出しません")
         except Exception as e:                                # noqa: BLE001
             print(f"  ⚠ 売り切れの記録skip ({type(e).__name__})")
+    # ★2026-09-17: まとめ売り・複数枚 も同じ台帳へ (1枚だけ買えない = 仕入元にできない)
+    _bundle_urls = [(d.get("url") or "").strip() for d in (res.get("bundle") or [])
+                    if (d.get("url") or "").strip()]
+    if _bundle_urls:
+        try:
+            for _bu in _bundle_urls:
+                mp.remember_not_buyable(_bu, "まとめ売り・複数枚 (再仕入れ照合 目視)")
+            print(f"  🚫 まとめ売り・複数枚: {len(_bundle_urls)}本 → 以後どの候補画面にも出しません")
+        except Exception as e:                                # noqa: BLE001
+            print(f"  ⚠ まとめ売りの記録skip ({type(e).__name__})")
 
     _alert_restock_diffs(res.get("diffs") or [], res.get("skip") or 0, restock_cands, today)
 

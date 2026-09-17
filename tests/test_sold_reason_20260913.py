@@ -68,7 +68,9 @@ def test_page_script_collects_and_sends_sold():
 def test_hoju_records_sold_not_as_skip_and_uses_ledger():
     """補URL③: 出品側は「売り切れ」で記録し、URL は買えない台帳へ入れる。"""
     src = _src("psa_hoju_fill.py")
-    assert 'reason = "違う" if idx in diffs else ("売り切れ" if idx in solds else "見送り")' in src
+    # ★2026-09-17: 「まとめ売り」を足したので式の形が変わった (売り切れを見送りに混ぜない点は同じ)
+    assert '"違う" if idx in diffs else "売り切れ" if idx in solds' in src
+    assert '"まとめ売り" if idx in bundles else "見送り"' in src
     assert 'remember_not_buyable(_su, "仕入元が売り切れ (補URL③ 目視)")' in src
 
 

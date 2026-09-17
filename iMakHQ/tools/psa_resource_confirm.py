@@ -370,6 +370,9 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
 /* PSA10でない = グレード対象外。捨てる系だが「違う(精度事故)」とは別物なので色を分ける */
 .rb.notpsa{border-color:#a06;color:#a06}
 .rb.notpsa.sel{background:#a06;color:#fff}
+/* まとめ売り = 1枚だけ買えない仕入元。売り切れと同じく二度と出さない */
+.rb.bundle{border-color:#865;color:#754}
+.rb.bundle.sel{background:#865;color:#fff}
 .vok{font-size:10px;padding:1px 5px;border-radius:3px;background:#2a7;color:#fff;font-weight:bold}
 .vng{font-size:10px;padding:1px 5px;border-radius:3px;background:#e80;color:#fff;font-weight:bold}
 .nng{font-size:10px;padding:1px 5px;border-radius:3px;background:#c00;color:#fff;font-weight:bold}
@@ -664,7 +667,7 @@ function setRsn(btn){var cand=btn.closest('.cand'); var ck=cand.querySelector('.
   ck.dataset.rsn=btn.dataset.r;
   cand.querySelectorAll('.rb').forEach(function(b){b.classList.toggle('sel', b.dataset.r===btn.dataset.r);});}
 function go(){
-  var conf=[]; var diffs=[]; var probes=[]; var notpsa=[]; var solds=[]; var skip=0; var unset=0;
+  var conf=[]; var diffs=[]; var probes=[]; var notpsa=[]; var solds=[]; var bundles=[]; var skip=0; var unset=0;
   document.querySelectorAll('.card').forEach(function(c){
     var idx=parseInt(c.dataset.idx); var urls=[];
     c.querySelectorAll('.ck').forEach(function(ck){
@@ -676,6 +679,8 @@ function go(){
       else if(ck.dataset.rsn==='notpsa'){notpsa.push({idx:idx, url:ck.dataset.url});}
       /* ★仕入元が売り切れ = この仕入元はもう買えない。見送りにも「違う」にも混ぜない (2026-09-13) */
       else if(ck.dataset.rsn==='sold'){solds.push({idx:idx, url:ck.dataset.url});}
+      /* ★まとめ売り・複数枚 = 1枚だけ買えない仕入元。売り切れと同じ扱い (2026-09-17) */
+      else if(ck.dataset.rsn==='bundle'){bundles.push({idx:idx, url:ck.dataset.url});}
       else{skip++; if(!ck.dataset.rsn) unset++;}});
     if(urls.length) conf.push({idx:idx, urls:urls});
   });
@@ -686,13 +691,14 @@ function go(){
   if(probes.length) msg.push('要調査(同じかも)が'+probes.length+'件 — 台帳に記録します。補URLには書きません。');
   if(notpsa.length) msg.push('PSA10でないが'+notpsa.length+'件 — 対象外として記録します。新規出品の種にも出ません。');
   if(solds.length) msg.push('仕入元が売り切れが'+solds.length+'件 — この仕入元は二度と候補に出しません。');
+  if(bundles.length) msg.push('まとめ売り・複数枚が'+bundles.length+'件 — この仕入元は二度と候補に出しません。');
   if(unset) msg.push('理由未選択が'+unset+'件 — 見送りとして記録します。別商品なら「違う」を押してください。');
   /* ★2026-08-01: ここは Python の**非 raw** 文字列なので \n と書くと本物の改行が埋まり、
      JS の文字列リテラルが行途中で切れて SyntaxError → この script ブロックの関数が
      **全部未定義**になる (zoom/upd/setAll/setRsn/go/imgFail が丸ごと死ぬ)。必ず \\n と書く。 */
   if(msg.length && !confirm(msg.join('\\n')+'\\n\\n確定しますか?')) return;
   fetch('/confirm',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({confirmed:conf, diffs:diffs, probes:probes, notpsa:notpsa, sold:solds, skip:skip})}).then(function(){
+    body:JSON.stringify({confirmed:conf, diffs:diffs, probes:probes, notpsa:notpsa, sold:solds, bundle:bundles, skip:skip})}).then(function(){
     document.getElementById('main').style.display='none';
     var d=document.getElementById('done'); d.style.display='block';
     d.textContent='✅ RESTOCK確定 '+conf.length+'件。ターミナルに戻ってください。';});
@@ -870,6 +876,12 @@ def build_restock_html(items):
                 f"<button type='button' class='rb sold' data-r='sold' onclick='setRsn(this)'"
                 f" title='出品ページを開いたら売り切れ / 取り下げ済み。この仕入元はもう買えない'>"
                 f"仕入元が売り切れ</button>"
+                # ★2026-09-17 ユーザー指示「念のため、見送る理由に追加しておいて」。
+                #   まとめ売り/連番は機械でも落としているが (_build_visual_candidates)、書き方が
+                #   判定をすり抜けた時の受け皿。URL は「買えない URL」台帳へ = 二度と候補に出ない。
+                f"<button type='button' class='rb bundle' data-r='bundle' onclick='setRsn(this)'"
+                f" title='複数枚のまとめ売り / 連番。1枚だけ買えないので仕入元にできない'>"
+                f"まとめ売り・複数枚</button>"
                 f"</span></span></label>")
         if not cand_html:
             cand_html = ["<div class='cph'>仕入候補なし</div>"]
@@ -997,8 +1009,11 @@ def parse_restock_result(data):
     #   skip(見送り = business 判断) にも diffs(違う = 検索の精度事故) にも入れない。
     sold = [{"idx": int(d["idx"]), "url": d.get("url", "")}
             for d in (data.get("sold") or []) if d.get("idx") is not None]
+    # ★2026-09-17: 「まとめ売り・複数枚」= 1枚だけ買えない仕入元。扱いは sold と同じ (買えない URL 台帳)。
+    bundle = [{"idx": int(d["idx"]), "url": d.get("url", "")}
+              for d in (data.get("bundle") or []) if d.get("idx") is not None]
     return {"confirmed": out, "diffs": diffs, "probes": probes, "notpsa": notpsa, "sold": sold,
-            "skip": int(data.get("skip") or 0)}
+            "bundle": bundle, "skip": int(data.get("skip") or 0)}
 
 
 def restock_confirm(items, timeout=10800):   # 2026-07-24 ユーザー要望で 30分→3時間に延長
