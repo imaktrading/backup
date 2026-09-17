@@ -318,8 +318,30 @@ def set_of_key(key):
     return m.group(1).upper() if m else None
 
 
+def _one_per_card(order, card_of):
+    """並び順を保ったまま、同じカードの2枚目以降を外す (純関数)。鍵が分からない物は残す。
+
+    ★2026-09-17 ユーザー指摘「ゼクロムが4枚連続で出てくる。考えたらわかるやん」。
+      実測: 20枠中 S8b-195 ゼクロムが6枠。同じカードは1枚しか出品できない
+      (2枚目以降は後段で「同じカードが既に出品中」になる) ので、**枠と目視を無駄にしていた**。
+      新規出品の目的は **出していない種類を増やす** こと。外した個体は候補に残り、
+      次回以降 (1枚目が出品された後は 補URL) に回る。
+    """
+    if card_of is None:
+        return list(order)
+    seen, out = set(), []
+    for c in order:
+        k = str(card_of(c) or "").split(":")[-1].strip().upper()
+        if k:
+            if k in seen:
+                continue
+            seen.add(k)
+        out.append(c)
+    return out
+
+
 def balanced_sample(certs, title_map, limit, shuffle=None, cost_of=None,
-                    pokemon_share=None, explore=0.2, demand_of=None):
+                    pokemon_share=None, explore=0.2, demand_of=None, card_of=None):
     """franchise 比率つきで limit 件選ぶ (既定: ポケモン7割 / 残り3割は他を順ぐり)。
 
     各グループ内の順番 (2026-09-08 ユーザー確定):
@@ -358,6 +380,10 @@ def balanced_sample(certs, title_map, limit, shuffle=None, cost_of=None,
             rest = g[n_explore:]
             rest.sort(key=lambda c: (cost_of(c) is None, cost_of(c) or 0))
             groups[name] = keep_random + rest
+    if card_of is None and demand_of is not None:
+        card_of = getattr(demand_of, "card_of", None)
+    if card_of is not None:
+        groups = {name: _one_per_card(g, card_of) for name, g in groups.items()}
     if share and "Pokemon" in groups:
         return _sample_with_share(groups, limit, share)
     order = [g for g in _PRIMARY if g in groups] + [g for g in groups if g not in _PRIMARY]
@@ -471,4 +497,7 @@ def build_demand_of(certs, funnel_glob=None, key_map=None, fallback_key_of=None)
                and score.get(set_of_key(fallback_key_of(c) or "")) is not None)
     print(f"  🔥 売れ筋順: {n}/{len(certs)}件に点が付きます (うち PSAデータから {n_fb}件 / "
           f"残りは点なし=後ろ・順不同)")
-    return lambda c: score.get(set_of_key(key_of(c)))
+    fn = lambda c: score.get(set_of_key(key_of(c)))          # noqa: E731
+    # ★2026-09-17: 同じカードを1回の枠に2枚以上入れないため、カードの鍵も渡す (balanced_sample が使う)
+    fn.card_of = key_of
+    return fn
