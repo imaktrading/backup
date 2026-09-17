@@ -1,5 +1,7 @@
 # 2026-09-15 クウェート宛 PSA10 ピカチュウ S-P 126 — 日本国内で差出人に返送
 
+**CLOSE (2026-09-17)**: FedEx で再送・買い手に返信ドラフト3 で連絡。赤字の話は伝えない
+
 - 注文: 20-15110-75073 / itemID 358750857470 / $155.00
 - 買い手: Yaqoub Ashkanani (Kuwait) / eBay ID s_tekanh
 - 追跡: Japan Post LX330798220JP — 9/10 引受 (豊能東ときわ台) → 9/14 大阪国際郵便局で「差出人に返送」(理由の記載なし)
@@ -38,6 +40,24 @@ Hi Yaqoub,
 Thank you for your quick reply. I will ship the card to you by FedEx as soon as it is back with me, and I will send you the new tracking number right away.
 
 Delivery may take a little longer than the original estimate. Thank you for your patience.
+
+Best regards,
+iMak Trading Japan
+
+## 2026-09-17 FedEx で再送・引き渡し済
+
+- 返送理由 (郵便局回答): 中東地域の情勢悪化による輸送便の運休で、日本からの発送を見合わせ中
+  (9/15 の「差出可否 ◯」は誤り。今後の中東宛は日本郵便不可 → FedEx)
+
+## 返信ドラフト 3 (英語)
+
+Hi Yaqoub,
+
+Good news: I shipped your PSA 10 Pikachu again today by FedEx.
+
+I also heard back from Japan Post about the first shipment. Because of the worsening situation in the Middle East, flights to the region have been suspended, and Japan Post has stopped sending mail there from Japan for now. That is why your package was returned to me.
+
+You can find the new tracking number on your eBay order page. It may take a day or two before the tracking shows updates. Thank you for your patience, and please let me know if you have any questions.
 
 Best regards,
 iMak Trading Japan
