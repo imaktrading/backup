@@ -573,20 +573,41 @@
     this.setAttribute("aria-expanded", String(!open));
   });
   $("drawer-hide").addEventListener("click", function () { drawerHidden = true; $("drawer").hidden = true; });
-  // ★2026-09-18 ユーザー要望「表示されているものを消すボタン」: 直前の走行だけを
-  //   コピーして貼りたいので、今出ている行を消す。以後の行は続けて出る
-  //   (サーバーからは続きだけ送られてくるため、消しても取りこぼさない)。
+  // ★2026-09-18 ユーザー要望: ログをコピーすると走行が3本ぶん入ってしまう。
+  //   欲しいのは **直前の1本だけ**。走行の始まりは「▶ 」で始まる行なので、
+  //   最後の「▶ 」より前を消す / コピーもそこから下だけにする。
+  function lastRunStart() {
+    var kids = $("log").childNodes;
+    for (var i = kids.length - 1; i >= 0; i--) {
+      if (/^▶/.test(kids[i].textContent || "")) return i;
+    }
+    return -1;
+  }
+  function lastRunText() {
+    var kids = $("log").childNodes, from = lastRunStart();
+    if (from < 0) return $("log").innerText;
+    var out = [];
+    for (var i = from; i < kids.length; i++) out.push(kids[i].textContent || "");
+    return out.join(String.fromCharCode(10));
+  }
   $("drawer-clear").addEventListener("click", function () {
-    $("log").innerHTML = "";
-    // ★見出し(「失敗: … (returncode=1)」)も一緒に消す。これが残ると
-    //   「消えていない」に見える (2026-09-18 ユーザー指摘)。走っていない時だけ消す。
+    var b = this;
+    var from = lastRunStart();
+    if (from > 0) {                       // 前の走行が残っている → その分だけ消す
+      for (var i = 0; i < from; i++) $("log").removeChild($("log").firstChild);
+      b.textContent = "前の分を消しました";
+      setTimeout(function () { b.textContent = "🗑 ログを消す"; }, 1200);
+      return;
+    }
+    $("log").innerHTML = "";              // 1本しか無い → 全部消す
+    // 見出し(「失敗: … (returncode=1)」)も一緒に消す。これが残ると
+    // 「消えていない」に見える (2026-09-18 ユーザー指摘)。走っていない時だけ。
     if (!(running && running.running)) {
       $("job-label").textContent = "";
       $("job-meta").textContent = "";
     }
-    var b = this;
     b.textContent = "消しました";
-    setTimeout(function () { b.textContent = "🗑 表示を消す"; }, 1200);
+    setTimeout(function () { b.textContent = "🗑 ログを消す"; }, 1200);
   });
   // ★2026-09-16 ユーザー「ログ画面消えてない？」: 実行中と直後しか出していなかった。
   //   いつでも開けるようにする (走っていない時は直近のログが出る)
@@ -606,7 +627,7 @@
   // ログをまるごとコピー (2026-09-16 ユーザー要望。貼って相談する時に使う)
   $("drawer-copy").addEventListener("click", function () {
     var head = ($("job-label").textContent || "") + " " + ($("job-meta").textContent || "");
-    var text = head.trim() + String.fromCharCode(10) + $("log").innerText;
+    var text = head.trim() + String.fromCharCode(10) + lastRunText();  // 直前の1本だけ (2026-09-18)
     var b = this;
     function done(ok) { b.textContent = ok ? "コピーしました" : "コピーできません"; setTimeout(function () { b.textContent = "ログをコピー"; }, 1800); }
     if (navigator.clipboard && navigator.clipboard.writeText) {

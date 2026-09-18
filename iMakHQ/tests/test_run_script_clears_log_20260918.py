@@ -34,5 +34,5 @@ def test_log_frame_has_clear_button():
     状態ライン右端の「ログクリア」は見つけにくかった。
     """
     src = PANEL.read_text(encoding="utf-8")
-    assert "表示を消す" in src
-    assert 'text="🗑 表示を消す", command=self.clear_log' in src
+    assert "ログを消す" in src
+    assert 'text="🗑 ログを消す", command=self.clear_log' in src

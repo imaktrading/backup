@@ -4060,7 +4060,7 @@ class ListingPanel:
         #   コピーして貼りたい、が用途なので、ログのすぐ上に置く。
         _log_bar = ttk.Frame(log_frame)
         _log_bar.pack(fill="x", pady=(0, 2))
-        ttk.Button(_log_bar, text="🗑 表示を消す", command=self.clear_log).pack(side="right")
+        ttk.Button(_log_bar, text="🗑 ログを消す", command=self.clear_log).pack(side="right")
         self.log = scrolledtext.ScrolledText(log_frame, wrap="word", font=("Consolas", 9))
         self.log.pack(fill="both", expand=True)
 
