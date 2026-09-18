@@ -25,12 +25,17 @@ def test_一覧が無ければ空_並べ順は今まで通り(tmp_path):
 
 def test_product_idを大文字で読む(tmp_path):
     p = _csv(tmp_path, ["020/M-P,M-P-020,ピカチュウ", "P-043,p-043,ルフィ"])
-    assert T.load_treasure_ids(p) == {"M-P-020", "P-043"}
+    # ★2026-09-18 変更: 番号の鍵も一緒に入れる (KEY 未記入の候補を拾うため)
+    assert T.load_treasure_ids(p) == {"M-P-020", "P-043", "T:020/M-P", "T:P-043"}
 
 
-def test_カタログを引けなかった行は入れない(tmp_path):
+def test_カタログを引けなかった行も番号で入る(tmp_path):
+    """★2026-09-18 変更: 以前は product_id が無い行を捨てていた。
+
+    実測で、生きている候補は全て KEY 空だったため 1件も当たらなかった。
+    """
     p = _csv(tmp_path, ["080/073,,", "020/M-P,M-P-020,ピカチュウ"])
-    assert T.load_treasure_ids(p) == {"M-P-020"}
+    assert T.load_treasure_ids(p) == {"M-P-020", "T:020/M-P", "T:080/073"}
 
 
 def test_トレジャーが先頭に来る():

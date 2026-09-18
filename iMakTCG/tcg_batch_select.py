@@ -528,10 +528,13 @@ TREASURE_CSV = r"C:/dev/iMak_data/hq/market_sold/demand_market.csv"
 
 
 def load_treasure_ids(path=TREASURE_CSV):
-    """トレジャーハントの product_id (市場で売れていて、うちが出していないカード)。
+    """トレジャーハントの鍵 (市場で売れていて、うちが出していないカード)。
 
     作るのは `iMakHQ/tools/market_ledger.py targets`。**無ければ空** (並べ順は今まで通り)。
-    カタログを引けなかった行は product_id が空なので、ここには入らない。
+    返すのは product_id と **カード番号の鍵** (`T:240/193` 形) の両方。
+    ★2026-09-18: product_id だけで見ていたため、KEY 未記入の候補が当たらず 0件だった
+      (売れ筋一致44件のうち、生きている候補3件は全て KEY 空)。番号は title_card_key で
+      正規化するので、タイトルの部分一致 (`EXRP-001` に `P-001` が入る等) では当たらない。
     """
     import csv as _csv
     import os as _os
@@ -539,8 +542,17 @@ def load_treasure_ids(path=TREASURE_CSV):
         return set()
     try:
         with open(path, encoding="utf-8-sig", newline="") as f:
-            return {(r.get("product_id") or "").strip().upper()
-                    for r in _csv.DictReader(f) if (r.get("product_id") or "").strip()}
+            keys = set()
+            for r in _csv.DictReader(f):
+                pid = (r.get("product_id") or "").strip()
+                if pid:
+                    keys.add(pid.upper())
+                num = (r.get("番号") or "").strip()
+                if num:
+                    k = title_card_key(num)
+                    if k.startswith("T:") and k != "T:":
+                        keys.add(k)
+            return keys
     except Exception as e:                                     # noqa: BLE001
         print(f"  ⚠ トレジャーハントの一覧を読めませんでした ({type(e).__name__})")
         return set()
@@ -630,11 +642,17 @@ def build_popular_of(certs, title_map, key_map=None, fallback_key_of=None, funne
     treasure_ids = load_treasure_ids()
 
     def treasure_of(c):
-        """トレジャーハント = 市場で売れているのに、うちが出していないカード。"""
+        """トレジャーハント = 市場で売れているのに、うちが出していないカード。
+
+        KEY があれば product_id で、無ければタイトルのカード番号で当てる (2026-09-18)。
+        """
         if not treasure_ids:
             return False
         pid = catalog_key(c).split(":")[-1].upper()
-        return bool(pid) and pid in treasure_ids
+        if pid and pid in treasure_ids:
+            return True
+        k = title_card_key((title_map or {}).get(c, ""))
+        return bool(k) and k in treasure_ids
 
     n = sum(1 for c in certs if popular_of(c))
     nk = sum(1 for c in certs if catalog_key(c))
