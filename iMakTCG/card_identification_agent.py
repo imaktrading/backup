@@ -205,8 +205,13 @@ def _resolve_pcc_reracode(vision_result: dict, psa_data: dict) -> dict:
     # iMakCatalog DB で再録元 card_number を直接 lookup
     try:
         import os, sys
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                        "..", "iMakCatalog"))
+        # ★2026-09-14: master の iMakCatalog は古い。catalog worktree を優先し、
+        # 無い時だけ master にフォールバック (psa_to_csv.py:24-29 と同じ形)。
+        _catalog_root = r"C:/dev/iMak_catalog/iMakCatalog"
+        if not os.path.isdir(_catalog_root):
+            _catalog_root = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                         "..", "iMakCatalog")
+        sys.path.insert(0, _catalog_root)
         import api as catalog_api
         record = catalog_api.lookup("one_piece_tcg", card_num)
         if record:

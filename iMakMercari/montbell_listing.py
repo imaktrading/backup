@@ -74,7 +74,12 @@ from listing_common import (
 
 # iMakCatalog (2026-05-04 連携): 型番→公式 spec lookup
 # memory: catalog_separation_completed.md / category_specialization_principle.md
-sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", "iMakCatalog"))
+# ★2026-09-14: master の iMakCatalog は古い。catalog worktree を優先し、
+# 無い時だけ master にフォールバック (psa_to_csv.py:24-29 と同じ形)。
+_CATALOG_ROOT = r"C:/dev/iMak_catalog/iMakCatalog"
+if not os.path.isdir(_CATALOG_ROOT):
+    _CATALOG_ROOT = os.path.join(SCRIPT_DIR, "..", "iMakCatalog")
+sys.path.insert(0, _CATALOG_ROOT)
 try:
     from api import lookup as _catalog_lookup
 except Exception:

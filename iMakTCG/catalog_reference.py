@@ -44,9 +44,13 @@ from typing import Optional
 # iMakCatalog adapter 遅延 import (隣で開発中、import 失敗してもフォールバック)
 def _import_catalog():
     try:
-        catalog_root = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "iMakCatalog"
-        )
+        # ★2026-09-14: master の iMakCatalog は古い。catalog worktree を優先し、
+        # 無い時だけ master にフォールバック (psa_to_csv.py:24-29 と同じ形)。
+        catalog_root = r"C:/dev/iMak_catalog/iMakCatalog"
+        if not os.path.isdir(catalog_root):
+            catalog_root = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "..", "iMakCatalog"
+            )
         if catalog_root not in sys.path:
             sys.path.insert(0, catalog_root)
         from integrations import psa_to_csv as catalog_psa  # type: ignore
