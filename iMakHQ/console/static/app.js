@@ -265,7 +265,9 @@
     $("kp-total").textContent = sum(todo, function (j) { return j.n; }).toLocaleString("ja-JP");
     $("kp-else").textContent = elsewhere;
 
-    var lanes = [["maint", "在庫メンテ", "--p-maint", ["hoju", "restock", "shelf"]],
+    // ★2026-09-19 ユーザー「オファーの件、重要だからTOP画面に出してほしい」。
+    //   オファーは期限が短い (実例: 受信から丸1日) ので、一番上の枠に入れる。
+    var lanes = [["maint", "在庫メンテ", "--p-maint", ["offer", "hoju", "restock", "shelf"]],
                  ["new", "新規出品", "--p-new", ["seed"]]];
     var waiting = 0;
     var html = lanes.map(function (L) {
@@ -276,7 +278,7 @@
       return '<div class="lane" style="--pc:var(' + L[2] + ')"><h2>' + esc(L[1]) + " <small>" + list.length + "</small></h2>" +
         '<div class="tasks">' + list.map(function (j) {
           return openTag(j, "task", ' style="--gc:var(--g-' + esc(j.group) + ');--pc:var(' + L[2] + ')"', ' title="' + esc(j.tip) + '"') +
-            '<span class="tag"><span class="pg">' + esc(groupName(j.group)) + '</span><span class="gp">' + esc(tagOf(j)) + "</span></span>" +
+            '<span class="tag"><span class="pg it" data-it="' + esc(itemOf(j)) + '">' + esc(itemOf(j)) + '</span><span class="gp">' + esc(tagOf(j)) + "</span></span>" +
             '<span class="nm">' + esc(shortName(j.label)) + "</span>" +
             '<span class="row"><span class="n">' + num(j) + "<small>件</small></span>" + goMark(j) + "</span>" + closeTag(j);
         }).join("") + "</div></div>";
@@ -288,10 +290,15 @@
     $("tab-today").innerHTML = "いま押す <b>" + (todo.length - waiting) + "</b> · 残件 " +
       sum(todo, function (j) { return j.n; }).toLocaleString("ja-JP");
   }
-  function groupName(g) { return { hoju: "補URL", restock: "再仕入れ", shelf: "取下げ・棚", seed: "見つける" }[g] || g; }
-  function tagOf(j) {
+  function groupName(g) { return { hoju: "補URL", restock: "再仕入れ", shelf: "取下げ・棚", seed: "見つける", offer: "オファー" }[g] || g; }
+  // ★2026-09-19 ユーザー「PSA関係なのか、くじ関係なのか、UT関係なのかがいまいち分かりにくい」。
+  //   商材を **カードの1番目**に出す。まとまり (補URL 等) はその次。
+  function itemOf(j) {
     var m = /^(PSA|UT|くじ|一番くじ|G-SHOCK)/.exec(j.label);
-    return (m ? m[1] : "全商材") + (j.step ? " " + j.step : "");
+    return m ? (m[1] === "一番くじ" ? "くじ" : m[1]) : "全商材";
+  }
+  function tagOf(j) {
+    return groupName(j.group) + (j.step ? " " + j.step : "");
   }
   function shortName(label) {
     return label.replace(/^(PSA|UT|くじ|一番くじ)\s*/, "").replace(/(補URL|再仕入れ)\s*[①②③④⑤]\s*/, "").trim() || label;

@@ -1459,6 +1459,8 @@ SCRIPTS = [
         #   オファーは期限が短い (実例: 受信から丸1日) ので、押しにくい所に置かない。
         "category": None, "type": "utility",
         "label": "💰 オファー対応",
+        # ★2026-09-19: 件数を出す = 今日やることの枠に入る (ユーザー「重要だからTOP画面に」)
+        "badge": "offer_calc",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "offer_calc.py"],   # 受信中の Best Offer を読み、判定表を開く
         "params": [],
@@ -4822,6 +4824,14 @@ class ListingPanel:
                                         "証明番号を打ちます")
             else:
                 nh_txt = "\n※押しても0件 (先に 🌱 捨てた候補→新規出品の種)"
+            # ★2026-09-19: オファーの残件 (受信中の件数)。期限が短いので画面に出す。
+            _of = (w0.get("offer") or {}) if isinstance(w0, dict) else {}
+            if _of.get("error"):
+                of_txt = "\n(残件 取得できず: %s)" % str(_of["error"])[:40]
+            elif _of.get("actionable"):
+                of_txt = self.todo_line("offer_calc", _of["actionable"], "受けるか決めます")
+            else:
+                of_txt = "\n※今 来ているオファーはありません"
             by_kind = {"hoju_search": s_txt, "hoju_search_now": sn_txt,
                        "hoju_confirm": c_txt, "hoju_swap": sw_txt, "newcand": n_txt,
                        "newcand_high": nh_txt,
@@ -4834,7 +4844,8 @@ class ListingPanel:
                        "shelf_evict": se_txt, "shelf_evict_label": se_label,
                        "sold_restock": sr_txt,
                        "psa_gate": pg_txt, "restock_build": rb_txt, "restock_wb": rw_txt,
-                       "hoju_status": hs_txt, "kuji_supply": kv_txt, "kuji_refresh": kr_txt}
+                       "hoju_status": hs_txt, "kuji_supply": kv_txt, "kuji_refresh": kr_txt,
+                       "offer_calc": of_txt}
             # ★青の意味 = **押さないと減らない残件がある** (2026-09-03 ユーザー確定)。
             #   > 押さないと減らないのに黒文字だと、無意味
             #   > 自動で消化されるのは、黒でいいけど

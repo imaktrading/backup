@@ -123,6 +123,15 @@ button.task:disabled{opacity:.5;cursor:default}
 .go{font:600 12.5px var(--f-ui);color:var(--ai);background:var(--ai-soft);border-radius:7px;padding:5px 11px;white-space:nowrap}
 .task .tag{font-size:11px;font-weight:600;letter-spacing:.03em;display:flex;gap:6px;align-items:center}
 .task .tag .pg{color:var(--pc)}
+/* ★2026-09-19 ユーザー「PSA関係なのか、くじ関係なのか、UT関係なのかが分かりにくい」。
+   商材をカードの1番目に置き、商材ごとに色を変えて一目で分かるようにする。 */
+.task .tag .pg.it{font-weight:700;border-radius:20px;padding:1px 8px;background:var(--sunken)}
+.task .tag .pg.it[data-it="PSA"]{background:#1e3a5f;color:#8ec8ff}
+.task .tag .pg.it[data-it="UT"]{background:#3a2a5f;color:#c9a7ff}
+.task .tag .pg.it[data-it="くじ"]{background:#5f3a1e;color:#ffc48e}
+.task .tag .pg.it[data-it="G-SHOCK"]{background:#1e5f3a;color:#8effc4}
+.task .tag .pg.it[data-it="全商材"]{background:var(--sunken);color:var(--ink-2)}
+
 .task .tag .gp{color:var(--ink-3);font-weight:500}
 .task .nm{font-weight:600;font-size:15px;line-height:1.35}
 .task .row{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:4px}
