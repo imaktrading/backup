@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from scrapers import snkrdunk_official as SO
+from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
 from scrapers import snkrdunk_op_catalog as OP
 from sheet_writer import COL_TITLE, HIGH_SHEET_ID, LISTINGS_GID
 from sheet_writer_mercari_seller import (
@@ -160,6 +161,10 @@ def main(argv: list[str] | None = None) -> int:
 
     # 1) 候補 model_id 列挙 (Selenium)
     _log(f"列挙開始: keywords={keywords} max_pages={args.max_pages}")
+    killed = kill_chrome_for_profile(SO.CHROME_PROFILE_DIR)
+    kill_orphan_chromedriver()
+    if killed:
+        _log(f"前回の残留 chrome を {killed} 個 片付けました")
     driver = SO.create_driver(headless=args.headless)
     candidates: list[str] = []
     seen: set[str] = set()
@@ -172,6 +177,8 @@ def main(argv: list[str] | None = None) -> int:
             _log(f"  keyword={kw!r}: +{len(new)} (累計候補 {len(candidates)})")
     finally:
         driver.quit()
+        kill_chrome_for_profile(SO.CHROME_PROFILE_DIR)
+        kill_orphan_chromedriver()
     if args.max_models:
         candidates = candidates[: args.max_models]
     _log(f"候補 model 総数: {len(candidates)}")

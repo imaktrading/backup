@@ -25,6 +25,7 @@ from datetime import datetime
 from typing import Optional
 
 from scrapers import snkrdunk_official
+from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
 from sheet_writer import COL_EBAY_ITEM_ID, COL_TITLE, HIGH_SHEET_ID, LISTINGS_GID
 from sheet_writer_snkrdunk_aux import (
     get_listings_worksheet,
@@ -116,6 +117,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # Selenium driver 起動 (検索 + used page render 用)
+    killed = kill_chrome_for_profile(snkrdunk_official.CHROME_PROFILE_DIR)
+    kill_orphan_chromedriver()
+    if killed:
+        _log(f"前回の残留 chrome を {killed} 個 片付けました")
+
     _log("Selenium driver 起動 (snkrdunk 専用 profile)...")
     driver = snkrdunk_official.create_driver(headless=args.headless)
 
@@ -183,6 +189,8 @@ def main(argv: list[str] | None = None) -> int:
             driver.quit()
         except Exception:
             pass
+        kill_chrome_for_profile(snkrdunk_official.CHROME_PROFILE_DIR)
+        kill_orphan_chromedriver()
 
 
 if __name__ == "__main__":

@@ -88,6 +88,13 @@ def main(argv=None) -> int:
 
     writer = PendingWriter(write_fn=_write, every=5, dump_path=dump, log=_log,
                            enabled=not args.dry_run)
+
+    from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
+    killed = kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
+    kill_orphan_chromedriver()
+    if killed:
+        _log(f"前回の残留 chrome を {killed} 個 片付けました")
+
     driver = MS.create_anonymous_driver(headless=headless)
     kept, rej = [], {"sold": 0, "not_tanker": 0, "not_target_bag": 0,
                      "seller_rating": 0, "no_identity": 0, "fetch_fail": 0}
@@ -158,6 +165,8 @@ def main(argv=None) -> int:
         except Exception:
             pass
         writer.close()      # 残りを書く。 書けなければ _unwritten.json に退避
+        kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
+        kill_orphan_chromedriver()
 
     _log(f"完了: 収集{len(collected['urls'])} → keep={len(kept)} / reject={rej}")
     if desc_missing:

@@ -37,7 +37,8 @@ from pathlib import Path
 
 from scrapers import amazon_search, amazon_search_http
 from scrapers.amazon_item_detail import fetch_detail_full
-from scrapers.amazon_wishlist import CHROME_VERSION_MAIN, create_driver
+from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
+from scrapers.amazon_wishlist import CHROME_PROFILE_DIR, CHROME_VERSION_MAIN, create_driver
 from sheet_writer_amazon import append_amazon_search_items
 
 
@@ -741,6 +742,11 @@ def harvest_amazon_search(
             f"{len(variant_sup_result['url_keep_urls'])} 件"
         )
 
+    killed = kill_chrome_for_profile(CHROME_PROFILE_DIR)
+    kill_orphan_chromedriver()
+    if killed:
+        _log(f"前回の残留 chrome を {killed} 個 片付けました")
+
     if attach_port:
         _log(f"[attach] localhost:{attach_port} の既存 chrome に接続")
         driver = attach_to_existing_chrome(port=attach_port)
@@ -824,6 +830,8 @@ def harvest_amazon_search(
             driver.quit()
         except Exception:
             pass
+        kill_chrome_for_profile(CHROME_PROFILE_DIR)
+        kill_orphan_chromedriver()
 
 
 def main(argv: list[str] | None = None) -> int:

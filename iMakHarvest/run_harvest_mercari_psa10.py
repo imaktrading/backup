@@ -528,6 +528,20 @@ def main(argv=None) -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
+    from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
+    killed = kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
+    kill_orphan_chromedriver()
+    if killed:
+        _log(f"前回の残留 chrome を {killed} 個 片付けました")
+
+    try:
+        return _run(args)
+    finally:
+        kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
+        kill_orphan_chromedriver()
+
+
+def _run(args) -> int:
     if args.verify_from_json:
         path = Path(args.verify_from_json)
         payload = json.loads(path.read_text(encoding="utf-8"))

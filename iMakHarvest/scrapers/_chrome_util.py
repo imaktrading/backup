@@ -182,3 +182,27 @@ def kill_chrome_for_profile(profile_dir: str) -> int:
         return int((out.stdout or "0").strip().splitlines()[-1] or 0)
     except Exception:  # noqa: BLE001 - 掃除に失敗しても走行は続ける
         return 0
+
+
+def kill_orphan_chromedriver() -> int:
+    """chromedriver.exe を全部落とす (残留数を返す)。
+
+    chromedriver.exe は --user-data-dir を自分のコマンドラインに持たないため
+    kill_chrome_for_profile では検出できない。ユーザーの通常ブラウザは chromedriver
+    を使わないので、chromedriver.exe は無条件で全部落として安全。
+    """
+    if os.name != "nt":
+        return 0
+    import subprocess  # noqa: PLC0415
+
+    ps = (
+        "$p = Get-CimInstance Win32_Process -Filter \"Name='chromedriver.exe'\"; "
+        "$p | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }; "
+        "($p | Measure-Object).Count"
+    )
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                             capture_output=True, text=True, timeout=60)
+        return int((out.stdout or "0").strip().splitlines()[-1] or 0)
+    except Exception:  # noqa: BLE001 - 掃除に失敗しても走行は続ける
+        return 0

@@ -103,6 +103,12 @@ def find_replacements(cards: list[dict], args, dump_path=None) -> list[dict]:
     それまでの詳細フェッチと Vision 読取 (= 課金済) が全部消える。
     1 枚の処理で落ちてもその 1 枚だけ飛ばし、 連続で落ちたら打ち切って保存する。
     """
+    from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
+    killed = kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
+    kill_orphan_chromedriver()
+    if killed:
+        _log(f"前回の残留 chrome を {killed} 個 片付けました")
+
     driver = MS.create_anonymous_driver(headless=False)  # メルカリは非 headless 必須
     found = []
     done_cards: list[str] = []
@@ -208,6 +214,8 @@ def find_replacements(cards: list[dict], args, dump_path=None) -> list[dict]:
             driver.quit()
         except Exception:
             pass
+        kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
+        kill_orphan_chromedriver()
     return found
 
 
