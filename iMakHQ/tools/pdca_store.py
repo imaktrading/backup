@@ -138,7 +138,12 @@ CREATE TABLE IF NOT EXISTS improvement_queue (
 
 # 既存DBに後付けする列 (CREATE TABLE IF NOT EXISTS は既存テーブルを変更しないため)
 _ADD_COLUMNS = {"identity": "TEXT DEFAULT ''", "seen_days": "INTEGER DEFAULT 1",
-                "catalog_state": "TEXT DEFAULT ''", "last_writer": "TEXT DEFAULT ''"}
+                "catalog_state": "TEXT DEFAULT ''", "last_writer": "TEXT DEFAULT ''",
+                # ★2026-09-19: Act が「誤検出でした」と確かめた結論を置く場所 (提案1)。
+                #   evidence は翌日の upsert で丸ごと上書きされるので、判定を書いても残らず、
+                #   翌日の Act が同じ調査をやり直していた (queue 646 で実測)。
+                #   **upsert はこの2列を触らない**。書き換えるのは set_act_verdict だけ。
+                "act_verdict": "TEXT DEFAULT ''", "act_verdict_ts": "TEXT DEFAULT ''"}
 
 # 列を足した直後だけ流す backfill (冪等: 列が既に有れば実行されない)。
 _BACKFILL = {
@@ -347,6 +352,24 @@ def upsert_improvement(con, category, item_id, target_field, suggested_value="",
          confidence, finding_type, pri, (identity or "").strip(),
          (catalog_state or "").strip(), writer, ts, ts))
     return cur.lastrowid
+
+
+def set_act_verdict(con, queue_id, verdict, ts=""):
+    """Act が確かめた結論を残す (upsert で消えない場所に書く)。
+
+    ★2026-09-19 (提案1): evidence に書くと、翌日 generator が同じ dkey を再検出した
+      瞬間に上書きされ、判定した事実がどこにも残らない。結果、翌日の Act が同じ調査を
+      最初からやり直していた (queue 646 / cert160479905 で実測)。
+    """
+    con.execute("UPDATE improvement_queue SET act_verdict=?, act_verdict_ts=? WHERE queue_id=?",
+                ((verdict or "").strip(), ts, queue_id))
+
+
+def get_act_verdict(con, queue_id):
+    """その行に Act の結論が入っていれば返す (無ければ空文字)。"""
+    r = con.execute("SELECT act_verdict FROM improvement_queue WHERE queue_id=?",
+                    (queue_id,)).fetchone()
+    return (r[0] if r and r[0] else "") if r else ""
 
 
 def set_status(con, queue_id, status, ts=""):

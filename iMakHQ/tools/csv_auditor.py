@@ -1297,14 +1297,21 @@ def _load_pdca_recurring(min_seen=2, limit=25, _con=None):
             import pdca_store as _pdca
             con = _pdca.connect()
         cur = con.execute(
-            "SELECT category,item_id,target_field,finding_type,seen_count,seen_days,status "
+            # ★2026-09-19: act_verdict (Act が確かめた結論) も載せる。入っている行は
+            #   「調査済 = 再調査するな」の印になる (提案1)。行は消さない —
+            #   誤検出でも「このカードが毎日出品できていない」のは事実なので、
+            #   resolver が直るまで見え続けるのが正しい。
+            "SELECT category,item_id,target_field,finding_type,seen_count,seen_days,status,"
+            "COALESCE(act_verdict,'') AS act_verdict "
             "FROM improvement_queue WHERE status='pending' AND seen_days>=? "
             "AND finding_type NOT IN ('resolver_drop') "
             "ORDER BY seen_days DESC, seen_count DESC LIMIT ?", (min_seen, limit))
         rows = [{"category": r["category"], "item_id": r["item_id"],
                  "target_field": r["target_field"], "finding_type": r["finding_type"],
                  "seen_count": r["seen_count"], "seen_days": r["seen_days"],
-                 "status": r["status"]} for r in cur.fetchall()]
+                 "status": r["status"],
+                 **({"act_verdict": r["act_verdict"]} if r["act_verdict"] else {})}
+                for r in cur.fetchall()]
         if _con is None:
             con.close()
         return rows
