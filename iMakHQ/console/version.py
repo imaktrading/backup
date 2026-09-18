@@ -12,7 +12,7 @@
 import os
 import subprocess
 
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 RELEASED = "2026-09-18"
 HERE = os.path.dirname(os.path.abspath(__file__))
 

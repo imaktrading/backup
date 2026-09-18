@@ -573,6 +573,15 @@
     this.setAttribute("aria-expanded", String(!open));
   });
   $("drawer-hide").addEventListener("click", function () { drawerHidden = true; $("drawer").hidden = true; });
+  // ★2026-09-18 ユーザー要望「表示されているものを消すボタン」: 直前の走行だけを
+  //   コピーして貼りたいので、今出ている行を消す。以後の行は続けて出る
+  //   (サーバーからは続きだけ送られてくるため、消しても取りこぼさない)。
+  $("drawer-clear").addEventListener("click", function () {
+    $("log").innerHTML = "";
+    var b = this;
+    b.textContent = "消しました";
+    setTimeout(function () { b.textContent = "🗑 表示を消す"; }, 1200);
+  });
   // ★2026-09-16 ユーザー「ログ画面消えてない？」: 実行中と直後しか出していなかった。
   //   いつでも開けるようにする (走っていない時は直近のログが出る)
   $("btn-log").addEventListener("click", function () {
