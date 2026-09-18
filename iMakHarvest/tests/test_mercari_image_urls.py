@@ -36,6 +36,25 @@ class _MockDriver:
         return self._elements_by_selector.get(value, [])
 
 
+class _MockDriverDelayed:
+    """主 selector への呼出しが `empty_calls` 回続いた後、 写真を返す
+    (カルーセルが説明文より遅れて描画されるケースを再現)."""
+
+    def __init__(self, primary_selector: str, photos: list, empty_calls: int):
+        self._primary_selector = primary_selector
+        self._photos = photos
+        self._empty_calls = empty_calls
+        self._calls = 0
+
+    def find_elements(self, by, value):
+        if value != self._primary_selector:
+            return []
+        self._calls += 1
+        if self._calls <= self._empty_calls:
+            return []
+        return self._photos
+
+
 OWN_PHOTO_1 = "https://static.mercdn.net/item/detail/orig/photos/m93825825680_1.jpg?123"
 OWN_PHOTO_2 = "https://static.mercdn.net/item/detail/orig/photos/m93825825680_2.jpg?123"
 OTHER_ITEM_THUMB = "https://static.mercdn.net/thumb/item/webp/m77504242885_1.jpg?456"
@@ -74,8 +93,31 @@ class TestExtractImageUrlsFiltersToOwnProductPhotos:
                 _MockImg(OTHER_ITEM_THUMB),
             ],
         })
-        assert _extract_image_urls(driver) == []
+        assert _extract_image_urls(driver, wait_sec=0) == []
 
     def test_no_elements_found_returns_empty(self):
         driver = _MockDriver({})
-        assert _extract_image_urls(driver) == []
+        assert _extract_image_urls(driver, wait_sec=0) == []
+
+
+class TestExtractImageUrlsWaitsForLateRender:
+    """2026-09-16 HQ 依頼: 目視候補553件中22件が写真URL列0本だった。
+    うち複数件は同じ URL を再訪問すると普通に写真が取れた = カルーセルが
+    説明文より遅れて描画される一発 find のタイミング負け (`_extract_description`
+    (8/17) と同じ形)。 出現を待ってから諦めるようにした。"""
+
+    def test_retries_until_photos_render(self):
+        driver = _MockDriverDelayed(
+            ".slick-list button mer-item-thumbnail",
+            [_MockImg(OWN_PHOTO_1), _MockImg(OWN_PHOTO_2)],
+            empty_calls=2,
+        )
+        assert _extract_image_urls(driver, wait_sec=1.0) == [OWN_PHOTO_1, OWN_PHOTO_2]
+
+    def test_gives_up_after_wait_sec_and_returns_empty(self):
+        driver = _MockDriverDelayed(
+            ".slick-list button mer-item-thumbnail",
+            [_MockImg(OWN_PHOTO_1)],
+            empty_calls=10_000,  # 待っている間ずっと空 (=タイムアウトで諦める)
+        )
+        assert _extract_image_urls(driver, wait_sec=0.3) == []

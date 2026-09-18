@@ -426,44 +426,59 @@ def _judge_color(
         return ""
 
 
-def _extract_image_urls(driver) -> list[str]:
+IMAGE_WAIT_SEC = 5.0
+IMAGE_POLL_INTERVAL = 0.2
+
+
+def _extract_image_urls(driver, wait_sec: float = IMAGE_WAIT_SEC) -> list[str]:
+    """商品画像 URL を抽出. カルーセルは説明文より遅れて描画されることがあるので、
+    出現を待ってから諦める (2026-09-16 HQ 依頼: 目視候補553件中22件が写真URL列0本
+    だったが、うち複数件は同じ URL を再訪問すると普通に写真が取れた = 一発 find の
+    タイミング負け。 `_extract_description` (8/17) と同じ形の抜け穴だった)。
+    """
     from selenium.webdriver.common.by import By  # noqa: PLC0415
 
     # trabajo: .slick-list button mer-item-thumbnail or .slick-list button img
-    urls: list[str] = []
-    seen: set[str] = set()
     selectors = (
         ".slick-list button mer-item-thumbnail",
         ".slick-list button img",
         "img[data-testid='item-image']",
         "img[src*='static.mercdn.net']",  # フォールバック
     )
-    for sel in selectors:
-        try:
-            elements = driver.find_elements(By.CSS_SELECTOR, sel)
-        except Exception:
-            elements = []
-        for e in elements:
-            try:
-                src = e.get_attribute("src") or e.get_attribute("data-src") or ""
-            except Exception:
-                src = ""
-            src = (src or "").strip()
-            if not src:
-                continue
-            if src in seen:
-                continue
-            seen.add(src)
-            urls.append(src)
-        if urls:
-            break  # 最初に当たった selector で十分なら終了
 
-    # フォールバック selector (img[src*='static.mercdn.net']) はページ内の
-    # mercdn.net 画像を全部拾うため、出品者アイコン (thumb/members/) や
-    # 他商品サムネ (thumb/item/) が混ざる。商品本体画像パターンのみ残し、
-    # 一致0件でもフォールバックせず空を返す (fail-closed。2026-09-14 HQ 依頼:
-    # G列に他商品の写真が混入していた実害 618行中390行)。
-    return [u for u in urls if _MERCARI_PRODUCT_IMAGE_RE.search(u)]
+    end_at = time.time() + wait_sec
+    while True:
+        urls: list[str] = []
+        seen: set[str] = set()
+        for sel in selectors:
+            try:
+                elements = driver.find_elements(By.CSS_SELECTOR, sel)
+            except Exception:
+                elements = []
+            for e in elements:
+                try:
+                    src = e.get_attribute("src") or e.get_attribute("data-src") or ""
+                except Exception:
+                    src = ""
+                src = (src or "").strip()
+                if not src:
+                    continue
+                if src in seen:
+                    continue
+                seen.add(src)
+                urls.append(src)
+            if urls:
+                break  # 最初に当たった selector で十分なら終了
+
+        # フォールバック selector (img[src*='static.mercdn.net']) はページ内の
+        # mercdn.net 画像を全部拾うため、出品者アイコン (thumb/members/) や
+        # 他商品サムネ (thumb/item/) が混ざる。商品本体画像パターンのみ残し、
+        # 一致0件でもフォールバックせず空を返す (fail-closed。2026-09-14 HQ 依頼:
+        # G列に他商品の写真が混入していた実害 618行中390行)。
+        filtered = [u for u in urls if _MERCARI_PRODUCT_IMAGE_RE.search(u)]
+        if filtered or time.time() >= end_at:
+            return filtered
+        time.sleep(IMAGE_POLL_INTERVAL)
 
 
 # ============================================================================
