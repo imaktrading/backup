@@ -488,6 +488,16 @@ def write_aux_urls(row_to_urls):
         reqs.append({"range": f"{c0}{row}:{c1}{row}", "values": [vals5]})
     if reqs:
         ws.batch_update(reqs, value_input_option="RAW")
+    # ★2026-09-19: **誰が・いつ 補URLを書いたか**を残す。aux_url_log.py は 2026-09-08 に
+    #   作られていたが **一度も呼ばれておらず**、台帳ファイルすら出来ていなかった。
+    #   そのため 2026-09-19 に「補URLが消えて同じ候補がまた出る」(itemID 820041238874)
+    #   を追った時、9/16 に3本あった補が1本に減った経緯を誰も辿れなかった。
+    #   記録は本業ではないので、失敗しても書込は止めない。
+    try:
+        import aux_url_log as _aux
+        _aux.record(row_to_urls)
+    except Exception:                                          # noqa: BLE001
+        pass
     return len(reqs)
 
 
