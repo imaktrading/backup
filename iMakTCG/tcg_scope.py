@@ -38,6 +38,16 @@ def _tokens(brand: str) -> set:
     return set((brand or "").upper().replace("-", " ").split())
 
 
+# 扱っているゲーム (detect_game_info / detect_franchise_from_brand の第3戻り値)。
+# ここに無い franchise は **通さない** (知らないゲーム = 対象外)。
+# 新しいゲームを始める時はここに足す。足し忘れると出品されないので、気づける。
+KNOWN_FRANCHISES = frozenset((
+    "Pokemon", "One Piece", "Dragon Ball", "Gundam",
+    # 下は上の枝で個別に弾いているが、真理表を1枚にするため一緒に並べておく
+    "Yu-Gi-Oh!", "Dragon Ball Heroes", "Itajaga",
+))
+
+
 def is_out_of_scope(franchise: str, brand: str, catalog_resolves=None) -> tuple[bool, str]:
     """PSA brand ✕ franchise → out-of-scope 判定 (純関数).
 
@@ -108,6 +118,17 @@ def is_out_of_scope(franchise: str, brand: str, catalog_resolves=None) -> tuple[
     #         静かに対象内へ戻る (回答書 2026-08-19_psa_preflight_scope_ssot_gap_response.md)。
     if franchise == "Pokemon" and _NEO_RE.search(b):
         return True, "Pokemon Neo 期 (2000年) — catalog に neo 期の set が 0件 (catalog も対象外と宣言済)"
+    # ★2026-09-19: **知らないゲームは通さない** (提案4・fail-closed)。
+    #   ここまでは「既知のゲームを列挙して、それ以外は素通り」だったため、
+    #   detect_franchise_from_brand が brand をそのまま返すスポーツカード
+    #   (TOPPS / UPPER DECK / PARKHURST / PANINI / LEAF / INDIAN GUM) が
+    #   TCG の候補として毎日 再評価されていた (2026-09-17 実測: live の該当9件とも
+    #   is_out_of_scope が False)。実害0で済んでいたのは「写真なし」ガードのおかげで、
+    #   写真がある5件は枠に当たっていなかっただけ。当たれば目視に出るか誤依頼になる。
+    #   ★brand が空 = PSA を引けていない (まだ分からない) ので落とさない。落とすのは
+    #     「brand は読めているのに、対応しているゲームのどれでもない」時だけ。
+    if b and franchise not in KNOWN_FRANCHISES:
+        return True, f"扱っていないカード ({franchise or brand}) — 対応しているゲームに当たらない"
     return False, ""
 
 
