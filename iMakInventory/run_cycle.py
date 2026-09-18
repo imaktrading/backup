@@ -86,7 +86,12 @@ LOCK_WAIT_POLL_SEC = 60
 #   4h 間隔では前の回が終わらないうちに次が来て skip されていた
 #   (09-09: 17:30 の回が入れず、完走が 08:38 → 18:15 の 9.6h 空いた)。
 #   Task Scheduler の trigger と対で変更すること (片方だけ直すと staleness が誤発火する)。
-CYCLE_INTERVAL_HOURS = {"SHEET": 6, "LOW": 8}   # 各 label の巡回間隔 (Task Scheduler と対)
+CYCLE_INTERVAL_HOURS = {"SHEET": 6, "LOW": 8, "CAND": 12}   # 各 label の巡回間隔 (Task Scheduler と対)
+
+# label ごとに「どの行を見るか」(2026-09-19 ユーザー判断)。
+#   SHEET/HIGH = 出品済 (itemID あり) だけ。CAND = 出品候補 (itemID 空) だけ、1日2回。
+#   LOW は従来どおり全部 (候補がほぼ無く、分ける実益が無い)。
+ROWS_FILTER_BY_LABEL = {"SHEET": "listed", "HIGH": "listed", "CAND": "candidate"}
 CYCLE_STALE_MULT = 2.2                          # この倍率を超えたら「止まっている」
 CYCLE_STALE_ALERT_STATE = DECISION_LOG_DIR / "cycle_staleness_alert_state.json"
 CYCLE_STALE_ALERT_THROTTLE_HOURS = 6            # 同 label の再告知間隔 (アラート疲労防止)
@@ -214,7 +219,8 @@ def _lock_path() -> Path:
     return _ACTIVE_LOCK_FILE or LOCK_FILE
 
 
-def _set_active_lock(sheet: str, sheet_id: Optional[str] = None) -> Path:
+def _set_active_lock(sheet: str, sheet_id: Optional[str] = None,
+                     sheet_label: Optional[str] = None) -> Path:
     """label 別の lock を選ぶ (= HIGH/LOW 並走の可否をここで決める).
 
     ★ 2026-08-19: 専用 chrome profile が用意できている label だけ別 lock にする。
@@ -224,6 +230,10 @@ def _set_active_lock(sheet: str, sheet_id: Optional[str] = None) -> Path:
     """
     global _ACTIVE_LOCK_FILE
     label = "LOW" if str(sheet or "").lower() == "low" else "SHEET"
+    # ★ 2026-09-19: CAND (出品候補の巡回) は HIGH と同じスプシを --sheet-id で指すので
+    #   sheet からは判別できない。label を見て別 lock 候補に回す (専用 profile がある時だけ)。
+    if str(sheet_label or "").upper() == "CAND":
+        label, sheet_id = "CAND", None
     _ACTIVE_LOCK_FILE = None      # None = 既定 (LOCK_FILE) を都度参照する
     if label != "SHEET" and not sheet_id:
         try:
@@ -615,6 +625,7 @@ def _phase_monitor(
                 start_row=2, end_row=None, limit=limit,
                 progress_callback=progress_callback,
                 dry_run=False, sleep_sec=1,
+                rows_filter=ROWS_FILTER_BY_LABEL.get((label or "").upper(), "all"),
             )
             grand["by_sheet"][label] = stats
             for k in ("processed", "newly_sold", "newly_in_stock", "errors"):
@@ -1015,7 +1026,7 @@ def run_cycle(
     #   伸びた結果、その 75 分後に始まる LOW が 45 分待っても解放されず 2 回連続 skip し、
     #   LOW シート 512 行が 19.5h 監視されなかった (= 取下げ漏れリスク)。LOW は待てば走れるので
     #   待ち上限だけ伸ばす (Task Scheduler 側で --lock-wait-minutes 150 を渡す)。
-    _set_active_lock(sheet, sheet_id)
+    _set_active_lock(sheet, sheet_id, sheet_label)
     wait_min = LOCK_WAIT_MINUTES if lock_wait_minutes is None else max(0, lock_wait_minutes)
     if not _acquire_lock(test_mode, wait_minutes=0 if test_mode else wait_min):
         cycle_log["status"] = "skipped_lock_held"
@@ -1662,5 +1673,46 @@ def main():
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+#: 落ち方を必ず残すファイル (pythonw 起動では stderr が捨てられるため)
+CRASH_LOG_PATH = SCRIPT_DIR / "logs" / "cycle_crash.log"
+
+
+def _install_crash_recorder():
+    """巡回が落ちた理由を必ずファイルに残す (2026-09-19).
+
+    ★ タスクは pythonw で起動するので sys.stdout / sys.stderr が None。例外も
+      セグフォも画面が無く、**ログが行の途中でぷつりと終わるだけ**で理由が残らない。
+      実測: 09-11〜09-19 に HIGH が少なくとも5回、途中で消えた (9/16 は 1,504行目)。
+      Python レベルの例外と、インタプリタごと落ちる類 (faulthandler) の両方を拾う。
+    """
+    try:
+        CRASH_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        f = open(CRASH_LOG_PATH, "a", encoding="utf-8", buffering=1)
+    except Exception:
+        return None     # 記録できなくても巡回は続ける
+    try:
+        import faulthandler
+        faulthandler.enable(file=f, all_threads=True)
+    except Exception:
+        pass
+
+    def _hook(exc_type, exc, tb):
+        import traceback
+        f.write(f"\n===== {datetime.now().isoformat(timespec='seconds')} "
+                f"pid={os.getpid()} 巡回が落ちました =====\n")
+        traceback.print_exception(exc_type, exc, tb, file=f)
+        f.flush()
+        try:
+            from monitor_listings import log as _mlog
+            _mlog(f"[!!] 巡回が落ちました: {exc_type.__name__}: {exc} "
+                  f"(詳細 {CRASH_LOG_PATH})")
+        except Exception:
+            pass
+
+    sys.excepthook = _hook
+    return f
+
+
 if __name__ == "__main__":
+    _crash_log_file = _install_crash_recorder()
     main()

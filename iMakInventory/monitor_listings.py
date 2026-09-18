@@ -1039,6 +1039,20 @@ def _default_profile_dirs() -> tuple:
             getattr(amazon_scraper, "EBAY_AMAZON_PROFILE_DIR", "") or "")
 
 
+def filter_rows_by_item_id(rows: list, rows_filter: str) -> list:
+    """itemID の有無で行を選ぶ (純関数).
+
+    rows_filter: "all" / "listed" (itemID あり) / "candidate" (itemID 空)。
+    listed と candidate は排他かつ全体を覆う = どちらの巡回にも入らない行は出ない。
+    """
+    if rows_filter == "all":
+        return list(rows)
+    if rows_filter not in ("listed", "candidate"):
+        raise ValueError(f"rows_filter は all/listed/candidate のいずれか: {rows_filter!r}")
+    want_id = (rows_filter == "listed")
+    return [r for r in rows if bool((r.get("item_id") or "").strip()) is want_id]
+
+
 def resolve_profile_dirs(sheet_label: str) -> tuple:
     """(mercari_profile, amazon_profile) を label 別に決める.
 
@@ -1191,6 +1205,7 @@ def process_sheet(
     sleep_sec: float = DEFAULT_SLEEP_SEC,
     progress_callback=None,
     supplier_filter: str = "all",
+    rows_filter: str = "all",
 ):
     global _LOG_LABEL
     _LOG_LABEL = "" if (sheet_label or "").upper() in ("", "HIGH", "SHEET") else sheet_label.upper()
@@ -1218,6 +1233,19 @@ def process_sheet(
         before = len(rows)
         rows = [r for r in rows if detect_supplier(_domain_of(r["url"])) == supplier_filter]
         log(f"  --supplier {supplier_filter} で絞込: {before} → {len(rows)} 件")
+
+    # ★ 2026-09-19 (ユーザー判断): 出品済 (itemID あり) と 出品候補 (itemID 空) を
+    #   別の巡回に分ける。候補は eBay に出ていない = 取下げ対象が無いので、毎 6h 見る
+    #   必要が無い (1日2回で足りる)。実測 HIGH 2,816行のうち候補が 1,992行 (scrape 560件)
+    #   を占め、1回の巡回 3.3h の 45% を使っていた。
+    #   fail-OPEN にはならない: 候補は itemID が無く取下げ対象が存在しないため、
+    #   CAND 巡回が止まっても「売れるのに取り下げ損ねる」は起きない。
+    #   itemID が入った時点で次回から自動的に listed 側に回る (行の移動は不要)。
+    if rows_filter != "all":
+        before = len(rows)
+        rows = filter_rows_by_item_id(rows, rows_filter)
+        kind = "出品済 (itemID あり)" if rows_filter == "listed" else "出品候補 (itemID 空)"
+        log(f"  {kind} だけに絞込: {before} → {len(rows)} 件")
 
     if limit is not None:
         rows = rows[:limit]
