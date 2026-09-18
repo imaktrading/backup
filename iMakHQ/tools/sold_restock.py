@@ -427,6 +427,30 @@ def _cost_from_row(row):
     return None
 
 
+RETIRED_PATH = r"C:/dev/iMak_data/hq/restock_retired_item_ids.txt"
+
+
+def load_retired(path=RETIRED_PATH):
+    """補充の対象から外した出品 (itemID) を読む。無ければ空。
+
+    ★2026-09-18 ユーザー判断「その4件はサヨナラしよう」。
+      7〜8月に売れた古い出品で、SKU が旧形式のため **最初からシートに行が無い**
+      (誰かが消したのではない。2026-09-17 調査済)。仕入元が分からないので補充できず、
+      注文APIが90日ぶん返す間ずっと「台帳に行が無い」と出続けていた。
+    行の形: `<itemID>  # 日付 理由` (# 以降は覚え書き)。
+    """
+    out = set()
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                t = line.split("#", 1)[0].strip()
+                if t:
+                    out.add(t)
+    except OSError:
+        pass
+    return out
+
+
 def update_live_cache(cache, old_id, new_id, qty):
     """補充した出品を live キャッシュに反映する (純関数・test可)。
 
@@ -613,6 +637,8 @@ def main():
     tok = fx.token()
 
     done = skipped = acted = 0
+    _retired = load_retired()
+    _retired_hit = 0
     seen = set()
     pending = pending_rows(want, sheets)
     _nb = _load_not_buyable() if pending else {}
@@ -624,7 +650,10 @@ def main():
         title = (o.get("Item Title") or "")[:56]
         label, n, row = W.find_row(sheets, sku, iid)
         if row is None:
-            print(f"  ⏭ [{cat}] 台帳に行が無い: {title}")
+            if iid in _retired:
+                _retired_hit += 1          # 対象から外した分 (毎回出さない)
+            else:
+                print(f"  ⏭ [{cat}] 台帳に行が無い: {title}")
             skipped += 1
             continue
         state, _aux = W.classify(row, live=_live or None)
@@ -725,6 +754,9 @@ def main():
             relisted += 1
         acted += 1
 
+    if _retired_hit:
+        print(f"  (補充の対象から外した出品 {_retired_hit}件は出していません: "
+              f"{os.path.basename(RETIRED_PATH)})")
     print(f"\n補充済で何もしない {done} / 対象 {acted} / 見送り {skipped}"
           + (f" / ⚠️要対応 {failed}" if failed else ""))
     if acted and not write:
