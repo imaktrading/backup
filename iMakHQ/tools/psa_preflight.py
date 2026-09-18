@@ -75,7 +75,13 @@ def _ensure_catalog():
 _NOISE = {"HOLO", "PROMO", "PROMOTION", "PROMOTIONAL", "ANNIVERSARY", "EDITION", "SPECIAL",
           "CARD", "PACK", "SET", "ART", "RARE", "FULL", "PCP", "GOLDEN", "BOX", "COLLECTION",
           "STARTER", "DECK", "JAPANESE", "ASIA", "POKEMON", "FA", "SAR", "AR", "SR", "HR", "UR",
-          "THE", "AND", "WITH", "VOL", "EX", "GX", "VSTAR", "VMAX", "STAR", "WORLD"}
+          "THE", "AND", "WITH", "VOL", "EX", "GX", "VSTAR", "VMAX", "STAR", "WORLD",
+          # ★2026-09-19: 最小長を2に下げたぶん、短い語をここで落とす (提案2)。
+          #   カード名になり得る短語 (MEW / RAY 等) は入れない。
+          "TO", "OF", "IN", "ON", "AT", "BY", "FOR", "A", "AN", "IS", "IT",
+          "SP", "SV", "SM", "XY", "BW", "DP", "HS", "TCG", "CCG", "NO", "TR",
+          # `DON!! CARD` は名前ではなくカードの種別。これだけでは照合にならない
+          "DON"}
 
 
 def detect_category(brand: str):
@@ -88,9 +94,51 @@ def detect_category(brand: str):
     return None
 
 
+def _norm_name(s: str) -> str:
+    """名前の照合用に均す (純関数): ハイフン・ピリオド・スラッシュ・空白を落として大文字。
+
+    `HO-OH` → `HOOH` / `MR.9` → `MR9`。catalog の name_en 側にも同じ処理を当てる。
+    """
+    return re.sub(r"[-./\s'’]", "", (s or "")).upper()
+
+
 def _subject_tokens(subject: str):
-    toks = re.findall(r"[A-Za-z]{4,}", subject or "")
-    return [t for t in toks if t.upper() not in _NOISE]
+    """PSA Subject → catalog を引く語 (純関数)。
+
+    ★2026-09-19 (提案2): 以前は `[A-Za-z]{4,}` しか拾わず、**カード名が丸ごと消える**
+      ことがあった。実測: `FA/HO-OH GX TO HAVE SEEN BTL.RNBW.` → {BTL.RNBW, SEEN, HAVE}
+      で HO-OH が消え、「名前でも引けない = 未収録」と誤断定して catalog へ送っていた
+      (cert160479905 が2日連続で GAP 除外・カタログに誤依頼)。
+      ハイフン等を落としてから2文字以上を拾い、絞り込みは _NOISE 側で行う。
+    """
+    out, seen = [], set()
+
+    def _add(t, minlen=2):
+        if len(t) < minlen or t in _NOISE or t.isdigit() or t in seen:
+            return
+        seen.add(t)
+        out.append(t)
+
+    for raw in re.split(r"[^A-Za-z0-9.\-']+|/", subject or ""):
+        _add(_norm_name(raw))
+        # ハイフン・ピリオドは **繋げた形と分けた形の両方**を出す。
+        # `HO-OH` は繋げた `HOOH` が正 / `MAGIKARP-HOLO` は分けた `MAGIKARP` が正で、
+        # どちらが正しいかは語を見ても決まらない (catalog に当たった方が使われる)。
+        for part in re.split(r"[-.]", raw or ""):
+            # 分けた側は3文字以上だけ (`HO-OH` の `HO`/`OH` は何にでも当たる)
+            _add(_norm_name(part), minlen=3)
+    return out
+
+
+def name_checked(subject: str, brand: str) -> bool:
+    """名前で catalog を引いたと言えるか (純関数)。
+
+    Brand (セット名) に含まれない語が1つ以上残った時だけ True。
+    `DON!! CARD` のように語が残らない / セット名の語しか残らない subject は
+    **確かめていない**ので、catalog に「未収録」と送ってはいけない。
+    """
+    b = _norm_name(brand)
+    return any(t not in b for t in _subject_tokens(subject))
 
 
 def _zero_o_variants(set_code: str):
@@ -219,8 +267,11 @@ def pids_by_subject(cur, cat: str, subject: str, brand: str = "", limit: int = 8
     for t in toks:
         try:
             rows = cur.execute(
+                # ★2026-09-19: catalog 側も同じ形に均してから比べる (提案2)。
+                #   `HOOH` が `Ho-Oh` に当たらないと、正規化した意味が無い。
                 "SELECT product_id,name_en,set_name_official FROM products "
-                "WHERE category=? AND name_en LIKE ? LIMIT 50",
+                "WHERE category=? AND REPLACE(REPLACE(REPLACE(UPPER(name_en),'-',''),"
+                "'.',''),' ','') LIKE ? LIMIT 50",
                 (cat, f"%{t}%")).fetchall()
         except Exception:                                      # noqa: BLE001
             return []
@@ -377,7 +428,10 @@ def classify(cert: str, meta: dict, con: sqlite3.Connection):
     #     カタログに送らず目視へ回す (2026-08-28 提案2)。
     # 名前で引けたか (= 「未収録」と言ってよいか) を呼び出し側に渡す。
     # 照合できる語が無い subject (`DON!! CARD` 等) は **確かめていない**ので断定しない。
-    res["name_checked"] = bool(_subject_tokens(subject))
+    # ★2026-09-19 (提案3): 生き残った語が **全部 Brand (セット名) の語** なら、
+    #   名前で引いたことにならない。Brand に無い語が1つでも残った時だけ「照合した」。
+    #   従来は語が1つでもあれば True で、空振りのまま catalog へ誤依頼が抜けていた。
+    res["name_checked"] = name_checked(subject, brand)
     subj_hits = pids_by_subject(cur, cat, subject, brand)
     if subj_hits:
         res["status"] = "REVIEW"

@@ -37,7 +37,10 @@ class _Con:
         return None
 
     def fetchall(self):
-        if "name_en LIKE" in self._last:
+        # ★2026-09-19: 照合の SQL が「name_en を均してから LIKE」に変わった (提案2)。
+        #   ハイフン等を落とす REPLACE が入っているのが名前引きの目印
+        #   (`name_en LIKE` だけで見ると、名前+番号の引き込みにも当たってしまう)。
+        if "REPLACE" in self._last:
             return self._by_name
         return []
 
