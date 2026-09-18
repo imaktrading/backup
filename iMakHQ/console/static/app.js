@@ -44,7 +44,7 @@
   };
   var STATE_LABEL = { todo: "要対応", night: "夜間で自動", hold: "止めている", done: "残りなし", error: "数えられない", unknown: "未集計" };
 
-  var jobs = {}, jobList = [], buttons = [], running = null, logAfter = 0, toastTimer, drawerHidden = false, schLoaded = false;
+  var jobs = {}, jobList = [], buttons = [], running = null, logAfter = 0, toastTimer, drawerHidden = true, schLoaded = false;
 
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
@@ -160,6 +160,13 @@
       "</b> · 残件 " + sum(sl, function (j) { return j.n; }).toLocaleString("ja-JP") + "</span></div>" +
       '<div class="list">' + sl.map(liCard).join("") + "</div>" +
       '<div class="rows" style="border-top:1px solid var(--line)">' + rowsFor(ROWS.shelf) + "</div>";
+    // ★2026-09-19: オファーの件数を段の見出しに出す (来ているのに出ていなかった)。
+    var oj = job("offer_calc");
+    var ot = oj ? (oj.state === "error" ? "数えられない"
+      : (oj.n ? "来ている <b>" + num(oj) + "</b>件" : "来ていない")) : "件数なし";
+    $("g-offer").innerHTML = '<div class="gh"><h3>オファー</h3><span class="target">値下げ交渉が来た出品</span>' +
+      '<span class="purpose">受けるか決める / ミラーにも交渉を付ける</span><span class="tot">' + ot + "</span></div>" +
+      '<div class="rows" id="offer-rows"></div>';
     $("offer-rows").innerHTML = rowsFor(ROWS.offer);
     $("fix-rows").innerHTML = rowsFor(ROWS.fix);
 
@@ -173,7 +180,8 @@
     $("maint-bar").innerHTML =
       pill("g-hoju", "補URL", "--g-hoju", h) + pill("g-restock", "再仕入れ", "--g-restock", r) +
       pill("g-shelf", "取下げ・棚", "--g-shelf", { todo: todoOf(sl).length, total: sum(sl, function (j) { return j.n; }) }) +
-      '<a class="pill" href="#g-offer" style="--gc:var(--g-fix)">オファー <b>—</b><span>件数なし</span></a>' +
+      '<a class="pill" href="#g-offer" style="--gc:var(--g-fix)">オファー <b>' +
+        (oj && oj.n != null ? num(oj) : "—") + '</b><span>' + (oj && oj.n ? "来ている" : "件数なし") + '</span></a>' +
       '<a class="pill" href="#g-fix" style="--gc:var(--g-fix)">在庫あり・直す <b>—</b><span>件数なし</span></a>';
     return { todo: todo, hold: hold };
   }
@@ -431,6 +439,10 @@
       running = d.job;
       if (running) {
         if (was && !running.running) { say(running.rc === 0 ? "終わりました — 件数を数え直しています" : "失敗しました — ログを確認してください"); drawerHidden = false; }
+        // ★2026-09-19 ユーザー「起動時にログが表示されるんだけど、閉じて欲しい」。
+        //   前回の走行の記録が残っているだけで開いていた。**今 走っている時だけ**開く。
+        //   見たい時は右上の「ログを見る」で開く。
+        if (running.running) drawerHidden = false;
         if (!drawerHidden) $("drawer").hidden = false;
         $("live").className = "live" + (running.running ? "" : " off");
         $("drawer-stop").hidden = !running.running;

@@ -4363,6 +4363,13 @@ class ListingPanel:
             "    d['restock']=SR.count_workload()\n"
             "except Exception as e:\n"
             "    d['restock']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
+            # 2026-09-19: 受信中のオファーの件数 (eBay 1コール)。オファーは期限が短い
+            #   (実例: 受信から丸1日) ので、表示のための取得を惜しまない。
+            "try:\n"
+            "    import offer_calc as OF\n"
+            "    d['offer']=OF.count_workload()\n"
+            "except Exception as e:\n"
+            "    d['offer']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
             # ★2026-09-03: UT の補URL も同じ subprocess で数える。パネル側から直接
             #   import していたら tools/ が sys.path に無く、毎回「取得できず」だった。
             "try:\n"

@@ -190,7 +190,8 @@ def summarize(d, nightly_ok=False):
             ("restock", "sold_restock", ("actionable",), "blocked"),
             ("psa_gate", "psa_gate", ("actionable", "variant_todo"), None),
             ("restock_build", "restock_build", ("actionable",), "blocked"),
-            ("restock_wb", "restock_wb", ("actionable",), None)):
+            ("restock_wb", "restock_wb", ("actionable",), None),
+            ("offer", "offer_calc", ("actionable",), None)):
         p = d.get(key) or {}
         if p.get("error"):
             err((kind,), p)

@@ -148,6 +148,46 @@ def parse_best_offers(xml, into=None):
     return out
 
 
+def count_workload():
+    """受信中のオファーの件数 (画面のラベル用・2026-09-19 ユーザー「反映してないね」)。
+
+    ★eBay を1回だけ叩く (`GetBestOffers`)。オファーは期限が短い (実例: 受信から丸1日)
+      ので、ここは表示のための取得を惜しまない。仕入値のためのスプシ読みはしない
+      (押した時に fetch_offers が読む)。
+
+    戻り: {"actionable": オファーの数, "items": 出品の数, "error": 読めなかった理由}
+    """
+    out = {"actionable": 0, "items": 0, "error": ""}
+    try:
+        import re as _re
+        sys.path.insert(0, r"C:\dev\iMak\iMakeBayAPI")
+        import dns_cache  # noqa: F401
+        import fix_de_speedpak_shipping as fx
+        fx.refresh()
+        tok = fx.token()
+        by_item = {}
+        for n in range(1, 40):
+            t = fx.post("GetBestOffers",
+                        "<BestOfferStatus>Active</BestOfferStatus>"
+                        f"<Pagination><EntriesPerPage>100</EntriesPerPage>"
+                        f"<PageNumber>{n}</PageNumber></Pagination>"
+                        "<DetailLevel>ReturnAll</DetailLevel>", tok, site="0")
+            before = len(by_item)
+            parse_best_offers(t, by_item)
+            if len(by_item) == before and not _re.search(r"<ItemBestOffers>", t):
+                break
+            pr = _re.search(r"<PaginationResult>.*?<TotalNumberOfPages>(\d+)</TotalNumberOfPages>",
+                            t, _re.S)
+            if pr and n >= int(pr.group(1)):
+                break
+        out["items"] = len(by_item)
+        out["actionable"] = sum(len(_re.findall(r"<BestOffer>", v.get("xml") or ""))
+                                for v in by_item.values())
+    except Exception as e:                                     # noqa: BLE001
+        out["error"] = f"{type(e).__name__}: {e}"[:60]
+    return out
+
+
 def fetch_offers():
     """受信中の Best Offer を eBay から取り、商品管理シートの仕入値まで解決して返す。
 

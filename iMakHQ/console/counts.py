@@ -48,6 +48,8 @@ def main():
         "cull": lambda: __import__("cull_end").count_workload(),
         "shelf": lambda: __import__("shelf_evict").count_workload(),
         "restock": lambda: __import__("sold_restock").count_workload(),
+        # ★2026-09-19: オファーは期限が短いので件数を出す (eBay 1コール)。
+        "offer": lambda: __import__("offer_calc").count_workload(),
         "ut": lambda: __import__("ut_hoju_fill").count_workload(),
         "ut_identify": lambda: __import__("ut_identify").count_workload(),
         "psa_gate": lambda: __import__("psa_resource_gate").count_workload(),
