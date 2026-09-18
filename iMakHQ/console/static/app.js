@@ -578,6 +578,12 @@
   //   (サーバーからは続きだけ送られてくるため、消しても取りこぼさない)。
   $("drawer-clear").addEventListener("click", function () {
     $("log").innerHTML = "";
+    // ★見出し(「失敗: … (returncode=1)」)も一緒に消す。これが残ると
+    //   「消えていない」に見える (2026-09-18 ユーザー指摘)。走っていない時だけ消す。
+    if (!(running && running.running)) {
+      $("job-label").textContent = "";
+      $("job-meta").textContent = "";
+    }
     var b = this;
     b.textContent = "消しました";
     setTimeout(function () { b.textContent = "🗑 表示を消す"; }, 1200);
