@@ -25,9 +25,15 @@ def test_trigger_is_three_backups_or_fewer():
     assert H.CONFIRM_MAX_BACKUPS < H.AUXN, "満杯(5)より狭いこと"
 
 
-def test_more_expensive_than_current_cost_is_dropped():
-    assert H.candidate_cost_conflicts(9000, 5000, False) is True
+def test_more_expensive_is_kept_when_backups_are_few():
+    """★2026-09-19 ユーザー確定「補が3本以下の補充は、高くても仕方がない」。
 
+    2026-09-08 は「今より高い候補は出さない」だったが、補が足りていない札では
+    **供給が1本も無いより、高くても買える先がある方がよい**に変えた。
+    値段で落とすのは入れ替え (min_gain>0) だけ。
+    """
+    assert H.candidate_cost_conflicts(9000, 5000, False) is False       # 補充 = 落とさない
+    assert H.candidate_cost_conflicts(9000, 5000, False, 1000) is True  # 入れ替え = 落とす
 
 def test_cheaper_or_equal_is_kept():
     assert H.candidate_cost_conflicts(3000, 5000, False) is False

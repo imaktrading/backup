@@ -38,7 +38,11 @@ def test_主が売り切れなら閾値を問わず出す():
 
 
 def test_値段が分からない候補は落とさない():
-    assert H.candidate_cost_conflicts(None, 5000, False, H.SWAP_MIN_GAIN) is False
+    # ★2026-09-19 ユーザー「入れ替えに高いのが出てきたら本末転倒だね」。
+    #   入れ替えは「今より安い」ことが唯一の目的なので、値段が分からない候補は出さない。
+    assert H.candidate_cost_conflicts(None, 5000, False, H.SWAP_MIN_GAIN) is True
+    # 補充 (min_gain=0) は従来どおり落とさない
+    assert H.candidate_cost_conflicts(None, 5000, False, 0) is False
     assert H.candidate_cost_conflicts(5000, None, False, H.SWAP_MIN_GAIN) is False
 
 

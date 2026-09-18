@@ -535,11 +535,20 @@ def candidate_cost_conflicts(price, now_cost, main_dead, min_gain=0):
       - 主URLが売り切れ (供給ゼロ) の札は **高くても押さえる価値がある** → 出す
       - 値段が分からない候補は判定しない → 出す (fail-open)
     """
+    # ★2026-09-19 ユーザー確定「補が3本以下の補充は、高くても仕方がないけど、4〜5本は
+    #   安いの入れないと」。min_gain=0 = 補が足りていない札 → **値段で落とさない**
+    #   (供給が1本も無いより、高くても買える先がある方がよい)。
+    if not min_gain:
+        return False
     if main_dead:
         return False
-    if price is None or not now_cost:
+    if not now_cost:
         return False
-    return price > now_cost - (min_gain or 0)
+    # ★入れ替えは「今より安い」ことが唯一の目的なので、**値段が分からない候補は出さない**
+    #   (2026-09-19 ユーザー「入れ替えに高いのが出てきたら本末転倒だね」)。
+    if price is None:
+        return True
+    return price > now_cost - min_gain
 
 
 def min_gain_for(t):
