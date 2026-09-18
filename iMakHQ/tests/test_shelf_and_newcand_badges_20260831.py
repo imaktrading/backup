@@ -42,6 +42,9 @@ def test_zero_target_returns_no_error():
 def test_picks_something_when_target_is_set(monkeypatch):
     """funnel データがあれば、目標額に届くまで選ぶ (funnel フォールバック経路)。"""
     monkeypatch.setattr(SE, "listed_today_amount", lambda *a, **k: 1000.0)
+    # ★2026-09-18: 目標は「今日の出品額 − 今日すでに落とした額」になった。
+    #   実際に落とした日にこの test を走らせると目標が 0 になるので、0 を注入する。
+    monkeypatch.setattr(SE, "evicted_today_amount", lambda *a, **k: 0.0)
     got = SE.count_workload()
     assert got["error"] == ""
     assert got["target"] == 1000.0

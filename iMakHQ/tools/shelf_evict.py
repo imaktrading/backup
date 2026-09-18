@@ -833,7 +833,11 @@ def count_workload():
            "cache_note": "", "error": ""}
     try:
         listed = listed_today_amount()
-        target = listed * RATIO
+        # ★2026-09-18: main() は「今日すでに落とした分」を引くのに、ここは引いていなかった。
+        #   3件 落とした直後もボタンは 3件 のままで「押しても件数が減りませんでした」と
+        #   出ていた (実際は押しても『今日はもう落とす分がありません』で何も起きない)。
+        #   main() と同じ remaining_target を通す (二重実装しない)。
+        target = remaining_target(listed, evicted_today_amount(), RATIO)
         out["listed_today"], out["target"] = listed, target
         # ★2026-09-03: 目標額を聞けるようにしたので、ボタンには **今日いくらまで空けられるか**
         #   (=対象すべて) を出す。今日の出品額しか出さないと「押せる上限」が分からない。

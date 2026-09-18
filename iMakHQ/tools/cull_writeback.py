@@ -180,7 +180,39 @@ def apply(ended_ids, commit=False, today=None):
         if ups and commit:
             ws.batch_update(ups)
         done += len(ups) // 2
+    if commit:
+        _drop_from_live_cache_file(ended)
     return done
+
+
+def drop_from_live_cache(cache, ended_ids):
+    """取り下げた出品を live キャッシュから消す (純関数・test可)。落とした件数を返す。
+
+    ★2026-09-18: 取下げが成功してもキャッシュは「出品中」のままで、画面の件数が
+      減らなかった (ユーザー「押しても件数が減りませんでした (3件 → 3件)」)。
+      キャッシュは数分〜2時間 使い回すので、その間 同じ出品を選び続ける。
+    取り下げた物は **もう出品ではない** ので、値を書き換えず行ごと消す。
+    """
+    n = 0
+    for i in {str(x).strip() for x in ended_ids if str(x).strip()}:
+        if cache.pop(i, None) is not None:
+            n += 1
+    return n
+
+
+def _drop_from_live_cache_file(ended_ids):
+    """live キャッシュを読んで当てて書き戻す (失敗は黙って諦める)。"""
+    try:
+        import json as _json
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import itemid_writeback_audit as _A
+        if not _A.CACHE.exists():
+            return
+        d = _json.loads(_A.CACHE.read_text(encoding="utf-8"))
+        if isinstance(d, dict) and drop_from_live_cache(d, ended_ids):
+            _A.CACHE.write_text(_json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    except Exception:                                          # noqa: BLE001
+        pass
 
 
 def main():
