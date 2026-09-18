@@ -60,3 +60,31 @@ def test_unknown_game_is_ignored_not_crashing():
 def test_empty_list_falls_back_to_all_games():
     # [] は「指定なし」= 全部。 うっかり 0 語で走らせない
     assert T.build_keywords([]) == T.build_keywords()
+
+
+# --------------------------------------------------------------------------
+# POPULAR_CHARACTERS (2026-09-17 user 提供の Aランク優先語)
+# --------------------------------------------------------------------------
+def test_popular_characters_included_by_default():
+    kws = T.build_keywords(["pokemon"])
+    assert "PSA10 リザードン" in kws
+    kws = T.build_keywords(["onepiece"])
+    assert "PSA10 モンキー・D・ルフィ" in kws
+
+
+def test_popular_characters_come_before_set_codes():
+    kws = T.build_keywords(["pokemon"])
+    first_code_idx = kws.index(f"PSA10 {T.SET_CODES['pokemon'][0]}")
+    for name in T.POPULAR_CHARACTERS["pokemon"]:
+        assert kws.index(f"PSA10 {name}") < first_code_idx
+
+
+def test_popular_characters_can_be_excluded():
+    kws = T.build_keywords(["pokemon"], include_popular=False)
+    assert "PSA10 リザードン" not in kws
+    assert f"PSA10 {T.SET_CODES['pokemon'][0]}" in kws
+
+
+def test_popular_characters_dedupe_against_set_codes_and_generic():
+    kws = T.build_keywords()
+    assert len(kws) == len(set(kws))

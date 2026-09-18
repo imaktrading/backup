@@ -40,18 +40,41 @@ GENERIC: dict[str, list[str]] = {
     "gundam": ["ガンダムカードゲーム"],
 }
 
+# 2026-09-17 user 提供: 海外eBay無在庫で取引ボリューム・PSA10相場が安定して高い
+# キャラ (Aランク優先語)。 このプロジェクトの実測データではなく user の市場知見なので、
+# ★型番までは信用せず キャラ名だけを検索語にする (型番はカタログ未照合)。
+# build_demand_keywords (ファネル分析ベース) と別枠の静的リスト。 語は減らさず増やす方針
+# (CLAUDE.md) のとおり、 既存の弾コード・需要ベース語と共存させ、 優先して先頭に置く。
+POPULAR_CHARACTERS: dict[str, list[str]] = {
+    "pokemon": [
+        "リザードン", "ピカチュウ", "ブラッキー", "ナンジャモ", "リーリエ", "ミュウツー",
+        "ゲンガー", "ミュウ", "ルギア", "マリィ", "ゲッコウガ", "ニンフィア",
+        "レイ", "ルチア", "カビゴン", "レックウザ", "ミミッキュ", "キハダ",
+        "サーナイト", "コイキング", "ポッチャマ",
+    ],
+    "onepiece": [
+        "モンキー・D・ルフィ", "ロロノア・ゾロ", "ポートガス・D・エース", "シャンクス",
+        "ボア・ハンコック", "トラファルガー・ロー", "ナミ", "ヤマト", "サボ", "サンジ",
+        "ジュエリー・ボニー", "ウタ", "ニコ・ロビン", "キャベンディッシュ",
+        "ゴール・D・ロジャー", "ペローナ", "シャーロット・カタクリ",
+        "ドンキホーテ・ドフラミンゴ", "エドワード・ニューゲート", "レベッカ",
+    ],
+}
+
 GAMES = tuple(SET_CODES)
 
 
-def build_keywords(games=None, include_generic: bool = True) -> list[str]:
+def build_keywords(games=None, include_generic: bool = True,
+                   include_popular: bool = True) -> list[str]:
     """収集用キーワード一覧を作る (純関数).
 
     Args:
         games: 対象ゲーム (既定 = 全部)。 未知の名前は無視する。
         include_generic: 弾コード以外の一般語も入れるか
+        include_popular: POPULAR_CHARACTERS (Aランク優先語) を先頭に足すか
     Returns:
-        重複を除いた検索キーワード。 1 語あたり実測 15 件前後なので、
-        語数 × 15 が収集件数の目安。
+        重複を除いた検索キーワード。 ゲームごとに 優先キャラ → 弾コード → 一般語 の順。
+        1 語あたり実測 15 件前後なので、 語数 × 15 が収集件数の目安。
     """
     names = list(games) if games else list(GAMES)
     out, seen = [], set()
@@ -59,7 +82,10 @@ def build_keywords(games=None, include_generic: bool = True) -> list[str]:
         codes = SET_CODES.get(g)
         if not codes:
             continue
-        terms = [f"{PREFIX} {c}" for c in codes]
+        terms = []
+        if include_popular:
+            terms += [f"{PREFIX} {c}" for c in POPULAR_CHARACTERS.get(g, [])]
+        terms += [f"{PREFIX} {c}" for c in codes]
         if include_generic:
             terms += [f"{PREFIX} {t}" for t in GENERIC.get(g, [])]
         for t in terms:
