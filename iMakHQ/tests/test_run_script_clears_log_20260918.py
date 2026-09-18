@@ -26,3 +26,13 @@ def test_run_script_calls_clear_log():
 def test_clear_log_runs_before_the_header_line():
     body = _run_script_body()
     assert body.index("self.clear_log()") < body.index("▶ {script['label']}")
+
+
+def test_log_frame_has_clear_button():
+    """ログ枠の中にも「表示を消す」ボタンがある (2026-09-18 ユーザー要望)。
+
+    状態ライン右端の「ログクリア」は見つけにくかった。
+    """
+    src = PANEL.read_text(encoding="utf-8")
+    assert "表示を消す" in src
+    assert 'text="🗑 表示を消す", command=self.clear_log' in src

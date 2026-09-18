@@ -4055,6 +4055,12 @@ class ListingPanel:
         # ログ
         log_frame = ttk.LabelFrame(root, text="実行ログ（着色: 青=商品/橙=API/緑=eBay/赤=エラー/灰=スキップ）", padding=4)
         log_frame.pack(fill="both", expand=True, padx=8, pady=(4, 8))
+        # ★2026-09-18: ログ枠の中にも「表示を消す」を置く (ユーザー要望)。
+        #   状態ライン右端の「ログクリア」は見つけにくかった。直前の走行だけを
+        #   コピーして貼りたい、が用途なので、ログのすぐ上に置く。
+        _log_bar = ttk.Frame(log_frame)
+        _log_bar.pack(fill="x", pady=(0, 2))
+        ttk.Button(_log_bar, text="🗑 表示を消す", command=self.clear_log).pack(side="right")
         self.log = scrolledtext.ScrolledText(log_frame, wrap="word", font=("Consolas", 9))
         self.log.pack(fill="both", expand=True)
 
