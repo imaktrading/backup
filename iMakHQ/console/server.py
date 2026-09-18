@@ -481,16 +481,35 @@ def research_meta():
     }
 
 
+# ★2026-09-18: 既定のブラウザ (Edge) で開くと、Terapeak 抜き出しの拡張が入っていないので
+#   ボタンが出ない。Chrome を名指しで開く (無ければ既定に落とす)。
+CHROME_PATHS = (
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    os.path.join(os.path.expanduser("~"), r"AppData\Local\Google\Chrome\Application\chrome.exe"),
+)
+
+
+def _chrome():
+    for p in CHROME_PATHS:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def research_open(preset, tabs, days):
-    """条件を焼いた Research の URL をブラウザで開く (SOLD / ACTIVE を選べる)。"""
-    import webbrowser
+    """条件を焼いた Research の URL を Chrome で開く (SOLD / ACTIVE を選べる)。"""
     m = _market_ledger()
-    urls = []
+    chrome, urls = _chrome(), []
     for tab in tabs or ["SOLD"]:
         url = m.build_url(preset, tab=tab, days=int(days or m.DEFAULT_DAYS))
-        webbrowser.open(url)
+        if chrome:
+            subprocess.Popen([chrome, url])
+        else:
+            import webbrowser
+            webbrowser.open(url)
         urls.append(url)
-    return {"ok": True, "urls": urls}
+    return {"ok": True, "urls": urls, "chrome": bool(chrome)}
 
 
 def research_run(cmd):

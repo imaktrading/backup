@@ -79,12 +79,40 @@
 
 
   // ---- 保存 (重複は itemId + 種別 + 検索語 で落とす) ----
+  // ★拡張を再読み込みすると、開いたままのページからは chrome.storage に繋がらなくなる
+  //   (Extension context invalidated)。何が起きたか分かる言葉で出す。
+  function dead(e) {
+    const s = String((e && e.message) || e);
+    return s.includes("Extension context") || s.includes("invalidated") || !chrome.runtime?.id;
+  }
   const load = (key) =>
-    new Promise((res) => chrome.storage.local.get([key], (o) => res(o[key] || [])));
+    new Promise((res, rej) => {
+      try {
+        chrome.storage.local.get([key], (o) => res(o[key] || []));
+      } catch (e) {
+        rej(e);
+      }
+    });
   const save = (key, val) =>
-    new Promise((res) => chrome.storage.local.set({ [key]: val }, res));
+    new Promise((res, rej) => {
+      try {
+        chrome.storage.local.set({ [key]: val }, res);
+      } catch (e) {
+        rej(e);
+      }
+    });
 
   async function capture(silent) {
+    try {
+      return await _capture(silent);
+    } catch (e) {
+      msg(dead(e) ? "拡張を入れ替えました。このページで F5 を押してください" : `取れませんでした: ${e}`, true);
+      running = false;
+      return 0;
+    }
+  }
+
+  async function _capture(silent) {
     const ctx = context();
     const rows = [...parseSold(ctx), ...parseActive(ctx)].filter((r) => r.itemId);
     if (!rows.length) {
@@ -123,13 +151,23 @@
       .map((tr) => (tr.querySelector("[data-item-id]") || {}).getAttribute?.("data-item-id") || "")
       .join(",");
 
+  // 検索条件が変わったかを見る。★ページを捲ると offset が変わる (0→50→100) ので、
+  //   そこを含めて比べると2ページ目で自分を止めてしまう (2026-09-18 実害: 100件で終了)。
+  function searchKey() {
+    const u = new URLSearchParams(location.search);
+    ["offset", "endDate", "startDate", "_trksid"].forEach((k) => u.delete(k));
+    const a = [...u.entries()].map((kv) => kv.join("="));
+    a.sort();
+    return a.join("&");
+  }
+
   async function runAll() {
     if (running) {
       running = false;
       return;
     }
     running = true;
-    const search0 = location.search;
+    const search0 = searchKey();
     const btn = panel.querySelector("#tpg-all");
     btn.textContent = "止める";
     let pages = 0;
@@ -149,7 +187,7 @@
           await sleep(250);
           if (pageLabel() + "|" + rowIds() !== before) break;
         }
-        if (location.search !== search0) {
+        if (searchKey() !== search0) {
           msg("検索条件が変わったので止めました", true);
           break;
         }
@@ -158,6 +196,8 @@
       }
       if (pages >= MAX_PAGES) msg(`${MAX_PAGES}ページで打ち止めにしました`, true);
       else if (!running) msg(`止めました (${pages}ページ)`, true);
+      // 最後まで行ったら CSV も出す (押し忘れを無くす)。途中で止めた時は出さない
+      else await exportCsv();
     } finally {
       running = false;
       btn.textContent = "まとめて取る";
@@ -202,6 +242,24 @@
   }
 
   function download(name, text) {
+    // 「名前を付けて保存」の窓を出さずに落とす (background.js の downloads API 経由)。
+    // 繋がらない時だけ、従来どおりリンクを押す形に落とす。
+    const bytes = new TextEncoder().encode(text);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    const b64 = btoa(bin);
+    try {
+      chrome.runtime.sendMessage({ type: "download", name, b64 }, (res) => {
+        if (chrome.runtime.lastError || !res || !res.ok) linkDownload(name, text);
+      });
+    } catch (e) {
+      linkDownload(name, text);
+    }
+  }
+
+  function linkDownload(name, text) {
     const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
     const a = document.createElement("a");
     a.href = url;

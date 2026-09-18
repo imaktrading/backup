@@ -91,7 +91,7 @@ def test_条件は毎回同じものが焼かれる():
     assert q["categoryId"] == ["183454"]
     assert sorted(q["format"]) == ["BEST_OFFER", "FIXED_PRICE"]
     assert q["sellerCountry"] == ["JP"]
-    assert q["keywords"] == ["PSA"]
+    assert q["keywords"] == ["PSA10"]   # 2026-09-18 ユーザー確定
     assert q["sorting"] == ["-itemssold"]
     assert q["dayRange"] == ["90"]
     assert "buyerCountry" not in q          # 買い手の国で絞るのは誤り (2026-09-18)

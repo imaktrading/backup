@@ -54,9 +54,12 @@ DAY_RANGES = {
     "1年": 365, "2年": 730, "3年": 1095,
 }
 DEFAULT_DAYS = 90
+# ★2026-09-18 ユーザー確定: `PSA10`。eBay の検索は `PSA 10` (間にスペース) も拾うので
+#   取りこぼさない (実データで確認済み: "PSA 10 Red's Pikachu 270/SM-P" が入っていた)
+KEYWORDS = "PSA10"
 
 
-def build_url(preset, tab="SOLD", days=DEFAULT_DAYS, keywords="PSA", now=None):
+def build_url(preset, tab="SOLD", days=DEFAULT_DAYS, keywords=KEYWORDS, now=None):
     """条件セットから Research の URL を作る。
 
     tab は "SOLD" か "ACTIVE"。days は DAY_RANGES の値 (既定 90)。
