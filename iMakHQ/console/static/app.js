@@ -228,31 +228,10 @@
   }
 
   // ---------------------------------------------------------------- 今日
-  // ②→③ のように順番があるものは、**今やる段だけ**出す (終わったら次の段が出る)。
-  // 2026-09-16 ユーザー:「②をやったあとで③みたいな順番が影響するのは、②だけ表示して終わったら③」
-  function chainOf(j) {
-    var item = (/^(PSA|UT|くじ|一番くじ|G-SHOCK)/.exec(j.label) || [, "全商材"])[1];
-    return item + "/" + j.group;                      // 例: PSA/hoju
-  }
-  function rankOf(j) {
-    // ★2026-09-16 ユーザー「棚②は今日やることに追加しないの？」で発覚:
-    //   段が空の時 indexOf("") は **0** を返すので、段の無い作業まで「①」扱いになり、
-    //   同じまとまりの ②③ を順番待ちに押し下げていた (取下げ=段なし が 棚② を隠していた)。
-    var s = j.step || "";
-    if (!s) return 9;                                  // 段の無い作業は順番待ちにしない
-    var n = "①②③④⑤".indexOf(s) + 1;
-    if (!n) return 9;
-    return n + (/入れ替え/.test(j.label) ? 0.5 : 0);    // 入れ替えは補充のあと
-  }
-  function firstStepOnly(list) {
-    var best = {};
-    list.forEach(function (j) {
-      var k = chainOf(j), r = rankOf(j);
-      if (best[k] == null || r < best[k]) best[k] = r;
-    });
-    var now = list.filter(function (j) { return rankOf(j) === best[chainOf(j)] || rankOf(j) === 9; });
-    return { now: now, waiting: list.length - now.length };
-  }
+  // ★2026-09-19 ユーザー「めっちゃ工夫してくれてるんやけど、実際そんな法則性はないんよ。
+  //   全部だしていいよ」。①→②→③ に見えても実際は各段が独立して残っており、
+  //   前の段が0件になるのを待つ関係ではなかった。順番待ちの仕組みは廃止し、全部出す
+  //   (実害: 補URL③入れ替え 17件 を実際に作業しているのに、補充88件の裏に隠れていた)。
 
   function paintToday() {
     var todo = todoOf(jobList);
@@ -263,11 +242,13 @@
 
     var lanes = [["maint", "在庫メンテ", "--p-maint", ["hoju", "restock", "shelf"]],
                  ["new", "新規出品", "--p-new", ["seed"]]];
-    var waiting = 0;
     var html = lanes.map(function (L) {
-      var picked = firstStepOnly(todo.filter(function (j) { return L[3].indexOf(j.group) >= 0; }));
-      waiting += picked.waiting;
-      var list = picked.now.sort(function (a, b) { return (b.n || 0) - (a.n || 0); });
+      // ★2026-09-19 ユーザー「めっちゃ工夫してくれてるんやけど、実際そんな法則性はないんよ。
+      //   全部だしていいよ」。①→②→③ に見えても、実際はどの段も独立して残っていて、
+      //   前の段が0件になるのを待つ関係ではなかった。**残っている物は全部出す**。
+      //   (実害: 補URL③入れ替え 17件 を実際に作業しているのに、補充88件の裏に隠れていた)
+      var list = todo.filter(function (j) { return L[3].indexOf(j.group) >= 0; })
+                     .sort(function (a, b) { return (b.n || 0) - (a.n || 0); });
       if (!list.length) return "";
       return '<div class="lane" style="--pc:var(' + L[2] + ')"><h2>' + esc(L[1]) + " <small>" + list.length + "</small></h2>" +
         '<div class="tasks">' + list.map(function (j) {
@@ -278,10 +259,9 @@
         }).join("") + "</div></div>";
     }).join("");
     $("today-lanes").innerHTML = html || '<div class="card"><div class="empty">押さないと減らない残件はありません</div></div>';
-    $("today-wait").textContent = waiting
-      ? "順番待ち " + waiting + "件 — 上の段が終わると出ます (全体は「在庫メンテ」の表)" : "";
-    $("kp-todo").textContent = todo.length - waiting;
-    $("tab-today").innerHTML = "いま押す <b>" + (todo.length - waiting) + "</b> · 残件 " +
+    $("today-wait").textContent = "";        // 順番待ちは作らない (全部出す)
+    $("kp-todo").textContent = todo.length;
+    $("tab-today").innerHTML = "いま押す <b>" + todo.length + "</b> · 残件 " +
       sum(todo, function (j) { return j.n; }).toLocaleString("ja-JP");
   }
   function groupName(g) { return { hoju: "補URL", restock: "再仕入れ", shelf: "取下げ・棚", seed: "見つける" }[g] || g; }

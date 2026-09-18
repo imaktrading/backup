@@ -379,17 +379,18 @@ def test_search_buttons_are_not_checked_for_not_moving():
         assert k in SERVER.split("SEARCH_KINDS = {")[1].split("}")[0], k
 
 
-def test_a_job_without_a_step_does_not_hide_the_others():
-    """段の無い作業が「①」扱いになって ②③ を隠していた (2026-09-16)。
+def test_today_shows_every_remaining_task():
+    """今日やること は **残っている物を全部出す** (2026-09-19 ユーザー確定)。
 
-    ユーザー「棚②は今日やることに追加しないの？」で発覚。JS の indexOf("") は **0** を返すので、
-    段が空の作業まで rank 1 になり、同じまとまりの 棚② (rank 2) が順番待ちに落ちていた。
+    ユーザー「めっちゃ工夫してくれてるんやけど、実際そんな法則性はないんよ。全部だしていいよ」。
+    ①→②→③ に見えても各段は独立して残っており、前の段が0件になるのを待つ関係ではなかった。
+    実害: 補URL③入れ替え 17件 を実際に作業しているのに、補充88件の裏に隠れていた。
     """
     app = open(os.path.join(HQ, "console", "static", "app.js"), encoding="utf-8").read()
-    body = app.split("function rankOf(j) {")[1].split("function firstStepOnly")[0]
-    assert 'var s = j.step || "";' in body
-    assert "if (!s) return 9;" in body                      # 段が無ければ順番待ちにしない
-    assert body.index("if (!s) return 9;") < body.index('indexOf(s)')   # indexOf より先に弾く
+    assert "firstStepOnly" not in app          # 順番待ちの仕組みは持たない
+    assert "順番待ち " not in app
+    body = app.split("function paintToday() {")[1].split("function groupName")[0]
+    assert "todo.filter(function (j) { return L[3].indexOf(j.group) >= 0; })" in body
 
 
 def test_today_is_only_my_todo():
