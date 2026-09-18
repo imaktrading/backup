@@ -4960,6 +4960,11 @@ class ListingPanel:
             if v:
                 cmd.extend([pname, v])
         cwd = script["cwd"]
+        # ★2026-09-18: 走行のたびにログ欄を空にする (ユーザー要望)。
+        #   直前の走行だけをコピーして貼れるようにするため。クリアの押し忘れで
+        #   前走行が混ざる問題 (実害 2026-08-02: gshock の報告に TCG の行が混入) もこれで消える。
+        #   run log ファイル (iMakHQ/run_logs/) は走行ごとに別ファイルなので影響を受けない。
+        self.clear_log()
         self.append_log(f"\n{'='*70}\n▶ {script['label']}\n  cwd: {cwd}\n  cmd: {' '.join(cmd)}\n{'='*70}\n")
         self.status_var.set(f"実行中: {script['label']}")
         self.now_processing.set("")
