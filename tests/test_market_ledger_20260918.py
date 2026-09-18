@@ -98,9 +98,11 @@ def test_条件は毎回同じものが焼かれる():
     assert "price" not in q                 # 価格の下限は入れない
 
 
-def test_ドラゴンボールはGameを2つ入れる():
+def test_ドラゴンボールはSuperCardGameだけ():
+    # 2026-09-18 カタログ回答: Dragon Ball CCG は 2000年代の別ゲーム (Score 社)。
+    # うちが扱う FB/DBS の弾は Super Card Game なので入れない
     q = _q(M.build_url("ドラゴンボール", now=NOW))
-    assert q["aspect"] == ["Game:::Dragon Ball Super Card Game", "Game:::Dragon Ball CCG"]
+    assert q["aspect"] == ["Game:::Dragon Ball Super Card Game"]
 
 
 def test_ACTIVEには売れた数の並びを付けない():

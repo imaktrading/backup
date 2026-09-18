@@ -5,6 +5,7 @@
 
     python iMakHQ/tools/market_ledger.py ingest          # ダウンロード等から取り込む
     python iMakHQ/tools/market_ledger.py report          # 売れているカードと前回との差
+    python iMakHQ/tools/market_ledger.py targets         # 探す先 (売れているのに出していない)
 
 ★台帳に貯めるのは **出品ごとの行** (eBay が出した「期間中に何個売れたか」付き)。
   カード単位の集計は report の時に作る。集計を焼いて保存すると、後から数え直せなくなる。
@@ -44,9 +45,10 @@ CATEGORY_CCG = "183454"
 PRESETS = {
     "ポケモン": ["Pokémon TCG"],
     "ワンピース": ["One Piece CCG"],
-    # ★2026-09-18: 市場側で Game が2つに割れている (Super Card Game 116 / CCG 66)。
-    #   片方だけだと半分落ちるので両方
-    "ドラゴンボール": ["Dragon Ball Super Card Game", "Dragon Ball CCG"],
+    # ★2026-09-18: 市場側では Dragon Ball CCG にも66件出ていたが、CCG は 2000年代の
+    #   別ゲーム (Score 社)。うちが扱う FB/DBS の弾は Super Card Game なので入れない
+    #   (カタログ回答 2026-09-18_aspect_values_vs_ebay_list_response.md)
+    "ドラゴンボール": ["Dragon Ball Super Card Game"],
 }
 
 DAY_RANGES = {
@@ -227,6 +229,144 @@ def by_card(rows, kind="Sold"):
     return agg, unknown
 
 
+# ---- 探す先に渡す一覧 (市場で売れているのに、うちが出していないカード) ----
+# ★抽出くんの決まり (skill harvest-targeting ①-3): 語にしてよいのは「番号が取れた」か
+#   「カタログを引けた」時だけ。訳さない・推測しない。だからここでは番号とカタログの和名しか出さない。
+CATALOG_DB = r"C:/dev/iMak_data/catalog/products.sqlite"
+TARGETS_CSV = os.path.join(LEDGER_DIR, "demand_market.csv")
+
+# タイトルの中の弾コード (SV2a / S12a / M2a / CLK / sv1a …)
+_SET_CODE = re.compile(r"\b((?:SV|S|M|CLK|SM|XY|BW|DP)[0-9]{0,2}[A-Z]?)\b", re.I)
+
+
+def product_id_candidates(key, title):
+    """カード番号 (と市場タイトル) から、カタログの product_id の候補を作る。"""
+    if "/" not in key:
+        return [key.upper()]                      # OP03-057 / P-043 はそのまま
+    num, suffix = key.split("/", 1)
+    if not suffix.isdigit():                      # 020/M-P → M-P-020
+        return [f"{suffix.upper()}-{num}"]
+    out = []
+    for m in _SET_CODE.finditer(title or ""):     # 175/165 は弾コードをタイトルから拾う
+        code = m.group(1)
+        if code.upper() in ("M", "S", "SV"):      # 単独の文字は弾ではない
+            continue
+        out.append(f"{code}-{num}")
+    return out
+
+
+def lookup_catalog(cands, conn):
+    """product_id でカタログを引く。**完全一致だけ** (名前で探さない)。"""
+    for pid in cands:
+        row = conn.execute(
+            "SELECT product_id, name, name_jp, category FROM products WHERE product_id=?", (pid,)
+        ).fetchone()
+        if row:
+            return row
+    return None
+
+
+def missing_cards(rows, live_keys, min_sold=2):
+    """市場で min_sold 以上売れたのに、うちが出していないカード。"""
+    agg, _ = by_card(rows)
+    mine_dash, mine_num = set(), collections.defaultdict(set)
+    for k in live_keys:
+        m = re.match(r"^([A-Za-z0-9]+)-(\d+)", (k or "").split(":")[-1])
+        if m:
+            mine_dash.add(f"{m.group(1).upper()}-{m.group(2)}")
+            mine_num[m.group(2).lstrip("0")].add(m.group(1).upper())
+    out = []
+    for k, v in agg.items():
+        if v["sold"] < min_sold:
+            continue
+        if "/" in k:
+            sets = mine_num.get(k.split("/")[0].lstrip("0"), set())
+            title = re.sub(r"[^A-Z0-9]", "", v["title"].upper())
+            have = any(s in title for s in sets)
+        else:
+            have = k.upper() in mine_dash
+        if not have:
+            out.append((k, v))
+    return sorted(out, key=lambda x: -x[1]["sold"])
+
+
+# ---- 実売価格 → 上限の仕入れ値 (cost-plus の逆引き) ----
+# ★式は持たない。出品と同じ pricing_engine を二分探索で逆に解くだけ。
+#   ここに計算式を写すと、値付けを変えた時に2箇所になる (SSOT を割らない)。
+PROFIT_CATEGORY = "TCG(PSA10)"
+
+
+def max_cost_jpy(price_usd, category=PROFIT_CATEGORY, lo=100, hi=300000):
+    """その値段で売るには、仕入れがいくらまでなら出せるか (円)。
+
+    出品価格は仕入れ値に対して単調に増えるので、二分探索で解ける。
+    解けない (安すぎて下限でも超える) 時は None。
+    """
+    if not price_usd or price_usd <= 0:
+        return None
+    sys.path.insert(0, r"C:/dev/iMak/iMakeBayAPI")
+    from pricing_engine import compute_listing_price
+
+    def price_of(cost):
+        return compute_listing_price(cost, 0, category)["price"]
+
+    try:
+        if price_of(lo) > price_usd:
+            return None                      # 一番安い仕入れでも、この値段では出せない
+        for _ in range(40):
+            mid = (lo + hi) / 2
+            if price_of(mid) <= price_usd:
+                lo = mid
+            else:
+                hi = mid
+        return int(lo // 100 * 100)          # 100円単位で切り捨て (安全側)
+    except Exception:                        # noqa: BLE001 価格が出せない時は付けない
+        return None
+
+
+def cmd_targets(argv):
+    """探す先の一覧を作る (毎回作り直す。焼いた値は残さない)。"""
+    import sqlite3
+    rows = load_ledger()
+    if not rows:
+        print("台帳が空です。先に ingest してください")
+        return 1
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import psa_hoju_fill as H
+    live = H.select_backfill_targets(H._read_high(), max_backups=H.AUXN + 1)
+    miss = missing_cards(rows, [t.get("key") for t in live])
+
+    conn = sqlite3.connect(CATALOG_DB)
+    out, hit = [], 0
+    for k, v in miss:
+        row = lookup_catalog(product_id_candidates(k, v["title"]), conn)
+        if row:
+            hit += 1
+        med = round(statistics.median(v["prices"]), 2) if v["prices"] else 0
+        out.append({
+            "番号": k,
+            "product_id": row[0] if row else "",
+            "和名": row[2] if row else "",
+            "英名": row[1] if row else "",
+            "ゲーム": row[3] if row else "",
+            "売れた数": v["sold"],
+            "出品本数": v["listings"],
+            "実売中央値": med,
+            "上限仕入れ値(円)": max_cost_jpy(med) if med else "",
+            "市場のタイトル例": v["title"][:80],
+        })
+    cols = list(out[0].keys())
+    with open(TARGETS_CSV, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        w.writerows(out)
+    print(f"市場で2個以上売れて、うちが出していない: {len(out)}種類 / 販売 "
+          f"{sum(r['売れた数'] for r in out)}個")
+    print(f"カタログを引けた: {hit}種類 ({hit / len(out):.0%})")
+    print(f"→ {TARGETS_CSV}")
+    return 0
+
+
 def cmd_report(_):
     rows = load_ledger()
     if not rows:
@@ -253,7 +393,7 @@ def cmd_report(_):
 
 
 def main(argv):
-    cmds = {"ingest": cmd_ingest, "report": cmd_report}
+    cmds = {"ingest": cmd_ingest, "report": cmd_report, "targets": cmd_targets}
     if len(argv) < 2 or argv[1] not in cmds:
         print(__doc__)
         return 1

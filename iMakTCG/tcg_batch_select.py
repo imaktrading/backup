@@ -374,7 +374,12 @@ def balanced_sample(certs, title_map, limit, shuffle=None, cost_of=None,
         for name, g in groups.items():
             keep_random = g[:n_explore]              # ランダムのまま残す分 (順位で永久に殺さない)
             _known = getattr(popular_of, "known", None)
+            _treasure = getattr(popular_of, "treasure", None)
             rest = sorted(g[n_explore:], key=lambda c: (
+                # ★トレジャーハント (2026-09-18 ユーザー確定): 市場で売れているのに
+                #   うちが出していないカードを最優先。件数が少ないので枠は切らない
+                #   (元: iMak_data/hq/market_sold/demand_market.csv)
+                not (_treasure(c) if _treasure else False),
                 # カードを特定できていない物 (PSA データ未取得) は目視前の除外が効かず、
                 # 開けてみたら重複・対象外で枠を潰しやすいので後ろ (ランダム枠で出番は残る)
                 bool(_known) and not _known(c),
@@ -519,6 +524,28 @@ def title_card_key(title):
     return ("T:" + norm) if norm else ""
 
 
+TREASURE_CSV = r"C:/dev/iMak_data/hq/market_sold/demand_market.csv"
+
+
+def load_treasure_ids(path=TREASURE_CSV):
+    """トレジャーハントの product_id (市場で売れていて、うちが出していないカード)。
+
+    作るのは `iMakHQ/tools/market_ledger.py targets`。**無ければ空** (並べ順は今まで通り)。
+    カタログを引けなかった行は product_id が空なので、ここには入らない。
+    """
+    import csv as _csv
+    import os as _os
+    if not _os.path.exists(path):
+        return set()
+    try:
+        with open(path, encoding="utf-8-sig", newline="") as f:
+            return {(r.get("product_id") or "").strip().upper()
+                    for r in _csv.DictReader(f) if (r.get("product_id") or "").strip()}
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ トレジャーハントの一覧を読めませんでした ({type(e).__name__})")
+        return set()
+
+
 def build_popular_of(certs, title_map, key_map=None, fallback_key_of=None, funnel_glob=None):
     """cert → 人気キャラか を返す関数を作る (I/O)。`.card_of` にカードの鍵も載せる。
 
@@ -600,11 +627,23 @@ def build_popular_of(certs, title_map, key_map=None, fallback_key_of=None, funne
         ce, nj = chars.get(catalog_key(c).split(":")[-1], ("", ""))
         return is_popular_name(ce, nj, (title_map or {}).get(c, ""), en_names, ja_names)
 
+    treasure_ids = load_treasure_ids()
+
+    def treasure_of(c):
+        """トレジャーハント = 市場で売れているのに、うちが出していないカード。"""
+        if not treasure_ids:
+            return False
+        pid = catalog_key(c).split(":")[-1].upper()
+        return bool(pid) and pid in treasure_ids
+
     n = sum(1 for c in certs if popular_of(c))
     nk = sum(1 for c in certs if catalog_key(c))
-    print(f"  ⭐ 並べ順: カード特定済 {nk}/{len(certs)}件 → 人気キャラ {n}件 → 仕入値の安い順 (2割はランダム)")
+    nt = sum(1 for c in certs if treasure_of(c))
+    print(f"  ⭐ 並べ順: トレジャーハント {nt}件 → カード特定済 {nk}/{len(certs)}件 "
+          f"→ 人気キャラ {n}件 → 仕入値の安い順 (2割はランダム)")
     popular_of.card_of = key_of
     popular_of.known = lambda c: bool(catalog_key(c))
+    popular_of.treasure = treasure_of
     return popular_of
 
 
