@@ -799,6 +799,10 @@ def append_rescue_log_rows(sh, events: list) -> dict:
         (e.get("backup_url", "") or "")[:200],
     ] for e in events]
     end_row = next_row + len(rows) - 1
+    # タブの行数が足りないと update が "exceeds grid limits" で落ちる
+    # (2026-08-17 以降、1000行 到達で毎 cycle 追記失敗していた)。足りなければ広げる。
+    if end_row > ws_log.row_count:
+        ws_log.add_rows(end_row - ws_log.row_count + 500)
     ws_log.update(values=rows,
                   range_name=f"A{next_row}:F{end_row}",
                   value_input_option="USER_ENTERED")

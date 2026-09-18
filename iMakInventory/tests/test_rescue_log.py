@@ -109,6 +109,7 @@ def test_append_rescue_log_creates_tab_and_appends():
     sh.add_worksheet = MagicMock(return_value=ws_log)
     ws_log.col_values = MagicMock(return_value=[RESCUE_LOG_HEADER[0]])  # header のみ
     ws_log.update = MagicMock()
+    ws_log.row_count = 1000
     events = [{"date": "2026/07/25", "item_id": "IT1", "title": "T",
                "backup_slot": "AD", "main_status": "all_sold", "backup_url": "https://b"}]
     res = append_rescue_log_rows(sh, events)
@@ -117,6 +118,25 @@ def test_append_rescue_log_creates_tab_and_appends():
     # 明示 range で next_row=2 に書く (append_rows は使わない)
     call = ws_log.update.call_args
     assert "A2:F2" in (call.kwargs.get("range_name") or "")
+
+
+def test_append_rescue_log_expands_rows_when_tab_is_full():
+    """タブが行数上限に達していたら広げてから書く (2026-08-17〜 追記失敗の再発防止)."""
+    from sheet_updater import append_rescue_log_rows, RESCUE_LOG_HEADER
+    sh = MagicMock()
+    ws_log = MagicMock()
+    sh.worksheet = MagicMock(return_value=ws_log)
+    ws_log.col_values = MagicMock(return_value=[RESCUE_LOG_HEADER[0]] * 1000)  # 満杯
+    ws_log.update = MagicMock()
+    ws_log.row_count = 1000
+    events = [{"date": "2026/09/19", "item_id": f"IT{i}", "title": "T",
+               "backup_slot": "AD", "main_status": "all_sold", "backup_url": "https://b"}
+              for i in range(3)]
+    res = append_rescue_log_rows(sh, events)
+    assert res["appended"] == 3
+    ws_log.add_rows.assert_called_once()
+    assert ws_log.add_rows.call_args[0][0] >= 3
+    assert "A1001:F1003" in (ws_log.update.call_args.kwargs.get("range_name") or "")
 
 
 def test_append_rescue_log_empty_noop():
