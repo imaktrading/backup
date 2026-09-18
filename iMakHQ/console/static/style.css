@@ -68,6 +68,15 @@ body{background:var(--ground);color:var(--ink);font:14px/1.55 var(--f-ui);margin
 .btn{border:1px solid var(--ai);background:var(--ai);color:var(--ai-ink);border-radius:7px;padding:7px 13px;font:600 13px var(--f-ui);cursor:pointer}
 .btn:disabled{opacity:.55;cursor:default}
 
+
+/* ★2026-09-18 ユーザー要望「今日やること・新規出品・在庫メンテの段は固定で、それ以下がスクロール」。
+   上の件数バーとページ切替だけを画面の上に貼り付ける (中身は今までどおり流れる)。
+   背景を敷かないと、下の内容が透けて重なって見える。 */
+.stick{position:sticky;top:0;z-index:40;background:var(--ground);
+  display:flex;flex-direction:column;gap:12px;padding-block:12px 10px;
+  margin-block:-18px 0;box-shadow:0 6px 12px -10px rgba(0,0,0,.5)}
+@media (max-height:700px){ .stick{position:static;margin-block:0} }
+
 /* ページ切替 */
 .nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;gap:10px;align-items:stretch}
 .big{appearance:none;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:12px 14px 12px 16px;cursor:pointer;display:grid;gap:3px;font:inherit;color:inherit;position:relative;overflow:hidden}
