@@ -522,19 +522,20 @@ def smart_titlecase(s):
 def pokemon_out_of_scope(franchise, brand):
     """catalog が構造的に収録しない Pokemon サブセット = out-of-scope skip 対象 (純関数, test可)。
 
-    現状: FAMILY POKEMON CARD GAME (はじめての〜) のみ。catalog 収録0件を実機確認済
-    (2026-07-01 Pokemon 22006件中 Family 0件)。seen×18 で永久 recurring 化していたのを止める。
-    ※XY期は catalog に173件あるので含めない (丸ごと除外すると出せるカードを殺す=K3不採用)。
+    ★2026-09-14: FAMILY POKEMON CARD GAME の除外を撤廃。2026-07-01 実機確認の
+    「catalog 0件」は 2026-07-16 の catalog 投入で崩れていた (SH-prefix 53件、
+    2026-09-14 実測)。BLACK DECK KIT と同じく catalog 有無で下流が fail-closed 判定する
+    (ハードコード除外は持たない=SSOT 原則)。
     ★2026-07-26: BLACK DECK KIT を除外リストから外した。2026-06-27 時点は catalog 0件だったが
     その後 catalog に BDK-005/006 (わるいマグカルゴ/わるいヘルガー) が収録された (cert 138056958=
     BDK-006 が hit するのに本 skip で殺されていた)。ハードコード除外でなく catalog 有無で判定させる
     (catalog hit→出品 / no-hit→下流の catalog欠 fail-closed skip)= SSOT 原則。
-    新サブセットを足す時も「catalog 0件」を実機確認してから追加する (誤除外=recall損 防止)。
+    現状、ハードコード除外の対象は無い。新サブセットを足す時は「catalog 0件」を実機確認してから
+    追加する (誤除外=recall損 防止)。
     """
     if franchise != "Pokemon":
         return False
-    b = (brand or "").upper()
-    return "FAMILY POKEMON CARD GAME" in b
+    return False
 
 
 def is_out_of_scope_language(brand):

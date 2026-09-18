@@ -11,16 +11,14 @@ Catalog に無駄な調査依頼が量産される事故 (2026-07-29 発覚) の
 - DIVERS = Dragon Ball Super Divers ... アーケード派生=SCG対象外 (brand 文字列で識別、
                                        franchise は "Dragon Ball" になる)
 - ITAJAGA / イタジャガ .... 食玩プロモ、公式 TCG カタログ対象外
-- Pokemon FAMILY POKEMON CARD GAME ... catalog 構造的未収録
 - 非日本語 Pokemon ......... catalog の pokemon_tcg は日本語のみ (2026-08-19 実測 en 0件)
 - ONE PIECE ウエハース ..... 2019年の菓子付録カード。OPTCG(2022年開始)とは別物
 - Pokemon Web 期 ........... 2001年。catalog 0件
 - Pokemon Neo 期 ........... 2000年。catalog 0件 (2026-08-21 psa_preflight から移設)
 
 pokemon_out_of_scope (psa_to_csv.py) との関係:
-本モジュールは pokemon_out_of_scope に依存しない (循環 import 回避)。真理表 (FAMILY のみ
-skip、BLACK DECK KIT は skip しない) は同一。BLACK DECK KIT は 2026-07-26 以降 catalog
-有無で判定 (skip しない=recall 損防止)。
+本モジュールは pokemon_out_of_scope に依存しない (循環 import 回避)。真理表は同一
+(FAMILY / BLACK DECK KIT とも skip しない、catalog 有無で判定=recall 損防止)。
 
 依存: 標準ライブラリのみ (test-friendly)。
 """
@@ -78,9 +76,10 @@ def is_out_of_scope(franchise: str, brand: str, catalog_resolves=None) -> tuple[
     # (2026-07-29 Advisor 確定)。DIVERS の全 vol (4/7/40th 等) を一括除外。
     if "DIVERS" in b:
         return True, "DIVERS=SCG対象外(catalog未収録)"
-    # Pokemon FAMILY POKEMON CARD GAME (はじめての〜) は catalog 0件 (2026-07-01 実機確認)
-    if franchise == "Pokemon" and "FAMILY POKEMON CARD GAME" in b:
-        return True, "Pokemon FAMILY POKEMON CARD GAME (catalog構造的未収録)"
+    # ★2026-09-14: FAMILY POKEMON CARD GAME の対象外条件を削除。2026-07-01 実機確認の
+    # 「catalog 0件」は 2026-07-16 の catalog 投入で崩れており (SH-prefix 53件、
+    # 2026-09-14 実測)、条件だけが取り残されていた (cert167882238 が build skip した)。
+    # 持っていない個体は後段の catalog 未解決で自然に fail-closed に落ちるので特別扱い不要。
     # ★2026-08-19 追加 (回答書 2026-08-19_act_code_proposals_tcg_response.md の 2)。
     #   3件とも「post_psa_review._route_none_to_catalog が言語/商材のゲートを持たない」
     #   という**同じ穴**なので、ここ1本にまとめる。いずれも catalog が構造的に
