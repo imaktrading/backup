@@ -152,6 +152,12 @@ def create_driver(
     # を無効化、 GUI subprocess 経由で chrome が背景化したケースでも lazy load が継続する。
     # mercari_seller の GUI 実行で「6 件で打切」 問題の根本治療 (HQ 相談回答 推奨 B 案)。
     options.add_argument("--disable-features=CalculateNativeWinOcclusion")
+    # ★GPU を使わない (2026-09-18 HQ 依頼 `2026-09-18_harvest_lighten_chrome`)。
+    # 隠したウィンドウに描画を続けさせる作りなので、 画面ドライバ (AMD Radeon) を
+    # 何時間も叩き続けるのは このPCでは抽出くんだけ。 ドライバ系の bugcheck
+    # (0x0A / 0x1E / 0x3B) が 9/16 から急増した件の切り分けを兼ねる。
+    # 非 headless のままなので件数は落ちない (CPU 描画に変わるだけ)。
+    options.add_argument("--disable-gpu")
     # --user-agent は意図的に指定しない (Chrome 本体の UA を使う、上部コメント参照)
     if headless:
         options.add_argument("--headless=new")

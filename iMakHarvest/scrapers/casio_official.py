@@ -124,6 +124,8 @@ def create_casio_driver(headless: bool = False):
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--lang=ja-JP")
+    # GPU を使わない (2026-09-18 HQ 依頼。 理由は mercari_likes.create_driver 参照)
+    options.add_argument("--disable-gpu")
     options.add_argument(f"--user-data-dir={CHROME_PROFILE_DIR_CASIO}")
     # CalculateNativeWinOcclusion + Http2 を一括 disable (= MR-G/MT-G page で
     # ERR_HTTP2_PROTOCOL_ERROR 多発、 HTTP/1.1 fallback で復旧確認 6/1)

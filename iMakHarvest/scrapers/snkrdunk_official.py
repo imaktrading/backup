@@ -192,6 +192,8 @@ def create_driver(headless: bool = False, profile_dir: Optional[str] = None):
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--lang=ja-JP")
+    # GPU を使わない (2026-09-18 HQ 依頼。 理由は mercari_likes.create_driver 参照)
+    options.add_argument("--disable-gpu")
     options.add_argument(f"--user-data-dir={profile}")
     if headless:
         options.add_argument("--headless=new")
