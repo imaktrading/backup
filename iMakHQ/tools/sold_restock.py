@@ -427,6 +427,39 @@ def _cost_from_row(row):
     return None
 
 
+def update_live_cache(cache, old_id, new_id, qty):
+    """補充した出品を live キャッシュに反映する (純関数・test可)。
+
+    ★2026-09-18: 補充が通っても キャッシュは在庫0のままで、ボタンの件数が減らなかった
+      (ユーザー「押しても件数が減りませんでした (1件 → 1件)」)。キャッシュは2時間
+      使い回すので、その間ずっと同じ1件を「送る分」と表示していた。
+    出し直し (relist) は番号が変わるので、古い番号の行は捨てて新しい番号に移す。
+    """
+    old_id, new_id = str(old_id), str(new_id or old_id)
+    rec = dict(cache.get(old_id) or cache.get(new_id) or {})
+    rec["avail"] = int(qty)
+    if new_id != old_id:
+        cache.pop(old_id, None)
+    cache[new_id] = rec
+    return cache
+
+
+def _write_live_cache(old_id, new_id, qty):
+    """live キャッシュを読んで update_live_cache を当てて書き戻す (失敗は黙って諦める)。"""
+    try:
+        import json as _json
+        import itemid_writeback_audit as _A
+        if not _A.CACHE.exists():
+            return
+        d = _json.loads(_A.CACHE.read_text(encoding="utf-8"))
+        if not isinstance(d, dict):
+            return
+        _A.CACHE.write_text(_json.dumps(update_live_cache(d, old_id, new_id, qty),
+                                        ensure_ascii=False), encoding="utf-8")
+    except Exception:                                              # noqa: BLE001
+        pass
+
+
 def count_workload():
     """押したら何件・何が起きるか (2026-08-31・ラベル/ヒント用)。
 
@@ -684,6 +717,7 @@ def main():
         v_status, v_qty, _v_site = ebay_status(fx, U, new_id, tok)
         if v_status == "Active" and v_qty >= 1:
             print(f"     ✅ {call} → ItemID {new_id} (読み直し: 在庫{v_qty})")
+            _write_live_cache(target, new_id, v_qty)   # 件数が減るように キャッシュも直す
         else:
             print(f"     ⚠️要対応: {call} は通ったが読み直すと 状態={v_status} 在庫={v_qty} (ItemID {new_id})")
             failed += 1
