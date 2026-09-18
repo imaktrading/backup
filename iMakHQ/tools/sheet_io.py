@@ -482,6 +482,19 @@ def write_aux_urls(row_to_urls):
         return chr(65 + idx0) if idx0 < 26 else "A" + chr(65 + idx0 - 26)
     c0 = _coln(PRODUCT_COL_AUX_START)                      # AC
     c1 = _coln(PRODUCT_COL_AUX_START + PRODUCT_AUX_MAX - 1)  # AG
+    # ★2026-09-19: **消える補URLを先に見る**。台帳は「書いた値」しか残らないので、
+    #   これが無いと「減ったこと」自体が記録に出ない (今回 3本→1本 を追えなかった原因)。
+    #   読めなくても書込は止めない (記録は本業ではない)。
+    before = {}
+    try:
+        _all = ws.get_all_values()
+        for row in row_to_urls:
+            r = _all[row - 1] if 0 < row <= len(_all) else []
+            before[row] = [(r[PRODUCT_COL_AUX_START + k].strip()
+                            if len(r) > PRODUCT_COL_AUX_START + k else "")
+                           for k in range(PRODUCT_AUX_MAX)]
+    except Exception:                                          # noqa: BLE001
+        before = {}
     reqs = []
     for row, urls in row_to_urls.items():
         vals5 = (list(urls)[:PRODUCT_AUX_MAX] + [""] * PRODUCT_AUX_MAX)[:PRODUCT_AUX_MAX]
@@ -496,6 +509,7 @@ def write_aux_urls(row_to_urls):
     try:
         import aux_url_log as _aux
         _aux.record(row_to_urls)
+        _aux.record_removed(before, row_to_urls)
     except Exception:                                          # noqa: BLE001
         pass
     return len(reqs)

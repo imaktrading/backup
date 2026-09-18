@@ -92,6 +92,44 @@ def record(row_to_urls, source=None, item_of=None, path=None):
     return len(recs)
 
 
+def build_removed(before, row_to_urls, source, today=None, item_of=None):
+    """書込で **消える** 補URL を台帳の行にする (純関数)。
+
+    ★2026-09-19: 台帳は「書いた値」しか残していなかったので、**減ったこと自体**が
+      記録に出なかった (itemID 820041238874 が 9/16 に3本 → 9/19 に1本。経緯を辿れず)。
+      増えた分と同じ台帳に `kind="removed"` で残す。
+    """
+    today = today or datetime.date.today().isoformat()
+    out = []
+    for row, olds in (before or {}).items():
+        keep = {norm(u) for u in (row_to_urls.get(row) or []) if (u or "").strip()}
+        for u in (olds or []):
+            u = (u or "").strip()
+            if u and norm(u) not in keep:
+                out.append({"date": today, "source": source, "row": row,
+                            "itemID": (item_of or {}).get(row, ""), "url": u,
+                            "n": norm(u), "kind": "removed"})
+    return out
+
+
+def record_removed(before, row_to_urls, source=None, item_of=None, path=None):
+    """消えた補URLを台帳に追記 (I/O)。失敗しても書込は止めない。"""
+    recs = build_removed(before or {}, row_to_urls or {},
+                         source or current_source(), item_of=item_of)
+    if not recs:
+        return 0
+    p = path or LOG_PATH
+    try:
+        with _LOCK:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "a", encoding="utf-8") as f:
+                for r in recs:
+                    f.write(json.dumps(r, ensure_ascii=False) + chr(10))
+    except Exception:                                          # noqa: BLE001
+        return 0
+    return len(recs)
+
+
 def load(path=None):
     """台帳を読む (I/O)。壊れた行は飛ばす。"""
     p = path or LOG_PATH
