@@ -1,0 +1,94 @@
+{
+  "project": "mercari",
+  "program_items": [
+    {
+      "sku": "m19677207002",
+      "msg": "タイトル↔spec不一致: C:Color='Blue' がタイトルに反映されてない(生成ロジック逸脱疑い)"
+    },
+    {
+      "sku": "m38086558164",
+      "msg": "タイトル↔spec不一致: C:Color='Blue' がタイトルに反映されてない(生成ロジック逸脱疑い)"
+    }
+  ],
+  "log_signals": [
+    "error: 13件"
+  ],
+  "log_signal_lines": [
+    "- ❌ `Theme`（Anime / One Piece）未入力の可能性→要追加",
+    "- ❌ `Character`フィールド→「Luffy」入力推奨",
+    "- ❌ `Country/Region of Manufacture`→「Japan」追加推奨"
+  ],
+  "recurring_missing": [],
+  "recurring_dropped": [
+    {
+      "cert": "140273536",
+      "days": 17
+    },
+    {
+      "cert": "936643273",
+      "days": 15
+    },
+    {
+      "cert": "145542062",
+      "days": 6
+    },
+    {
+      "cert": "128424450",
+      "days": 4
+    },
+    {
+      "cert": "138056958",
+      "days": 4
+    },
+    {
+      "cert": "141208100",
+      "days": 4
+    },
+    {
+      "cert": "139291730",
+      "days": 4
+    },
+    {
+      "cert": "158452539",
+      "days": 4
+    },
+    {
+      "cert": "149306806",
+      "days": 3
+    },
+    {
+      "cert": "149779651",
+      "days": 3
+    },
+    {
+      "cert": "151546667",
+      "days": 3
+    },
+    {
+      "cert": "140936782",
+      "days": 3
+    },
+    {
+      "cert": "147929071",
+      "days": 3
+    },
+    {
+      "cert": "154233090",
+      "days": 3
+    },
+    {
+      "cert": "150888970",
+      "days": 3
+    },
+    {
+      "cert": "138008723",
+      "days": 3
+    }
+  ],
+  "counts": {
+    "program": 2,
+    "log": 1,
+    "recurring_missing": 0,
+    "recurring_dropped": 16
+  }
+}

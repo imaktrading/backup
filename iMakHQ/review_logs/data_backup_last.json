@@ -1,0 +1,17 @@
+{
+ "at": "2026-09-19T05:00:01",
+ "ok": true,
+ "dest": "G:\\マイドライブ\\iMak_backup\\daily",
+ "files": 4439,
+ "raw_mb": 249.3,
+ "skipped_type": 263,
+ "skipped_big": [
+  "dedupe\\requests\\2026-06-10_step4b_ambiguous74_viewer.html"
+ ],
+ "db_rows": 100609,
+ "zip": "G:\\マイドライブ\\iMak_backup\\daily\\iMak_daily_20260919_0500.zip",
+ "zip_mb": 65.3,
+ "zip_entries": 4440,
+ "pruned": [],
+ "sec": 61
+}

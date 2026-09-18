@@ -1,0 +1,79 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [],
+  "log_signal_lines": [],
+  "recurring_missing": [],
+  "recurring_dropped": [
+    {
+      "cert": "140273536",
+      "days": 17
+    },
+    {
+      "cert": "936643273",
+      "days": 15
+    },
+    {
+      "cert": "145542062",
+      "days": 6
+    },
+    {
+      "cert": "128424450",
+      "days": 4
+    },
+    {
+      "cert": "138056958",
+      "days": 4
+    },
+    {
+      "cert": "139291730",
+      "days": 4
+    },
+    {
+      "cert": "141208100",
+      "days": 4
+    },
+    {
+      "cert": "158452539",
+      "days": 4
+    },
+    {
+      "cert": "149306806",
+      "days": 3
+    },
+    {
+      "cert": "149779651",
+      "days": 3
+    },
+    {
+      "cert": "151546667",
+      "days": 3
+    },
+    {
+      "cert": "140936782",
+      "days": 3
+    },
+    {
+      "cert": "147929071",
+      "days": 3
+    },
+    {
+      "cert": "154233090",
+      "days": 3
+    },
+    {
+      "cert": "150888970",
+      "days": 3
+    },
+    {
+      "cert": "138008723",
+      "days": 3
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 0,
+    "recurring_dropped": 16
+  }
+}

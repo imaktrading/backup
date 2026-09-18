@@ -1,0 +1,4 @@
+2026-09-14 19:30 ユーザー判断「廃止して / 必要な時に再開するから」
+- タスク iMakHQ_DispatchWatch を Disabled、常駐 watcher を停止
+- 再開: このファイルを消して `schtasks /change /tn iMakHQ_DispatchWatch /enable`
+- 理由: 多重起動 (5本) と固着で PC が重くなっていた

@@ -1,10 +1,10 @@
 {
- "checked": 373,
+ "checked": 417,
  "stat": {
-  "listed": 508,
-  "compared": 373,
+  "listed": 554,
+  "compared": 417,
   "no_cost": 0,
-  "no_market": 135
+  "no_market": 137
  },
  "ratio": 0.6,
  "verified": false,
@@ -13,14 +13,46 @@
    "itemID": "820004967108",
    "cert": "99050306",
    "key": "one_piece_tcg:OP03-122",
-   "cost": 19999,
-   "cheapest": 109000.0,
-   "ratio": 0.183,
+   "cost": 11880,
+   "cheapest": 120000.0,
+   "ratio": 0.099,
    "title": "【特価】（ケース傷あり）【PSA10】そげキング(SEC★){青}〈OP03-122〉[ブースターパック 強大な敵] パ",
    "urls": [
     "https://jp.mercari.com/shops/product/2JUs4fthTavjystdhA7gLF",
+    "https://jp.mercari.com/item/m67879673166",
     "https://jp.mercari.com/item/m55016829217",
     "https://jp.mercari.com/item/m53432281305"
+   ]
+  },
+  {
+   "itemID": "358912448330",
+   "cert": "81822257",
+   "key": "one_piece_tcg:OP02-013",
+   "cost": 19999,
+   "cheapest": 200000.0,
+   "ratio": 0.1,
+   "title": "【PSA10】ポートガス・Ｄ・エース(SR★){赤}〈OP02-013〉[ブースターパック 頂上決戦]",
+   "urls": [
+    "https://jp.mercari.com/shops/product/2JUr6painG2s6jyTsW88yq",
+    "https://jp.mercari.com/item/m56575276464",
+    "https://jp.mercari.com/item/m46066263940",
+    "https://jp.mercari.com/item/m75431767804",
+    "https://jp.mercari.com/item/m67961261458",
+    "https://jp.mercari.com/item/m70784421565"
+   ]
+  },
+  {
+   "itemID": "820041238478",
+   "cert": "161379803",
+   "key": "one_piece_tcg:OP01-120_PRB01_1",
+   "cost": 7199,
+   "cheapest": 29999.0,
+   "ratio": 0.24,
+   "title": "803 【PSA10】シャンクス SEC [OP01-120] THE BEST",
+   "urls": [
+    "https://jp.mercari.com/item/m88120780062",
+    "https://jp.mercari.com/item/m23662158067",
+    "https://snkrdunk.com/apparels/328421/used/47748582"
    ]
   },
   {
@@ -28,8 +60,8 @@
    "cert": "150266286",
    "key": "one_piece_tcg:PRB02-014",
    "cost": 11000,
-   "cheapest": 46000.0,
-   "ratio": 0.239,
+   "cheapest": 45000.0,
+   "ratio": 0.244,
    "title": "【PSA10】ワンピースカードゲーム サボ SR-P [PRB02-014](プレミアムブースター「ONE PIECE ",
    "urls": [
     "https://jp.mercari.com/shops/product/2JTRTxCpvm5bBiNmAydJsP",
@@ -37,58 +69,31 @@
    ]
   },
   {
-   "itemID": "820041238478",
-   "cert": "161379803",
-   "key": "one_piece_tcg:OP01-120_PRB01_1",
-   "cost": 7690,
-   "cheapest": 29999.0,
-   "ratio": 0.256,
-   "title": "803 【PSA10】シャンクス SEC [OP01-120] THE BEST",
+   "itemID": "820137738121",
+   "cert": "166462376",
+   "key": "pokemon_tcg:S8b-243",
+   "cost": 5980,
+   "cheapest": 14800.0,
+   "ratio": 0.404,
+   "title": "PSA10 クロバットV CSR S8b VMAXクライマックス 243/184",
    "urls": [
-    "https://jp.mercari.com/item/m88120780062",
-    "https://jp.mercari.com/shops/product/2JTRTbCNbkRCWmpfgoiyEm",
-    "https://jp.mercari.com/item/m23662158067",
-    "https://snkrdunk.com/apparels/328421/used/47748582"
+    "https://jp.mercari.com/item/m11655414049"
    ]
   },
   {
-   "itemID": "358908083352",
-   "cert": "153574705",
-   "key": "one_piece_tcg:OP03-001_p2",
-   "cost": 16900,
-   "cheapest": 36000.0,
-   "ratio": 0.469,
-   "title": "【PSA10】ポートガス・D・エース (L) {赤} <OP03-001> [チャンピオンシップセット2023(エース・",
+   "itemID": "820017723507",
+   "cert": "157256442",
+   "key": "pokemon_tcg:S11a-080",
+   "cost": 8180,
+   "cheapest": 15000.0,
+   "ratio": 0.545,
+   "title": "【PSA10】ホウオウV ポケモンカード　SR 080/068",
    "urls": [
-    "https://jp.mercari.com/item/m85820558036",
-    "https://jp.mercari.com/item/m57040869072"
-   ]
-  },
-  {
-   "itemID": "820110211694",
-   "cert": "151534079",
-   "key": "pokemon_tcg:S10b-054",
-   "cost": 4000,
-   "cheapest": 7700.0,
-   "ratio": 0.519,
-   "title": "【PSA10】イーブイ ポケモンGO 054/071①",
-   "urls": [
-    "https://jp.mercari.com/item/m36747620208"
-   ]
-  },
-  {
-   "itemID": "820045156794",
-   "cert": "151644464",
-   "key": "one_piece_tcg:OP01-016_p1",
-   "cost": 13000,
-   "cheapest": 23500.0,
-   "ratio": 0.553,
-   "title": "【PSA10】ナミ (R★) {赤} <OP01-016> [プレミアムカードコレクション 25周年エディション]",
-   "urls": [
-    "https://jp.mercari.com/shops/product/2JVEHN8LrPfSXyAgGbB6d8",
-    "https://jp.mercari.com/shops/product/2JUWJTHG2FTyJQSgLBLcym",
-    "https://jp.mercari.com/shops/product/2JTV6UqGL2VgGH2mkuJdz5",
-    "https://jp.mercari.com/shops/product/2JTQfDpvzKFsyMsLCptcdA"
+    "https://jp.mercari.com/item/m30044417474",
+    "https://jp.mercari.com/item/m62803461264",
+    "https://jp.mercari.com/item/m80437063437",
+    "https://snkrdunk.com/apparels/95247/used/48945486",
+    "https://snkrdunk.com/apparels/95247/used/48712651"
    ]
   },
   {
@@ -100,35 +105,21 @@
    "ratio": 0.555,
    "title": "【PSA10】博士の研究 SR SV1S スカーレットex 099/078",
    "urls": [
-    "https://jp.mercari.com/item/m16298074953"
+    "https://jp.mercari.com/item/m16298074953",
+    "https://jp.mercari.com/item/m90633798729"
    ]
   },
   {
-   "itemID": "820017723507",
-   "cert": "157256442",
-   "key": "pokemon_tcg:S11a-080",
-   "cost": 8480,
-   "cheapest": 15000.0,
-   "ratio": 0.565,
-   "title": "【PSA10】ホウオウV ポケモンカード　SR 080/068",
+   "itemID": "820137737956",
+   "cert": "157025551",
+   "key": "pokemon_tcg:SV1S-013",
+   "cost": 7000,
+   "cheapest": 12222.0,
+   "ratio": 0.573,
+   "title": "PSA10 コイキング 013/078 スカーレットex MAGIKARP 02",
    "urls": [
-    "https://jp.mercari.com/item/m30044417474",
-    "https://jp.mercari.com/item/m62803461264",
-    "https://jp.mercari.com/item/m80437063437",
-    "https://snkrdunk.com/apparels/95247/used/48945486",
-    "https://snkrdunk.com/apparels/95247/used/48712651"
-   ]
-  },
-  {
-   "itemID": "820112385551",
-   "cert": "140425019",
-   "key": "pokemon_tcg:SV8a-213",
-   "cost": 5799,
-   "cheapest": 9833.0,
-   "ratio": 0.59,
-   "title": "【PSA10】テツノブジンex SAR sv8a 213/187",
-   "urls": [
-    "https://jp.mercari.com/item/m41694128303"
+    "https://jp.mercari.com/item/m29488643832",
+    "https://snkrdunk.com/apparels/270087/used/50169663?slide=right"
    ]
   },
   {
@@ -148,36 +139,28 @@
  ],
  "drops": [
   {
-   "itemID": "820113987817",
-   "prev": 24999,
+   "itemID": "358488910102",
+   "prev": 29800,
+   "now": 12500,
+   "ratio": 0.419,
+   "key": "OP13-001_p",
+   "title": "ワンピース カードゲーム モンキー・D・ルフィ PSA10"
+  },
+  {
+   "itemID": "820004967113",
+   "prev": 34500,
+   "now": 15000,
+   "ratio": 0.435,
+   "key": "one_piece_tcg:ST01-012_p5",
+   "title": "PSA10 モンキー・Ｄ・ルフィ SR [ST01-012]"
+  },
+  {
+   "itemID": "820137738044",
+   "prev": 19999,
    "now": 8888,
-   "ratio": 0.356,
-   "key": "pokemon_tcg:SM11a-073",
-   "title": "ポケモンカード ローラースケーター sr psa10"
-  },
-  {
-   "itemID": "820057588505",
-   "prev": 27777,
-   "now": 11800,
-   "ratio": 0.425,
-   "key": "one_piece_tcg:ST03-013_p1",
-   "title": "PSA10 ボア・ハンコック ワンピースカード　プレミアムカードコレクション"
-  },
-  {
-   "itemID": "820061491445",
-   "prev": 59900,
-   "now": 25999,
-   "ratio": 0.434,
-   "key": "one_piece_tcg:ST17-004_p1",
-   "title": "PSA10 ボア・ハンコック ワンピースカードゲーム　SR ST17-004"
-  },
-  {
-   "itemID": "358754893860",
-   "prev": 29180,
-   "now": 14444,
-   "ratio": 0.495,
-   "key": "pokemon_tcg:SM-P-253",
-   "title": "PSA10 ヤドン 253/SM-P PROMO プロモ ポケモンカード"
+   "ratio": 0.444,
+   "key": "pokemon_tcg:S8b-195",
+   "title": "ゼクロム CHR S8b VMAXクライマックス 195/184"
   }
  ]
 }
