@@ -32,7 +32,9 @@ def test_more_expensive_is_kept_when_backups_are_few():
     **供給が1本も無いより、高くても買える先がある方がよい**に変えた。
     値段で落とすのは入れ替え (min_gain>0) だけ。
     """
-    assert H.candidate_cost_conflicts(9000, 5000, False) is False       # 補充 = 落とさない
+    # ★2026-09-19 追記: 補充も青天井ではなく **今の仕入値の1.5倍まで** (ユーザー確定)。
+    assert H.candidate_cost_conflicts(7000, 5000, False) is False       # 1.4倍 = 出す
+    assert H.candidate_cost_conflicts(9000, 5000, False) is True        # 1.8倍 = 落とす
     assert H.candidate_cost_conflicts(9000, 5000, False, 1000) is True  # 入れ替え = 落とす
 
 def test_cheaper_or_equal_is_kept():

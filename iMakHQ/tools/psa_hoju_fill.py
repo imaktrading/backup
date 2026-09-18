@@ -65,7 +65,10 @@ CONFIRM_MAX_BACKUPS = 4             # 補<4 = **3本以下**で発動
 #   押しても1本も替わらないカードだった。差額 ¥1,000 未満も 目視1枚の手間に見合わない。
 #   ★補充 (補0〜3本) には効かせない。丸腰の出品にとって同額の仕入元は「値下げ」ではなく
 #     **予備の本数そのもの**で、切れた時に生き残るための供給。
-SWAP_MIN_GAIN = 1000                # 入れ替えは「今より ¥1,000以上 安い」候補だけ目視に出す
+SWAP_MIN_GAIN = 1000
+# 補が足りない札 (補3本以下) で許す仕入値の上限 = 今の仕入値の何倍まで。
+# ★2026-09-19 ユーザー確定 1.5倍。0 や None にすると青天井になるので必ず値を入れる。
+BACKFILL_MAX_RATIO = 1.5                # 入れ替えは「今より ¥1,000以上 安い」候補だけ目視に出す
 HIGH_SHEET_ID = "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk"
 HIGH_GID = 851100680
 
@@ -92,6 +95,49 @@ def _listed_sort_key(row):
     """
     v = _cell(row, LISTED_AT).replace("/", "-")
     return v if len(v) >= 10 and v[:4].isdigit() else ""
+
+
+LAST_SHOWN_PATH = r"C:/dev/iMak_data/hq/hoju_last_shown.json"
+
+
+def load_last_shown(path=LAST_SHOWN_PATH):
+    """{itemID: 最後に目視画面へ出した日} を読む (I/O・読めなければ空)。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:                                          # noqa: BLE001
+        return {}
+
+
+def remember_shown(item_ids, today, path=LAST_SHOWN_PATH):
+    """目視画面に出した itemID の日付を記録する (I/O・書けなくても走行は止めない)。"""
+    if not item_ids:
+        return
+    try:
+        d = load_last_shown(path)
+        for i in item_ids:
+            if i:
+                d[str(i)] = today
+        import os as _os
+        _os.makedirs(_os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False)
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
+def rotate_by_last_shown(targets, last_shown):
+    """**前に出した順**に並べ替える (純関数, test可)。一度も出していない物が先。
+
+    ★2026-09-19 ユーザー「目視画面にも『前に出した順』の回転を入れたい」。
+      並びが毎回同じ (ウォッチ多い順 → 補が少ない順) なので、1回に見る件数を超えた分は
+      **毎回 同じ顔ぶれしか目に入らない**。夜の検索には同じ回転が入っている
+      (targets_needing_search) が、目視画面には無かった。
+      Python の sort は安定なので、**同じ日付の中では今までの並び**がそのまま残る。
+    """
+    ls = last_shown or {}
+    return sorted(targets or [], key=lambda t: ls.get(str(t.get("itemID")), ""))
 
 
 def select_backfill_targets(rows2d, max_backups=1, min_backups=0, watch=None):
@@ -538,10 +584,17 @@ def candidate_cost_conflicts(price, now_cost, main_dead, min_gain=0):
     # ★2026-09-19 ユーザー確定「補が3本以下の補充は、高くても仕方がないけど、4〜5本は
     #   安いの入れないと」。min_gain=0 = 補が足りていない札 → **値段で落とさない**
     #   (供給が1本も無いより、高くても買える先がある方がよい)。
-    if not min_gain:
-        return False
+    # ★2026-09-19 ユーザー確定「3本以下は今の仕入値の1.5倍までにしよう」。
+    #   補が足りない札は「買える先がある」こと自体に価値があるので同額以下に縛らない。
+    #   ただし青天井にはしない (買えば cost-plus の利益がその分 消えるため)。
+    #   ★この上とは別に **¥70,000 の上限** (global.yaml cost_sanity) が候補を作る段で効く。
+    # 主URLが売り切れ (供給ゼロ) の札は **高くても押さえる価値がある** → 値段で落とさない
     if main_dead:
         return False
+    if not min_gain:
+        if price is None or not now_cost:
+            return False               # 判定材料が無い = 落とさない (従来どおり)
+        return price > now_cost * BACKFILL_MAX_RATIO
     if not now_cost:
         return False
     # ★入れ替えは「今より安い」ことが唯一の目的なので、**値段が分からない候補は出さない**
@@ -1808,6 +1861,9 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     vals = _read_high()
     targets = select_backfill_targets(vals, max_backups=max_backups, min_backups=min_backups,
                                       watch=load_watch_by_item())
+    # ★2026-09-19: **前に出した順**に回す (ユーザー「全部に順番が回るようにしたい」)。
+    #   並びが毎回同じで、1回に見る件数を超えた分は毎回同じ顔ぶれしか出ていなかった。
+    targets = rotate_by_last_shown(targets, load_last_shown())
     cache = _load_cache()
 
     # ★前提(skip台帳 cooldown / 候補NG / 他出品が使用中のURL)は build_confirm_context に1本化。
@@ -2012,6 +2068,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     _ready = len(items)
     if limit is not None:
         items, item_targets = items[:limit], item_targets[:limit]
+        remember_shown([t.get("itemID") for t in item_targets], today)
         for n, it in enumerate(items):
             it["idx"] = n
         _rest = _ready - len(items)
