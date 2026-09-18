@@ -1452,6 +1452,31 @@ SCRIPTS = [
     },
     # ===== Utility 単独ボタン (カテゴリなし) =====
     {
+        # ★2026-09-19 ユーザー「出品くんコンソールにオファーがないね」。
+        #   旧パネルでは上段の青ボタン (open_offer_calc) で、SCRIPTS に無かったため
+        #   新 Console に出ていなかった。中身は offer_calc.py を走らせるだけなので、
+        #   ここに置けば両方から押せる (二重実装しない)。
+        #   オファーは期限が短い (実例: 受信から丸1日) ので、押しにくい所に置かない。
+        "category": None, "type": "utility",
+        "label": "💰 オファー対応",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "offer_calc.py"],   # 受信中の Best Offer を読み、判定表を開く
+        "params": [],
+        "tip": "受信中のオファーを国・出品価格・仕入値つきで一覧にしてブラウザで開く",
+        "skip_postprocess": True,             # 読取専用。CSV の後処理を走らせない
+    },
+    {
+        # ★2026-09-19: 同上。UK/AU/CA のミラーに 広告10% と ベストオファーを付ける
+        #   (付いていない物だけ。押したら実行する = 2026-09-11 ユーザー確定)。
+        "category": None, "type": "utility",
+        "label": "📣 ミラーに広告・オファーを付ける",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "mirror_promo_bestoffer.py", "--write"],
+        "params": [],
+        "tip": "UK/AU/CA のミラー出品に 広告10% と ベストオファーを付ける (付いていない物だけ)",
+        "skip_postprocess": True,
+    },
+    {
         "category": None, "type": "utility",
         "label": "🔍 CSV監査くん",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",

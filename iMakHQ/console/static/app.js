@@ -37,6 +37,9 @@
     check: ["CSV監査くん"],
     ana: ["ファネル分析", "効果測定", "需要・新規強化"],
     fix: ["価格見直し", "タイトル改修"],
+    // ★2026-09-19 ユーザー「出品くんコンソールにオファーがないね」。
+    //   旧パネルでは上段の青ボタンで、この画面のどこにも出ていなかった。
+    offer: ["オファー対応", "ミラーに広告・オファー"],
     shelf: ["取下再出品", "再仕入れ一覧"]
   };
   var STATE_LABEL = { todo: "要対応", night: "夜間で自動", hold: "止めている", done: "残りなし", error: "数えられない", unknown: "未集計" };
@@ -157,6 +160,7 @@
       "</b> · 残件 " + sum(sl, function (j) { return j.n; }).toLocaleString("ja-JP") + "</span></div>" +
       '<div class="list">' + sl.map(liCard).join("") + "</div>" +
       '<div class="rows" style="border-top:1px solid var(--line)">' + rowsFor(ROWS.shelf) + "</div>";
+    $("offer-rows").innerHTML = rowsFor(ROWS.offer);
     $("fix-rows").innerHTML = rowsFor(ROWS.fix);
 
     var todo = h.todo + r.todo + todoOf(sl).length;
@@ -169,6 +173,7 @@
     $("maint-bar").innerHTML =
       pill("g-hoju", "補URL", "--g-hoju", h) + pill("g-restock", "再仕入れ", "--g-restock", r) +
       pill("g-shelf", "取下げ・棚", "--g-shelf", { todo: todoOf(sl).length, total: sum(sl, function (j) { return j.n; }) }) +
+      '<a class="pill" href="#g-offer" style="--gc:var(--g-fix)">オファー <b>—</b><span>件数なし</span></a>' +
       '<a class="pill" href="#g-fix" style="--gc:var(--g-fix)">在庫あり・直す <b>—</b><span>件数なし</span></a>';
     return { todo: todo, hold: hold };
   }
