@@ -2180,6 +2180,28 @@ def render_skip_reasons(pairs):
 _SUPPLY_PIC_CACHE = None
 
 
+def supply_pic_of_row(pics: str, url: str) -> str:
+    """シートの1行から仕入元の写真URLを決める (純関数・test可)。
+
+    G列(写真)があればその1枚目。**空なら A列(仕入元URL)から解決する**。
+    ★2026-09-18: G列だけを見ていたため、写真が未取得の候補 (実測 1,577件中77件) は
+      目視画面に「🛒仕入元」の列ごと出ず、現物と PSA を見比べられなかった
+      (cert 149501652 / 136006234)。URL は入っているので、そこから引けばよい。
+    """
+    first = (pics or "").split("|")[0].strip()
+    if first.startswith("http"):
+        return first
+    u = (url or "").strip()
+    if not u.startswith("http"):
+        return ""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from psa_resource_confirm import _resolve_image_url
+        return _resolve_image_url(u) or ""
+    except Exception:                                          # noqa: BLE001
+        return ""
+
+
 def _supply_pic_by_cert(cert: str) -> str:
     """cert → 仕入元の1枚目の写真URL (シートは1回だけ読む)。取れなければ空。"""
     global _SUPPLY_PIC_CACHE
@@ -2190,11 +2212,12 @@ def _supply_pic_by_cert(cert: str) -> str:
             import sheet_io
             for r in sheet_io._product_ws().get_all_values()[1:]:
                 g = lambda i: (r[i].strip() if len(r) > i else "")
-                c, pics = g(8), g(6)
-                if c and pics:
-                    first = pics.split("|")[0].strip()
-                    if first.startswith("http"):
-                        _SUPPLY_PIC_CACHE.setdefault(c, first)
+                c = g(8)
+                if not c or c in _SUPPLY_PIC_CACHE:
+                    continue
+                pic = supply_pic_of_row(g(6), g(0))
+                if pic:
+                    _SUPPLY_PIC_CACHE[c] = pic
         except Exception as e:
             print(f"  ⚠️ 仕入元写真を取得できず (目視は従来どおり続行): {type(e).__name__}: {e}")
     return _SUPPLY_PIC_CACHE.get(str(cert).strip(), "")
