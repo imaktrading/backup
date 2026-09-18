@@ -1712,8 +1712,14 @@ def main():
         # ※ _os は main() 後段 (whitelist 検証) で local import されるため、ここで先に local 束縛する
         import os as _os
         _no_shuffle = (_os.environ.get("GSHOCK_NO_SHUFFLE") == "1")
+        # ★2026-09-14 残務 №63: 🤖自動ボタンの件数枠 (PSA の20枠と別)。
+        #   env 未設定なら既定 MAX_PER_RUN のまま (手動「新規」ボタンは無指定=無変更)。
+        try:
+            _max_per_run = max(1, int(_os.environ.get("GSHOCK_BATCH_LIMIT") or MAX_PER_RUN))
+        except ValueError:
+            _max_per_run = MAX_PER_RUN
         _total = len(targets)
-        targets = select_run_targets(targets, no_shuffle=_no_shuffle)
+        targets = select_run_targets(targets, no_shuffle=_no_shuffle, max_per_run=_max_per_run)
         if _total > len(targets):
             _how = "先頭" if _no_shuffle else "ランダム"
             print(f"\n合計 {_total} 件中、{_how} {len(targets)} 件を処理します (残 {_total-len(targets)} 件は次回実行で)。\n")
