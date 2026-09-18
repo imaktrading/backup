@@ -504,7 +504,9 @@ def research_open(preset, tabs, days):
     for tab in tabs or ["SOLD"]:
         url = m.build_url(preset, tab=tab, days=int(days or m.DEFAULT_DAYS))
         if chrome:
-            subprocess.Popen([chrome, url])
+            # ★--new-window: 付けないと「最後に使っていた窓」に入る。Gemini などを
+            #   Chrome のアプリとして開いていると、その窓にタブが出てしまう (2026-09-18)
+            subprocess.Popen([chrome, "--new-window", url])
         else:
             import webbrowser
             webbrowser.open(url)

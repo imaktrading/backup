@@ -120,3 +120,18 @@ def test_知らない商材やタブは弾く():
         M.build_url("ガンダム")
     with pytest.raises(ValueError):
         M.build_url("ポケモン", tab="BOTH")
+
+
+def test_ワンピースとドラゴンボールの番号も読む():
+    # 2026-09-18: 斜線の形しか見ておらず、この2ゲームは1枚も読めていなかった
+    assert M.card_no("PSA10 Shanks OP03-057 Manga Alt Art") == "OP03-057"
+    assert M.card_no("Nami (Full Art) ST29-008 Starter Deck 29") == "ST29-008"
+    assert M.card_no("PSA10 Monkey D Luffy P-043 WEEKLY SHONEN JUMP") == "P-043"
+    assert M.card_no("2025 DBS Fusion World Son Goku FB02-119 PSA10") == "FB02-119"
+    assert M.card_no("PSA10 Super Dragon Ball Heroes MM2-074 Son Goku") == "MM2-074"
+    assert M.card_no("PSA10 Dragon Ball Super Divers Goku SDV9-020") == "SDV9-020"
+
+
+def test_斜線の形を先に見る():
+    # 両方あるタイトルでは、ポケモンの形 (斜線) を優先する
+    assert M.card_no("PSA10 Psyduck AR 175/165 SV2a sv2a-175") == "175/165"

@@ -96,19 +96,27 @@ def build_url(preset, tab="SOLD", days=DEFAULT_DAYS, keywords=KEYWORDS, now=None
     return RESEARCH_BASE + "?" + urllib.parse.urlencode(q)
 
 
+# ポケモンの形 (175/165 や 270/SM-P)
 _CARD_NO = re.compile(r"\b(\d{1,3}\s*/\s*(?:\d{1,3}|[A-Z]{1,3}-?[A-Z]?))\b")
+# ワンピース / ドラゴンボールの形 (OP03-057 / ST21-015 / P-001 / FB02-119 / SDV9-020 / MM2-074)
+# ★2026-09-18: 斜線の形しか見ていなかったため、この2ゲームは1枚も読めていなかった
+_CARD_NO_DASH = re.compile(r"\b([A-Z]{1,4}\d{0,2}-\d{2,3})\b")
 
 
 def card_no(title):
-    """タイトルからカード番号 (123/456 や 270/SM-P) を取る。取れなければ None。
+    """タイトルからカード番号を取る。取れなければ None。
 
     ★eBay のタイトルは書き方がばらばらなので、番号だけを鍵にする。弾コードは
       セラーによって付いたり付かなかったりするので、鍵にすると取りこぼす。
     """
     if not title:
         return None
-    m = _CARD_NO.search(title.upper().replace(" /", "/").replace("/ ", "/"))
-    return m.group(1).replace(" ", "") if m else None
+    t = title.upper().replace(" /", "/").replace("/ ", "/")
+    m = _CARD_NO.search(t)
+    if m:
+        return m.group(1).replace(" ", "")
+    m = _CARD_NO_DASH.search(t)
+    return m.group(1) if m else None
 
 
 def _money(s):
