@@ -1143,7 +1143,11 @@ NG_CAND_TAB = "補URL候補NG"
 #   後から「この候補は何だったのか」を引く手段が無かった (= 捨てた候補を新規出品の種に
 #   戻す時に、URL を1件ずつ開くしかない)。実測で 144件中 32件が復元不能だった。
 #   旧5列の行はそのまま残る (末尾2列が空)。
-NG_CAND_HEADER = ["itemID", "cert", "url", "title", "日付", "候補タイトル", "候補価格"]
+# ★2026-09-19: 「理由」を足した。従来は **「違う」しか記録していなかった**ので、
+#   出品を確定した時に **チェックを外しただけの候補 (見送り) は記録が残らず**、
+#   次回また同じ候補が並んでいた (ユーザー「以前目視したのに再び現れている」)。
+#   古い行 (7列) は 理由なし = 「違う」として読む。
+NG_CAND_HEADER = ["itemID", "cert", "url", "title", "日付", "候補タイトル", "候補価格", "理由"]
 
 # ★2026-08-09: 「ラベルの表記は違うが同じカードの可能性が濃厚」の受け皿。
 #   PSA は同じカードに複数の印字書式を使うため (OP09-050 ナミの実例: 現物 "ONE PIECE JPN." /
@@ -1170,15 +1174,59 @@ def cand_info_by_url(candidates):
 
 
 def _ng_urls_by_iid(rows):
-    """候補NG台帳 → {itemID: {正規化URL}} (純関数)。"""
+    """候補NG台帳 → {itemID: {正規化URL}} (純関数)。**「違う」だけ** = 二度と出さない分。"""
     out = {}
     for r in (rows[1:] if rows and len(rows) > 1 else []):
-        if not r or len(r) < 3:
+        if not r or len(r) < 3 or _row_reason(r) != "違う":
             continue
         iid, url = (r[0] or "").strip(), (r[2] or "").strip()
         if iid and url:
             out.setdefault(iid, set()).add(_norm_url(url))
     return out
+
+
+def _row_reason(r):
+    """台帳の行の理由 (純関数)。古い行 (7列) は 理由なし = 「違う」。"""
+    v = (r[7] or "").strip() if r and len(r) > 7 else ""
+    return v or "違う"
+
+
+def _row_price(r):
+    """台帳に残した候補価格 (純関数)。数字でなければ None。"""
+    import re as _re
+    d = _re.sub(r"[^0-9]", "", str((r[6] if r and len(r) > 6 else "") or ""))
+    return int(d) if d else None
+
+
+def skipped_by_iid(rows):
+    """候補NG台帳 → {itemID: {正規化URL: その時の値段}} (純関数)。**「見送り」の分**。
+
+    ★2026-09-19: 見送りは「今回は買わない」であって「二度と使えない」ではないので、
+      **値段が下がったら また出す**。下がっていなければ出さない (同じ判断をさせない)。
+    """
+    out = {}
+    for r in (rows[1:] if rows and len(rows) > 1 else []):
+        if not r or len(r) < 3 or _row_reason(r) != "見送り":
+            continue
+        iid, url = (r[0] or "").strip(), (r[2] or "").strip()
+        if iid and url:
+            out.setdefault(iid, {})[_norm_url(url)] = _row_price(r)
+    return out
+
+
+def filter_candidates_skipped(cands, skipped):
+    """前に「見送り」にした候補を除く (値段が下がっていれば残す)。戻り: (残す, 落とした)。純関数。"""
+    sk = skipped or {}
+    keep, drop = [], []
+    for c in (cands or []):
+        was = sk.get(_norm_url(c.get("url")), "__none__")
+        if was == "__none__":
+            keep.append(c)
+        elif isinstance(c.get("price"), int) and isinstance(was, int) and c["price"] < was:
+            keep.append(c)          # 安くなった = もう一度見る価値がある
+        else:
+            drop.append(c)
+    return keep, drop
 
 
 def filter_candidates_used_by_others(cands, used_by_others, self_iid):
@@ -1546,9 +1594,11 @@ def build_confirm_context(vals, cache, today, verbose=False):
         skip_iids, revived, newsupply = set(), 0, set()
     try:
         from sheet_io import read_tab
-        ng_by_iid = _ng_urls_by_iid(read_tab(NG_CAND_TAB))
+        _ng_rows = read_tab(NG_CAND_TAB)
+        ng_by_iid = _ng_urls_by_iid(_ng_rows)
+        skipped_by = skipped_by_iid(_ng_rows)
     except Exception:
-        ng_by_iid = {}
+        ng_by_iid, skipped_by = {}, {}
     # ★他の出品が既に使っているURLは、目視に出す前に外す (どのみち書けない・2026-07-30)。
     used_by_others, guard_ok = {}, True
     try:
@@ -1574,14 +1624,14 @@ def build_confirm_context(vals, cache, today, verbose=False):
                   f"(台帳の行は残す)")
         if newsupply:
             print(f"  🆕 うち番号まで一致した供給 {len(newsupply)}件")
-    return {"skip_iids": skip_iids, "ng_by_iid": ng_by_iid, "used_by_others": used_by_others,
+    return {"skip_iids": skip_iids, "ng_by_iid": ng_by_iid, "skipped_by": skipped_by, "used_by_others": used_by_others,
             "revived": revived, "newsupply": newsupply, "guard_ok": guard_ok}
 
 
 # 足切りで止まった理由。**ラベル・status_now・confirm のログが同じ語彙を使う**。
 STOP_REASONS = ("skip_ledger", "no_cache", "no_cand", "no_cardno",
                 "all_known", "all_number", "all_variant", "all_cost", "all_ng",
-                "all_used", "no_ref", "all_art")
+                "all_used", "no_ref", "all_art", "all_skipped")
 
 # ★2026-08-15 ユーザー指示「そういう分類にしてくれないと、ん?ってなる」。
 #   内部の理由名 (all_art / all_ng / no_cand …) をそのまま出していたので読めなかった。
@@ -1676,6 +1726,13 @@ def confirm_survivors(t, vals, cache, ctx, today, *, ref_of, art_of, stats):
     if not cands:
         stats["all_ng"] += 1
         return [], "", "all_ng", []
+    # ★2026-09-19: 前に「見送り」にした候補は、**値段が下がった時だけ**また出す。
+    #   従来は見送りを記録していなかったので、同じ候補が毎回並んでいた。
+    cands, dropped_skip = filter_candidates_skipped(cands, (ctx.get("skipped_by") or {}).get(iid))
+    stats["cand_skipped"] += len(dropped_skip)
+    if not cands:
+        stats["all_skipped"] += 1
+        return [], "", "all_skipped", []
     if ctx["used_by_others"]:
         _keep, _drop = filter_candidates_used_by_others(cands, ctx["used_by_others"], iid)
         stats["cand_used"] += len(_drop)
@@ -2253,7 +2310,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         _ci = cand_info_by_url((items[_i] or {}).get("candidates")) if _i < len(items) else {}
         _ct, _cp = _ci.get(_norm_url(_u), ("", ""))
         _ng_new.append([_t["itemID"], _t.get("cert", ""), _u, (_t.get("title") or "")[:60],
-                        today, _ct, _cp])
+                        today, _ct, _cp, "違う"])
     if _ng_new:
         try:
             from sheet_io import read_tab, write_rows_to_tab
@@ -2263,6 +2320,40 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
                   f"(この出品にこのURLは次回から出さない・復活は同タブ行削除)")
         except Exception as e:
             print(f"  ⚠ {NG_CAND_TAB} 記録skip ({type(e).__name__}: {e})")
+
+    # --- 候補単位の「見送り」も台帳へ (2026-09-19) ---
+    #   ★ここが無いと、出品を確定した時に **チェックを外しただけの候補**は記録が残らず、
+    #     次回また同じ候補が並ぶ (ユーザー「以前目視したのに再び現れている」)。
+    #     「違う」(二度と出さない) と違い、見送りは **値段が下がったらまた出す**。
+    _sk_new = []
+    _decided = set()
+    for _key in ("diffs", "probes", "notpsa", "sold", "bundle"):
+        for _d in (res.get(_key) or []):
+            if _d.get("idx") is not None and (_d.get("url") or "").strip():
+                _decided.add((int(_d["idx"]), _norm_url(_d["url"])))
+    for _i, _urls in confirmed.items():
+        if _i >= len(item_targets) or _i >= len(items):
+            continue
+        _t2 = item_targets[_i]
+        _took = {_norm_url(u) for u in (_urls or [])}
+        _ci2 = cand_info_by_url((items[_i] or {}).get("candidates"))
+        for _c in ((items[_i] or {}).get("candidates") or []):
+            _u2 = (_c.get("url") or "").strip()
+            _n2 = _norm_url(_u2)
+            if not _u2 or _n2 in _took or (_i, _n2) in _decided:
+                continue
+            _ct2, _cp2 = _ci2.get(_n2, ("", ""))
+            _sk_new.append([_t2["itemID"], _t2.get("cert", ""), _u2,
+                            (_t2.get("title") or "")[:60], today, _ct2, _cp2, "見送り"])
+    if _sk_new:
+        try:
+            from sheet_io import read_tab, write_rows_to_tab
+            write_rows_to_tab(NG_CAND_TAB,
+                              _merge_ng_rows(read_tab(NG_CAND_TAB), _sk_new, NG_CAND_HEADER))
+            print(f"  ⏭ {NG_CAND_TAB}: 見送り +{len(_sk_new)}件 記録 (値段が下がるまで出しません)")
+        except Exception as _e_sk:
+            print(f"  ⚠ 見送りの記録skip ({type(_e_sk).__name__}: {_e_sk})")
+
     if diffs:
         print(f"🚨 「違う」{len(diffs)}件 = 検索が別カード/別変種を拾った精度事故。"
               "slice2 の検索(kw/variant_hint)を要修正(残存=精度事故の放置)。")
