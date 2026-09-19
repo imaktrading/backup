@@ -15,9 +15,14 @@ ROWS = [H.NG_CAND_HEADER,
         ["iid1", "c", "https://c", "t", "2026-09-01", "名前", "1000"]]   # 古い行 = 違う
 
 
-def test_違うと見送りを分けて読む():
-    assert H._ng_urls_by_iid(ROWS) == {"iid1": {"https://b", "https://c"}}
-    assert H.skipped_by_iid(ROWS) == {"iid1": {"https://a": 5000}}
+def test_見送りだけを分けて読む():
+    """★8列目は前から別の用途でも使われている (「新規出品候補へ …」「対象外: …」等)。
+    "違う" だけを NG にすると それらが素通りして復活するので、**見送り以外は全部 NG**。
+    """
+    rows = ROWS + [["iid1", "c", "https://d", "t", "2026-09-10", "名前", "900",
+                    "対象外: 別ジャンル (対象外の商材)"]]
+    assert H._ng_urls_by_iid(rows) == {"iid1": {"https://b", "https://c", "https://d"}}
+    assert H.skipped_by_iid(rows) == {"iid1": {"https://a": 5000}}
 
 
 def test_同じ値段なら出さない():

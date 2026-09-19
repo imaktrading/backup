@@ -1177,7 +1177,10 @@ def _ng_urls_by_iid(rows):
     """候補NG台帳 → {itemID: {正規化URL}} (純関数)。**「違う」だけ** = 二度と出さない分。"""
     out = {}
     for r in (rows[1:] if rows and len(rows) > 1 else []):
-        if not r or len(r) < 3 or _row_reason(r) != "違う":
+        # ★2026-09-19 訂正: 8列目は **前から別の用途でも使われていた**
+        #   (「新規出品候補へ …」「対象外: …」等 175行)。"違う" だけを NG にすると
+        #   それらが素通りして復活する。**「見送り」以外は全部 NG** (従来の挙動) とする。
+        if not r or len(r) < 3 or _row_reason(r) == "見送り":
             continue
         iid, url = (r[0] or "").strip(), (r[2] or "").strip()
         if iid and url:
