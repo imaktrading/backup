@@ -907,10 +907,26 @@ def candidate_passes_filter(cond, ship, reviews, is_shops, min_reviews=100,
 #     出さない。ユーザー報告「補URL③に AUC がまだ出てる」への対応。
 #   候補NG台帳 (出品×URL) とは別物。こちらは **URL そのものが買えない** ので全出品で共通。
 NOT_BUYABLE_PATH = os.path.join("C:/dev/iMak_data/hq", "not_buyable_urls.json")
+# ★2026-09-19: **今は売り切れだが再入荷する**仕入元 (メルカリShops / Amazon 等)。
+#   監視くんが補URLを消す時、こちらは not_buyable に入れない判断をしている
+#   (載せると仕入元を永久に失うため)。だが今そのまま目視に出すと人の手間だけかかるので、
+#   出品くんは **落とさずに一番後ろへ回し、「今は売り切れ」と出す**。
+#   ファイルが無ければ今までどおり (= 全部そのままの順で出る)。
+RESTOCKABLE_SOLD_PATH = os.path.join("C:/dev/iMak_data/hq", "not_buyable_restockable.json")
 
 
 def load_not_buyable(path=NOT_BUYABLE_PATH):
     """{url: {"why","at"}} を読む。読めなければ空 (候補を消す方に倒さない)。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:                                          # noqa: BLE001
+        return {}
+
+
+def load_restockable_sold(path=RESTOCKABLE_SOLD_PATH):
+    """{url: {...}} を読む。今は売り切れだが再入荷する仕入元。読めなければ空。"""
     try:
         with open(path, encoding="utf-8") as f:
             d = json.load(f)

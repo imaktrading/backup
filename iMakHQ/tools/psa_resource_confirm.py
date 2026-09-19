@@ -788,6 +788,11 @@ def build_restock_html(items):
             #   未選択のまま確定した場合は go() が件数を confirm で見せてから 見送り 扱いにする。
             _nm = _s(cd.get("name"))
             _nm_html = f"<br><span class='cnm'>{_html.escape(_nm[:48])}</span>" if _nm else ""
+            # ★2026-09-19: 今は売り切れだが再入荷する仕入元 (メルカリShops / Amazon 等)。
+            #   落とさず後ろに回している分なので、買えないことが見て分かるようにする。
+            if cd.get("sold_restockable"):
+                _nm_html += ("<br><span class='cnm' style='color:#ffb454'>"
+                             "今は売り切れ (再入荷あり)</span>")
             # ★2026-08-01: 変種が確証できているかを候補ごとに出す。mercari の候補は既定で
             #   「同番号の全変種」なので、確証できていない物を黙って混ぜると人が毎回「違う」を
             #   押すことになる (=「候補が違うのは意味がない」)。確証済は先頭に並んでいる。

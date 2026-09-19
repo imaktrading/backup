@@ -174,6 +174,13 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
         _ng_urls = set(_mpx.load_not_buyable() or {})
     except Exception:                                          # noqa: BLE001
         _ng_urls = set()
+    # ★2026-09-19: 今は売り切れだが **再入荷する** 仕入元 (メルカリShops / Amazon 等)。
+    #   監視くんは これを not_buyable に入れない (載せると仕入元を永久に失うため)。
+    #   落とさずに **一番後ろへ回し**、画面に「今は売り切れ (再入荷あり)」と出す。
+    try:
+        _soon = set(_mpx.load_restockable_sold() or {})
+    except Exception:                                          # noqa: BLE001
+        _soon = set()
     # ★2026-09-04: 上限を超える仕入値の候補は **目視にも出さない**。
     #   ここは 補URL の目視画面が使う一覧なので、combine() の aux_urls とは別経路。
     #   片方だけ絞ると「①探すには出ないのに補URLには入る」がまた起きる。
@@ -245,6 +252,11 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
             # snkrdunk は card_id で引いているので変種は特定済み (番号一致の全変種を混ぜない)。
             out.append({"channel": "snkrdunk", "url": d["url"], "price": d.get("price"),
                         "image": d.get("image", ""), "variant_ok": True})
+    # 売り切れ (再入荷あり) は落とさずに後ろへ。人が「今は買えない」と分かるよう印を付ける。
+    for c in out:
+        if c.get("url") in _soon:
+            c["sold_restockable"] = True
+    out.sort(key=lambda c: 1 if c.get("sold_restockable") else 0)
     return out
 
 
