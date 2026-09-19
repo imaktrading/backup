@@ -1346,6 +1346,28 @@ def record_not_psa10(entries, today=None):
     return len(ng_new)
 
 
+_SNKR_ITEM_RE = re.compile(r"(snkrdunk\.com/apparels/\d+)/", re.I)
+
+
+def _supply_key(url):
+    """供給の同一性を見る鍵 (純関数)。
+
+    ★2026-09-19: スニダンは **同じカードに 個体ごとの URL** を付ける
+      (`/apparels/761394/used/50273173` … `/used/49135740`)。売れて新しい個体が並ぶたびに
+      URL が変わるので、URL で比べると **毎回「新しい供給が出た」** ことになり、
+      判定済みの出品が何度も目視に戻っていた (ユーザー報告: 820133533434 / 神龍 FB07-097)。
+      スニダンは **商品ID (apparels/NNN) まで**で1つの供給とみなす。
+      メルカリは1出品=1個体なので従来どおり URL で見る。
+    """
+    u = _norm_url(url)
+    m = _SNKR_ITEM_RE.search(u + "/")
+    return m.group(1).lower() if m else u
+
+
+def _supply_keys(urls):
+    return {_supply_key(u) for u in (urls or []) if (u or "").strip()}
+
+
 def _has_new_supply(seen_urls, current_urls):
     """前回外した時に見せた候補と比べて **新しい出品が出ているか**(純関数)。
 
@@ -1353,10 +1375,10 @@ def _has_new_supply(seen_urls, current_urls):
     前回の記録が無い (旧形式の台帳行) 場合は True = 出す。
     「同じ候補しか無いのに毎日出す」を防ぎつつ、「新しく出たのに1週間出さない」も防ぐ。
     """
-    cur = _norm_urls(current_urls)
+    cur = _supply_keys(current_urls)
     if not cur:
         return False                      # 候補ゼロ = 見せるものが無い
-    seen = _norm_urls(seen_urls)
+    seen = _supply_keys(seen_urls)
     if not seen:
         return True                       # 記録なし(旧行) → 出す
     return bool(cur - seen)
