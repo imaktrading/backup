@@ -96,7 +96,18 @@ def summary(xml):
         "写真枚数": len(pics),
         "送料無料": free,
         "BestOffer": _one(xml, "BestOfferEnabled") == "true",
-        "返品": _one(xml, "ReturnsAcceptedOption"),
+        # ★2026-09-20 ユーザー「それが何個売れているかは?」「シッピングポリシーとか、
+        #   リターンポリシーとか」→ 全部 取れる。ポリシーの **名前**は他人の出品なので
+        #   出ないが、中身は出る。比べるのに要るのは中身の方。
+        "売れた数": _one(xml, "QuantitySold"),
+        "在庫数": _one(xml, "Quantity"),
+        "発送方法": _one(xml, "ShippingService"),
+        "送料の形": _one(xml, "ShippingType"),
+        "発送までの日数": _one(xml, "DispatchTimeMax"),
+        "送料負担": _one(xml, "ShippingCostPaidBy"),
+        "返品": _one(xml, "ReturnsAcceptedOption") or _one(xml, "ReturnsAccepted"),
+        "返品期限": _one(xml, "ReturnsWithin"),
+        "返金方法": _one(xml, "RefundOption"),
         "状態": _one(xml, "ConditionDisplayName"),
         "出品形式": _one(xml, "ListingType"),
         "説明文の長さ": len(_one(xml, "Description")),
@@ -189,6 +200,13 @@ def cmd_report(_argv):
           f"送料無料 {sum(1 for r in rows if r['送料無料'])}件 / "
           f"BestOffer {sum(1 for r in rows if r['BestOffer'])}件 / "
           f"サブタイトル {sum(1 for r in rows if r['サブタイトル'])}件")
+    ship = collections.Counter(r["発送方法"] for r in rows if r["発送方法"])
+    days = [int(r["発送までの日数"]) for r in rows if (r["発送までの日数"] or "").isdigit()]
+    ret = collections.Counter(r["返品期限"] for r in rows if r["返品期限"])
+    print(f"発送までの日数 中央値 {sorted(days)[len(days) // 2] if days else '-'}日 / "
+          f"返品 {sum(1 for r in rows if '返品' in r and r['返品'] and 'Not' not in r['返品'])}件")
+    print("発送方法:", dict(ship.most_common(5)))
+    print("返品期限:", dict(ret.most_common(5)))
     print("よく埋めている項目:")
     for k, v in fields.most_common(25):
         print(f"  {v:>4}件 ({v / len(rows):>3.0%})  {k}")
