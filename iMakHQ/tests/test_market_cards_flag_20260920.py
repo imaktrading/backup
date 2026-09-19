@@ -48,3 +48,49 @@ def test_レアリティが違えば比べない():
 def test_同じ物なら比べる():
     ours = "PSA 10 Pokemon Japanese Mega Brave #088/063 Mega Lucario ex Super Rare 2025"
     assert M.same_product(ours, "PSA10 Mega Lucario ex SAR 2025 088/063 Mega Brave Japanese") is True
+
+
+# ---- eBay カタログ形式のタイトルを読む (2026-09-20) ----
+# 実測: 番号が読めなかった858行のうち57行がこの形。カタログに当たったのは 40 → 54件。
+
+def test_eBayカタログ形式から弾と番号を読む():
+    t = "PSA10 Milcery 110 Art Rare 2024 Pokemon Japanese Sv7-Stellar Miracle マホミル AR"
+    assert M.ebay_catalog_no(t) == ("Sv7", "110")
+
+
+def test_PSA10の10を番号と読まない():
+    """最初の実装は全部 -010 になった。"""
+    code, num = M.ebay_catalog_no(
+        "PSA10 Rowlet 082 Art Rare 2026 Pokemon Japanese M3-Mullifying Zero モクロー")
+    assert (code, num) == ("M3", "082")
+
+
+def test_年を番号と読まない():
+    _c, num = M.ebay_catalog_no(
+        "PSA10 2025 Marshadow 069 Art Rare Pokemon Japanese M1L-Mega Brave マーシャドー")
+    assert num == "069"
+
+
+def test_この形でない物は読まない():
+    assert M.ebay_catalog_no("One Piece Roronoa Zoro Parallel Romance Dawn PSA10") == (None, None)
+    assert M.ebay_catalog_no("") == (None, None)
+
+
+def test_番号として使える形で返す():
+    assert M.card_no(
+        "PSA10 Kirlia 084 Art Rare 2023 Pokemon Japanese Sv1s-Scarlet Ex キルリア AR") == "SV1S-084"
+
+
+def test_カタログは大文字小文字を問わずに引く():
+    """カタログは SV3a / M2a と小文字混じりで書く。こちらが大文字に潰して当たらなかった。"""
+    import sqlite3
+    conn = sqlite3.connect(M.CATALOG_DB)
+    assert M.lookup_catalog(["SV3A-071"], conn) is not None
+
+
+def test_弾が枝分かれしている時は和名で決める():
+    """SV11 は SV11W / SV11B に割れている。和名が無ければ当てない (推測しない)。"""
+    import sqlite3
+    conn = sqlite3.connect(M.CATALOG_DB)
+    assert M.lookup_by_set_and_no("SV11", "136", "ズルッグ", conn) == "SV11W-136"
+    assert M.lookup_by_set_and_no("SV11", "136", "", conn) is None

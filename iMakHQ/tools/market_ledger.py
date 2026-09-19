@@ -119,7 +119,54 @@ def card_no(title):
     if m:
         return m.group(1).replace(" ", "")
     m = _CARD_NO_DASH.search(t)
-    return m.group(1) if m else None
+    if m:
+        return m.group(1)
+    # ★2026-09-20: eBay カタログが作った形 (斜線もハイフンも無い)
+    code, num = ebay_catalog_no(title)
+    return f"{code.upper()}-{num}" if code else None
+
+
+# ★2026-09-20: eBay のカタログが作ったタイトルの形。番号が斜線でもハイフンでもなく
+#   「<日本語名の英名> <番号> <レアリティ語> <年> Pokemon Japanese <弾>-<弾名> <和名>」と並ぶ。
+#   実測: 番号が読めなかった858行のうち57行がこの形 (販売108個)。
+_EBAY_SET = re.compile(r"JAPANESE\s+([A-Z]{1,3}[0-9]{1,2}[A-Z]?)-", re.I)
+#   ★"PSA10" の 10 を番号と読まないこと (最初の実装で全部 -010 になった)
+_EBAY_NUM = re.compile(r"(?<![0-9/])(\d{2,3})(?![0-9/])")
+
+
+def ebay_catalog_no(title):
+    """eBay カタログ形式のタイトル → (弾コード, 3桁番号)。読めなければ (None, None)。純関数。"""
+    t = title or ""
+    m = _EBAY_SET.search(t)
+    if not m:
+        return None, None
+    clean = _EBAY_SET.sub(" ", re.sub(r"PSA\s*10", "", t, flags=re.I))
+    for n in _EBAY_NUM.finditer(clean):
+        v = int(n.group(1))
+        if 1900 <= v <= 2100:              # 年は番号ではない
+            continue
+        return m.group(1), "%03d" % v
+    return None, None
+
+
+def lookup_by_set_and_no(code, num, title, conn):
+    """弾コード+番号 → カタログの product_id (I/O)。当てられなければ None。
+
+    ★カタログは `SV3a` `M2a` `SV11W` と **小文字混じり**で書く。こちらが大文字に潰して
+      引いていたので当たらなかった (2026-09-20 / ②引き方の誤り。40件 → 54件)。
+      `SV11` のように弾が2つに割れている時 (SV11W / SV11B) は **タイトルの和名**で決める。
+      決められなければ None = 当てない (推測で当てると別のカードの値段を掴む)。
+    """
+    rows = conn.execute(
+        "SELECT product_id, name_jp FROM products WHERE product_id LIKE ?",
+        ("%s%%-%s" % (code, num),)).fetchall()
+    ok = [r for r in rows if re.fullmatch(code + "[A-Za-z]?", r[0].split("-")[0], re.I)]
+    if len(ok) == 1:
+        return ok[0][0]
+    for pid, jp in ok:
+        if jp and jp in (title or ""):
+            return pid
+    return None
 
 
 def _money(s):
@@ -259,14 +306,30 @@ def product_id_candidates(key, title):
     return out
 
 
-def lookup_catalog(cands, conn):
-    """product_id でカタログを引く。**完全一致だけ** (名前で探さない)。"""
+def lookup_catalog(cands, conn, title=""):
+    """product_id でカタログを引く。**完全一致だけ** (名前で探さない)。
+
+    ★2026-09-20: 大文字小文字だけは問わない。カタログは `SV3a` `M2a` と小文字混じりで
+      書くのに、こちらが大文字に潰して引いていて当たらなかった (②引き方の誤り)。
+      綴りが同じで大小が違うだけの物は同じ物なので、これは「名前で探す」ことにはならない。
+    ★弾が枝分かれしている物 (SV11 → SV11W / SV11B) は **タイトルの和名**で決める。
+      決められなければ当てない。
+    """
     for pid in cands:
         row = conn.execute(
-            "SELECT product_id, name, name_jp, category FROM products WHERE product_id=?", (pid,)
-        ).fetchone()
+            "SELECT product_id, name, name_jp, category FROM products "
+            "WHERE product_id = ? COLLATE NOCASE", (pid,)).fetchone()
         if row:
             return row
+    for pid in cands:
+        m = re.fullmatch(r"([A-Za-z]{1,3}\d{1,2}[A-Za-z]?)-(\d{2,3})", pid or "")
+        if not m:
+            continue
+        got = lookup_by_set_and_no(m.group(1), m.group(2), title, conn)
+        if got:
+            return conn.execute(
+                "SELECT product_id, name, name_jp, category FROM products WHERE product_id=?",
+                (got,)).fetchone()
     return None
 
 
@@ -365,7 +428,7 @@ def cmd_targets(argv):
     conn = sqlite3.connect(CATALOG_DB)
     out, hit = [], 0
     for k, v in miss:
-        row = lookup_catalog(product_id_candidates(k, v["title"]), conn)
+        row = lookup_catalog(product_id_candidates(k, v["title"]), conn, v["title"])
         if row:
             hit += 1
         med = round(statistics.median(v["prices"]), 2) if v["prices"] else 0
@@ -539,7 +602,7 @@ def cmd_cards(argv):
     conn = sqlite3.connect(CATALOG_DB)
     out, hit = [], 0
     for k, v, have in cards:
-        row = lookup_catalog(product_id_candidates(k, v["title"]), conn)
+        row = lookup_catalog(product_id_candidates(k, v["title"]), conn, v["title"])
         if row:
             hit += 1
         med = round(statistics.median(v["prices"]), 2) if v["prices"] else 0
@@ -588,6 +651,7 @@ def cmd_cards(argv):
                   f"${r['比べてよい実売']:>7.2f} ({r['売れた数']}個)  {r['和名'] or r['番号']}")
     else:
         print("実売中央値より安く出している出品はありません")
+    print("★この一覧は **候補まで**。値上げは1件ずつ人が確かめてから (自動で変えない)。")
     print(f"→ {CARDS_CSV}")
     return 0
 
