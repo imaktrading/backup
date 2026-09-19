@@ -543,18 +543,40 @@ _CAND_PARALLEL_WORDS = ("パラレル", "PARALLEL", "parallel", "コミパラ", 
 _OURS_PARALLEL_WORDS = _CAND_PARALLEL_WORDS + ("★", "☆", "-P]", "-P］", "SEC-P", "SP-", "(SP", "／P")
 
 
-def candidate_variant_conflicts(our_title, cand_title):
-    """候補が **こちらと違う刷り (パラレル)** を名乗っているか (純関数, test可)。
+# ★2026-09-19: **こちらがパラレルで、候補が通常版**という逆向きも落とす。
+#   実害 (2026-09-19 の目視): 現物「キッド＆キラー **SP**」に対して候補
+#   「キッド&キラー EB01-003 **R** 日本語版」が並び、人が「違う」を押していた。
+#   従来の判定は「候補がパラレルを名乗り、こちらが名乗っていない」時しか効かなかった。
+#   ★安全側に倒す: **両方にレアリティの表記があって、それが食い違う時だけ**落とす。
+#     片方にしか書いていない物は落とさない (無在庫では仕入元を失う方が痛い)。
+#     `R` 単体のような短い語は、区切り (空白/括弧/【】) に挟まれている時だけ拾う。
+#   ★区切りは **消費しない** (先読み/後読み)。`(SP/SR)` のように連続して並ぶ時、
+#     区切りを消費すると 2つ目が拾えず「SP だけ」に見えて誤爆する (実測で2件)。
+_RARITY_RE = re.compile(
+    r"(?<![A-Z0-9])(SEC|SP|SR|UR|HR|RRR|RR|AR|CHR|CSR|PR|UC|L|R|C)(?![A-Z0-9])")
 
-    True = 外してよい。判定材料が無い/こちらもパラレルなら False (= 人に見せる)。
+
+def _rarity_tokens(title):
+    """タイトルに **明記されている** レアリティ (純関数)。無ければ空集合。"""
+    return {m.upper() for m in _RARITY_RE.findall((title or "").upper())}
+
+
+def candidate_variant_conflicts(our_title, cand_title):
+    """候補が **こちらと違う刷り** を名乗っているか (純関数, test可)。
+
+    True = 外してよい。判定材料が無い/同じ刷りかもしれない場合は False (= 人に見せる)。
     """
     c = (cand_title or "")
-    if not any(k in c for k in _CAND_PARALLEL_WORDS):
-        return False                      # 候補がパラレルと言っていない = 判定しない
     o = (our_title or "")
-    if any(k in o for k in _OURS_PARALLEL_WORDS):
+    if any(k in c for k in _CAND_PARALLEL_WORDS):
+        if not any(k in o for k in _OURS_PARALLEL_WORDS):
+            return True                   # 候補だけパラレル = 別の刷り
         return False                      # こちらもパラレル = 同じ刷りかもしれない
-    return True
+    # 逆向き: 両方にレアリティが書いてあって、重なりが無ければ別の刷り
+    ro, rc = _rarity_tokens(o), _rarity_tokens(c)
+    if ro and rc and not (ro & rc):
+        return True
+    return False
 
 
 def _row_cost_and_dead(t, vals):

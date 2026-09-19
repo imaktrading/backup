@@ -356,7 +356,11 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
 html{scrollbar-width:none;-ms-overflow-style:none}
 html::-webkit-scrollbar{display:none}
 body::-webkit-scrollbar{display:none}
-#cardnav{position:fixed;left:50%;transform:translateX(-50%);bottom:10px;z-index:50;
+/* ★2026-09-19 ユーザー「次、前が後半重なって、操作しづらい」。
+   画面中央下だと 候補の「前へ/次へ」と重なる。現物ナビは **右下**に寄せ、
+   本文の下にも余白を作って、どのボタンも隠れないようにする。 */
+#main{padding-bottom:78px}
+#cardnav{position:fixed;right:18px;bottom:14px;z-index:50;
    display:flex;align-items:center;gap:10px;background:#fff;border:1px solid #bbb;
    border-radius:22px;padding:6px 14px;box-shadow:0 2px 10px rgba(0,0,0,.18)}
 #cardpos{font-size:12px;color:#666;min-width:56px;text-align:center}
