@@ -350,13 +350,26 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
    1件ぶんの高さが増えるので、枠の高さも 290 → 430 に合わせる (1件が切れずに収まる)。 */
 /* ★2026-09-19 ユーザー「仕入候補はスクロールバーでめくるのがやりづらい。次へ・前へに」。
    枠の高さ (430px) に候補1件がちょうど収まるので、1件ずつ送る。 */
-.cnav{display:flex;align-items:center;gap:8px;margin:2px 0 4px}
+/* ★2026-09-19 ユーザー「こちらもスクロールバーは要らない」。
+   ページ全体の縦スクロールバーも消す (送るのは 前の現物/次の現物 で行う)。
+   ホイールでの移動は残す = 見え方だけ変える。 */
+html{scrollbar-width:none;-ms-overflow-style:none}
+html::-webkit-scrollbar{display:none}
+body::-webkit-scrollbar{display:none}
+#cardnav{position:fixed;left:50%;transform:translateX(-50%);bottom:10px;z-index:50;
+   display:flex;align-items:center;gap:10px;background:#fff;border:1px solid #bbb;
+   border-radius:22px;padding:6px 14px;box-shadow:0 2px 10px rgba(0,0,0,.18)}
+#cardpos{font-size:12px;color:#666;min-width:56px;text-align:center}
+.cnav{display:flex;align-items:center;gap:8px;margin:4px 0 2px}
 .cnavb{font-size:13px;padding:4px 12px;border:1px solid #bbb;border-radius:4px;
        background:#fff;cursor:pointer}
 .cnavb:hover{background:#f0f0f0}
 .cnavb:disabled{opacity:.4;cursor:default}
 .cpos{font-size:12px;color:#666;min-width:52px;text-align:center}
-.cands{display:flex;flex-direction:column;gap:5px;height:430px;overflow-y:auto;overflow-x:hidden}
+.cands{display:flex;flex-direction:column;gap:5px;height:430px;overflow-y:auto;scrollbar-width:none;-ms-overflow-style:none;overflow-x:hidden}
+/* ★2026-09-19 ユーザー「スクロールバーは消して」。送るのは 前へ/次へ で行う
+   (ホイールでの移動は残す)。 */
+.cands::-webkit-scrollbar{display:none}
 .cand{display:flex;align-items:flex-start;gap:8px;border:1px solid #eee;border-radius:4px;padding:3px 4px;cursor:pointer}
 .cand img{width:300px;height:405px;object-fit:contain;border:1px solid #eee;margin:0;background:#fafafa}
 .cand .cph{width:300px;height:405px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999;border:1px dashed #ccc}
@@ -645,6 +658,18 @@ def confirm_targets(items, timeout=10800):   # 2026-07-24 ユーザー要望で 
 
 _JS_RESTOCK = """
 /* ★2026-09-19 ユーザー要望: 仕入候補を スクロールでなく「前へ / 次へ」で送る。 */
+function cardIdx(){var cs=document.querySelectorAll('.card'); var best=0,d=1e9;
+  for(var i=0;i<cs.length;i++){var v=Math.abs(cs[i].getBoundingClientRect().top-70);
+    if(v<d){d=v; best=i;}} return best;}
+function cardPos(){var cs=document.querySelectorAll('.card'); var p=document.getElementById('cardpos');
+  if(!p||!cs.length)return; var i=cardIdx(); p.textContent=(i+1)+' / '+cs.length;
+  var bs=document.getElementById('cardnav').querySelectorAll('.cnavb');
+  if(bs.length===2){bs[0].disabled=(i<=0); bs[1].disabled=(i>=cs.length-1);}}
+function cardStep(d){var cs=document.querySelectorAll('.card'); var i=cardIdx()+d;
+  if(i<0)i=0; if(i>cs.length-1)i=cs.length-1;
+  cs[i].scrollIntoView({block:'start'}); setTimeout(cardPos,120);}
+window.addEventListener('scroll',function(){cardPos();});
+window.addEventListener('DOMContentLoaded',cardPos);
 function candBox(btn){return btn.closest('.col.cat').querySelector('.cands');}
 function candIdx(box){var cs=box.querySelectorAll('.cand'); var best=0, d=1e9;
   for(var i=0;i<cs.length;i++){var v=Math.abs(cs[i].offsetTop-box.offsetTop-box.scrollTop);
@@ -980,10 +1005,11 @@ def build_restock_html(items):
             f"<div class='pair'><div class='col psa'><div class='cap'>① 現物(出品)</div>{ref_tag}</div>"
             f"{sup_col}"
             f"<div class='col cat'><div class='cap'>仕入候補(チェック=買う / 外す=仕入見送り)</div>"
+            f"<div class='cands' onscroll='candPos(this)'>{''.join(cand_html)}</div>"
+            # ★2026-09-19 ユーザー「上じゃなくて、下に配置して」
             f"<div class='cnav'><button type='button' class='cnavb' onclick='candStep(this,-1)'>↑ 前へ</button>"
             f"<span class='cpos'></span>"
-            f"<button type='button' class='cnavb' onclick='candStep(this,1)'>次へ ↓</button></div>"
-            f"<div class='cands' onscroll='candPos(this)'>{''.join(cand_html)}</div></div></div>"
+            f"<button type='button' class='cnavb' onclick='candStep(this,1)'>次へ ↓</button></div></div></div>"
             "</div>")
     # ★2026-07-30: 旧文は「買わない候補(**違うカード** / 高い / …)は仕入見送り」と書いており、
     #   別に「違う」ボタンがあるのと矛盾していた。これが 見送り 誤用の原因。意味を書き分ける。
@@ -1009,6 +1035,11 @@ def build_restock_html(items):
             f"<div class='zn'>ラベルの<b>書式違い</b>は別カードの根拠になりません — "
             f"<b>番号・変種名・絵柄</b>で判定</div>"
             f"<div class='zwrap'><img alt=''></div></div></div>"
+            # ★2026-09-19 ユーザー「現物単位でも同様にしてほしい」。
+            #   現物 (出品) の行き来も スクロールでなく 前へ/次へ で送る。画面下に固定。
+            f"<div id='cardnav'><button type='button' class='cnavb' onclick='cardStep(-1)'>"
+            f"↑ 前の現物</button><span id='cardpos'></span>"
+            f"<button type='button' class='cnavb' onclick='cardStep(1)'>次の現物 ↓</button></div>"
             f"<div id='done'></div><script>{_JS_RESTOCK}</script></body></html>")
 
 
