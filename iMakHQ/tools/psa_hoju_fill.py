@@ -1364,6 +1364,15 @@ def _supply_key(url):
     return m.group(1).lower() if m else u
 
 
+def _supply_site(key):
+    """供給の鍵 → どの仕入元サイトか (純関数)。"""
+    if "snkrdunk.com" in key:
+        return "snkrdunk"
+    if "mercari" in key:
+        return "mercari"
+    return "other"
+
+
 def _supply_keys(urls):
     return {_supply_key(u) for u in (urls or []) if (u or "").strip()}
 
@@ -1381,7 +1390,12 @@ def _has_new_supply(seen_urls, current_urls):
     seen = _supply_keys(seen_urls)
     if not seen:
         return True                       # 記録なし(旧行) → 出す
-    return bool(cur - seen)
+    # ★2026-09-20: **仕入元サイトごとに、記録がある側だけ**を比べる。
+    #   スニダンを判定に入れた初日、過去の記録にスニダンのURLが無い行が
+    #   「初めて見る = 新しい供給」になり、**復活が 12件 → 43件**に増えた。
+    #   比べる物が無い側は「増えた」と言えないので、数えない (出しすぎない側に倒す)。
+    sites = {_supply_site(k) for k in seen}
+    return bool({k for k in cur if _supply_site(k) in sites} - seen)
 
 
 def _skip_row_active(reason, date_str, today):
@@ -1417,16 +1431,33 @@ def _seen_urls_by_iid(rows):
 def _cache_candidate_urls(entry):
     """キャッシュ1件 → 今出せる候補URL(純関数)。新供給の有無を安く判定するための素。
 
-    メルカリの all_cands/cands のみ見る (SNKRDUNK 側の増減は拾わない = 保守的)。
+    ★2026-09-20 ユーザー確定「スニダンもいるのでは? 目視した同じものを何回も出してくるのを
+      やめてもらいたいだけです」。従来はスニダンを一切見ていなかった (保守的にしていた) が、
+      スニダンも仕入元なので **新しい商品が出たら戻す**のが正しい。
+      同じカードの別個体 (`/apparels/NNN/used/xxxx` の xxxx 違い) は `_supply_key` が
+      商品IDまでで潰すので、並び替わっただけでは戻らない。
     """
+    out = []
     m = (entry or {}).get("mercari") or {}
-    if not isinstance(m, dict):
+    if isinstance(m, dict):
+        # ★2026-08-01: 厳密一致が0件のときは **番号未確認(名前一致のみ)** の枠も候補として数える。
+        #   ここで拾わないと「候補なし」として確証UIに出ないまま埋もれる (実測39件がこの状態だった)。
+        #   番号未確認である事実は _build_visual_candidates が number_ok=False で持ち回り、UI が明示する。
+        rows = m.get("all_cands") or m.get("cands") or m.get("loose_cands") or []
+        out += [t[1] for t in rows if t and len(t) > 1 and t[1]]
+    out += _cache_snkrdunk_urls(entry)
+    return out
+
+
+def _cache_snkrdunk_urls(entry):
+    """キャッシュ1件 → スニダンの候補URL (純関数)。card_id で引いているので変種は特定済み。"""
+    sd = (entry or {}).get("snkrdunk")
+    if not isinstance(sd, dict):
         return []
-    # ★2026-08-01: 厳密一致が0件のときは **番号未確認(名前一致のみ)** の枠も候補として数える。
-    #   ここで拾わないと「候補なし」として確証UIに出ないまま埋もれる (実測39件がこの状態だった)。
-    #   番号未確認である事実は _build_visual_candidates が number_ok=False で持ち回り、UI が明示する。
-    rows = m.get("all_cands") or m.get("cands") or m.get("loose_cands") or []
-    return [t[1] for t in rows if t and len(t) > 1 and t[1]]
+    out = [(d or {}).get("url") for d in (sd.get("psa10_listings") or [])]
+    if sd.get("card_url"):
+        out.append(sd["card_url"])
+    return [u for u in out if u]
 
 
 def _skip_iids_from_tab(rows, today=None):
@@ -1579,12 +1610,15 @@ def _cache_strict_candidate_urls(entry):
       夜の探すが毎晩1本 拾うたびに同じ札が戻ってきていた (実測: 台帳65件中50件が復活状態)。
       戻すのは **番号まで一致した供給が出た時だけ** にする。
       `all_cands`/`loose_cands` は番号未確認の枠なので、ここでは数えない。
+    ★2026-09-20: スニダンは **card_id で引いている = 番号まで特定済み**なので、ここにも入れる
+      (変種違いが混ざる余地が無い)。個体の並び替わりは `_supply_key` が商品IDまでで潰す。
     """
+    out = []
     m = (entry or {}).get("mercari") or {}
-    if not isinstance(m, dict):
-        return []
-    rows = m.get("cands") or []
-    return [t[1] for t in rows if t and len(t) > 1 and t[1]]
+    if isinstance(m, dict):
+        out += [t[1] for t in (m.get("cands") or []) if t and len(t) > 1 and t[1]]
+    out += _cache_snkrdunk_urls(entry)
+    return out
 
 
 def skip_iids_now(rows, cand_urls_by_iid, strict_urls_by_iid=None):
