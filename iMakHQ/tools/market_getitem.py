@@ -129,6 +129,25 @@ def ledger_item_ids():
     return out
 
 
+# ★2026-09-20 ユーザー「APIの無駄使いは出来ない」「いつも、それで失敗する」。
+#   残りがこれを下回ったら **取りに行かない**。今日の他の処理 (監視くんの取下げ /
+#   補URL目視の現物画像 / 夜の出品) が GetItem と同じ 5,000回 の枠を使うため。
+QUOTA_FLOOR = 1500
+
+
+def remaining_getitem():
+    """GetItem の残り回数 (I/O)。取れなければ None = 分からない。"""
+    sys.path.insert(0, HERE)
+    try:
+        import ebay_rate_limits as R
+        for row in R.fetch_rate_limits(R.get_app_token()):
+            if (row.get("resource") or "") == "GetItem":
+                return int(row.get("remaining"))
+    except Exception:                                          # noqa: BLE001
+        return None
+    return None
+
+
 def cmd_fetch(argv):
     import requests
     L = _tools()
@@ -140,7 +159,18 @@ def cmd_fetch(argv):
     total = len(ids)
     if limit:
         ids = ids[:limit]
-    print(f"未取得 {total}件 / 今回 {len(ids)}件 を取ります")
+    left = remaining_getitem()
+    if left is None:
+        print("⚠ 残り回数が分からないので取りに行きません (分からない時は動かさない)")
+        return 1
+    if left - len(ids) < QUOTA_FLOOR:
+        can = max(0, left - QUOTA_FLOOR)
+        print(f"⚠ 残り {left}回。{QUOTA_FLOOR}回は他の処理に残すので、今回は {can}件までです")
+        ids = ids[:can]
+        if not ids:
+            print("  → 今日はここまで。16:00 のリセット後にもう一度どうぞ")
+            return 0
+    print(f"未取得 {total}件 / 今回 {len(ids)}件 を取ります (GetItem 残り {left}回)")
     ok = err = 0
     for n, iid in enumerate(ids, 1):
         body = ('<?xml version="1.0" encoding="utf-8"?>'

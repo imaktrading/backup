@@ -56,3 +56,34 @@ def test_保存は丸ごと():
     src = open(r"C:/dev/iMak/iMakHQ/tools/market_getitem.py", encoding="utf-8").read()
     assert "def save_raw" in src and "gzip" in src
     assert "取り直し" in src                      # なぜ丸ごとかを書き残す
+
+
+# ---- 無駄打ちをしない (2026-09-20 ユーザー「いつも、それで失敗する」) ----
+
+def test_取れた分は二度取りに行かない():
+    """1件1ファイルで残し、既にある物は対象から外す。実機で確認:
+    3件 → 2件追加 → 2件追加 と増え、先の3件の更新時刻は変わらなかった。
+    """
+    src = open(r"C:/dev/iMak/iMakHQ/tools/market_getitem.py", encoding="utf-8").read()
+    body = src.split("def cmd_fetch(")[1]
+    assert "if not have(i)" in body                  # 既にある物は取らない
+
+
+def test_残り回数を見てから走る():
+    src = open(r"C:/dev/iMak/iMakHQ/tools/market_getitem.py", encoding="utf-8").read()
+    body = src.split("def cmd_fetch(")[1]
+    assert "remaining_getitem()" in body
+    assert body.index("remaining_getitem()") < body.index("requests.post")   # 走る前に見る
+
+
+def test_分からない時は動かさない():
+    """残り回数が取れない時に走ると、気づかないうちに枠を使い切る。"""
+    src = open(r"C:/dev/iMak/iMakHQ/tools/market_getitem.py", encoding="utf-8").read()
+    body = src.split("def cmd_fetch(")[1]
+    i = body.index("if left is None:")
+    assert "return 1" in body[i:i + 200]
+
+
+def test_他の処理のぶんを残す():
+    import market_getitem as G2
+    assert G2.QUOTA_FLOOR >= 1000
