@@ -348,6 +348,14 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
     font-size:12px;border:1px dashed #c33;margin:2px;text-align:center;padding:4px}
 /* ★2026-09-08 ユーザー要望「補の画像をもう少し大きく」。候補は 200x270 → 300x405。
    1件ぶんの高さが増えるので、枠の高さも 290 → 430 に合わせる (1件が切れずに収まる)。 */
+/* ★2026-09-19 ユーザー「仕入候補はスクロールバーでめくるのがやりづらい。次へ・前へに」。
+   枠の高さ (430px) に候補1件がちょうど収まるので、1件ずつ送る。 */
+.cnav{display:flex;align-items:center;gap:8px;margin:2px 0 4px}
+.cnavb{font-size:13px;padding:4px 12px;border:1px solid #bbb;border-radius:4px;
+       background:#fff;cursor:pointer}
+.cnavb:hover{background:#f0f0f0}
+.cnavb:disabled{opacity:.4;cursor:default}
+.cpos{font-size:12px;color:#666;min-width:52px;text-align:center}
 .cands{display:flex;flex-direction:column;gap:5px;height:430px;overflow-y:auto;overflow-x:hidden}
 .cand{display:flex;align-items:flex-start;gap:8px;border:1px solid #eee;border-radius:4px;padding:3px 4px;cursor:pointer}
 .cand img{width:300px;height:405px;object-fit:contain;border:1px solid #eee;margin:0;background:#fafafa}
@@ -636,6 +644,22 @@ def confirm_targets(items, timeout=10800):   # 2026-07-24 ユーザー要望で 
 
 
 _JS_RESTOCK = """
+/* ★2026-09-19 ユーザー要望: 仕入候補を スクロールでなく「前へ / 次へ」で送る。 */
+function candBox(btn){return btn.closest('.col.cat').querySelector('.cands');}
+function candIdx(box){var cs=box.querySelectorAll('.cand'); var best=0, d=1e9;
+  for(var i=0;i<cs.length;i++){var v=Math.abs(cs[i].offsetTop-box.offsetTop-box.scrollTop);
+    if(v<d){d=v; best=i;}} return best;}
+function candPos(box){var cs=box.querySelectorAll('.cand');
+  var nav=box.parentNode.querySelector('.cnav'); if(!nav)return;
+  var i=candIdx(box); var p=nav.querySelector('.cpos');
+  if(p) p.textContent=(cs.length?(i+1)+' / '+cs.length:'');
+  var bs=nav.querySelectorAll('.cnavb');
+  if(bs.length===2){bs[0].disabled=(i<=0); bs[1].disabled=(i>=cs.length-1);}}
+function candStep(btn,d){var box=candBox(btn); var cs=box.querySelectorAll('.cand');
+  var i=candIdx(box)+d; if(i<0)i=0; if(i>cs.length-1)i=cs.length-1;
+  box.scrollTop=cs[i].offsetTop-box.offsetTop; candPos(box);}
+window.addEventListener('DOMContentLoaded',function(){
+  document.querySelectorAll('.cands').forEach(candPos);});
 function zoom(ev,btn){ev.preventDefault(); ev.stopPropagation();
   var card=btn.closest('.card'); var ref=(card&&card.dataset.ref)||'';
   var o=document.getElementById('zov');
@@ -956,7 +980,10 @@ def build_restock_html(items):
             f"<div class='pair'><div class='col psa'><div class='cap'>① 現物(出品)</div>{ref_tag}</div>"
             f"{sup_col}"
             f"<div class='col cat'><div class='cap'>仕入候補(チェック=買う / 外す=仕入見送り)</div>"
-            f"<div class='cands'>{''.join(cand_html)}</div></div></div>"
+            f"<div class='cnav'><button type='button' class='cnavb' onclick='candStep(this,-1)'>↑ 前へ</button>"
+            f"<span class='cpos'></span>"
+            f"<button type='button' class='cnavb' onclick='candStep(this,1)'>次へ ↓</button></div>"
+            f"<div class='cands' onscroll='candPos(this)'>{''.join(cand_html)}</div></div></div>"
             "</div>")
     # ★2026-07-30: 旧文は「買わない候補(**違うカード** / 高い / …)は仕入見送り」と書いており、
     #   別に「違う」ボタンがあるのと矛盾していた。これが 見送り 誤用の原因。意味を書き分ける。
