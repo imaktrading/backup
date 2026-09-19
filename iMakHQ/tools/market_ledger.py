@@ -6,6 +6,7 @@
     python iMakHQ/tools/market_ledger.py ingest          # ダウンロード等から取り込む
     python iMakHQ/tools/market_ledger.py report          # 売れているカードと前回との差
     python iMakHQ/tools/market_ledger.py targets         # 探す先 (売れているのに出していない)
+    python iMakHQ/tools/market_ledger.py cards           # 売れ筋 (出品済/未出品 の印つき・値段の差)
 
 ★台帳に貯めるのは **出品ごとの行** (eBay が出した「期間中に何個売れたか」付き)。
   カード単位の集計は report の時に作る。集計を焼いて保存すると、後から数え直せなくなる。
@@ -234,6 +235,9 @@ def by_card(rows, kind="Sold"):
 #   「カタログを引けた」時だけ。訳さない・推測しない。だからここでは番号とカタログの和名しか出さない。
 CATALOG_DB = r"C:/dev/iMak_data/catalog/products.sqlite"
 TARGETS_CSV = os.path.join(LEDGER_DIR, "demand_market.csv")
+# ★2026-09-20: 売れ筋の全体 (出品済/未出品 の印つき)。上の demand_market.csv は
+#   抽出くんに渡す「うちが出していない分」だけなので、値段の比較には使えなかった。
+CARDS_CSV = os.path.join(LEDGER_DIR, "market_cards.csv")
 
 # タイトルの中の弾コード (SV2a / S12a / M2a / CLK / sv1a …)
 _SET_CODE = re.compile(r"\b((?:SV|S|M|CLK|SM|XY|BW|DP)[0-9]{0,2}[A-Z]?)\b", re.I)
@@ -266,28 +270,50 @@ def lookup_catalog(cands, conn):
     return None
 
 
-def missing_cards(rows, live_keys, min_sold=2):
-    """市場で min_sold 以上売れたのに、うちが出していないカード。"""
-    agg, _ = by_card(rows)
+def mine_index(live_keys):
+    """うちが出しているカードの索引 (純関数)。戻り: (弾コード付きの集合, 番号→弾コード集合)。"""
     mine_dash, mine_num = set(), collections.defaultdict(set)
     for k in live_keys:
-        m = re.match(r"^([A-Za-z0-9]+)-(\d+)", (k or "").split(":")[-1])
+        # ★2026-09-20: 弾コードに `-` が入る物 (M-P-020 / SV-P-098 のプロモ) を拾えていなかった。
+        #   末尾の数字より前を弾コードとして見る。
+        suf = (k or "").split(":")[-1]
+        m = re.match(r"^(.+)-(\d+)$", suf) or re.match(r"^([A-Za-z0-9]+)-(\d+)", suf)
         if m:
             mine_dash.add(f"{m.group(1).upper()}-{m.group(2)}")
             mine_num[m.group(2).lstrip("0")].add(m.group(1).upper())
-    out = []
-    for k, v in agg.items():
-        if v["sold"] < min_sold:
-            continue
-        if "/" in k:
-            sets = mine_num.get(k.split("/")[0].lstrip("0"), set())
-            title = re.sub(r"[^A-Z0-9]", "", v["title"].upper())
-            have = any(s in title for s in sets)
-        else:
-            have = k.upper() in mine_dash
-        if not have:
-            out.append((k, v))
+    return mine_dash, mine_num
+
+
+def is_mine(key, title, idx):
+    """そのカードを うちが出しているか (純関数)。idx は mine_index の戻り。"""
+    mine_dash, mine_num = idx
+    if "/" in key:
+        sets = mine_num.get(key.split("/")[0].lstrip("0"), set())
+        t = re.sub(r"[^A-Z0-9]", "", (title or "").upper())
+        # ★2026-09-20: 弾コード側も記号を落として比べる。`M-P` のままだと、記号を落とした
+        #   タイトル (…020MP) に当たらず、プロモが全部「未出品」に見えていた。
+        return any(re.sub(r"[^A-Z0-9]", "", s) in t for s in sets)
+    return key.upper() in mine_dash
+
+
+def cards_with_flag(rows, live_keys, min_sold=2):
+    """市場で min_sold 以上売れたカードを **出品済/未出品 の印つき**で返す (純関数)。
+
+    ★2026-09-20 ユーザー指示「売れ筋一覧に出品済、未出品のFLGがあれば、いいんだよね」。
+      従来は「うちが出していない分」だけを出していた (抽出くんに渡す用) ので、
+      **出している分の実売価格と自分の値段を比べられなかった**。同じ集計から両方出す。
+    戻り: [(番号, 集計, 出品済か)] 売れた数の多い順。
+    """
+    agg, _ = by_card(rows)
+    idx = mine_index(live_keys)
+    out = [(k, v, is_mine(k, v["title"], idx))
+           for k, v in agg.items() if v["sold"] >= min_sold]
     return sorted(out, key=lambda x: -x[1]["sold"])
+
+
+def missing_cards(rows, live_keys, min_sold=2):
+    """市場で min_sold 以上売れたのに、うちが出していないカード。"""
+    return [(k, v) for k, v, have in cards_with_flag(rows, live_keys, min_sold) if not have]
 
 
 # ---- 実売価格 → 上限の仕入れ値 (cost-plus の逆引き) ----
@@ -367,6 +393,205 @@ def cmd_targets(argv):
     return 0
 
 
+FUNNEL_DIR = r"C:/dev/iMak/iMakHQ/funnel_output"
+
+
+def _our_prices():
+    """itemID → うちの eBay 出品価格 (USD)。一番新しいファネルCSVから (I/O)。
+
+    ★商品管理シートの「商品価格」は **仕入元 (メルカリ) の円**なので使えない
+      (2026-09-20 に取り違えた)。うちの売値が載っているのはファネルだけ。US のみ見る
+      (UK/AU/CA は eBaymag のミラーで itemID が別物)。
+    """
+    files = sorted(glob.glob(os.path.join(FUNNEL_DIR, "funnel_*.csv")))
+    if not files:
+        return {}
+    out = {}
+    with open(files[-1], encoding="utf-8-sig", newline="") as f:
+        for r in csv.DictReader(f):
+            if (r.get("site") or "") != "US":
+                continue
+            p = _money(r.get("price"))
+            if r.get("item_id") and p:
+                out[r["item_id"].strip()] = (p, r.get("title") or "")
+    return out
+
+
+# ★2026-09-20: 番号だけで突き合わせると **別物の値段**を掴む (実測)。
+#   シャンクス OP09-004: うち $272 に対して "Manga Alt Art comic parallel" が $19,447。
+#   満身創痍 ST01-012: うち $186 に対して "1st Anniversary 尾田サイン入り" が $5,165。
+#   ナミ OP08-106 は英語版、格闘戦 ST03-013 は中国語版だった。
+#   同じ番号でも **刷り・言語・特別仕様が違えば別の商品**。印が食い違う行は値段に使わない。
+_MARKERS = (
+    ("英語版", ("ENGLISH", "ENG ")),
+    ("中国語版", ("CHINESE", "CHN")),
+    ("韓国語版", ("KOREAN",)),
+    ("サイン", ("SIGNATURE", "SIGNED", "AUTOGRAPH", "SIGNATURE")),
+    ("記念", ("ANNIVERSARY",)),
+    ("マンガ", ("MANGA", "COMIC")),
+    ("別イラスト", ("ALT ART", "ALTERNATE ART", "ALTERNATIVE ART")),
+    ("パラレル", ("PARALLEL", "パラレル")),
+    # ★大会の賞品は同じ番号でも別物 (実測: シャンクス OP09-004 の
+    #   "SR final-T Best32 Promo Championship 2025" が $37,000。うちの通常版は $272)。
+    ("大会賞品", ("CHAMPIONSHIP", "TOURNAMENT", "WINNER", "TOP 8", "BEST32", "BEST 32")),
+    ("プロモ", ("PROMO",)),
+)
+
+
+def markers(title):
+    """タイトルが名乗っている「別物の印」(純関数)。無ければ空集合。"""
+    t = (title or "").upper()
+    return {name for name, words in _MARKERS if any(w in t for w in words)}
+
+
+def _rarity(title):
+    """タイトルに明記されたレアリティ (SEC / SP / SR …)。補URL目視と同じ判定を使う。"""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    # ★語で書かれた分も拾う (うちの eBay タイトルは "Super Rare" と綴る)。
+    t = (title or "").upper()
+    out = set()
+    for word, tok in (("SECRET RARE", "SEC"), ("SUPER RARE", "SR"),
+                      ("ULTRA RARE", "UR"), ("ART RARE", "AR"),
+                      ("SPECIAL RARE", "SP"), ("TREASURE RARE", "TR")):
+        if word in t:
+            out.add(tok)
+    try:
+        import psa_hoju_fill as _H
+        return out | _H._rarity_tokens(title)
+    except Exception:                                          # noqa: BLE001
+        return out
+
+
+def same_product(our_title, market_title):
+    """同じ商品として値段を比べてよいか (純関数寄り)。食い違えば比べない。
+
+    ★2026-09-20: 印 (英語版/サイン/記念/パラレル 等) に加えて **レアリティ**も見る。
+      OP05-119 ルフィは うち $150 に対し、市場の `SEC` / `SP` / `Alt Art` が $675〜$1,001
+      だった。番号が同じでも SEC と通常は別の商品。
+    """
+    if markers(our_title) != markers(market_title):
+        return False
+    # ★値段を比べる用途なので **完全に同じレアリティ**でなければ比べない。
+    #   OP05-119 は うちが SEC、市場が "Sec Sp" で、重なりを見る判定では通ってしまった。
+    ro, rm = _rarity(our_title), _rarity(market_title)
+    if ro and rm and ro != rm:
+        return False
+    return True
+
+
+def _live_rows():
+    """出品中の行 → [(KEY, 出品価格USD, itemID, タイトル)] (I/O)。売り切れは除く。"""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import sheet_io as _S
+    usd = _our_prices()
+    out = []
+    for r in _S._product_ws().get_all_values()[1:]:
+        g = lambda i: (r[i].strip() if len(r) > i else "")
+        if not g(1) or g(3):                       # itemID 無 / 売り切れ
+            continue
+        # ★2026-09-20: 比べるのは **うちの eBay タイトル** (ファネル)。シートの C列は
+        #   仕入元 (メルカリ) の日本語タイトルなので、市場の英語タイトルとは比べられない。
+        p, t = usd.get(g(1)) or (None, "")
+        out.append((g(34), p, g(1), t or g(2)))
+    return out
+
+
+def cmd_cards(argv):
+    """売れ筋の一覧を **出品済/未出品 の印つき**で出す (毎回作り直す)。
+
+    ★2026-09-20 ユーザー指示。出品済の行には うちの値段と実売中央値の差も出す。
+      「実売より安く出している = そのぶん取り逃している」を1枚で見るため。
+    """
+    import sqlite3
+    rows = load_ledger()
+    if not rows:
+        print("台帳が空です。先に ingest してください")
+        return 1
+    live = _live_rows()
+    _, unknown = by_card(rows)
+    cards = cards_with_flag(rows, [k for k, _p, _i, _t in live])
+
+    # 番号 → [(うちの値段, うちのタイトル)]。突合は市場側のタイトルで見る (is_mine の約束)。
+    ours = [(price, title, mine_index([key])) for key, price, _i, title in live if price]
+    mine_of = collections.defaultdict(list)
+    for k, v, have in cards:
+        if not have:
+            continue
+        for price, title, one in ours:
+            if is_mine(k, v["title"], one):
+                mine_of[k].append((price, title))
+    # うちの product_id 索引 (KEY の末尾がカタログの product_id)
+    mine_pids = collections.defaultdict(list)
+    for key, price, _iid, title in live:
+        pid = (key or "").split(":")[-1].upper()
+        if pid and price and "/" not in pid:
+            mine_pids[pid].append((price, title))
+    # 市場の行を番号ごとに持つ (中央値は **印が一致する行だけ**から出し直す)
+    rows_of = collections.defaultdict(list)
+    for r in rows:
+        if r.get("種別") != "Sold":
+            continue
+        k = card_no(r.get("タイトル"))
+        pr = _money(r.get("平均落札"))
+        if k and pr:
+            rows_of[k].append((pr, r.get("タイトル") or ""))
+
+    conn = sqlite3.connect(CATALOG_DB)
+    out, hit = [], 0
+    for k, v, have in cards:
+        row = lookup_catalog(product_id_candidates(k, v["title"]), conn)
+        if row:
+            hit += 1
+        med = round(statistics.median(v["prices"]), 2) if v["prices"] else 0
+        mine = mine_of.get(k) or []
+        low = min(p for p, _t in mine) if mine else ""
+        # ★2026-09-20: 値段を比べるのは **カタログの product_id が両側で一致した時だけ**。
+        #   番号だけで当てると別の刷り・別セットを掴む (シャンクス OP09-004 で $37,000、
+        #   ルフィ OP05-119 で $1,001 を掴んだ)。うちの決まり = ID完全一致・推測で当てない。
+        fair = ""
+        pid = row[0] if row else ""
+        if pid and pid in mine_pids:
+            our_title = min(mine_pids[pid])[1]
+            ok = [pr for pr, t in rows_of.get(k, []) if same_product(our_title, t)]
+            fair = round(statistics.median(ok), 2) if ok else ""
+            low = min(p for p, _t in mine_pids[pid])
+        out.append({
+            "番号": k,
+            "product_id": row[0] if row else "",
+            "和名": row[2] if row else "",
+            "ゲーム": row[3] if row else "",
+            "出品状況": "出品済" if have else "未出品",
+            "売れた数": v["sold"],
+            "出品本数": v["listings"],
+            "実売中央値": med,
+            "うちの値段": low,
+            "比べてよい実売": fair,
+            "差額": round(fair - low, 2) if (low and fair) else "",
+            "上限仕入れ値(円)": max_cost_jpy(med) if med else "",
+            "市場のタイトル例": v["title"][:80],
+        })
+    with open(CARDS_CSV, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(out[0].keys()))
+        w.writeheader()
+        w.writerows(out)
+
+    mine_n = sum(1 for r in out if r["出品状況"] == "出品済")
+    cheap = [r for r in out if r["差額"] != "" and r["差額"] > 0]
+    print(f"売れ筋 {len(out)}種類 — 出品済 {mine_n} / 未出品 {len(out) - mine_n}")
+    print(f"特定できず: 番号が読めなかった販売 {unknown}個 / "
+          f"カタログを引けなかったカード {len(out) - hit}種類 (引けた {hit})")
+    if cheap:
+        tot = sum(r["差額"] for r in cheap)
+        print(f"実売中央値より安く出している: {len(cheap)}件 / 差額の合計 ${tot:,.2f}")
+        for r in sorted(cheap, key=lambda x: -x["差額"])[:10]:
+            print(f"  +${r['差額']:>7.2f}  今 ${r['うちの値段']:>7.2f} → 比べてよい実売 "
+                  f"${r['比べてよい実売']:>7.2f} ({r['売れた数']}個)  {r['和名'] or r['番号']}")
+    else:
+        print("実売中央値より安く出している出品はありません")
+    print(f"→ {CARDS_CSV}")
+    return 0
+
+
 def cmd_report(_):
     rows = load_ledger()
     if not rows:
@@ -393,7 +618,8 @@ def cmd_report(_):
 
 
 def main(argv):
-    cmds = {"ingest": cmd_ingest, "report": cmd_report, "targets": cmd_targets}
+    cmds = {"ingest": cmd_ingest, "report": cmd_report, "targets": cmd_targets,
+            "cards": cmd_cards}
     if len(argv) < 2 or argv[1] not in cmds:
         print(__doc__)
         return 1
