@@ -97,5 +97,49 @@ def test_only_one_off_urls_should_be_registered():
     assert not is_one_off_url("https://www.amazon.co.jp/dp/B0ABC")
 
 
+
+
+# ============================================================================
+# 再入荷しうる分の台帳 (2026-09-19 出品くん依頼)
+# ============================================================================
+def test_restockable_ledger_is_a_separate_file():
+    from monitor_listings import NOT_BUYABLE_LEDGER, NOT_BUYABLE_RESTOCKABLE
+    assert NOT_BUYABLE_RESTOCKABLE.name == "not_buyable_restockable.json"
+    assert NOT_BUYABLE_RESTOCKABLE != NOT_BUYABLE_LEDGER
+    assert NOT_BUYABLE_RESTOCKABLE.parent == NOT_BUYABLE_LEDGER.parent
+
+
+def test_unregister_removes_restocked_urls(tmp_path):
+    from monitor_listings import unregister_not_buyable
+    p = tmp_path / "r.json"
+    register_not_buyable(["https://a", "https://b"], why="売り切れ (再入荷あり)", path=p)
+    r = unregister_not_buyable(["https://a", "https://zzz"], path=p)
+    assert r == {"removed": 1, "error": None}
+    assert set(json.loads(p.read_text(encoding="utf-8"))) == {"https://b"}
+
+
+def test_unregister_on_missing_file_is_noop(tmp_path):
+    from monitor_listings import unregister_not_buyable
+    r = unregister_not_buyable(["https://a"], path=tmp_path / "none.json")
+    assert r == {"removed": 0, "error": None}
+
+
+def test_unregister_keeps_file_valid_when_nothing_matches(tmp_path):
+    from monitor_listings import unregister_not_buyable
+    p = tmp_path / "r.json"
+    register_not_buyable(["https://a"], why="売り切れ (再入荷あり)", path=p)
+    before = p.read_text(encoding="utf-8")
+    assert unregister_not_buyable(["https://x"], path=p)["removed"] == 0
+    assert p.read_text(encoding="utf-8") == before
+
+
+def test_register_error_reports_zero_added(tmp_path):
+    """壊れた台帳に書こうとしたら 0件 + エラー (件数だけ増えて見えない)."""
+    p = tmp_path / "r.json"
+    p.write_text("[]", encoding="utf-8")
+    r = register_not_buyable(["https://a"], why="売り切れ (再入荷あり)", path=p)
+    assert r["added"] == 0 and r["error"]
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

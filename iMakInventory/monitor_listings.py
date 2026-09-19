@@ -591,20 +591,22 @@ CLEARED_BACKUPS_ARCHIVE = DECISION_LOG_DIR / "cleared_backups_archive.jsonl"
 # 出し続ける。形式: {url: {"why": str, "at": iso}}。出品くんも書くので **追記のみ / 既存キーは
 # 触らない**、かつ読み込み→書き戻しの間に相手の追記を失わないよう lock を取る。
 NOT_BUYABLE_LEDGER = Path(r"C:\dev\iMak_data\hq\not_buyable_urls.json")
+# 売切だが **再入荷しうる** 仕入元 (メルカリShops / Amazon 等) の台帳 (2026-09-19 出品くん依頼)。
+# 出品くんはこれを読み、候補を落とさず「今は売り切れ (再入荷あり)」として後ろに回す。
+# 上の台帳と違い **在庫が戻ったら消す**。消し漏れても実害は無い (人が見て判断できる)。
+NOT_BUYABLE_RESTOCKABLE = Path(r"C:\dev\iMak_data\hq\not_buyable_restockable.json")
 
 
-def register_not_buyable(urls, why: str, path: Path = None, retries: int = 20) -> dict:
-    """売切と判った URL を出品くんの台帳へ登録する (追記のみ).
+def _edit_url_ledger(path: Path, mutate, retries: int = 20) -> dict:
+    """出品くんの台帳を安全に読み書きする (lock → 読 → mutate → 差替).
 
-    既に載っている URL は上書きしない (出品くんが書いた理由を潰さない)。
-    書けなくても巡回は止めない (台帳は出品側の都合であり、取下げの正しさには影響しない)。
+    出品くんも同じファイルを書くので、読込→書戻しの間に相手の追記を失わないよう
+    lock を取る。書けなくても巡回は止めない (台帳は出品側の都合であり、取下げの
+    正しさには影響しない)。
 
-    Returns: {"added": N, "already": M, "error": str or None}
+    mutate: dict を受け取り、変えた件数 (int) を返す関数。dict は in-place で変える。
+    Returns: {"changed": N, "error": str or None}
     """
-    path = path or NOT_BUYABLE_LEDGER
-    urls = [u for u in dict.fromkeys(u.strip() for u in urls if u and u.strip())]
-    if not urls:
-        return {"added": 0, "already": 0, "error": None}
     lock = path.with_suffix(path.suffix + ".lock")
     fd = None
     try:
@@ -614,7 +616,7 @@ def register_not_buyable(urls, why: str, path: Path = None, retries: int = 20) -
                 fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 break
             except FileExistsError:
-                # 相手 (出品くん) が書いている最中。少し待つ。古い lock は置き去りとみなす
+                # 相手が書いている最中。少し待つ。古い lock は置き去りとみなす
                 try:
                     if time.time() - os.path.getmtime(lock) > 60:
                         os.unlink(lock)
@@ -623,30 +625,23 @@ def register_not_buyable(urls, why: str, path: Path = None, retries: int = 20) -
                     pass
                 time.sleep(0.5)
         if fd is None:
-            return {"added": 0, "already": 0, "error": "lock を取れませんでした"}
+            return {"changed": 0, "error": "lock を取れませんでした"}
 
         try:
             data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
             if not isinstance(data, dict):
-                return {"added": 0, "already": 0, "error": "台帳の形式が想定と違います"}
+                return {"changed": 0, "error": "台帳の形式が想定と違います"}
         except Exception as e:
-            return {"added": 0, "already": 0, "error": f"読込失敗 {type(e).__name__}: {e}"}
+            return {"changed": 0, "error": f"読込失敗 {type(e).__name__}: {e}"}
 
-        now = datetime.now().isoformat(timespec="seconds")
-        added = already = 0
-        for u in urls:
-            if u in data:
-                already += 1
-                continue
-            data[u] = {"why": why, "at": now}
-            added += 1
-        if added:
+        changed = mutate(data)
+        if changed:
             tmp = path.with_suffix(path.suffix + ".tmp")
             tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             os.replace(tmp, path)
-        return {"added": added, "already": already, "error": None}
+        return {"changed": changed, "error": None}
     except Exception as e:
-        return {"added": 0, "already": 0, "error": f"{type(e).__name__}: {e}"}
+        return {"changed": 0, "error": f"{type(e).__name__}: {e}"}
     finally:
         if fd is not None:
             try:
@@ -654,6 +649,62 @@ def register_not_buyable(urls, why: str, path: Path = None, retries: int = 20) -
                 os.unlink(lock)
             except OSError:
                 pass
+
+
+def _clean_urls(urls) -> list:
+    return [u for u in dict.fromkeys((u or "").strip() for u in urls) if u]
+
+
+def register_not_buyable(urls, why: str, path: Path = None, retries: int = 20) -> dict:
+    """売切と判った URL を出品くんの台帳へ登録する (追記のみ).
+
+    既に載っている URL は上書きしない (出品くんが書いた理由を潰さない)。
+
+    Returns: {"added": N, "already": M, "error": str or None}
+    """
+    path = path or NOT_BUYABLE_LEDGER
+    urls = _clean_urls(urls)
+    if not urls:
+        return {"added": 0, "already": 0, "error": None}
+    state = {"added": 0, "already": 0}
+
+    def mutate(data):
+        now = datetime.now().isoformat(timespec="seconds")
+        for u in urls:
+            if u in data:
+                state["already"] += 1
+                continue
+            data[u] = {"why": why, "at": now}
+            state["added"] += 1
+        return state["added"]
+
+    r = _edit_url_ledger(path, mutate, retries=retries)
+    return {"added": state["added"] if not r["error"] else 0,
+            "already": state["already"] if not r["error"] else 0,
+            "error": r["error"]}
+
+
+def unregister_not_buyable(urls, path: Path = None, retries: int = 20) -> dict:
+    """在庫が戻った URL を台帳から消す (再入荷台帳用).
+
+    消し漏れても実害は無い (出品くん側で人が見て判断できる) ので、失敗は握って進む。
+
+    Returns: {"removed": N, "error": str or None}
+    """
+    path = path or NOT_BUYABLE_RESTOCKABLE
+    urls = _clean_urls(urls)
+    if not urls or not path.exists():
+        return {"removed": 0, "error": None}
+    state = {"removed": 0}
+
+    def mutate(data):
+        for u in urls:
+            if data.pop(u, None) is not None:
+                state["removed"] += 1
+        return state["removed"]
+
+    r = _edit_url_ledger(path, mutate, retries=retries)
+    return {"removed": state["removed"] if not r["error"] else 0, "error": r["error"]}
 # ★ 2026-08-07 revive_qty1_impl §6 復活パス:
 # pending_revive.jsonl = 2 cycle 連続 in_stock 確定した行 (= 誤検知1回で誤復活しない)。
 # newly_in_stock_state.json = 1 cycle 目に検知した (label, item_id) を暫定記録し、
@@ -1839,6 +1890,22 @@ def process_sheet(
                     f"(前M比 ±{int(PRICE_SURGE_THRESHOLD*100)}%超が過半)。見送り {res.get('m_held', 0)} 行。"
                     f"scraper 系統崩壊疑い → 要 DOM 検体確認。D/O は正常書込。")
 
+            # 在庫が戻った URL は再入荷台帳から消す (2026-09-19 出品くん依頼)。
+            # 主URL・補URL の別を問わず、この cycle で「買える」と確認できたもの全部。
+            _alive = []
+            for _r in results:
+                if _r.get("is_sold") is False and _r.get("url"):
+                    _alive.append(_r["url"])
+                for _s in (_r.get("backup_slot_results") or []):
+                    if _s and _s.get("is_sold") is False and _s.get("url"):
+                        _alive.append(_s["url"])
+            if _alive:
+                _un = unregister_not_buyable(_alive)
+                if _un["error"]:
+                    log(f"  [!] 再入荷台帳の消去に失敗 (実害なし、次 cycle で再試行): {_un['error']}")
+                elif _un["removed"]:
+                    log(f"  [OK] 再入荷台帳: 在庫が戻った {_un['removed']} 件を消去")
+
             # ★ 補URL 売切消込 (compare-and-clear + 消込急増ガード)。sold_at と別 API (書込直前 re-read)。
             #   D/O(取下げ) は上で書けている = 消込の HOLD/mismatch は fail-OPEN ではない (延命枠の衛生管理)。
             if clear_candidates:
@@ -1876,14 +1943,23 @@ def process_sheet(
                     # 登録が無いと、消したのと同じ売切URLが再び補URL候補として出てくる。
                     # ★ 1点ものだけ登録する。メルカリShops 等 再入荷する仕入元は売切でも
                     #   また買えるようになるので、台帳に載せると仕入元を永久に失う (fail-closed)。
+                    _cleared_urls = [_e.get("url", "") for _e in _cleared_entries]
                     _nb = register_not_buyable(
-                        [_e.get("url", "") for _e in _cleared_entries
-                         if is_one_off_url(_e.get("url", ""))],
+                        [u for u in _cleared_urls if is_one_off_url(u)],
                         why=f"売り切れ (監視くん {checked_at_now} 消込)")
                     if _nb["error"]:
                         log(f"  [!] 買えないURL台帳へ登録できず (消込は成功): {_nb['error']}")
                     else:
                         log(f"  [OK] 買えないURL台帳: 新規 {_nb['added']} 件 / 既載 {_nb['already']} 件")
+                    # 再入荷しうる分は別台帳へ (2026-09-19 出品くん依頼)。出品くんは候補を
+                    # 落とさず「今は売り切れ (再入荷あり)」として後ろに回す。
+                    _rs = register_not_buyable(
+                        [u for u in _cleared_urls if not is_one_off_url(u)],
+                        why="売り切れ (再入荷あり)", path=NOT_BUYABLE_RESTOCKABLE)
+                    if _rs["error"]:
+                        log(f"  [!] 再入荷台帳へ登録できず (消込は成功): {_rs['error']}")
+                    elif _rs["added"] or _rs["already"]:
+                        log(f"  [OK] 再入荷台帳: 新規 {_rs['added']} 件 / 既載 {_rs['already']} 件")
                 bc = backup_clear_result
                 if bc.get("surge") or bc.get("held"):
                     log(f"  [★補URL消込 急増ガード発火] 新規 {bc.get('new_count', '?')} 件 > 閾値 "
