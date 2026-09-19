@@ -2360,7 +2360,10 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             print(f"  ⏭ {NG_CAND_TAB}: 見送り +{len(_sk_new)}件 記録 (値段が下がるまで出しません)")
         except Exception as _e_sk:
             print(f"  ⚠ 見送りの記録skip ({type(_e_sk).__name__}: {_e_sk})")
-
+    else:
+        # ★2026-09-19: 0件でも必ず出す。出ないと「記録されていない」のか
+        #   「見送りが無かった」のかが、走行ログから区別できない。
+        print("  ⏭ 見送りにした候補はありませんでした (全部いずれかの判断をしています)")
     if diffs:
         print(f"🚨 「違う」{len(diffs)}件 = 検索が別カード/別変種を拾った精度事故。"
               "slice2 の検索(kw/variant_hint)を要修正(残存=精度事故の放置)。")
