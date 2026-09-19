@@ -175,6 +175,32 @@ def verify_alive(urls, verbose=True, budget_sec=VERIFY_BUDGET_SEC, now=None):
     return alive, dead
 
 
+def name_by_url_from_cache():
+    """{正規化URL: 出品名} を 補URL探索キャッシュから作る (I/O。読めなければ空)。
+
+    ★2026-09-19: 目視待ちの候補が **名前も値段も空** のまま目視に出て、人が中身を
+      見ないまま「違う」(= 永久NG) を押していた (実測 2026-09-19: 10件中6件)。
+      値段と同じ出どころから名前も取る。
+    """
+    out = {}
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import psa_hoju_fill as _H
+        for entry in (_H._load_cache() or {}).values():
+            m = (entry or {}).get("mercari") or {}
+            if not isinstance(m, dict):
+                continue
+            for key in ("cands", "all_cands", "loose_cands"):
+                for row in (m.get(key) or []):
+                    if row and len(row) > 2 and row[1] and row[2]:
+                        n = _norm(row[1])
+                        if n and n not in out:
+                            out[n] = str(row[2])
+    except Exception:                                          # noqa: BLE001
+        return out
+    return out
+
+
 def price_by_url_from_cache():
     """{正規化URL: 価格} を 補URL探索キャッシュから作る (I/O。読めなければ空)。
 

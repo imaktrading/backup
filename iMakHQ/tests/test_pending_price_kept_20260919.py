@@ -31,3 +31,14 @@ def test_画面は積んだ時の値段を先に使う():
 def test_値段が無い候補はその旨を画面に出す():
     src = open(r"C:/dev/iMak/iMakHQ/tools/psa_hoju_fill.py", encoding="utf-8").read()
     assert "値段が取れていません" in src
+
+
+def test_目視待ちの候補に名前も出す():
+    """★2026-09-19: 名前も値段も空のまま目視に出て、人が中身を見ないまま
+    「違う」(= 永久NG) を押していた (実測: 10件中6件)。値段と同じ出どころから名前も取る。
+    """
+    import hoju_url_from_dupes as hd
+    assert hasattr(hd, "name_by_url_from_cache")
+    src = open(r"C:/dev/iMak/iMakHQ/tools/psa_hoju_fill.py", encoding="utf-8").read()
+    assert "name_by_url_from_cache()" in src
+    assert '_name_of.get(_norm_url(_u))' in src

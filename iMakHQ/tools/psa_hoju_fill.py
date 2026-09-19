@@ -1938,12 +1938,13 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     _pending_by_iid, _shown_pending = {}, []
     try:
         import aux_pending
-        _price_of = {}
+        _price_of, _name_of = {}, {}
         try:
             import hoju_url_from_dupes as _hd
             _price_of = _hd.price_by_url_from_cache()
+            _name_of = _hd.name_by_url_from_cache()
         except Exception:                                      # noqa: BLE001
-            _price_of = {}
+            _price_of, _name_of = {}, {}
         # ★2026-09-13: itemID が空の行が 886本 溜まっていた (夜間の書き手が入れていなかった)。
         #   捨てずに **行番号からシートの B列を引いて**拾う。積んだ物を必ず人に見せる。
         # ★2026-09-13 ユーザー報告「補URL③ のスニダンの分が画像が出ない / 価格が出ない」。
@@ -1986,7 +1987,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
                 {"url": _u, "source": _r.get("source", ""), "price": _pp,
                  "channel": "snkrdunk" if _is_sd else ("mercari" if "mercari" in _u else ""),
                  "image": _sdi if _is_sd else "",
-                 "name": ("最新の検索に無い (値段が取れていません)" if _pp is None else ""),
+                 "name": (_name_of.get(_norm_url(_u)) or ("最新の検索に無い (値段が取れていません)" if _pp is None else "")),
                  "site": "mercari" if "mercari" in _u else ""})
         if _pending_by_iid:
             print(f"  ＋目視待ちの補URL {sum(len(v) for v in _pending_by_iid.values())}本 "
