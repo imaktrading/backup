@@ -1973,7 +1973,11 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             _u = _r["url"]
             _is_sd = "snkrdunk.com" in _u
             _sdp, _sdi = _sd_info.get(_norm_url(_u), (None, ""))
-            _pp = _sdp if _is_sd else _price_of.get(_norm_url(_u))
+            # ★2026-09-19: **積んだ時の値段を最優先**。今の検索キャッシュに無い古い分は
+            #   そこからしか分からない (実測: 目視待ち455本のうち257本が空だった)。
+            _pp = _r.get("price")
+            if _pp in (None, ""):
+                _pp = _sdp if _is_sd else _price_of.get(_norm_url(_u))
             try:
                 _pp = int(round(float(_pp))) if _pp not in (None, "") else None
             except (TypeError, ValueError):
@@ -1982,7 +1986,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
                 {"url": _u, "source": _r.get("source", ""), "price": _pp,
                  "channel": "snkrdunk" if _is_sd else ("mercari" if "mercari" in _u else ""),
                  "image": _sdi if _is_sd else "",
-                 "name": ("最新の検索に無い (売り切れの可能性)" if _is_sd and _sdp is None else ""),
+                 "name": ("最新の検索に無い (値段が取れていません)" if _pp is None else ""),
                  "site": "mercari" if "mercari" in _u else ""})
         if _pending_by_iid:
             print(f"  ＋目視待ちの補URL {sum(len(v) for v in _pending_by_iid.values())}本 "
@@ -2448,8 +2452,16 @@ def run_newcand_aux(dry_run=False):
         item_of = {row: _cell(vals[row - 1], B) for row in wb if 0 < row <= len(vals)}
         existing_by_row = {row: [_cell(vals[row - 1], AUX0 + k) for k in range(AUXN)]
                            for row in wb if 0 < row <= len(vals)}
+        # ★2026-09-19: 積む時に値段も残す (画面で「今の検索キャッシュ」から引き直すと、
+        #   数日前に積んだ物は値段が空のまま目視に出る)。
+        try:
+            import hoju_url_from_dupes as _hd_p
+            _price_of = _hd_p.price_by_url_from_cache()
+        except Exception:                                      # noqa: BLE001
+            _price_of = {}
         n_q = aux_pending.queue(wb, source="捨てた候補の転記(夜間)",
-                                existing_by_row=existing_by_row, item_of=item_of)
+                                existing_by_row=existing_by_row, item_of=item_of,
+                                price_of=_price_of)
         print(f"🔗 書込は行いません (ユーザー指示)。目視待ちに {n_q}本 積みました "
               f"(python aux_pending.py で確認)")
         return 0

@@ -451,7 +451,9 @@ def main():
             n_q = aux_pending.queue({row: [u for u in v["add"]] for row, v in plan.items()
                                      if v["add"]},
                                     source="2枚目の自動追記",
-                                    existing_by_row=existing_by_row, item_of=item_of)
+                                    existing_by_row=existing_by_row, item_of=item_of,
+                                    # ★2026-09-19: 積む時に値段も残す (後から引き直すと空になる)
+                                    price_of=price_by_url_from_cache())
             print(f"=== 書込は行いません (2026-09-08 ユーザー指示)。"
                   f"目視待ちに {n_q}本 積みました ===")
             print("   人が採否を決めます: python aux_pending.py で中身を確認")

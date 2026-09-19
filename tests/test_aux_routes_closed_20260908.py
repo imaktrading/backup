@@ -63,7 +63,7 @@ def test_newcand_aux_route_queues_instead_of_writing():
     assert "aux_pending" in s
     i = s.find('if os.environ.get("AUX_AUTO_WRITE") != "1":')
     assert i > 0
-    assert "queue(" in s[i:i + 700]
+    assert "queue(" in s[i:i + 1200]
 
 
 def test_escape_hatch_is_documented():

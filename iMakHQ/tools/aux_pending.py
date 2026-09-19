@@ -31,7 +31,7 @@ PATH = os.path.join(HERE, "..", "review_logs", "aux_url_pending.jsonl")
 
 
 def build_rows(row_to_urls, source, existing_by_row=None, item_of=None, today=None,
-               already=None):
+               already=None, price_of=None):
     """積む行を作る (純関数)。**既にシートに在る URL は積まない** (二度見せない)。
 
     ★2026-09-12 追加 `already`: **既に待ち行列に居る (行, URL) も積まない**。
@@ -50,7 +50,12 @@ def build_rows(row_to_urls, source, existing_by_row=None, item_of=None, today=No
                 continue
             seen.add((row, u))
             out.append({"date": today, "source": source, "row": row,
-                        "itemID": (item_of or {}).get(row, ""), "url": u})
+                        "itemID": (item_of or {}).get(row, ""), "url": u,
+                        # ★2026-09-19: **積んだ時の値段を一緒に残す**。
+                        #   以前は値段を持たず、画面で「今の検索キャッシュ」から引いていた。
+                        #   数日前に積んだ物はキャッシュに居ないので **値段が空のまま**
+                        #   目視に出ていた (実測: 目視待ち455本のうち257本が空)。
+                        "price": (price_of or {}).get(u)})
     return out
 
 
@@ -59,10 +64,10 @@ def queued_pairs(path=None):
     return {(r.get("row"), (r.get("url") or "").strip()) for r in load(path)}
 
 
-def queue(row_to_urls, source, existing_by_row=None, item_of=None, path=None):
+def queue(row_to_urls, source, existing_by_row=None, item_of=None, path=None, price_of=None):
     """目視待ちに積む (I/O)。戻り: 積んだ本数。既に居る分は積み直さない。"""
     rows = build_rows(row_to_urls, source, existing_by_row, item_of,
-                      already=queued_pairs(path))
+                      already=queued_pairs(path), price_of=price_of)
     if not rows:
         return 0
     p = path or PATH
