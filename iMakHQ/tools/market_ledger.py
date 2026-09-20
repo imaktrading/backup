@@ -559,22 +559,20 @@ def _live_rows():
     return out
 
 
-def cmd_cards(argv):
-    """売れ筋の一覧を **出品済/未出品 の印つき**で出す (毎回作り直す)。
+def build_cards(min_sold=2):
+    """売れ筋の一覧を作る (I/O)。戻り: (行, まとめ)。CSV も画面も同じものを使う。
 
-    ★2026-09-20 ユーザー指示。出品済の行には うちの値段と実売中央値の差も出す。
-      「実売より安く出している = そのぶん取り逃している」を1枚で見るため。
+    ★2026-09-20 ユーザー「よく売れているカードをHTMLで表示して欲しい。何のカードか、
+      何枚売れたか、いくらで売れたか、内が出せているかどうか」。
     """
     import sqlite3
     rows = load_ledger()
     if not rows:
-        print("台帳が空です。先に ingest してください")
-        return 1
+        return [], {"error": "台帳が空です。先に ingest してください"}
     live = _live_rows()
     _, unknown = by_card(rows)
-    cards = cards_with_flag(rows, [k for k, _p, _i, _t in live])
+    cards = cards_with_flag(rows, [k for k, _p, _i, _t in live], min_sold)
 
-    # 番号 → [(うちの値段, うちのタイトル)]。突合は市場側のタイトルで見る (is_mine の約束)。
     ours = [(price, title, mine_index([key])) for key, price, _i, title in live if price]
     mine_of = collections.defaultdict(list)
     for k, v, have in cards:
@@ -583,13 +581,11 @@ def cmd_cards(argv):
         for price, title, one in ours:
             if is_mine(k, v["title"], one):
                 mine_of[k].append((price, title))
-    # うちの product_id 索引 (KEY の末尾がカタログの product_id)
     mine_pids = collections.defaultdict(list)
     for key, price, _iid, title in live:
         pid = (key or "").split(":")[-1].upper()
         if pid and price and "/" not in pid:
             mine_pids[pid].append((price, title))
-    # 市場の行を番号ごとに持つ (中央値は **印が一致する行だけ**から出し直す)
     rows_of = collections.defaultdict(list)
     for r in rows:
         if r.get("種別") != "Sold":
@@ -608,9 +604,6 @@ def cmd_cards(argv):
         med = round(statistics.median(v["prices"]), 2) if v["prices"] else 0
         mine = mine_of.get(k) or []
         low = min(p for p, _t in mine) if mine else ""
-        # ★2026-09-20: 値段を比べるのは **カタログの product_id が両側で一致した時だけ**。
-        #   番号だけで当てると別の刷り・別セットを掴む (シャンクス OP09-004 で $37,000、
-        #   ルフィ OP05-119 で $1,001 を掴んだ)。うちの決まり = ID完全一致・推測で当てない。
         fair = ""
         pid = row[0] if row else ""
         if pid and pid in mine_pids:
@@ -620,8 +613,9 @@ def cmd_cards(argv):
             low = min(p for p, _t in mine_pids[pid])
         out.append({
             "番号": k,
-            "product_id": row[0] if row else "",
+            "product_id": pid,
             "和名": row[2] if row else "",
+            "英名": row[1] if row else "",
             "ゲーム": row[3] if row else "",
             "出品状況": "出品済" if have else "未出品",
             "売れた数": v["sold"],
@@ -631,21 +625,35 @@ def cmd_cards(argv):
             "比べてよい実売": fair,
             "差額": round(fair - low, 2) if (low and fair) else "",
             "上限仕入れ値(円)": max_cost_jpy(med) if med else "",
-            "市場のタイトル例": v["title"][:80],
+            "市場のタイトル例": v["title"][:90],
         })
+    mine_n = sum(1 for r in out if r["出品状況"] == "出品済")
+    cheap = [r for r in out if r["差額"] != "" and r["差額"] > 0]
+    summary = {"カード": len(out), "出品済": mine_n, "未出品": len(out) - mine_n,
+               "番号が読めなかった販売": unknown,
+               "カタログを引けた": hit, "引けなかった": len(out) - hit,
+               "実売より安い": len(cheap),
+               "取り逃し合計": round(sum(r["差額"] for r in cheap), 2)}
+    return out, summary
+
+
+def cmd_cards(argv):
+    """売れ筋の一覧を **出品済/未出品 の印つき**で出す (毎回作り直す)。"""
+    out, summary = build_cards()
+    if not out:
+        print(summary.get("error") or "空です")
+        return 1
     with open(CARDS_CSV, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(out[0].keys()))
         w.writeheader()
         w.writerows(out)
-
-    mine_n = sum(1 for r in out if r["出品状況"] == "出品済")
+    print(f"売れ筋 {summary['カード']}種類 — 出品済 {summary['出品済']} / 未出品 {summary['未出品']}")
+    print(f"特定できず: 番号が読めなかった販売 {summary['番号が読めなかった販売']}個 / "
+          f"カタログを引けなかったカード {summary['引けなかった']}種類 "
+          f"(引けた {summary['カタログを引けた']})")
     cheap = [r for r in out if r["差額"] != "" and r["差額"] > 0]
-    print(f"売れ筋 {len(out)}種類 — 出品済 {mine_n} / 未出品 {len(out) - mine_n}")
-    print(f"特定できず: 番号が読めなかった販売 {unknown}個 / "
-          f"カタログを引けなかったカード {len(out) - hit}種類 (引けた {hit})")
     if cheap:
-        tot = sum(r["差額"] for r in cheap)
-        print(f"実売中央値より安く出している: {len(cheap)}件 / 差額の合計 ${tot:,.2f}")
+        print(f"実売中央値より安く出している: {len(cheap)}件 / 差額の合計 ${summary['取り逃し合計']:,.2f}")
         for r in sorted(cheap, key=lambda x: -x["差額"])[:10]:
             print(f"  +${r['差額']:>7.2f}  今 ${r['うちの値段']:>7.2f} → 比べてよい実売 "
                   f"${r['比べてよい実売']:>7.2f} ({r['売れた数']}個)  {r['和名'] or r['番号']}")

@@ -474,6 +474,23 @@ def _market_ledger():
     return market_ledger
 
 
+# ★2026-09-20 ユーザー「よく売れているカードをHTMLで表示して欲しい。何のカードか、
+#   何枚売れたか、いくらで売れたか、内が出せているかどうか」。
+#   中身は tools/market_ledger.build_cards が唯一の口 (CSV も画面も同じものを見る)。
+#   作るのに数秒かかる (シート + カタログ) ので、少しの間 使い回す。
+_CARDS = {"at": 0, "v": None}
+CARDS_TTL = 180
+
+
+def research_cards(refresh=False):
+    if not refresh and _CARDS["v"] and time.time() - _CARDS["at"] < CARDS_TTL:
+        return _CARDS["v"]
+    rows, summary = _market_ledger().build_cards()
+    out = {"rows": rows, "summary": summary}
+    _CARDS["at"], _CARDS["v"] = time.time(), out
+    return out
+
+
 def research_meta():
     """画面に出す選択肢 (商材 / 期間 / 既定)。"""
     m = _market_ledger()
@@ -917,6 +934,12 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/research":
             try:
                 return self._json(200, research_meta())
+            except Exception as e:                       # noqa: BLE001 画面に出して知らせる
+                return self._json(200, {"error": str(e)})
+        if u.path == "/api/research/cards":
+            try:
+                q = parse_qs(u.query)
+                return self._json(200, research_cards(refresh=bool(q.get("refresh"))))
             except Exception as e:                       # noqa: BLE001 画面に出して知らせる
                 return self._json(200, {"error": str(e)})
         if u.path == "/api/log":

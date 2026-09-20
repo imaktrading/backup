@@ -762,6 +762,61 @@
       };
     });
   }
+  // ------------------------------------------------ よく売れているカード
+  // ★2026-09-20 ユーザー「よく売れているカードをHTMLで表示して欲しい。何のカードか、
+  //   何枚売れたか、いくらで売れたか、内が出せているかどうか」。
+  //   中身は tools/market_ledger.build_cards が唯一の口 (CSV と同じものを見る)。
+  var mkRows = [], mkFilter = "all";
+  var MK_FILTERS = [{ v: "all", t: "全部" }, { v: "no", t: "未出品だけ" },
+                    { v: "yes", t: "出品済だけ" }, { v: "gain", t: "値上げできる" }];
+
+  function mkMoney(v) { return (v === "" || v == null) ? "—" : "$" + Number(v).toFixed(2); }
+
+  function mkPaint() {
+    var rows = mkRows.filter(function (r) {
+      if (mkFilter === "no") return r["出品状況"] === "未出品";
+      if (mkFilter === "yes") return r["出品状況"] === "出品済";
+      if (mkFilter === "gain") return r["差額"] !== "" && r["差額"] > 0;
+      return true;
+    }).sort(function (a, b) { return b["売れた数"] - a["売れた数"]; });
+    $("mk-table").innerHTML =
+      "<thead><tr><th>カード</th><th>番号</th><th>売れた</th><th>実売の中央値</th>" +
+      "<th>うちの値段</th><th>差</th><th>出品</th></tr></thead><tbody>" +
+      rows.map(function (r) {
+        var nm = r["和名"] || r["英名"] || "(カタログ未収録)";
+        var gain = (r["差額"] !== "" && r["差額"] > 0)
+          ? '<span class="gain">+' + Number(r["差額"]).toFixed(2) + "</span>" : "—";
+        var st = r["出品状況"] === "出品済"
+          ? '<span class="st yes">出品済</span>' : '<span class="st no">未出品</span>';
+        return "<tr><td class='nm'>" + esc(nm) +
+               "<div class='sub'>" + esc(r["市場のタイトル例"] || "") + "</div></td>" +
+               "<td>" + esc(r["番号"]) + "</td>" +
+               "<td class='num'>" + r["売れた数"] + "</td>" +
+               "<td class='num'>" + mkMoney(r["実売中央値"]) + "</td>" +
+               "<td class='num'>" + mkMoney(r["うちの値段"]) + "</td>" +
+               "<td class='num'>" + gain + "</td>" +
+               "<td>" + st + "</td></tr>";
+      }).join("") + "</tbody>";
+    if (!rows.length) {
+      $("mk-table").innerHTML = "<tbody><tr><td class='empty'>該当なし</td></tr></tbody>";
+    }
+  }
+
+  function initMarketCards() {
+    rsChips("mk-filters", MK_FILTERS, function () { return mkFilter; },
+            function (v) { mkFilter = v; mkPaint(); });
+    getJSON("/api/research/cards").then(function (d) {
+      if (d.error) { $("mk-note").textContent = "出せません: " + d.error; return; }
+      mkRows = d.rows || [];
+      var s = d.summary || {};
+      $("mk-note").textContent =
+        s["カード"] + "種類 — 出品済 " + s["出品済"] + " / 未出品 " + s["未出品"] +
+        " · カタログを引けなかった " + s["引けなかった"] + "種類";
+      mkPaint();
+    }).catch(function () { $("mk-note").textContent = "読めませんでした"; });
+  }
+  initMarketCards();
+
   initResearch();
 
   bootstrap();

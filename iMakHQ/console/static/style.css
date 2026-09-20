@@ -286,3 +286,21 @@ button.rw:disabled{opacity:.5;cursor:default}
 .rsrch-out { margin: 10px 0 0; padding: 10px 12px; max-height: 320px; overflow: auto;
   background: var(--panel2, rgba(127,127,127,.08)); border-radius: 6px;
   font: 11px/1.5 Consolas, monospace; white-space: pre-wrap; }
+
+/* ★2026-09-20 よく売れているカード (リサーチの下) */
+.mk-wrap { max-height: 520px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.mk { width: 100%; border-collapse: collapse; font-size: 13px; }
+.mk th, .mk td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left;
+                 white-space: nowrap; }
+.mk th { position: sticky; top: 0; background: var(--sunken); color: var(--ink-2);
+         font-weight: 600; font-size: 12px; z-index: 1; }
+.mk td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.mk tr:hover td { background: var(--sunken); }
+.mk .nm { white-space: normal; max-width: 340px; }
+.mk .sub { color: var(--ink-3); font-size: 11px; }
+/* 出品済 / 未出品 が一目で分かるように色を変える */
+.mk .st { border-radius: 20px; padding: 1px 8px; font-size: 11px; font-weight: 700; }
+.mk .st.yes { background: #1e3a5f; color: #8ec8ff; }
+.mk .st.no  { background: #5f3a1e; color: #ffc48e; }
+.mk .gain { color: #7ddc9a; font-weight: 700; }
+.mk .chips { display: flex; flex-wrap: wrap; gap: 6px; }
