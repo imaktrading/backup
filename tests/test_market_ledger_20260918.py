@@ -62,7 +62,11 @@ def test_カード単位の集計は出品をまたいで足す():
         _row("2", "PSA10 コダック AR 175/165 sv2a 151", sold="1"),
         _row("3", "PSA10 Charizard 番号なし", sold="4"),
     ]
-    agg, unknown = M.by_card(rows)
+    # ★2026-09-20: 集計は **日本のセラー / 日本語版** だけを数えるようになった。
+    #   入口 (Terapeak の sellerCountry) が効かないので、ここが最後の門。
+    jp = {"1": "JP", "2": "JP", "3": "JP"}
+    ja = {"1": "Japanese", "2": "Japanese", "3": "Japanese"}
+    agg, unknown = M.by_card(rows, lang=ja, seller=jp)
     assert agg["175/165"]["sold"] == 3
     assert agg["175/165"]["listings"] == 2
     assert unknown == 4

@@ -17,9 +17,14 @@ import market_ledger as M
 
 
 def test_出品済と未出品を分ける():
-    rows = [{"種別": "Sold", "タイトル": "PSA10 Pikachu 020/M-P", "売れた数": "3", "平均落札": "$100"},
-            {"種別": "Sold", "タイトル": "PSA10 Mew 150/165", "売れた数": "2", "平均落札": "$50"}]
-    got = M.cards_with_flag(rows, ["pokemon_tcg:M-P-020"])
+    rows = [{"種別": "Sold", "itemId": "1", "タイトル": "PSA10 Pikachu 020/M-P",
+             "売れた数": "3", "平均落札": "$100"},
+            {"種別": "Sold", "itemId": "2", "タイトル": "PSA10 Mew 150/165",
+             "売れた数": "2", "平均落札": "$50"}]
+    # ★日本のセラー / 日本語版 として数える (出口の門を通す)
+    got = M.cards_with_flag(rows, ["pokemon_tcg:M-P-020"],
+                            lang={"1": "Japanese", "2": "Japanese"},
+                            seller={"1": "JP", "2": "JP"})
     flag = {k: have for k, _v, have in got}
     assert flag["020/M-P"] is True
     assert flag["150/165"] is False

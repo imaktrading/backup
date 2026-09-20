@@ -108,6 +108,12 @@ def build_url(preset, tab="SOLD", days=DEFAULT_DAYS, keywords=KEYWORDS, now=None
     ]
     q += [("aspect", f"Game:::{g}") for g in PRESETS[preset]]   # 空 = 絞らない
     q += [
+        # ★2026-09-20 ユーザー確定「一応入れておいて、日本人セラーに絞るかだね」。
+        #   **この指定は効いていない** (実測: 付けて取っても JP 896 / US 892 とほぼ半々)。
+        #   それでも入れたままにする理由: ①害がない (無視されるだけ) ②eBay が将来
+        #   効かせたら取得が減って得 ③外すと「効かないから外した」経緯が消え、
+        #   誰かがまた入れて同じ検証を繰り返す。
+        #   **本当に絞るのは出口** (is_jp_seller)。
         # ★2026-09-20 ユーザー確定「セラーだけ日本にして、取り直しやな」。
         #   9/18 に取った分は **買い手の国 (buyerCountry=JP)** で絞られていた。
         #   買い手が日本人かどうかは どうでもよく、むしろ eBay の買い手は大半が米国なので
@@ -339,6 +345,47 @@ def lang_by_item():
     return _LANG
 
 
+_SELLER = {}
+
+
+def seller_country_by_item():
+    """{itemID: セラーの国} を GetItem の控えから作る (I/O・1回だけ)。
+
+    ★2026-09-20 ユーザー「EB03-026 これを調べたら、2件ともUSセラーだね」
+      →「つまり、テラピークの抽出も100%ではないということだね。セラー=JPには仕切れない」。
+      そのとおりで、URL に `sellerCountry=JP` を入れても効いていなかった。
+      実測: 今日の台帳1,970件のセラー国は **JP 896 / US 892 / CN 57 / CZ 25** とほぼ半々。
+      入口 (Terapeak) では絞れないので、**出口 (ここ) で落とす**。
+    """
+    if _SELLER:
+        return _SELLER
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import market_getitem as _G
+        for name in os.listdir(_G.OUT_DIR):
+            iid = name.split(".")[0]
+            try:
+                xml = _G.load_raw(iid)
+            except Exception:                                  # noqa: BLE001
+                continue
+            m = re.search(r"<Country>(.*?)</Country>", xml)
+            if m:
+                _SELLER[iid] = m.group(1).strip()
+    except Exception:                                          # noqa: BLE001
+        pass
+    return _SELLER
+
+
+def is_jp_seller(row, seller=None):
+    """その出品が **日本のセラー** か (純関数寄り)。分からない時は False = 数えない。
+
+    ★うちと同じ土俵の相場と出品の作りを見るための集団。分からない物を混ぜると、
+      また「英語版が多い」に戻る。落とす側に倒す (入口で絞れない以上、ここが最後の門)。
+    """
+    seller = seller if seller is not None else seller_country_by_item()
+    return (seller.get((row.get("itemId") or "").strip()) or "") == "JP"
+
+
 def is_japanese(row, lang=None):
     """その出品が **日本語版か** (純関数寄り)。分からない時は True = 落とさない。
 
@@ -352,15 +399,18 @@ def is_japanese(row, lang=None):
     return v.startswith("japan")
 
 
-def by_card(rows, kind="Sold"):
+def by_card(rows, kind="Sold", lang=None, seller=None):
     """カード番号ごとに 売れた数・出品本数・実売中央値 をまとめる。"""
     agg = collections.defaultdict(lambda: {"sold": 0, "listings": 0, "prices": [], "title": ""})
     unknown = 0
-    lang = lang_by_item()
+    lang = lang_by_item() if lang is None else lang
+    seller = seller_country_by_item() if seller is None else seller
     for r in rows:
         if r.get("種別") != kind:
             continue
         if not is_japanese(r, lang):       # 英語版・中国語版は別の商品なので数えない
+            continue
+        if not is_jp_seller(r, seller):    # 日本のセラーだけ (入口で絞れないので ここで)
             continue
         try:
             n = int(r.get("売れた数") or 0)
@@ -522,7 +572,7 @@ def is_mine(key, title, idx):
     return key.upper() in mine_dash
 
 
-def cards_with_flag(rows, live_keys, min_sold=2):
+def cards_with_flag(rows, live_keys, min_sold=2, lang=None, seller=None):
     """市場で min_sold 以上売れたカードを **出品済/未出品 の印つき**で返す (純関数)。
 
     ★2026-09-20 ユーザー指示「売れ筋一覧に出品済、未出品のFLGがあれば、いいんだよね」。
@@ -530,7 +580,7 @@ def cards_with_flag(rows, live_keys, min_sold=2):
       **出している分の実売価格と自分の値段を比べられなかった**。同じ集計から両方出す。
     戻り: [(番号, 集計, 出品済か)] 売れた数の多い順。
     """
-    agg, _ = by_card(rows)
+    agg, _ = by_card(rows, lang=lang, seller=seller)
     idx = mine_index(live_keys)
     out = [(k, v, is_mine(k, v["title"], idx))
            for k, v in agg.items() if v["sold"] >= min_sold]

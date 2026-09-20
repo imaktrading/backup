@@ -89,3 +89,25 @@ def test_取り込んだファイルは二度と拾わない():
     assert "def _remember_ingested(" in src
     ing = src.split("def cmd_ingest(")[1].split("\ndef ")[0]
     assert "_remember_ingested(" in ing          # 取り込んだら覚える
+
+
+def test_入口では絞れないので出口で落とす():
+    """★2026-09-20 ユーザー「EB03-026 これを調べたら、2件ともUSセラーだね」
+    →「テラピークの抽出も100%ではない。セラー=JPには仕切れない」。
+
+    実測: `sellerCountry=JP` を付けて取っても JP 896 / US 892 / CN 57 / CZ 25 と
+    ほぼ半々だった。入口では絞れないので、GetItem のセラー国で出口で落とす。
+    URL の指定は **入れたまま**にする (害がない / 将来効けば得 / 経緯が残る)。
+    """
+    src = open(os.path.join(HQ, "tools", "market_ledger.py"), encoding="utf-8").read()
+    assert "def is_jp_seller(" in src
+    body = src.split("def by_card(")[1].split("\ndef ")[0]
+    assert "is_jp_seller(r, seller)" in body          # 集計で必ず通す
+    assert "sellerCountry=JP" in M.build_url(PRESET, "SOLD", 90)   # 入口の指定は残す
+
+
+def test_セラー国が分からなければ数えない():
+    """分からない物を残すと、また英語版が混ざる。落とす側に倒す。"""
+    assert M.is_jp_seller({"itemId": "ありえないID"}, {}) is False
+    assert M.is_jp_seller({"itemId": "1"}, {"1": "JP"}) is True
+    assert M.is_jp_seller({"itemId": "1"}, {"1": "US"}) is False
