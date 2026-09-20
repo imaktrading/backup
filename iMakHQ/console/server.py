@@ -192,7 +192,13 @@ def summarize(d, nightly_ok=False):
             #   (実測: 要対応2件と出ていたが、中身は売れて終了した UK ミラーで、走行は必ず飛ばす)。
             #   件数は **押して動かせる分だけ**。判定できない分は下の note に出す。
             ("restock", "sold_restock", ("actionable",), "blocked"),
-            ("psa_gate", "psa_gate", ("actionable", "variant_todo"), None),
+            # ★2026-09-20 ユーザー「4件と表示されているけど、押すと1件しか出てこない」。
+            #   このボタンは **2段** ある: ①変種の目視ゲート → (答えてから) ②仕入元の照合。
+            #   2つを足して1つの数字にしていたので、1段目が残っている間は「4件」と出て
+            #   画面には1段目の1件しか出なかった (実測 2026-09-20 19:53 の走行ログ:
+            #   「新規/未解決 1件のみ目視」で止まりブラウザを開いている)。
+            #   **今出る段の件数だけ**を出す (今日やることの ①→③ と同じ考え方)。
+            ("psa_gate", "psa_gate", ("variant_todo|actionable",), None),
             ("restock_build", "restock_build", ("actionable",), "blocked"),
             ("restock_wb", "restock_wb", ("actionable",), None),
             ("offer", "offer_calc", ("actionable",), None)):
@@ -200,9 +206,21 @@ def summarize(d, nightly_ok=False):
         if p.get("error"):
             err((kind,), p)
         elif p:
-            n = sum(_num(p.get(f)) for f in fields)
+            # "a|b" = **先に出る段を優先**し、残っていない時だけ次の段を数える
+            n = 0
+            for f in fields:
+                if "|" in f:
+                    for one in f.split("|"):
+                        n = _num(p.get(one))
+                        if n:
+                            break
+                else:
+                    n += _num(p.get(f))
             hold = _num(p.get(hold_field)) if hold_field else 0
             note = ("止めている %d件" % hold) if hold and not n else ""
+            # 1段目が残っている時は、次の段が何件あるかを note に出す (隠したわけではない)
+            if kind == "psa_gate" and _num(p.get("variant_todo")) and _num(p.get("actionable")):
+                note = (note + " / " if note else "") +                     "答えたら 仕入元の照合 %d件 に進みます" % _num(p.get("actionable"))
             if kind == "sold_restock" and _num(p.get("unknown")):
                 note = (note + " / " if note else "") + "判定できない %d件 (押しても動きません)" % _num(p.get("unknown"))
             put(kind, n, n > 0, note, hold)
