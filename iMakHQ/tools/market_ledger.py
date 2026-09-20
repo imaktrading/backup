@@ -139,71 +139,27 @@ _CARD_NO = re.compile(r"\b(\d{1,3}\s*/\s*(?:\d{1,3}|[A-Z]{1,3}-?[A-Z]?))\b")
 _CARD_NO_DASH = re.compile(r"\b([A-Z]{1,4}\d{0,2}-\d{2,3})\b")
 
 
-def card_no(title):
-    """タイトルからカード番号を取る。取れなければ None。
+# ★2026-09-20 ユーザー「カタログの引き方に関して、ノウハウを蓄積しておかないとね」。
+#   引き方は **tools/catalog_lookup.py が唯一の口**。ここでは薄く包むだけ。
+#   (引き方の落とし穴と順番は あちらの docstring に全部書いてある)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import catalog_lookup as _CL                                   # noqa: E402
 
-    ★eBay のタイトルは書き方がばらばらなので、番号だけを鍵にする。弾コードは
-      セラーによって付いたり付かなかったりするので、鍵にすると取りこぼす。
-    """
-    if not title:
-        return None
-    t = title.upper().replace(" /", "/").replace("/ ", "/")
-    # ★2026-09-20: eBay ライブ配信の日付を番号と読まない。
-    #   実例: "ebay Live 07/25-021 [PSA10] Mega Gengar MA 230/193" の 07/25 を
-    #   カード番号として拾い、カタログに無い = 要補充 と出していた。
-    t = re.sub(r"EBAY\s*LIVE\s*\d{1,2}/\d{1,2}(-\d+)?", " ", t)
-    m = _CARD_NO.search(t)
-    if m:
-        return m.group(1).replace(" ", "")
-    m = _CARD_NO_DASH.search(t)
-    if m:
-        return m.group(1)
-    # ★2026-09-20: eBay カタログが作った形 (斜線もハイフンも無い)
-    code, num = ebay_catalog_no(title)
-    return f"{code.upper()}-{num}" if code else None
+CATALOG_DB = _CL.DB
+card_no = _CL.card_no
+ebay_catalog_no = _CL.ebay_catalog_no
+product_id_candidates = _CL.candidates
+lookup_by_set_and_no = _CL.by_set_and_no
+lookup_by_number_text = _CL.by_number_text
+set_code_by_name = _CL.set_code_by_name
+set_code_from_title = _CL.set_code_from_title
+first_image = _CL.first_image
+_is_en_image = _CL.is_en_image
 
 
-# ★2026-09-20: eBay のカタログが作ったタイトルの形。番号が斜線でもハイフンでもなく
-#   「<日本語名の英名> <番号> <レアリティ語> <年> Pokemon Japanese <弾>-<弾名> <和名>」と並ぶ。
-#   実測: 番号が読めなかった858行のうち57行がこの形 (販売108個)。
-_EBAY_SET = re.compile(r"JAPANESE\s+([A-Z]{1,3}[0-9]{1,2}[A-Z]?)-", re.I)
-#   ★"PSA10" の 10 を番号と読まないこと (最初の実装で全部 -010 になった)
-_EBAY_NUM = re.compile(r"(?<![0-9/])(\d{2,3})(?![0-9/])")
-
-
-def ebay_catalog_no(title):
-    """eBay カタログ形式のタイトル → (弾コード, 3桁番号)。読めなければ (None, None)。純関数。"""
-    t = title or ""
-    m = _EBAY_SET.search(t)
-    if not m:
-        return None, None
-    clean = _EBAY_SET.sub(" ", re.sub(r"PSA\s*10", "", t, flags=re.I))
-    for n in _EBAY_NUM.finditer(clean):
-        v = int(n.group(1))
-        if 1900 <= v <= 2100:              # 年は番号ではない
-            continue
-        return m.group(1), "%03d" % v
-    return None, None
-
-
-def lookup_by_set_and_no(code, num, title, conn):
-    """弾コード+番号 → カタログの product_id (I/O)。当てられなければ None。
-
-    ★カタログは `SV3a` `M2a` `SV11W` と **小文字混じり**で書く。こちらが大文字に潰して
-      引いていたので当たらなかった (2026-09-20 / ②引き方の誤り。40件 → 54件)。
-      `SV11` のように弾が2つに割れている時 (SV11W / SV11B) は **タイトルの和名**で決める。
-      決められなければ None = 当てない (推測で当てると別のカードの値段を掴む)。
-    """
-    rows = conn.execute(
-        "SELECT product_id, name_jp FROM products WHERE product_id LIKE ?",
-        ("%s%%-%s" % (code, num),)).fetchall()
-    ok = [r for r in rows if re.fullmatch(code + "[A-Za-z]?", r[0].split("-")[0], re.I)]
-    if len(ok) == 1:
-        return ok[0][0]
-    for pid, jp in ok:
-        if jp and jp in (title or ""):
-            return pid
-    return None
+def lookup_catalog(cands, conn, title=""):
+    """カタログを引く (tools/catalog_lookup の包み)。"""
+    return _CL.lookup(cands, conn, title)
 
 
 def _money(s):
@@ -438,7 +394,6 @@ def by_card(rows, kind="Sold", lang=None, seller=None):
 # ---- 探す先に渡す一覧 (市場で売れているのに、うちが出していないカード) ----
 # ★抽出くんの決まり (skill harvest-targeting ①-3): 語にしてよいのは「番号が取れた」か
 #   「カタログを引けた」時だけ。訳さない・推測しない。だからここでは番号とカタログの和名しか出さない。
-CATALOG_DB = r"C:/dev/iMak_data/catalog/products.sqlite"
 TARGETS_CSV = os.path.join(LEDGER_DIR, "demand_market.csv")
 # ★2026-09-20: 売れ筋の全体 (出品済/未出品 の印つき)。上の demand_market.csv は
 #   抽出くんに渡す「うちが出していない分」だけなので、値段の比較には使えなかった。
@@ -456,148 +411,6 @@ _SET_CODE = re.compile(r"\b((?:SV|S|M|CLK|SM|XY|BW|DP)[0-9]{0,2}[A-Z]?)\b", re.I
 #   持っているので、そこから 名前→コード の表を作って引く。表は作らない (カタログが唯一の口)。
 _SET_NAME_RE = re.compile(r"^([A-Za-z0-9-]{2,8}):\s*(.+)$")
 _SET_BY_NAME = {}
-
-
-def set_code_by_name(conn):
-    """{英語のセット名(小文字): 弾コード} をカタログから作る (I/O・1回だけ)。"""
-    if _SET_BY_NAME:
-        return _SET_BY_NAME
-    try:
-        rows = conn.execute(
-            "SELECT DISTINCT ebay_value FROM ebay_filter_map WHERE field LIKE 'set%'"
-        ).fetchall()
-    except Exception:                                          # noqa: BLE001
-        return _SET_BY_NAME
-    for (v,) in rows:
-        m = _SET_NAME_RE.match((v or "").strip())
-        if m:
-            _SET_BY_NAME.setdefault(m.group(2).strip().lower(), m.group(1))
-    return _SET_BY_NAME
-
-
-def set_code_from_title(title, conn):
-    """タイトルの中の英語セット名 → 弾コード。見つからなければ None。
-
-    長い名前から先に当てる ("Pokemon Card 151" を "151" より先に見る)。
-    """
-    t = (title or "").lower()
-    best = None
-    for name, code in set_code_by_name(conn).items():
-        if len(name) >= 4 and name in t:
-            if best is None or len(name) > len(best[0]):
-                best = (name, code)
-    return best[1] if best else None
-
-
-def product_id_candidates(key, title):
-    """カード番号 (と市場タイトル) から、カタログの product_id の候補を作る。"""
-    if "/" not in key:
-        return [key.upper()]                      # OP03-057 / P-043 はそのまま
-    num, suffix = key.split("/", 1)
-    if not suffix.isdigit():                      # 020/M-P → M-P-020
-        return [f"{suffix.upper()}-{num}", key]
-    out = []
-    for m in _SET_CODE.finditer(title or ""):     # 175/165 は弾コードをタイトルから拾う
-        code = m.group(1)
-        if code.upper() in ("M", "S", "SV"):      # 単独の文字は弾ではない
-            continue
-        out.append(f"{code}-{num}")
-    out.append(key)                               # ★番号そのものも残す (最後の手)
-    return out
-
-
-def lookup_by_number_text(num_text, title, conn):
-    """カタログの **カード番号そのもの** (specs の card_number_text) で引く (I/O)。
-
-    ★2026-09-20 ユーザー指摘で発覚。「カタログ要補充 17件」のうち **16件はカタログに在った**。
-      番号が `212/172` の形のとき、弾コードをタイトルから拾えないと候補が空になり、
-      引かずに「無い」と言っていた (②引き方の誤り)。
-      カタログは番号そのものを持っているので、まずそれで引く。
-      1つに決まればそれ。複数なら **タイトルの和名 / 弾コード / 英語のセット名**で決める。
-      決められなければ当てない (推測で別のカードを掴まない)。
-    """
-    rows = conn.execute(
-        "SELECT product_id, name, name_jp, category, images, set_name, name_en FROM products "
-        "WHERE specs LIKE ?", ('%"card_number_text": "' + num_text + '"%',)).fetchall()
-    if not rows:
-        return None
-    if len(rows) == 1:
-        return rows[0][:5]
-    t = (title or "")
-    tu = re.sub(r"[^A-Z0-9]", "", t.upper())
-    for r in rows:                                   # 和名がタイトルに在る
-        if r[2] and r[2] in t:
-            return r[:5]
-    # ★2026-09-20: **英語のカード名**で決める。市場のタイトルは英語なので、ここが一番効く
-    #   (Articuno → フリーザー / Radiant Greninja → かがやくゲッコウガ)。
-    #   カタログは name_en を 22,435/22,492 件 持っている。
-    #   長い名前から先に見る ("Flareon GX" を "Flareon" より先に)。
-    named = sorted([r for r in rows if r[6]], key=lambda r: -len(r[6]))
-    for r in named:
-        if re.sub(r"[^A-Z0-9]", "", r[6].upper()) in tu:
-            return r[:5]
-    for r in rows:                                   # 弾コードがタイトルに在る
-        code = re.sub(r"[^A-Z0-9]", "", r[0].split("-")[0].upper())
-        if code and code in tu:
-            return r[:5]
-    code = set_code_from_title(t, conn)              # 英語のセット名から
-    if code:
-        cu = re.sub(r"[^A-Z0-9]", "", code.upper())
-        for r in rows:
-            if re.sub(r"[^A-Z0-9]", "", r[0].split("-")[0].upper()) == cu:
-                return r[:5]
-    return None
-
-
-def lookup_catalog(cands, conn, title=""):
-    """product_id でカタログを引く。**完全一致だけ** (名前で探さない)。
-
-    ★2026-09-20: 大文字小文字だけは問わない。カタログは `SV3a` `M2a` と小文字混じりで
-      書くのに、こちらが大文字に潰して引いていて当たらなかった (②引き方の誤り)。
-      綴りが同じで大小が違うだけの物は同じ物なので、これは「名前で探す」ことにはならない。
-    ★弾が枝分かれしている物 (SV11 → SV11W / SV11B) は **タイトルの和名**で決める。
-      決められなければ当てない。
-    """
-    for pid in cands:
-        row = conn.execute(
-            "SELECT product_id, name, name_jp, category, images FROM products "
-            "WHERE product_id = ? COLLATE NOCASE", (pid,)).fetchone()
-        if row:
-            return row
-    for pid in cands:
-        m = re.fullmatch(r"([A-Za-z]{1,3}\d{1,2}[A-Za-z]?)-(\d{2,3})", pid or "")
-        if not m:
-            continue
-        got = lookup_by_set_and_no(m.group(1), m.group(2), title, conn)
-        if got:
-            return conn.execute(
-                "SELECT product_id, name, name_jp, category, images FROM products WHERE product_id=?",
-                (got,)).fetchone()
-    # ★最後に「英語のセット名」から弾コードを当てる (市場のタイトルはコードを書かないことが多い)
-    num = ""
-    for pid in cands:
-        m = re.search(r"-(\d{2,3})$", pid or "")
-        if m:
-            num = m.group(1)
-            break
-    if not num:
-        m = re.match(r"^(\d{1,3})/", (cands[0] if cands else "") or "")
-        num = ("%03d" % int(m.group(1))) if m else ""
-    if num:
-        code = set_code_from_title(title, conn)
-        if code:
-            got = lookup_by_set_and_no(code, num, title, conn)
-            if got:
-                return conn.execute(
-                    "SELECT product_id, name, name_jp, category, images "
-                    "FROM products WHERE product_id=?", (got,)).fetchone()
-    # ★最後に **カード番号そのもの** で引く (弾コードが分からなくても決まることが多い)
-    for pid in (cands or []):
-        if "/" in (pid or ""):
-            got = lookup_by_number_text(pid, title, conn)
-            if got:
-                return got
-    return None
 
 
 def mine_index(live_keys):
@@ -902,39 +715,6 @@ def _live_rows():
         p, t = usd.get(g(1)) or tuple(extra.get(g(1)) or (None, ""))
         out.append((g(34), p, g(1), t or g(2), sold.get(g(1), 0)))
     return out
-
-
-def first_image(images_json):
-    """カタログの images → **日本語版の**画像URL (純関数)。無ければ先頭。
-
-    ★2026-09-20 ユーザー報告「114、115 英語版」。出品もセラーも日本語版で正しいのに、
-      表に出る画像が英語版のカードだった。原因は **こちらの引き方** (①ではなく②)。
-      カタログは日本語版もちゃんと持っていて、並びが
-        [0] .../OP-EN/OP06/OP06-022_d.png   ← 英語版
-        [1] .../OP-JA/OP06/OP06-022.png     ← 日本語版
-      なのに、先頭を無条件で使っていた。
-      実測 (ワンピース): 先頭が英語版 4,760件のうち **4,591件は2枚目以降に日本語版がある**。
-      日本語版が1枚も無いのは169件だけ。ドラゴンボールも同じ形 (DBFW-EN / EN_FW_)。
-      ポケモンは全部 日本語版なので、この不具合が出ていなかった。
-    """
-    try:
-        v = json.loads(images_json) if isinstance(images_json, str) else images_json
-    except Exception:                                          # noqa: BLE001
-        return ""
-    if isinstance(v, str):
-        return v
-    if not isinstance(v, list) or not v:
-        return ""
-    for u in v:
-        if u and not _is_en_image(u):
-            return str(u)
-    return str(v[0])                       # 日本語版が無ければ 仕方なく先頭
-
-
-def _is_en_image(url):
-    """英語版のカード画像か (純関数)。バンダイの画像は入れ物の名前で分かる。"""
-    u = (url or "").upper()
-    return "-EN/" in u or "/EN_" in u
 
 
 def build_cards(min_sold=2):

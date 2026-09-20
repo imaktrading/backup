@@ -23,7 +23,7 @@ import sqlite3
 import sys
 import webbrowser
 
-DB = r"C:/dev/iMak_data/catalog/products.sqlite"
+DB = None   # ↓ catalog_lookup から借りる
 OUT = r"C:/dev/iMak_data/hq/catalog_browse.html"
 API = "http://127.0.0.1:8770/api/catalog"
 
@@ -33,46 +33,15 @@ GAMES = [("pokemon_tcg", "ポケモン"), ("one_piece_tcg", "ワンピース"),
          ("", "全部")]
 
 
-def first_image(images_json):
-    """カタログの images → **日本語版の**画像URL (純関数)。無ければ先頭。
+# ★2026-09-20: 引き方と画像の選び方は **tools/catalog_lookup.py が唯一の口**。
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import catalog_lookup as _CL                                   # noqa: E402
 
-    ★2026-09-20 ユーザー報告「114、115 英語版」。出品もセラーも日本語版で正しいのに、
-      表に出る画像が英語版のカードだった。原因は **こちらの引き方** (①ではなく②)。
-      カタログは日本語版もちゃんと持っていて、並びが
-        [0] .../OP-EN/OP06/OP06-022_d.png   ← 英語版
-        [1] .../OP-JA/OP06/OP06-022.png     ← 日本語版
-      なのに、先頭を無条件で使っていた。
-      実測 (ワンピース): 先頭が英語版 4,760件のうち **4,591件は2枚目以降に日本語版がある**。
-      日本語版が1枚も無いのは169件だけ。ドラゴンボールも同じ形 (DBFW-EN / EN_FW_)。
-      ポケモンは全部 日本語版なので、この不具合が出ていなかった。
-    """
-    try:
-        v = json.loads(images_json) if isinstance(images_json, str) else images_json
-    except Exception:                                          # noqa: BLE001
-        return ""
-    if isinstance(v, str):
-        return v
-    if not isinstance(v, list) or not v:
-        return ""
-    for u in v:
-        if u and not _is_en_image(u):
-            return str(u)
-    return str(v[0])                       # 日本語版が無ければ 仕方なく先頭
-
-
-def _is_en_image(url):
-    """英語版のカード画像か (純関数)。バンダイの画像は入れ物の名前で分かる。"""
-    u = (url or "").upper()
-    return "-EN/" in u or "/EN_" in u
-
-
-def is_cert_image(url):
-    """PSA の鑑定画像か (純関数)。カタログが実物写真しか持っていない印。
-
-    ★2026-09-20 ユーザー「91はなんで実物画像なの? PSA画像かもしれないけど、
-      カタログ画像ないの?」→ 実際にそうだった (CLK-007 は鑑定画像1枚だけ)。
-    """
-    return "d1htnxwo4o0jhw.cloudfront.net/cert/" in (url or "")
+DB = _CL.DB
+first_image = _CL.first_image
+_is_en_image = _CL.is_en_image
+is_cert_image = _CL.is_cert_image
+spec_of = _CL.spec_of
 
 
 def fetch(conn, game="", q="", limit=400):
@@ -91,15 +60,6 @@ def fetch(conn, game="", q="", limit=400):
     sql.append("ORDER BY product_id LIMIT ?")
     args.append(limit)
     return conn.execute(" ".join(sql), args).fetchall()
-
-
-def spec_of(specs_json, key):
-    """specs (JSON) から1つ取り出す (純関数)。"""
-    try:
-        d = json.loads(specs_json) if isinstance(specs_json, str) else (specs_json or {})
-    except Exception:                                          # noqa: BLE001
-        return ""
-    return str(d.get(key) or "") if isinstance(d, dict) else ""
 
 
 _PAGE = """<!doctype html><html lang="ja"><meta charset="utf-8">
