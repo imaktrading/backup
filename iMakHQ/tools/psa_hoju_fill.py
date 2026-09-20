@@ -1550,6 +1550,35 @@ def run_status(max_backups=1):
               f"  ※これは足切り前の母数。実数ではない")
 
 
+def confirmed_but_nothing_written(confirmed, item_targets, vals, aux_writeback, aux_max=None):
+    """人が確認したのに **1本も補URLに入らなかった** 行を返す (純関数)。
+
+    ★2026-09-20 ユーザー「押しても残数が変わってない」。
+      入れ替えは「既存より安い候補だけが枠に入る」ので、既に安いものが5本ある行では
+      人が確認しても全部はじかれる。その結果がどこにも残らないため、**次回また同じ候補を
+      見せて、また件数が減らない**状態になっていた (実測 2026-09-20 20:44: 3件確認 → 3件のまま)。
+
+    戻り: [(idx, [入らなかったURL...])]
+    """
+    import dup_guard as _dg
+    aux_max = aux_max or AUXN
+    out = []
+    for idx, urls in (confirmed or {}).items():
+        t = item_targets[idx] if idx < len(item_targets) else None
+        if not t:
+            continue
+        row = t.get("row")
+        r = vals[row - 1] if (row and 0 < row <= len(vals)) else []
+        full = aux_writeback.get(row)
+        if full is None:
+            full = [u for u in (_cell(r, AUX0 + k) for k in range(aux_max)) if u]
+        have = {_dg.norm_url(u) for u in full if u}
+        lost = [u for u in (urls or []) if u and _dg.norm_url(u) not in have]
+        if lost and len(lost) == len([u for u in (urls or []) if u]):
+            out.append((idx, lost))
+    return out
+
+
 def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, aux_max=None,
                        price_by_url=None):
     """確定URL → 補URL書込計画 {row: [URL×5]} を決める **純関数**(I/Oなし・test可)。
@@ -2352,8 +2381,18 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             print(f"  ⚠ まとめ売りの記録skip ({type(_e_b).__name__})")
     shown = set(range(len(items)))
     not_confirmed = shown - set(confirmed.keys())
-    if not_confirmed:
+    # ★2026-09-20: 確認したのに1本も入らなかった行も「今は手が無い」として記録する。
+    #   記録しないと件数が減らず、次回また同じ候補を見せることになる。
+    _no_effect = confirmed_but_nothing_written(confirmed, item_targets, vals, aux_writeback)
+    if not_confirmed or _no_effect:
         new_skip = []
+        for idx, _lost in _no_effect:
+            t = item_targets[idx]
+            new_skip.append([t["itemID"], t.get("cert", ""), (t.get("title") or "")[:60],
+                             "既に安い補URLが5本ある", today, " | ".join(_lost)])
+        if _no_effect:
+            print(f"  📝 確認したが枠に入らなかった {len(_no_effect)}件 "
+                  f"(既に安い補URLが5本ある) → 新しい供給が出るまで出しません")
         for idx in sorted(not_confirmed):
             t = item_targets[idx]
             reason = ("違う" if idx in diffs else "売り切れ" if idx in solds
