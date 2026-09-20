@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -148,6 +149,9 @@ def main(argv=None) -> int:
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--manual", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--resume-from-json", default=None,
+                    help="落ちた走行の debug/mercari_treasure_*.json を渡すと、"
+                         " 収集済の検索語・処理済の商品を飛ばして続きから走る")
     args = ap.parse_args(argv)
 
     from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
@@ -180,7 +184,13 @@ def _run(args) -> int:
     limits = treasure_keywords.build_cost_limits(rows)
     _log(f"トレジャーハント: 一覧 {len(rows)} 件 / 検索語 {len(keywords)} 語")
 
-    dump_path = psa10.DUMP_DIR / f"mercari_treasure_{datetime.now():%Y%m%dT%H%M%S}.json"
+    resume = None
+    if args.resume_from_json:
+        dump_path = Path(args.resume_from_json)
+        resume = json.loads(dump_path.read_text(encoding="utf-8"))
+    else:
+        dump_path = psa10.DUMP_DIR / f"mercari_treasure_{datetime.now():%Y%m%dT%H%M%S}.json"
+    _log(f"途中保存先: {dump_path}")
     treasure_args = _build_treasure_args(keywords, args)
 
     # ★走行中にスプシへも書く。 最後にまとめて書くと、 落ちた時にその走行の成果が
@@ -212,7 +222,8 @@ def _run(args) -> int:
         _log(f"  [SHEET] 途中書込: {res}")
         return len(new_cands), len(new_unreadable)
 
-    payload = psa10.collect(treasure_args, dump_path=dump_path, on_flush=_flush)
+    payload = psa10.collect(treasure_args, dump_path=dump_path, resume=resume,
+                            on_flush=_flush)
 
     kept = payload["candidates"]
     unreadable = payload.get("unreadable") or []

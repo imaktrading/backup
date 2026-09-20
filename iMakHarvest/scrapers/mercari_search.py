@@ -276,21 +276,32 @@ def collect_multi_keyword_urls(
     item_condition_ids: Optional[list] = None,
     sleep_between_sec: float = 0.0,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    on_keyword_done: Optional[Callable[[list, dict], None]] = None,
+    resume_urls: Optional[list] = None,
+    resume_by_keyword: Optional[dict] = None,
 ) -> dict:
     """複数キーワードを順に検索し、 URL を横断 dedup で統合.
+
+    on_keyword_done(merged, by_keyword): 1 語終わるたびに呼ぶ (呼出側が保存する)。
+    resume_urls / resume_by_keyword: 前回までの収集結果。 by_keyword にある語は検索しない。
+      どちらも None なら従来動作。
 
     manual=True: 各キーワードでフリマアシスト手動 click 待ち (= volume 突破、 非headless)。
     sleep_between_sec: 語間の待機。 語を大量に流す時は空けた方が件数が落ちない
       (2026-08-17 実測: 8 秒空けて 10 語連続でも 15 件/語 を維持。 既定 0 = 従来動作)。
     Returns: {"urls": list[str] (dedup済), "by_keyword": {kw: 件数}, "total_raw": int}
     """
-    seen: set[str] = set()
-    merged: list[str] = []
-    by_keyword: dict[str, int] = {}
+    merged: list[str] = list(resume_urls or [])
+    seen: set[str] = set(merged)
+    by_keyword: dict[str, int] = dict(resume_by_keyword or {})
     total_raw = 0
-    for idx, kw in enumerate(keywords):
-        if idx and sleep_between_sec > 0:
+    searched = 0
+    for kw in keywords:
+        if kw in by_keyword:
+            continue
+        if searched and sleep_between_sec > 0:
             time.sleep(sleep_between_sec)
+        searched += 1
         r = collect_search_listing_urls(
             kw, driver, price_min=price_min, price_max=price_max,
             cap=cap_per_keyword, manual=manual,
@@ -307,4 +318,6 @@ def collect_multi_keyword_urls(
             merged.append(u)
             added += 1
         by_keyword[kw] = added
+        if on_keyword_done:
+            on_keyword_done(merged, by_keyword)
     return {"urls": merged, "by_keyword": by_keyword, "total_raw": total_raw}

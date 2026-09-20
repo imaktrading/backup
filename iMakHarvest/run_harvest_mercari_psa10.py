@@ -54,6 +54,9 @@ from scrapers import psa_slab_vision  # noqa: E402
 # **語を増やすとほぼ線形に積み上がる** (弾コード 10 語 → 148 件、 重複 2 件のみ)。
 # ゲーム名だけの 4 語だと 60 件が上限になるので、 弾コードで刻む。
 DUMP_DIR = ROOT / "debug"
+# 鑑定番号が読めない出品は投入しない (2026-09-08 user 確定「わからないと出品できない」)。
+# 0523ea3a で参照だけ入って定義が無く、読めない出品に当たるたび NameError で落ちていた
+SKIP_UNREADABLE = True
 
 
 # Windows の既定コンソールは cp932。 収集も書込も終わった後に ログ 1 行の
@@ -151,9 +154,12 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
         for k, v in (resume.get("collect_reject") or {}).items():
             rej[k] = rej.get(k, 0) + v
         done_urls = set(resume.get("processed_urls") or [])
-        _log(f"再開: 処理済 {len(done_urls)} URL / 既存候補 {len(cands)} 件")
+        by_keyword = dict(resume.get("by_keyword") or {})
+        _log(f"再開: 処理済 {len(done_urls)} URL / 既存候補 {len(cands)} 件 / "
+             f"収集済の検索語 {len(by_keyword)} 語")
     processed: list[str] = list(done_urls)
-    state = {"truncated": False}
+    state = {"truncated": False,
+             "urls": list((resume or {}).get("collected_urls") or [])}
     flushed = {"c": 0, "u": 0}  # スプシへ書き終えた位置
 
     def _save():
@@ -164,7 +170,8 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                "failed_urls": failed_urls,
                "vision_errors": sorted(set(vision_errors)),
                "processed_urls": processed, "truncated": state["truncated"],
-               "by_keyword": by_keyword}, dump_path, quiet=True)
+               "by_keyword": by_keyword, "collected_urls": state["urls"]},
+              dump_path, quiet=True)
 
     # 本番で既に押さえてある仕入元は拾い直さない (URL は詳細フェッチの前に落とすので
     # 1 件あたり 約10秒 と Vision 1 回分が丸ごと浮く)
@@ -180,11 +187,22 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
             urls = list(urls_override)
             _log(f"拾い直し: {len(urls)} URL (検索はしない)")
         else:
+            def _kw_done(merged, bk):
+                # ★1 語ごとに保存。 収集は 162 語で 1 時間半かかる (2026-09-20 実測)。
+                # 終わってから保存では、 途中で落ちた分が全部消える
+                state["urls"] = list(merged)
+                by_keyword.clear()
+                by_keyword.update(bk)
+                _save()
+
             collected = MSch.collect_multi_keyword_urls(
                 keywords, driver, price_min=args.price_min, price_max=args.price_max,
                 cap_per_keyword=args.cap_per_keyword, manual=args.manual,
                 sleep_between_sec=args.keyword_interval,
                 progress_callback=lambda n, m: _log(f"  収集 {m}"),
+                on_keyword_done=_kw_done if dump_path else None,
+                resume_urls=state["urls"] or None,
+                resume_by_keyword=by_keyword or None,
             )
             urls = collected["urls"]
             by_keyword = collected["by_keyword"]
