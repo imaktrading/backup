@@ -826,18 +826,36 @@ def _live_rows():
 
 
 def first_image(images_json):
-    """カタログの images (JSON配列の文字列) → 先頭のURL (純関数)。無ければ空。
+    """カタログの images → **日本語版の**画像URL (純関数)。無ければ先頭。
 
-    ★2026-09-20 ユーザー「カード画像で見たいねん。テキストだけだとイメージがわかない。
-      カタログ画像でいいよ。カタログになければ要補充もわかるし」。
+    ★2026-09-20 ユーザー報告「114、115 英語版」。出品もセラーも日本語版で正しいのに、
+      表に出る画像が英語版のカードだった。原因は **こちらの引き方** (①ではなく②)。
+      カタログは日本語版もちゃんと持っていて、並びが
+        [0] .../OP-EN/OP06/OP06-022_d.png   ← 英語版
+        [1] .../OP-JA/OP06/OP06-022.png     ← 日本語版
+      なのに、先頭を無条件で使っていた。
+      実測 (ワンピース): 先頭が英語版 4,760件のうち **4,591件は2枚目以降に日本語版がある**。
+      日本語版が1枚も無いのは169件だけ。ドラゴンボールも同じ形 (DBFW-EN / EN_FW_)。
+      ポケモンは全部 日本語版なので、この不具合が出ていなかった。
     """
     try:
         v = json.loads(images_json) if isinstance(images_json, str) else images_json
     except Exception:                                          # noqa: BLE001
         return ""
-    if isinstance(v, list) and v:
-        return str(v[0])
-    return str(v) if isinstance(v, str) else ""
+    if isinstance(v, str):
+        return v
+    if not isinstance(v, list) or not v:
+        return ""
+    for u in v:
+        if u and not _is_en_image(u):
+            return str(u)
+    return str(v[0])                       # 日本語版が無ければ 仕方なく先頭
+
+
+def _is_en_image(url):
+    """英語版のカード画像か (純関数)。バンダイの画像は入れ物の名前で分かる。"""
+    u = (url or "").upper()
+    return "-EN/" in u or "/EN_" in u
 
 
 def build_cards(min_sold=2):

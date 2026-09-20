@@ -83,3 +83,33 @@ def test_ボタンから開ける():
     assert "📇 カタログを見る" in PANEL
     assert '"catalog_browse.py"' in PANEL
     assert "カタログを見る" in APP                 # 分析・棚 の並びに居る
+
+
+# ---- 画像は日本語版を選ぶ (2026-09-20 ユーザー「114、115 英語版」) ----
+
+def test_日本語版の画像を選ぶ():
+    """★出品もセラーも日本語版で正しいのに、表に出る画像が英語版のカードだった。
+
+    原因は **こちらの引き方** (①ではなく②)。カタログは日本語版も持っていて、
+      [0] .../OP-EN/OP06/OP06-022_d.png   ← 英語版
+      [1] .../OP-JA/OP06/OP06-022.png     ← 日本語版
+    なのに先頭を無条件で使っていた。実測 (ワンピース): 先頭が英語版 4,760件のうち
+    **4,591件は2枚目以降に日本語版がある**。日本語版が1枚も無いのは169件だけ。
+    """
+    assert C.first_image('["https://x/OP-EN/a.png", "https://x/OP-JA/a.png"]') \
+        == "https://x/OP-JA/a.png"
+
+
+def test_日本語版が無ければ仕方なく先頭():
+    assert C.first_image('["https://x/OP-EN/only.png"]') == "https://x/OP-EN/only.png"
+
+
+def test_ドラゴンボールの形も英語版と分かる():
+    """DBFW-EN / EN_FW_ の形。"""
+    assert C._is_en_image("https://x/card_image/DBFW-EN/FB09/EN_FW_FB09-001_Leader.png")
+    assert not C._is_en_image("https://x/card_image/DBFW-JA/FB09/FW_FB09-001.png")
+
+
+def test_ポケモンの画像は素通し():
+    u = "https://www.pokemon-card.com/assets/images/card_images/large/M-P/048258.jpg"
+    assert C.first_image('["%s"]' % u) == u
