@@ -685,7 +685,10 @@ def row_solved_in_catalog(row, *, resolve_fn=None, images_fn=None, cert_fn=None)
       program_fix 等 catalog では判定できない行は触らない (False=送る / fail-closed)。
       依頼書: hq/requests/2026-08-28_catalog_pdca_requeue_closed_items.md (3)
     """
-    if (row.get("finding_type") or "").strip() != "catalog_gap":
+    # ★2026-09-20 (提案1): `resolver_gap` も見る。ここで弾いていたため、真因を直した後も
+    #   cert160479905 が9/18-9/20 と3日連続でカタログの層Aに載り続けた。
+    #   判定内容は target_field で分岐しているので、種別を広げるだけでよい。
+    if (row.get("finding_type") or "").strip() not in ("catalog_gap", "resolver_gap"):
         return False
     cat = (row.get("category") or "").strip()
     item = str(row.get("item_id") or "")
@@ -736,7 +739,13 @@ def make_pre_emit_verifier(catalog_db, classify_fn=None, certs_dir=None):
             return False
         try:
             meta = json.loads(f.read_text(encoding="utf-8"))
-            return (_classify(str(cert), meta, con) or {}).get("status") == "RESOLVED"
+            res = _classify(str(cert), meta, con) or {}
+            # ★2026-09-20 (提案2): `REVIEW` かつ候補在り = **カタログには在る**。
+            #   目視が要るかどうかは出品くん側の話で、カタログに「登録してください」と
+            #   送る理由にはならない。RESOLVED だけを見ていたため誤依頼が続いた。
+            if res.get("status") == "RESOLVED":
+                return True
+            return res.get("status") == "REVIEW" and bool(res.get("candidates"))
         except Exception:                                      # noqa: BLE001
             return False
 
@@ -915,14 +924,17 @@ def _md_cell(v, limit=None):
 
 
 def _queue_table(items):
-    rows = ["| pri | item | 商品(identity) | field | 候補値 | 確信度 | 根拠 |",
-            "|--:|---|---|---|---|--:|---|"]
+    # ★2026-09-20 (提案3): Act が確かめた結論 (`act_verdict`) を表に出す。
+    #   DB には入っているのに渡していなかったため、カタログが毎回ゼロから調べていた。
+    rows = ["| pri | item | 商品(identity) | field | 候補値 | 確信度 | Act判定 | 根拠 |",
+            "|--:|---|---|---|---|--:|---|---|"]
     for r in items:
         ident = _md_cell((r.get("identity") or "").strip()) or "**(不明=要調査)**"
         # ★2026-09-14: 根拠を50字で切っていたため、catalog が判断できなかった
         #   (「PSA Subject='RIKA SUPER' の語が CSVの」で途切れていた)。判断に足る長さにする。
         rows.append(f"| {r['priority']} | {_md_cell(r['item_id'])} | {ident} | {_md_cell(r['target_field'])} | "
                     f"{_md_cell(r['suggested_value'] or '', 24)} | {_md_cell(r.get('confidence',''))} | "
+                    f"{_md_cell(r.get('act_verdict') or '', 40)} | "
                     f"{_md_cell(r['evidence'] or '', 200)} |")
     return rows
 
