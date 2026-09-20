@@ -99,3 +99,23 @@ def is_bundle(title: str) -> bool:
     if _BUNDLE_RE.search(t):
         return True
     return len(_PSA10_RE.findall(t)) >= 2
+
+
+# ---------------------------------------------------------------------------
+# 外国語版は採らない (2026-09-20 HQ 依頼: うちが出すのは日本語版だけ)
+# ---------------------------------------------------------------------------
+# トレジャーハント初回走行で 1,129件中 11件混入 (「中国語」「英語版」がタイトルに在る)。
+# 「英語」単体は入れない (商品名・説明に出うる)。 版を示す語だけ。
+_FOREIGN_RE = re.compile(
+    r"中国語版?|簡体字?|繁体字?|中文|"
+    r"英語版|英[語文]版|海外版|北米版|"
+    r"韓国語版?|韓国版|"
+    r"\bENGLISH\b|\bKOREAN\b|\bCHINESE\b|\bKOR\b|"
+    r"[（(]\s*(?:英語|韓国語|中国語)\s*[）)]",
+    re.IGNORECASE,
+)
+
+
+def is_foreign_edition(title: str) -> bool:
+    """タイトルが外国語版を示すか. True なら採らない."""
+    return bool(_FOREIGN_RE.search(title or ""))

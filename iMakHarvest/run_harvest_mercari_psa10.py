@@ -285,6 +285,35 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
             "by_keyword": by_keyword}
 
 
+COST_SANITY_PATH = Path("C:/dev/iMak_data/shared/cost_sanity.json")
+
+
+def load_cost_sanity(path: Path | None = None) -> dict:
+    """仕入上限の表を読む. 値を決めるのは HQ の global.yaml 1か所 (これは写し)。
+    無い / 壊れている / max_jpy が無い時は **例外** (fail-closed: 走る前に止める)."""
+    p = path or COST_SANITY_PATH
+    cfg = json.loads(p.read_text(encoding="utf-8"))
+    float(cfg["max_jpy"])
+    return cfg
+
+
+def cost_rejected(price_jpy, cfg: dict) -> bool:
+    """仕入値が上限超え / 下限割れ / ダミー数字なら True (純関数). 価格不明は落とさない."""
+    if not cfg.get("enabled", True) or price_jpy is None:
+        return False
+    c = float(price_jpy)
+    if c > float(cfg["max_jpy"]) or c < float(cfg.get("min_jpy", 0)):
+        return True
+    n = int(cfg.get("repdigit_len") or 0)
+    if n:
+        run, digits = 1, str(int(c))
+        for x, y in zip(digits, digits[1:]):
+            run = run + 1 if x == y else 1
+            if run >= n:
+                return True
+    return False
+
+
 def _process_one(url, driver, args, claimed, rej, vision_errors, failed=None):
     """1 件を判定して 候補 dict を返す (対象外なら None)。 例外は呼出側で捕まえる.
 
@@ -299,6 +328,15 @@ def _process_one(url, driver, args, claimed, rej, vision_errors, failed=None):
     if not detail.get("in_stock"):
         rej["sold"] += 1
         return None
+
+    # ★トレジャーハントの門 (2026-09-20 HQ 依頼)。 Vision に投げる前に落として費用も省く
+    if getattr(args, "strict_gates", False):
+        if psa_grade_gate.is_foreign_edition(detail.get("title") or ""):
+            rej["foreign_edition"] = rej.get("foreign_edition", 0) + 1
+            return None
+        if cost_rejected(detail.get("price_jpy"), args.cost_cfg):
+            rej["cost_over_limit"] = rej.get("cost_over_limit", 0) + 1
+            return None
 
     q = MSch.extract_seller_quality(driver)  # 直前に開いた商品ページから
     if not MSch.passes_seller_filter(

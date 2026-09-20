@@ -114,7 +114,7 @@ def append_treasure_items(items: list[dict], known_keys: set | None = None) -> d
             "skipped_existing": skipped, "input": len(items)}
 
 
-def _build_treasure_args(keywords: list[str], ap_args) -> argparse.Namespace:
+def _build_treasure_args(keywords: list[str], ap_args, cost_cfg) -> argparse.Namespace:
     """collect() が読む属性だけを持たせた args (= psa10 の既定値を踏襲)."""
     return argparse.Namespace(
         keywords=keywords,
@@ -135,6 +135,8 @@ def _build_treasure_args(keywords: list[str], ap_args) -> argparse.Namespace:
         save_every=10,
         sheet_every=30,
         max_consecutive_errors=3,
+        strict_gates=True,
+        cost_cfg=cost_cfg,
     )
 
 
@@ -175,6 +177,15 @@ def _treasure_items(kept: list[dict], unreadable: list[dict],
 
 
 def _run(args) -> int:
+    # 仕入上限は HQ が共有領域に置く写しを読むだけ。 読めなければ 7時間走って
+    # 全件素通しになる (fail-OPEN) ので、 走る前に止める。
+    import run_harvest_mercari_psa10 as _p  # noqa: PLC0415
+    try:
+        cost_cfg = _p.load_cost_sanity()
+    except Exception as e:  # noqa: BLE001
+        _log(f"❌ 停止: 仕入上限の表を読めない ({_p.COST_SANITY_PATH}): {type(e).__name__}: {e}")
+        return 2
+    _log(f"仕入上限: ¥{cost_cfg['max_jpy']:,.0f} (共有領域の写しから)")
     rows = treasure_keywords.load_rows()
     if not rows:
         _log(f"一覧が空 ({treasure_keywords.CSV_PATH}) → 何もしない")
@@ -191,7 +202,7 @@ def _run(args) -> int:
     else:
         dump_path = psa10.DUMP_DIR / f"mercari_treasure_{datetime.now():%Y%m%dT%H%M%S}.json"
     _log(f"途中保存先: {dump_path}")
-    treasure_args = _build_treasure_args(keywords, args)
+    treasure_args = _build_treasure_args(keywords, args, cost_cfg)
 
     # ★走行中にスプシへも書く。 最後にまとめて書くと、 落ちた時にその走行の成果が
     # 1 行も残らない (2026-09-13 に UT 収集で 140 件を失った型)。
