@@ -14,6 +14,7 @@
 
 import csv
 import glob
+import json
 import os
 import re
 import sys
@@ -317,7 +318,7 @@ def lookup_catalog(cands, conn, title=""):
     """
     for pid in cands:
         row = conn.execute(
-            "SELECT product_id, name, name_jp, category FROM products "
+            "SELECT product_id, name, name_jp, category, images FROM products "
             "WHERE product_id = ? COLLATE NOCASE", (pid,)).fetchone()
         if row:
             return row
@@ -328,7 +329,7 @@ def lookup_catalog(cands, conn, title=""):
         got = lookup_by_set_and_no(m.group(1), m.group(2), title, conn)
         if got:
             return conn.execute(
-                "SELECT product_id, name, name_jp, category FROM products WHERE product_id=?",
+                "SELECT product_id, name, name_jp, category, images FROM products WHERE product_id=?",
                 (got,)).fetchone()
     return None
 
@@ -437,6 +438,7 @@ def cmd_targets(argv):
             "product_id": row[0] if row else "",
             "和名": row[2] if row else "",
             "英名": row[1] if row else "",
+            "画像": first_image(row[4]) if (row and len(row) > 4) else "",
             "ゲーム": row[3] if row else "",
             "売れた数": v["sold"],
             "出品本数": v["listings"],
@@ -559,6 +561,21 @@ def _live_rows():
     return out
 
 
+def first_image(images_json):
+    """カタログの images (JSON配列の文字列) → 先頭のURL (純関数)。無ければ空。
+
+    ★2026-09-20 ユーザー「カード画像で見たいねん。テキストだけだとイメージがわかない。
+      カタログ画像でいいよ。カタログになければ要補充もわかるし」。
+    """
+    try:
+        v = json.loads(images_json) if isinstance(images_json, str) else images_json
+    except Exception:                                          # noqa: BLE001
+        return ""
+    if isinstance(v, list) and v:
+        return str(v[0])
+    return str(v) if isinstance(v, str) else ""
+
+
 def build_cards(min_sold=2):
     """売れ筋の一覧を作る (I/O)。戻り: (行, まとめ)。CSV も画面も同じものを使う。
 
@@ -616,6 +633,7 @@ def build_cards(min_sold=2):
             "product_id": pid,
             "和名": row[2] if row else "",
             "英名": row[1] if row else "",
+            "画像": first_image(row[4]) if (row and len(row) > 4) else "",
             "ゲーム": row[3] if row else "",
             "出品状況": "出品済" if have else "未出品",
             "売れた数": v["sold"],

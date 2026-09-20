@@ -304,3 +304,10 @@ button.rw:disabled{opacity:.5;cursor:default}
 .mk .st.no  { background: #5f3a1e; color: #ffc48e; }
 .mk .gain { color: #7ddc9a; font-weight: 700; }
 .mk .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ★2026-09-20 カード画像 (カタログ)。無ければ「要補充」と出す */
+.mk .mkimg { width: 58px; height: 80px; object-fit: contain; display: block;
+             border: 1px solid var(--line); border-radius: 4px; background: var(--sunken); }
+.mk .mkimg.none { display: flex; align-items: center; justify-content: center;
+                  font-size: 10px; color: #ffc48e; border-style: dashed; text-align: center; }
+.mk td:first-child { width: 66px; padding: 4px 6px; }

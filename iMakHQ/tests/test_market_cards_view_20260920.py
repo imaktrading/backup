@@ -46,3 +46,30 @@ def test_置き場所はリサーチの中():
 
 def test_口が生えている():
     assert '/api/research/cards' in SERVER and '/api/research/cards' in APP
+
+
+# ---- カード画像 (2026-09-20 ユーザー「カード画像で見たいねん」) ----
+
+def test_カタログの画像を出す():
+    body = APP.split("function mkPaint()")[1].split("function initMarketCards")[0]
+    assert 'r["画像"]' in body and "mkimg" in body
+
+
+def test_カタログに無ければ要補充と出す():
+    body = APP.split("function mkPaint()")[1].split("function initMarketCards")[0]
+    assert "要補充" in body
+    assert "カタログ要補充" in APP          # 絞り込みにも出す
+
+
+def test_画像は先頭の1枚を使う():
+    import sys
+    sys.path.insert(0, os.path.join(HQ, "tools"))
+    import market_ledger as M
+    assert M.first_image('["https://a.png", "https://b.png"]') == "https://a.png"
+    assert M.first_image("") == ""
+    assert M.first_image(None) == ""
+
+
+def test_一覧に画像の欄がある():
+    body = LEDGER.split("def build_cards(")[1].split(chr(10) + "def ")[0]
+    assert '"画像": first_image(row[4])' in body

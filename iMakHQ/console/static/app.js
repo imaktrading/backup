@@ -768,7 +768,8 @@
   //   中身は tools/market_ledger.build_cards が唯一の口 (CSV と同じものを見る)。
   var mkRows = [], mkFilter = "all";
   var MK_FILTERS = [{ v: "all", t: "全部" }, { v: "no", t: "未出品だけ" },
-                    { v: "yes", t: "出品済だけ" }, { v: "gain", t: "値上げできる" }];
+                    { v: "yes", t: "出品済だけ" }, { v: "gain", t: "値上げできる" },
+                    { v: "nocat", t: "カタログ要補充" }];
 
   function mkMoney(v) { return (v === "" || v == null) ? "—" : "$" + Number(v).toFixed(2); }
 
@@ -777,10 +778,11 @@
       if (mkFilter === "no") return r["出品状況"] === "未出品";
       if (mkFilter === "yes") return r["出品状況"] === "出品済";
       if (mkFilter === "gain") return r["差額"] !== "" && r["差額"] > 0;
+      if (mkFilter === "nocat") return !r["product_id"];
       return true;
     }).sort(function (a, b) { return b["売れた数"] - a["売れた数"]; });
     $("mk-table").innerHTML =
-      "<thead><tr><th>カード</th><th>番号</th><th>売れた</th><th>実売の中央値</th>" +
+      "<thead><tr><th></th><th>カード</th><th>番号</th><th>売れた</th><th>実売の中央値</th>" +
       "<th>うちの値段</th><th>差</th><th>出品</th></tr></thead><tbody>" +
       rows.map(function (r) {
         var nm = r["和名"] || r["英名"] || "(カタログ未収録)";
@@ -788,7 +790,11 @@
           ? '<span class="gain">+' + Number(r["差額"]).toFixed(2) + "</span>" : "—";
         var st = r["出品状況"] === "出品済"
           ? '<span class="st yes">出品済</span>' : '<span class="st no">未出品</span>';
-        return "<tr><td class='nm'>" + esc(nm) +
+        // ★2026-09-20 ユーザー「カード画像で見たいねん」「カタログになければ要補充も分かる」
+        var img = r["画像"]
+          ? "<img class='mkimg' src='" + esc(r["画像"]) + "' loading='lazy' alt=''>"
+          : "<div class='mkimg none'>要補充</div>";
+        return "<tr><td>" + img + "</td><td class='nm'>" + esc(nm) +
                "<div class='sub'>" + esc(r["市場のタイトル例"] || "") + "</div></td>" +
                "<td>" + esc(r["番号"]) + "</td>" +
                "<td class='num'>" + r["売れた数"] + "</td>" +
