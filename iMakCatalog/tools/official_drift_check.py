@@ -96,6 +96,7 @@ def parse_cards(page: str) -> list[dict]:
     """公式ページ → [{no, rarity, type, name, get_info}]  (重複は畳む)."""
     out, seen = [], set()
     for b in re.split(r'(?=<dl class="modalCol")', page)[1:]:
+        m_img = re.search(r'src="[^"]*/([A-Z0-9-]+-\d+(?:_[a-z]\d+)?)\.png', b)
         m_info = re.search(r'class="infoCol">(.*?)</div>', b, re.S)
         m_name = re.search(r'class="cardName">([^<]+)<', b)
         m_get = re.search(r'class="getInfo"><h3>[^<]*</h3>(.*?)</div>', b, re.S)
@@ -111,8 +112,11 @@ def parse_cards(page: str) -> list[dict]:
             "type": cells[2] if len(cells) > 2 else "",
             "name": _norm(m_name.group(1)),
             "get_info": _norm(re.sub(r"<[^>]+>", " ", m_get.group(1))) if m_get else "",
+            # 画像ファイル名の枝番 (`EB02-061_p3.png` -> `EB02-061_p3`)。
+            # 同じ番号で パラレル と 通常 が並ぶ弾では、**これが無いと行を1枚に結べない**
+            "variant": m_img.group(1) if m_img else "",
         }
-        key = (card["no"], card["name"], card["rarity"], card["get_info"])
+        key = (card["no"], card["name"], card["rarity"], card["get_info"], card["variant"])
         if key in seen:
             continue
         seen.add(key)
@@ -133,7 +137,9 @@ def check_series(conn, sid: str) -> dict:
     #   そこは商品ごとに行が要る (3rd ANNIVERSARY SET の欠落はこの形で出る)。
     check_set = len({c["get_info"] for c in cards if c["get_info"]}) > 1
 
-    missing, name_ng, rarity_ng, set_ng = [], [], [], []
+    missing, name_ng, rarity_ng, set_ng, rarity_row_ng = [], [], [], [], []
+    # 枝番つきの表 (`EB02-061_p3` -> `SPカード`)。1行ずつ見る照合で使う。
+    by_variant = {c["variant"]: c["rarity"] for c in cards if c["variant"] and c["rarity"]}
     for c in cards:
         # 券面番号で引く。★set_name_official は catalog 側が英語の弾名で持つことがあるので
         #   照合キーにしない (2026-09-02: 一致条件にして 126枚全部を「欠落」と誤検出した)
@@ -165,8 +171,30 @@ def check_series(conn, sid: str) -> dict:
         if check_set and c["get_info"] and not any(
                 _norm(r["set_name_official"] or "") == c["get_info"] for r in rows):
             set_ng.append((c, sorted({(r["set_name_official"] or "")[:34] for r in rows})[:3]))
+    # ★1行ずつのレアリティ照合 (2026-09-20 追加)
+    #   上の rarity_ng は **同じ番号の全行を1つの集合にまとめ、どれか1つ合えば OK** とする。
+    #   そのため「正しい行の隣に誤った行が在る」形を素通りする
+    #   (PRB 再録の EB02-061_PRB02_p3 が SEC のまま5行残っていた。2026-09-20 実測で差分0と出た)。
+    #   枝番で1行ずつ突き合わせて、その行が持つべき値と違うものを出す。
+    # ★この弾の印だけを外す。`_OP08` のように **別の弾の印**が付いた行は、その弾を見る時に
+    #   照合する (ここで外すと、よその弾の再録を この弾の値と比べて誤検出する。
+    #   2026-09-20: PRB-02 の回で `OP07-109_OP08` を SR と誤判定しかけた)。
+    m_code = re.search(r'<option value="%s"[^>]*selected[^>]*>.*?【([A-Z0-9-]+)】' % sid, html, re.S)
+    mark = m_code.group(1).replace("-", "") if m_code else None
+    if by_variant and mark:
+        for r in conn.execute(
+                "SELECT product_id, specs FROM products WHERE category=?", (CATEGORY,)):
+            v = r["product_id"].replace("_" + mark, "")
+            want = by_variant.get(v) or by_variant.get(v + "_r1")
+            if not want:
+                continue
+            got = str((json.loads(r["specs"] or "{}") or {}).get("rarity") or "").strip()
+            if not ({want, want.replace("カード", "")} & (set(got.split()) | {got})):
+                rarity_row_ng.append((r["product_id"], got, want))
+
     return {"sid": sid, "fetched": len(cards), "missing": missing,
-            "name_ng": name_ng, "rarity_ng": rarity_ng, "set_ng": set_ng}
+            "name_ng": name_ng, "rarity_ng": rarity_ng, "set_ng": set_ng,
+            "rarity_row_ng": rarity_row_ng}
 
 
 def main() -> None:
@@ -217,7 +245,7 @@ def main() -> None:
             print(f"  ✗ series={sid} {res['error']}")
             continue
         n = (len(res["missing"]) + len(res["name_ng"]) + len(res["rarity_ng"])
-             + len(res["set_ng"]))
+             + len(res["set_ng"]) + len(res.get("rarity_row_ng") or []))
         total += res["fetched"]
         ng += n
         mark = "OK " if n == 0 else "★NG"
@@ -228,6 +256,8 @@ def main() -> None:
             print(f"      [名前] {c['no']} 公式={c['name']!r} catalog={got}")
         for c, got in res["rarity_ng"][:5]:
             print(f"      [レア] {c['no']} 公式={c['rarity']!r} catalog={got}")
+        for pid, got, want in (res.get("rarity_row_ng") or [])[:5]:
+            print(f"      [レア/行] {pid} 公式={want!r} catalog={got!r}")
         for c, got in res["set_ng"][:5]:
             print(f"      [収録] {c['no']} 公式={c['get_info'][:34]!r} catalog={got}")
         state[sid] = {"at": now, "ng": n}
