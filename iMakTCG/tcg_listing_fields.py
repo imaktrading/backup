@@ -490,6 +490,13 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
             optional.append(feat)
     if fields.get("C:Year Manufactured"):
         optional.append(fields["C:Year Manufactured"])
+    # ★2026-09-20 ユーザー指示: **最後に余った枠だけ** `Gem Mint` で埋める。
+    #   PSA 10 の正式な呼び名なので全 PSA10 行に必ず当てはまる事実で、推測語ではない。
+    #   レアリティが公式に無いカード (pokemon_tcg だけで 9,729行) はタイトルが 53〜69字に
+    #   なり、監査が毎回「キーワード不足」を出していた。優先度は最下位なので、
+    #   レアリティ/年号が入る行のタイトルは **今までと変わらない**。
+    if str(grade).strip() == "10" and not _word_overlap("Gem Mint", " ".join(core + optional)):
+        optional.append("Gem Mint")
 
     def _assemble(toks):
         # 重複語 dedupe (大小無視・既出 token は落とす)

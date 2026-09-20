@@ -22,7 +22,7 @@ SV8A = {"C:Game": "Pokémon TCG", "C:Language": "Japanese", "C:Set": "Sv8a: Tera
 
 def test_short_optional_is_kept_when_a_long_one_does_not_fit():
     t = T.build_title_from_fields(SV8A)
-    assert t.endswith("2024"), t              # 長い Rarity は入らないが Year は入る
+    assert "2024" in t, t              # 長い Rarity は入らないが Year は入る
     assert 65 <= len(t) <= T._TITLE_MAX, len(t)
 
 
@@ -31,7 +31,7 @@ def test_everything_fits_is_unchanged():
     f = dict(SV8A, **{"C:Set": "Sv5k: Wild Force", "C:Card Number": "074/071",
                       "C:Character": "Bronzor", "C:Rarity": "Art Rare", "C:Features": ""})
     t = T.build_title_from_fields(f)
-    assert "Art Rare" in t and t.endswith("2024") and len(t) <= T._TITLE_MAX
+    assert "Art Rare" in t and "2024" in t and len(t) <= T._TITLE_MAX
 
 
 def test_core_is_never_cut_for_an_optional():
@@ -52,7 +52,7 @@ def test_a_word_that_is_already_there_is_not_added_again():
          "C:Features": "Art", "C:Year Manufactured": "2024"}
     t = T.build_title_from_fields(f)
     assert t.lower().split().count("art") == 1, t                       # Art は1回だけ
-    assert "Art Rare" in t and t.endswith("2024")
+    assert "Art Rare" in t and "2024" in t
 
 
 def test_a_new_word_is_still_added_even_if_part_overlaps():
@@ -77,7 +77,7 @@ def test_character_inside_the_set_name_is_not_repeated():
     t = T.build_title_from_fields(f)
     assert t.lower().split().count("frieza") == 1, t
     assert "Starter Deck Frieza" in t and "#FS04-01" in t          # 同定語は残る
-    assert "Leader" in t and t.endswith("2025")                    # 空いた分に入る
+    assert "Leader" in t and "2025" in t                    # 空いた分に入る
 
     g = dict(f, **{"C:Set": "Wish for Shenron", "C:Card Number": "FB07-097", "C:Character": "Shenron"})
     assert T.build_title_from_fields(g).lower().split().count("shenron") == 1
