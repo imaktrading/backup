@@ -44,7 +44,7 @@ def test_引けた行だけ埋める():
     rows = [HEAD,
             _row("PSA10 ミモザ SAR SV1V 105/078"),
             _row("PSA10 ピカチュウ 25th")]          # 番号が無い = 引けない
-    got, miss = T.plan(rows, _Conn())
+    got, miss, _marks = T.plan(rows, _Conn())
     assert got == {2: "pokemon_tcg:SV1V-105"}
     assert miss == 1
 
@@ -52,19 +52,19 @@ def test_引けた行だけ埋める():
 def test_引けなかった行は空のまま():
     """★推測で入れると、別のカードとして出品することになる (判定不能は skip)。"""
     rows = [HEAD, _row("PSA10 ピカチュウ 25th")]
-    got, miss = T.plan(rows, _Conn())
+    got, miss, _marks = T.plan(rows, _Conn())
     assert got == {} and miss == 1
 
 
 def test_既に入っている行は触らない():
     rows = [HEAD, _row("PSA10 ミモザ SAR SV1V 105/078", key="pokemon_tcg:既存")]
-    got, _miss = T.plan(rows, _Conn())
+    got, _miss, _m = T.plan(rows, _Conn())
     assert got == {}
 
 
 def test_KEYの形は商品管理シートと同じ():
     rows = [HEAD, _row("PSA10 ミモザ SAR SV1V 105/078")]
-    got, _ = T.plan(rows, _Conn())
+    got, _, _m = T.plan(rows, _Conn())
     assert list(got.values())[0] == "pokemon_tcg:SV1V-105"     # <category>:<product_id>
 
 
@@ -76,3 +76,37 @@ def test_引き方は1か所から():
 def test_書くのは明示した時だけ():
     src = open(os.path.join(HQ, "tools", "treasure_fill_key.py"), encoding="utf-8").read()
     assert '"--write" in argv' in src
+
+
+# ---- 仕分けの印 (2026-09-20 ユーザー「トレジャーハント対象はどれか分からない」) ----
+
+def test_門を通る物に出せるの印():
+    """★門 (ユーザー確定): 上限+¥7,000 かつ 上限×1.5。**厳しい方が効く**。"""
+    assert T.mark_of(10000, 10000) == T.MARK_GO          # ぴったり
+    assert T.mark_of(15000, 10000) == T.MARK_GO          # 1.5倍 = 通る
+    assert T.mark_of(15001, 10000) == T.MARK_HIGH        # 1.5倍を超える
+    assert T.mark_of(57000, 50000) == T.MARK_GO          # +7,000 = 通る
+    assert T.mark_of(58000, 50000) == T.MARK_HIGH        # +7,000 を超える
+
+
+def test_安いカードは1点5倍で締まる():
+    """★上限¥400 に ¥5,500 払うと どう転んでも赤字。+¥7,000 だけだと通ってしまう。"""
+    assert T.mark_of(5500, 400) == T.MARK_HIGH
+    assert T.mark_of(600, 400) == T.MARK_GO
+
+
+def test_売れ筋でなければ印を付けない():
+    assert T.mark_of(5000, None) == T.MARK_NONE
+    assert T.mark_of(5000, 0) == T.MARK_NONE
+
+
+def test_値段が読めなければ出せない側に倒す():
+    assert T.mark_of(0, 10000) == T.MARK_HIGH
+
+
+def test_門の数字を自前で持たない()  :
+    """★上限仕入れ値は HQ が実売から逆算した値。ここでは写すだけ。"""
+    src = open(os.path.join(HQ, "tools", "treasure_fill_key.py"), encoding="utf-8").read()
+    body = src.split("def load_caps(")[1].split(chr(10) + "def ")[0]
+    assert "上限仕入れ値(円)" in body            # CSV の値をそのまま読む
+    assert T.CAP_ADD == 7000 and T.CAP_MUL == 1.5
