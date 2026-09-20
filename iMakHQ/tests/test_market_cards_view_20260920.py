@@ -40,9 +40,27 @@ def test_集計は1か所から出す():
 def test_HTMLに4つが揃っている():
     h = M.cards_html(ROWS, SUMMARY)
     assert "ピカチュウ" in h                      # 何のカードか
-    assert ">166<" in h                           # 何個売れたか
+    assert "<b>166個</b>" in h                    # 何個売れたか
     assert "$202.50" in h                         # いくらで売れたか
     assert "未出品" in h and "出品済" in h        # うちが出せているか
+
+
+def test_5列に並べて順位を振る():
+    """★2026-09-20 ユーザー「カードをもう少し大きくしてほしいのと、ナンバリングして
+    横に5枚くらい並べて」。表をやめてカードの並びにした。
+    """
+    h = M.cards_html(ROWS, SUMMARY)
+    assert "repeat(5,1fr)" in h
+    assert "<div class='rank'>1</div>" in h and "<div class='rank'>2</div>" in h
+    assert h.index("<b>166個</b>") < h.index("<b>13個</b>")   # 売れた数の多い順
+
+
+def test_見出しと絞り込みは動かさない():
+    """★ユーザー「フィルタ以下がスクロールする感じで固定して欲しい」。"""
+    h = M.cards_html(ROWS, SUMMARY)
+    assert "height:100vh" in h and "overflow:hidden" in h     # 画面全体は動かさない
+    grid = h.split(".grid{")[1].split("}")[0]
+    assert "overflow-y:auto" in grid                          # 並びだけスクロール
 
 
 def test_画像を出す_無ければ要補充():

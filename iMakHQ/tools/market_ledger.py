@@ -253,12 +253,57 @@ def cmd_ingest(paths):
     return 0
 
 
+# ★2026-09-20 ユーザー報告「8は英語版」「77、78、79 英語版」「162〜165、173〜175 英語版」
+#   「英語版が多いけど」。タイトルの文字だけでは 11件中4件しか見分けられなかった
+#   ("Nami (Full Art) ST29-008 Starter Deck 29" のように 英語版と書いていない物が多い)。
+#   → 今日 取った GetItem の **Language (相手が申告した値)** を使う。実測 1,271件に入っている
+#     (日本語856 / 英語322 / 中国語55 / 韓国語7)。推測でなく申告値で分ける。
+_LANG = {}
+
+
+def lang_by_item():
+    """{itemID: 言語} を GetItem の控えから作る (I/O・1回だけ)。無ければ空。"""
+    if _LANG:
+        return _LANG
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import market_getitem as _G
+        for name in os.listdir(_G.OUT_DIR):
+            iid = name.split(".")[0]
+            try:
+                sp = _G.specifics(_G.load_raw(iid))
+            except Exception:                                  # noqa: BLE001
+                continue
+            v = (sp.get("Language") or [""])[0].strip()
+            if v:
+                _LANG[iid] = v
+    except Exception:                                          # noqa: BLE001
+        pass
+    return _LANG
+
+
+def is_japanese(row, lang=None):
+    """その出品が **日本語版か** (純関数寄り)。分からない時は True = 落とさない。
+
+    うちが売るのは日本語版だけ。英語版・中国語版の値段を混ぜると、別の商品の
+    相場を見ることになる。
+    """
+    lang = lang if lang is not None else lang_by_item()
+    v = (lang.get((row.get("itemId") or "").strip()) or "").strip().lower()
+    if not v or v == "na":
+        return True                       # 申告が無い = 判断材料なし → 落とさない
+    return v.startswith("japan")
+
+
 def by_card(rows, kind="Sold"):
     """カード番号ごとに 売れた数・出品本数・実売中央値 をまとめる。"""
     agg = collections.defaultdict(lambda: {"sold": 0, "listings": 0, "prices": [], "title": ""})
     unknown = 0
+    lang = lang_by_item()
     for r in rows:
         if r.get("種別") != kind:
+            continue
+        if not is_japanese(r, lang):       # 英語版・中国語版は別の商品なので数えない
             continue
         try:
             n = int(r.get("売れた数") or 0)
@@ -290,6 +335,47 @@ CARDS_CSV = os.path.join(LEDGER_DIR, "market_cards.csv")
 
 # タイトルの中の弾コード (SV2a / S12a / M2a / CLK / sv1a …)
 _SET_CODE = re.compile(r"\b((?:SV|S|M|CLK|SM|XY|BW|DP)[0-9]{0,2}[A-Z]?)\b", re.I)
+
+
+# ★2026-09-20 ユーザー指摘「カタログ未収録というか、引き方の問題じゃないの?」。
+#   そのとおりだった (①カタログにデータは在る / ②こちらが使っていない)。
+#   市場のタイトルは弾コードを書かず **英語のセット名**だけのことが多い
+#   ("VSTAR Universe" / "Pokemon Card 151" / "VMAX Climax" / "Incandescent Arcana")。
+#   カタログの `ebay_filter_map` が「S12a: Vstar Universe」の形で **コード付きの英語名**を
+#   持っているので、そこから 名前→コード の表を作って引く。表は作らない (カタログが唯一の口)。
+_SET_NAME_RE = re.compile(r"^([A-Za-z0-9-]{2,8}):\s*(.+)$")
+_SET_BY_NAME = {}
+
+
+def set_code_by_name(conn):
+    """{英語のセット名(小文字): 弾コード} をカタログから作る (I/O・1回だけ)。"""
+    if _SET_BY_NAME:
+        return _SET_BY_NAME
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT ebay_value FROM ebay_filter_map WHERE field LIKE 'set%'"
+        ).fetchall()
+    except Exception:                                          # noqa: BLE001
+        return _SET_BY_NAME
+    for (v,) in rows:
+        m = _SET_NAME_RE.match((v or "").strip())
+        if m:
+            _SET_BY_NAME.setdefault(m.group(2).strip().lower(), m.group(1))
+    return _SET_BY_NAME
+
+
+def set_code_from_title(title, conn):
+    """タイトルの中の英語セット名 → 弾コード。見つからなければ None。
+
+    長い名前から先に当てる ("Pokemon Card 151" を "151" より先に見る)。
+    """
+    t = (title or "").lower()
+    best = None
+    for name, code in set_code_by_name(conn).items():
+        if len(name) >= 4 and name in t:
+            if best is None or len(name) > len(best[0]):
+                best = (name, code)
+    return best[1] if best else None
 
 
 def product_id_candidates(key, title):
@@ -332,6 +418,24 @@ def lookup_catalog(cands, conn, title=""):
             return conn.execute(
                 "SELECT product_id, name, name_jp, category, images FROM products WHERE product_id=?",
                 (got,)).fetchone()
+    # ★最後に「英語のセット名」から弾コードを当てる (市場のタイトルはコードを書かないことが多い)
+    num = ""
+    for pid in cands:
+        m = re.search(r"-(\d{2,3})$", pid or "")
+        if m:
+            num = m.group(1)
+            break
+    if not num:
+        m = re.match(r"^(\d{1,3})/", (cands[0] if cands else "") or "")
+        num = ("%03d" % int(m.group(1))) if m else ""
+    if num:
+        code = set_code_from_title(title, conn)
+        if code:
+            got = lookup_by_set_and_no(code, num, title, conn)
+            if got:
+                return conn.execute(
+                    "SELECT product_id, name, name_jp, category, images "
+                    "FROM products WHERE product_id=?", (got,)).fetchone()
     return None
 
 
@@ -494,8 +598,11 @@ _MARKERS = (
     ("韓国語版", ("KOREAN",)),
     ("サイン", ("SIGNATURE", "SIGNED", "AUTOGRAPH", "SIGNATURE")),
     ("記念", ("ANNIVERSARY",)),
-    ("マンガ", ("MANGA", "COMIC")),
-    ("別イラスト", ("ALT ART", "ALTERNATE ART", "ALTERNATIVE ART")),
+    # ★2026-09-20 訂正 (ユーザー「FB05-119とかも値上げできるのでは?」):
+    #   「Alt Art」「Manga」は **同じカードの呼び名**で、別商品の印ではない。
+    #   実例: 孫悟空 FB05-119 は そのカード自体が別イラストの SCR。市場側だけが
+    #   "Alt Art" と書いていたために 別物と判定し、$730 の実売を捨てていた。
+    #   番号が同じで 言語・サイン・大会賞品 が同じなら、同じ商品として比べてよい。
     ("パラレル", ("PARALLEL", "パラレル")),
     # ★大会の賞品は同じ番号でも別物 (実測: シャンクス OP09-004 の
     #   "SR final-T Best32 Promo Championship 2025" が $37,000。うちの通常版は $272)。
@@ -545,19 +652,68 @@ def same_product(our_title, market_title):
     return True
 
 
+PRICE_CACHE = os.path.join(LEDGER_DIR, "our_prices.json")
+
+
+def _price_from_ebay(item_ids):
+    """ファネルに無い出品の値段を eBay に聞く (I/O)。
+
+    ★2026-09-20 ユーザー報告「出品済で、うちの値段がないんだけど」。
+      値段の出どころをファネルだけにしていたので、**出品したての物は必ず空**になっていた
+      (実例: 9/14 出品の2件が 9/19 のファネルに載っていない。ファネルは表示回数が
+      溜まってから載る)。足りない分だけ GetItem で補い、取れた分は残す。
+    """
+    import re as _re
+    import requests
+    try:
+        cache = json.load(open(PRICE_CACHE, encoding="utf-8"))
+    except Exception:                                          # noqa: BLE001
+        cache = {}
+    todo = [i for i in item_ids if i not in cache]
+    if todo:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import market_getitem as _G
+        for iid in todo[:60]:                 # 一度に取りすぎない
+            body = ('<?xml version="1.0" encoding="utf-8"?>'
+                    '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+                    f"<ItemID>{iid}</ItemID></GetItemRequest>")
+            try:
+                r = requests.post(_G.EP, data=body.encode("utf-8"),
+                                  headers=_G.headers("GetItem"), timeout=30)
+                x = r.content.decode("utf-8", "replace")
+                m = _re.search(r'<CurrentPrice currencyID="USD">([\d.]+)</CurrentPrice>', x)
+                t = _re.search(r"<Title>(.*?)</Title>", x, _re.S)
+                cache[iid] = [float(m.group(1)) if m else None,
+                              t.group(1) if t else ""]
+            except Exception:                                  # noqa: BLE001
+                cache[iid] = [None, ""]
+        try:
+            os.makedirs(LEDGER_DIR, exist_ok=True)
+            with open(PRICE_CACHE, "w", encoding="utf-8") as f:
+                json.dump(cache, f, ensure_ascii=False)
+        except Exception:                                      # noqa: BLE001
+            pass
+    return cache
+
+
 def _live_rows():
     """出品中の行 → [(KEY, 出品価格USD, itemID, タイトル)] (I/O)。売り切れは除く。"""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import sheet_io as _S
     usd = _our_prices()
+    rows2d = _S._product_ws().get_all_values()[1:]
+    live_ids = [(r[1].strip() if len(r) > 1 else "") for r in rows2d
+                if (len(r) > 1 and r[1].strip()) and not (len(r) > 3 and r[3].strip())]
+    # ファネルに無い分だけ eBay に聞く (出品したては必ずファネルに無い)
+    extra = _price_from_ebay([i for i in live_ids if i and i not in usd])
     out = []
-    for r in _S._product_ws().get_all_values()[1:]:
+    for r in rows2d:
         g = lambda i: (r[i].strip() if len(r) > i else "")
         if not g(1) or g(3):                       # itemID 無 / 売り切れ
             continue
         # ★2026-09-20: 比べるのは **うちの eBay タイトル** (ファネル)。シートの C列は
         #   仕入元 (メルカリ) の日本語タイトルなので、市場の英語タイトルとは比べられない。
-        p, t = usd.get(g(1)) or (None, "")
+        p, t = usd.get(g(1)) or tuple(extra.get(g(1)) or (None, ""))
         out.append((g(34), p, g(1), t or g(2)))
     return out
 
@@ -603,7 +759,15 @@ def build_cards(min_sold=2):
     for key, price, _iid, title in live:
         pid = (key or "").split(":")[-1].upper()
         if pid and price and "/" not in pid:
-            mine_pids[pid].append((price, title))
+            mine_pids[pid].append((price, title))      # 鍵は大文字に揃えてある
+            # ★2026-09-20 ユーザー「FB05-119とかも値上げできるのでは?」「OP05-119とか」。
+            #   うちの鍵は変種の印が付く (`FB05-119_PARA` / `OP05-119_PRB01_1`) のに、
+            #   市場側は番号だけ (`FB05-119`) なので照合できていなかった。
+            #   **印の前の番号でも引けるようにする**。刷り違いは この後の
+            #   same_product (言語・レアリティ・サイン・大会賞品) で落とす。
+            base = pid.split("_", 1)[0]
+            if base != pid:
+                mine_pids[base].append((price, title))
     rows_of = collections.defaultdict(list)
     for r in rows:
         if r.get("種別") != "Sold":
@@ -623,7 +787,10 @@ def build_cards(min_sold=2):
         mine = mine_of.get(k) or []
         low = min(p for p, _t in mine) if mine else ""
         fair = ""
-        pid = row[0] if row else ""
+        # ★2026-09-20 ユーザー報告「出品済で、うちの値段がないんだけど」。
+        #   カタログは `SV2a-195` と小文字混じりで書くのに、こちらは大文字に潰した鍵で
+        #   索引を作っていたので、照合できず値段が空になっていた (②引き方の誤り)。
+        pid = (row[0] if row else "").upper()
         if pid and pid in mine_pids:
             our_title = min(mine_pids[pid])[1]
             ok = [pr for pr, t in rows_of.get(k, []) if same_product(our_title, t)]
@@ -690,30 +857,45 @@ _HTML_HEAD = """<!doctype html><html lang="ja"><meta charset="utf-8">
 <style>
  :root{--bg:#14161a;--card:#1b1e24;--line:#2a2f38;--ink:#e8eaed;--ink2:#a9b0bb;--ink3:#767d88;
        --sunken:#20242b}
- body{margin:0;background:var(--bg);color:var(--ink);
+ /* ★2026-09-20 ユーザー「フィルタ以下がスクロールする感じで固定して欲しい」。
+    見出しと絞り込みは動かさず、カードの並びだけスクロールさせる。 */
+ html,body{height:100%}
+ body{margin:0;background:var(--bg);color:var(--ink);height:100vh;
+      display:flex;flex-direction:column;overflow:hidden;
       font:14px/1.6 "Yu Gothic UI","Segoe UI",system-ui,sans-serif}
- header{padding:18px 22px;border-bottom:1px solid var(--line)}
+ header{padding:18px 22px;border-bottom:1px solid var(--line);flex:none}
  h1{margin:0 0 4px;font-size:20px}
  .sum{color:var(--ink2);font-size:13px}
- .bar{display:flex;gap:6px;padding:12px 22px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+ .bar{display:flex;gap:6px;padding:12px 22px;flex-wrap:wrap;border-bottom:1px solid var(--line);
+      background:var(--bg);flex:none}
  .chip{background:var(--card);border:1px solid var(--line);color:var(--ink2);border-radius:20px;
        padding:5px 14px;font-size:13px;cursor:pointer}
  .chip.on{background:#1e3a5f;color:#8ec8ff;border-color:#2f5d94}
- table{width:100%;border-collapse:collapse}
- th,td{padding:7px 12px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
- th{position:sticky;top:0;background:var(--sunken);color:var(--ink2);font-size:12px}
- td.num{text-align:right;font-variant-numeric:tabular-nums}
- tr:hover td{background:var(--sunken)}
- .nm{white-space:normal;max-width:380px}
- .sub{color:var(--ink3);font-size:11px}
- img.c{width:72px;height:100px;object-fit:contain;display:block;border:1px solid var(--line);
-       border-radius:4px;background:var(--sunken)}
- .none{width:72px;height:100px;display:flex;align-items:center;justify-content:center;
-       border:1px dashed #a8703a;border-radius:4px;color:#ffc48e;font-size:11px}
- .st{border-radius:20px;padding:2px 9px;font-size:11px;font-weight:700}
+ /* ★2026-09-20 ユーザー「カードをもう少し大きくしてほしいのと、ナンバリングして
+    横に5枚くらい並べて」。表をやめて **5列のカード並び**にする。 */
+ .grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;padding:16px 22px;
+       overflow-y:auto;flex:1 1 auto;align-content:start}
+ @media(max-width:1500px){.grid{grid-template-columns:repeat(4,1fr)}}
+ @media(max-width:1200px){.grid{grid-template-columns:repeat(3,1fr)}}
+ @media(max-width:880px){.grid{grid-template-columns:repeat(2,1fr)}}
+ .it{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;
+     position:relative}
+ .rank{position:absolute;left:10px;top:10px;background:#1e3a5f;color:#8ec8ff;font-weight:700;
+       font-size:12px;border-radius:14px;padding:2px 9px;z-index:1}
+ .ph{display:flex;align-items:center;justify-content:center;height:280px;margin-bottom:10px}
+ img.c{max-width:100%;max-height:280px;object-fit:contain;border-radius:6px}
+ .none{width:190px;height:265px;display:flex;align-items:center;justify-content:center;
+       border:2px dashed #a8703a;border-radius:6px;color:#ffc48e;font-size:13px;font-weight:700}
+ .nm{font-weight:700;font-size:15px;margin-bottom:2px}
+ .no{color:var(--ink3);font-size:12px;margin-bottom:8px}
+ .kv{display:flex;justify-content:space-between;font-size:13px;padding:2px 0}
+ .kv span:first-child{color:var(--ink2)}
+ .kv b{font-variant-numeric:tabular-nums}
+ .sub{color:var(--ink3);font-size:11px;margin-top:8px;line-height:1.4}
+ .st{border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700}
  .st.yes{background:#1e3a5f;color:#8ec8ff} .st.no{background:#5f3a1e;color:#ffc48e}
  .gain{color:#7ddc9a;font-weight:700}
- td:first-child{width:84px;padding:5px 8px}
+ .foot{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
 </style>
 """
 
@@ -731,23 +913,24 @@ def cards_html(rows, summary):
         return "—" if v in ("", None) else "$%.2f" % float(v)
 
     body = []
-    for r in sorted(rows, key=lambda x: -x["売れた数"]):
+    for n, r in enumerate(sorted(rows, key=lambda x: -x["売れた数"]), 1):
         img = (f"<img class='c' src='{esc(r['画像'])}' loading='lazy' alt=''>"
-               if r.get("画像") else "<div class='none'>要補充</div>")
-        gain = ("<span class='gain'>+%.2f</span>" % r["差額"])             if (r["差額"] != "" and r["差額"] > 0) else "—"
+               if r.get("画像") else "<div class='none'>カタログ<br>要補充</div>")
+        gain = ("<span class='gain'>+%.2f</span>" % r["差額"])             if (r["差額"] != "" and r["差額"] > 0) else ""
         st = ("<span class='st yes'>出品済</span>" if r["出品状況"] == "出品済"
               else "<span class='st no'>未出品</span>")
         body.append(
-            f"<tr data-st='{esc(r['出品状況'])}' data-gain='{1 if gain != '—' else 0}'"
-            f" data-cat='{1 if r['product_id'] else 0}'>"
-            f"<td>{img}</td>"
-            f"<td class='nm'>{esc(r['和名'] or r['英名'] or '(カタログ未収録)')}"
-            f"<div class='sub'>{esc(r['市場のタイトル例'])}</div></td>"
-            f"<td>{esc(r['番号'])}</td>"
-            f"<td class='num'>{r['売れた数']}</td>"
-            f"<td class='num'>{money(r['実売中央値'])}</td>"
-            f"<td class='num'>{money(r['うちの値段'])}</td>"
-            f"<td class='num'>{gain}</td><td>{st}</td></tr>")
+            f"<div class='it' data-st='{esc(r['出品状況'])}'"
+            f" data-gain='{1 if gain else 0}' data-cat='{1 if r['product_id'] else 0}'>"
+            f"<div class='rank'>{n}</div>"
+            f"<div class='ph'>{img}</div>"
+            f"<div class='nm'>{esc(r['和名'] or r['英名'] or '(カタログ未収録)')}</div>"
+            f"<div class='no'>{esc(r['番号'])}</div>"
+            f"<div class='kv'><span>売れた数</span><b>{r['売れた数']}個</b></div>"
+            f"<div class='kv'><span>実売の中央値</span><b>{money(r['実売中央値'])}</b></div>"
+            f"<div class='kv'><span>うちの値段</span><b>{money(r['うちの値段'])}</b></div>"
+            f"<div class='foot'>{st}{gain}</div>"
+            f"<div class='sub'>{esc(r['市場のタイトル例'])}</div></div>")
     sm = summary
     return (_HTML_HEAD +
             "<header><h1>よく売れているカード</h1><div class='sum'>"
@@ -760,14 +943,12 @@ def cards_html(rows, summary):
             "<button class='chip' data-f='yes'>出品済だけ</button>"
             "<button class='chip' data-f='gain'>値上げできる</button>"
             "<button class='chip' data-f='nocat'>カタログ要補充</button></div>"
-            "<table><thead><tr><th></th><th>カード</th><th>番号</th><th>売れた</th>"
-            "<th>実売の中央値</th><th>うちの値段</th><th>差</th><th>出品</th></tr></thead>"
-            "<tbody>" + "".join(body) + "</tbody></table>"
+            "<div class='grid'>" + "".join(body) + "</div>"
             "<script>"
             "document.querySelectorAll('.chip').forEach(function(b){b.onclick=function(){"
             "document.querySelectorAll('.chip').forEach(function(x){x.classList.remove('on')});"
             "b.classList.add('on');var f=b.dataset.f;"
-            "document.querySelectorAll('tbody tr').forEach(function(tr){var ok=true;"
+            "document.querySelectorAll('.it').forEach(function(tr){var ok=true;"
             "if(f==='no')ok=tr.dataset.st==='未出品';"
             "if(f==='yes')ok=tr.dataset.st==='出品済';"
             "if(f==='gain')ok=tr.dataset.gain==='1';"
