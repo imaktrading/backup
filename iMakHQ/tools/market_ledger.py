@@ -4,6 +4,7 @@
 `C:/dev/iMak_data/hq/market_sold/ledger.csv` に追記する。同じ出品は1行にしかならない。
 
     python iMakHQ/tools/market_ledger.py ingest          # ダウンロード等から取り込む
+    python iMakHQ/tools/market_ledger.py archive         # 今の台帳を退避して空にする
     python iMakHQ/tools/market_ledger.py report          # 売れているカードと前回との差
     python iMakHQ/tools/market_ledger.py targets         # 探す先 (売れているのに出していない)
     python iMakHQ/tools/market_ledger.py cards           # 売れ筋 (出品済/未出品 の印つき・値段の差)
@@ -45,12 +46,22 @@ KEY_COLS = ("種別", "検索語", "itemId", "期間")
 RESEARCH_BASE = "https://www.ebay.com/sh/research"
 CATEGORY_CCG = "183454"
 
+# ★2026-09-20: 一度「ゲームで絞らない」に変えたが、**戻した**。
+#   ユーザー指摘「カタログに無いから自然に落ちるって、カタログ及び引き方の精度が低いのに、
+#   よく言うわ」。そのとおりで、測ったら 落ちなかった:
+#     正式値でない出品 267件 → カタログまで引けたのは **73件 (27%)** だけ。
+#     残り194件は判別できないまま画面に出る (カードダス / 引けていない普通のポケカ /
+#     何か分からない物 が混ざる)。
+#   取りこぼす約10%より、判別できないゴミが267件入る方が害が大きい。
+#   ★外すのは **カタログと引き方の精度が上がってから**。
 PRESETS = {
     "ポケモン": ["Pokémon TCG"],
     "ワンピース": ["One Piece CCG"],
     # ★2026-09-18: 市場側では Dragon Ball CCG にも66件出ていたが、CCG は 2000年代の
     #   別ゲーム (Score 社)。うちが扱う FB/DBS の弾は Super Card Game なので入れない
-    #   (カタログ回答 2026-09-18_aspect_values_vs_ebay_list_response.md)
+    #   (カタログ回答 2026-09-18_aspect_values_vs_ebay_list_response.md)。
+    #   実データでも Dragon Ball CCG の中身は イタジャガ (シール) と
+    #   ドラゴンボールヒーローズ で、フュージョンワールドではなかった (2026-09-20 確認)。
     "ドラゴンボール": ["Dragon Ball Super Card Game"],
 }
 
@@ -88,9 +99,16 @@ def build_url(preset, tab="SOLD", days=DEFAULT_DAYS, keywords=KEYWORDS, now=None
         ("format", "BEST_OFFER"),
         ("format", "FIXED_PRICE"),
     ]
-    q += [("aspect", f"Game:::{g}") for g in PRESETS[preset]]
+    q += [("aspect", f"Game:::{g}") for g in PRESETS[preset]]   # 空 = 絞らない
     q += [
+        # ★2026-09-20 ユーザー確定「セラーだけ日本にして、取り直しやな」。
+        #   9/18 に取った分は **買い手の国 (buyerCountry=JP)** で絞られていた。
+        #   買い手が日本人かどうかは どうでもよく、むしろ eBay の買い手は大半が米国なので
+        #   市場の大部分を捨てていた。実害: 台帳1,612件に米国セラーの英語版が309件 混ざり、
+        #   「英語版が多い」とユーザーに何度も指摘させた。
+        #   絞るのは **売る側の国**。うちと同じ土俵の相場を見る。
         ("sellerCountry", "JP"),
+        # 買い手の国では絶対に絞らない (ここに buyerCountry を足さないこと)
         ("offset", "0"),
         ("limit", "50"),
         ("tabName", tab),
@@ -250,6 +268,9 @@ def cmd_ingest(paths):
         print(f"  {os.path.basename(p):<32} 新規 {added:4} / 更新 {updated:4}")
     save_ledger(rows)
     print(f"\n台帳 {before} → {len(rows)}行  ({LEDGER})")
+    warn = warn_if_wrong_filter(rows)
+    if warn:
+        print(warn)
     return 0
 
 
@@ -973,6 +994,40 @@ def cmd_html(_argv):
     return 0
 
 
+def cmd_archive(_argv):
+    """今の台帳を日付つきで退避して、空にする。
+
+    ★2026-09-20 ユーザー「セラーだけ日本にして、取り直しやな」。
+      条件が変わったデータを混ぜると、前の条件で入った行が残り続ける
+      (台帳は出品ごとに1行で、同じ出品は上書きしないため)。
+    """
+    import datetime as _dt
+    import shutil
+    if not os.path.exists(LEDGER):
+        print("台帳がありません")
+        return 1
+    dst = LEDGER.replace(".csv", "_" + _dt.date.today().isoformat() + "_buyerCountryで取った分.csv")
+    shutil.move(LEDGER, dst)
+    print(f"退避しました → {dst}")
+    print("次: リサーチを開いて取り直し → ingest")
+    return 0
+
+
+def warn_if_wrong_filter(rows):
+    """取り込んだ行の検索条件を見て、**買い手の国で絞っていたら**知らせる (純関数)。
+
+    ★9/18 の取り込みは buyerCountry=JP で絞られていて、米国セラーの英語版が309件 入った。
+      同じことを黙って通さない。
+    """
+    bad = [r for r in (rows or [])
+           if "buyerCountry" in ((r.get("条件") or "") + (r.get("検索語") or ""))]
+    if bad:
+        return ("⚠ 買い手の国 (buyerCountry) で絞った条件が混ざっています: "
+                f"{len(bad)}行。絞るのは **売る側の国** (sellerCountry)。"
+                "Research の画面で Seller location が日本になっているか見てください")
+    return ""
+
+
 def cmd_report(_):
     rows = load_ledger()
     if not rows:
@@ -1000,7 +1055,8 @@ def cmd_report(_):
 
 def main(argv):
     cmds = {"ingest": cmd_ingest, "report": cmd_report, "targets": cmd_targets,
-            "cards": cmd_cards, "html": cmd_html}
+            "cards": cmd_cards, "html": cmd_html,
+            "archive": cmd_archive}
     if len(argv) < 2 or argv[1] not in cmds:
         print(__doc__)
         return 1

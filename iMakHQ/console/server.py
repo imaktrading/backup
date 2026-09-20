@@ -491,6 +491,25 @@ def research_cards(refresh=False):
     return out
 
 
+# ★2026-09-20 ユーザー「これだと、開ける前に条件入れないとダメでしょ。開けてから絞り込みたい」。
+#   カタログは10万件あって1枚の HTML には収まらないので、画面から ここに聞く形にする。
+#   引くのは tools/catalog_browse.fetch が唯一の口。
+def catalog_rows(game="", q="", limit=400):
+    if TOOLS not in sys.path:
+        sys.path.insert(0, TOOLS)
+    import sqlite3
+    import catalog_browse as CB
+    conn = sqlite3.connect(CB.DB)
+    out = []
+    for pid, name, name_jp, cat, set_name, images, specs in CB.fetch(conn, game, q, limit):
+        out.append({"product_id": pid, "name": name, "name_jp": name_jp, "category": cat,
+                    "set_name": set_name, "image": CB.first_image(images),
+                    "cert": CB.is_cert_image(CB.first_image(images)),
+                    "rarity": CB.spec_of(specs, "rarity"),
+                    "no": CB.spec_of(specs, "card_number_text") or pid})
+    return {"rows": out, "game": game, "q": q, "limit": limit}
+
+
 def research_meta():
     """画面に出す選択肢 (商材 / 期間 / 既定)。"""
     m = _market_ledger()
@@ -934,6 +953,14 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/research":
             try:
                 return self._json(200, research_meta())
+            except Exception as e:                       # noqa: BLE001 画面に出して知らせる
+                return self._json(200, {"error": str(e)})
+        if u.path == "/api/catalog":
+            try:
+                p = parse_qs(u.query)
+                return self._json(200, catalog_rows(
+                    (p.get("game") or [""])[0], (p.get("q") or [""])[0],
+                    min(int((p.get("limit") or ["400"])[0] or 400), 2000)))
             except Exception as e:                       # noqa: BLE001 画面に出して知らせる
                 return self._json(200, {"error": str(e)})
         if u.path == "/api/research/cards":

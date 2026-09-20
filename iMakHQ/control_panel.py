@@ -1628,13 +1628,10 @@ SCRIPTS = [
         "label_fg": "blue",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "catalog_browse.py"],
-        "params": [
-            {"name": "--game", "label": "商材 (pokemon_tcg/one_piece_tcg/dragonball_scg/空=全部)",
-             "default": "pokemon_tcg"},
-            {"name": "--q", "label": "絞り込み (番号・名前・セット)", "default": ""},
-            {"name": "--limit", "label": "件数", "default": "400"},
-        ],
-        "tip": "カタログを画像つきで見る。0件なら本当に無い / 出てくれば引き方の問題",
+        # ★開く前に条件を入れさせない (ユーザー「開けてから絞り込みたい」)。
+        "params": [],
+        "tip": "カタログを画像つきで見る。商材も絞り込みも画面の中で。"
+               "0件なら本当に無い / 出てくれば引き方の問題",
     },
     {
         # ①効果測定ループ: 直近2世代の funnel を突合し「直した結果が効いたか」を測る (2026-06-05)

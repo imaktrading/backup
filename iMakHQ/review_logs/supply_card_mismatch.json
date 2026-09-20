@@ -1,10 +1,10 @@
 {
- "checked": 417,
+ "checked": 430,
  "stat": {
-  "listed": 554,
-  "compared": 417,
+  "listed": 568,
+  "compared": 430,
   "no_cost": 0,
-  "no_market": 137
+  "no_market": 138
  },
  "ratio": 0.6,
  "verified": false,
@@ -51,6 +51,7 @@
    "title": "803 【PSA10】シャンクス SEC [OP01-120] THE BEST",
    "urls": [
     "https://jp.mercari.com/item/m88120780062",
+    "https://jp.mercari.com/item/m58891474856",
     "https://jp.mercari.com/item/m23662158067",
     "https://snkrdunk.com/apparels/328421/used/47748582"
    ]
@@ -69,15 +70,16 @@
    ]
   },
   {
-   "itemID": "820137738121",
-   "cert": "166462376",
-   "key": "pokemon_tcg:S8b-243",
-   "cost": 5980,
-   "cheapest": 14800.0,
-   "ratio": 0.404,
-   "title": "PSA10 クロバットV CSR S8b VMAXクライマックス 243/184",
+   "itemID": "820077374808",
+   "cert": "147210685",
+   "key": "pokemon_tcg:S8b-050",
+   "cost": 4700,
+   "cheapest": 9600.0,
+   "ratio": 0.49,
+   "title": "psa10 pop14 サンダー　s8b 050/184 VMAXクライマックス",
    "urls": [
-    "https://jp.mercari.com/item/m11655414049"
+    "https://jp.mercari.com/item/m83303762389",
+    "https://jp.mercari.com/item/m48452016165"
    ]
   },
   {
@@ -110,19 +112,6 @@
    ]
   },
   {
-   "itemID": "820137737956",
-   "cert": "157025551",
-   "key": "pokemon_tcg:SV1S-013",
-   "cost": 7000,
-   "cheapest": 12222.0,
-   "ratio": 0.573,
-   "title": "PSA10 コイキング 013/078 スカーレットex MAGIKARP 02",
-   "urls": [
-    "https://jp.mercari.com/item/m29488643832",
-    "https://snkrdunk.com/apparels/270087/used/50169663?slide=right"
-   ]
-  },
-  {
    "itemID": "358810782372",
    "cert": "138131835",
    "key": "pokemon_tcg:SV4a-339",
@@ -132,6 +121,7 @@
    "title": "【PSA10・ワンオーナー品】シャイニートレジャー イルカマン AR ポケモンカード",
    "urls": [
     "https://jp.mercari.com/shops/product/2JSfYophkR7opiYGJHwGTW",
+    "https://jp.mercari.com/shops/product/2JTtz5iAHWfpbJNuzxeKC2",
     "https://jp.mercari.com/item/m84840168612",
     "https://snkrdunk.com/apparels/162092/used/45516638"
    ]
@@ -139,28 +129,52 @@
  ],
  "drops": [
   {
-   "itemID": "358488910102",
-   "prev": 29800,
-   "now": 12500,
-   "ratio": 0.419,
-   "key": "OP13-001_p",
-   "title": "ワンピース カードゲーム モンキー・D・ルフィ PSA10"
+   "itemID": "820141671656",
+   "prev": 24000,
+   "now": 12222,
+   "ratio": 0.509,
+   "key": "pokemon_tcg:SV6-113",
+   "title": "ラッキー AR スカーレット&バイオレット 拡張パック 変幻の仮面 113/1…"
   },
   {
-   "itemID": "820004967113",
-   "prev": 34500,
-   "now": 15000,
-   "ratio": 0.435,
-   "key": "one_piece_tcg:ST01-012_p5",
-   "title": "PSA10 モンキー・Ｄ・ルフィ SR [ST01-012]"
+   "itemID": "358632857689",
+   "prev": 9200,
+   "now": 5000,
+   "ratio": 0.543,
+   "key": "pokemon_tcg:M2a-229",
+   "title": "【PSA10】メガルチャブルex MA"
   },
   {
-   "itemID": "820137738044",
-   "prev": 19999,
-   "now": 8888,
-   "ratio": 0.444,
-   "key": "pokemon_tcg:S8b-195",
-   "title": "ゼクロム CHR S8b VMAXクライマックス 195/184"
+   "itemID": "820034337387",
+   "prev": 28888,
+   "now": 15800,
+   "ratio": 0.547,
+   "key": "pokemon_tcg:SV9a-071",
+   "title": "【PSA10】カスミのコダック AR 071/063 sv9a 熱風のアリーナ"
+  },
+  {
+   "itemID": "820000791250",
+   "prev": 60000,
+   "now": 33599,
+   "ratio": 0.56,
+   "key": "pokemon_tcg:M2a-246",
+   "title": "【PSA10】メガカイリューex（SAR)〈246/193〉[M2a]5992"
+  },
+  {
+   "itemID": "820070750789",
+   "prev": 7980,
+   "now": 4497,
+   "ratio": 0.564,
+   "key": "pokemon_tcg:M1L-070",
+   "title": "【PSA10】キョジオーン AR"
+  },
+  {
+   "itemID": "820141672196",
+   "prev": 12800,
+   "now": 7499,
+   "ratio": 0.586,
+   "key": "pokemon_tcg:S12a-015",
+   "title": "【PSA10】かがやくリザードン"
   }
  ]
 }
