@@ -401,6 +401,20 @@ def build_card_query(title, set_no, key=None):
             "image": image or "", "hint": hint, "multi_variant": mv}
 
 
+def should_offer_loose(all_cands, failclosed) -> bool:
+    """名前だけの救済枠 (loose) を出してよいか (純関数)。
+
+    救済枠は「メルカリが番号を書いていないので番号で引けなかった」時のためのもの。
+    **変種を確証できないので わざと候補を出さないと決めた (fail-closed) 時は出さない。**
+
+    ★2026-09-20: `all_cands` を空にした直後に「空だから救済」と拾い直しており、
+      多変種の fail-closed が骨抜きになっていた。実害 (2026-09-20 の走行):
+      P-041 / OP06-106 (どちらも多変種) に別変種4件が出て、人が「違う」を4回押し、
+      走行ログが「🚨 違う即対応 4件 = 検索の事故」として鳴っていた。
+    """
+    return not all_cands and not failclosed
+
+
 def _is_multi_variant(card_no, category="", _cache={}):
     """card_no が catalog で 2 変種以上(=同番号で別配布/別art)か(純関数・DB1回でcache)。
 
@@ -1078,6 +1092,7 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
                 all_cands = pick_psa10_candidates(items, card_no, c.get("hint"), limit=8)
                 best = cands[0] if cands else None
                 via = "kw"
+                _failclosed = False
                 # keyword で変種を確証できない(0件 or set語不一致=違うカードを掴むリスク)→ 画像検索。
                 # 画像検索は自社PSAスラブ画像で視覚一致 → 番号+PSA10検証なので別カード混入を防ぐ。
                 _unconfident = best is None or not kw_variant_confident(best[2], c.get("hint"))
@@ -1089,6 +1104,7 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
                     cands = []
                     all_cands = []      # 目視枠も出さない(OP01-061 の扱いに揃える・2026-08-28)
                     via = "多変種fail-closed(画像検索skip)"
+                    _failclosed = True                 # 下の救済枠も出さない (2026-09-20)
                     print(f"  [{i+1}/{len(cards)}] {card_no}: 多変種で変種確証不可→候補出さず(手動仕入れ)", flush=True)
                 elif _unconfident and eid:
                     img = image_search_fallback(drv, eid, card_no)
@@ -1113,7 +1129,14 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
                 #   実在しても「候補なし」になるため。番号未確認なので best/価格判定には
                 #   一切使わず、視覚確証UIに「番号未確認」と明示して出す。
                 loose = []
-                if not all_cands:
+                # ★2026-09-20: 多変種で **わざと候補を出さないと決めた** 時は、
+                #   救済枠も出さない。`all_cands` を空にした直後にここが「空だから救済」と
+                #   拾い直しており、fail-closed が骨抜きになっていた。
+                #   実害 (2026-09-20 の走行): P-041 (多変種プロモ) に別変種3件が出て、
+                #   人が「違う」を3回押し、走行ログが「検索の事故」として毎回鳴っていた。
+                #   救済枠は「番号で引けなかった」時のためのもので、「変種を確証できない」
+                #   時のためのものではない (番号が合っても絵柄が別なら買えない)。
+                if should_offer_loose(all_cands, _failclosed):
                     loose = pick_psa10_loose_candidates(items, c.get("name_jp"))
                     # ★2026-08-02: 救済枠は **同じ検索結果から** 拾う作りなので、検索自体が
                     #   0件だと道連れで空になる(実測: 補0本の候補ゼロ33件は all/loose とも0
