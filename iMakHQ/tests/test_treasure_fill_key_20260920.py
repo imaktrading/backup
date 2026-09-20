@@ -110,3 +110,31 @@ def test_門の数字を自前で持たない()  :
     body = src.split("def load_caps(")[1].split(chr(10) + "def ")[0]
     assert "上限仕入れ値(円)" in body            # CSV の値をそのまま読む
     assert T.CAP_ADD == 7000 and T.CAP_MUL == 1.5
+
+
+def test_会社の仕入上限も見る():
+    """★2026-09-20 ユーザー「7マン超えてるのあるけど」。
+
+    カードごとの上限とは **別に**、会社としての仕入上限 (¥70,000) がある。
+    実害: レックウザEX 122/XY-P は 上限仕入れ値 ¥87,200 でカードの門は通るが、
+    会社の上限を超えるので出品できない。◎ に4件 混ざっていた。
+    """
+    assert T.mark_of(79000, 87200, 70000) == T.MARK_HIGH      # 会社の上限を超える
+    assert T.mark_of(69000, 87200, 70000) == T.MARK_GO        # 両方 通る
+    assert T.mark_of(69000, 10000, 70000) == T.MARK_HIGH      # カードの上限を超える
+
+
+def test_会社の上限は自前で持たない():
+    """値は global.yaml の1か所。共有領域の写しを読むだけ。"""
+    src = open(os.path.join(HQ, "tools", "treasure_fill_key.py"), encoding="utf-8").read()
+    assert "cost_sanity.json" in src
+    body = src.split("def hard_cap(")[1].split(chr(10) + "def ")[0]
+    assert "70000" not in body
+
+
+def test_上限が読めなければ走らない():
+    """★判定できないまま印を付けると、出せない物を HIGH に写すことになる。"""
+    src = open(os.path.join(HQ, "tools", "treasure_fill_key.py"), encoding="utf-8").read()
+    body = src.split("def main(")[1]
+    i = body.index("hard_cap() is None")
+    assert "return 1" in body[i:i + 200]

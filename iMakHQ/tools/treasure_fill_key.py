@@ -43,6 +43,23 @@ MARK_NONE = ""              # 売れ筋ではない (古い一覧で拾った分
 #   幅を持たせるのは 仕入元の値引き / ライバルの売り切れ / 補URLの入れ替え を見込むため。
 CAP_ADD = 7000
 CAP_MUL = 1.5
+# ★2026-09-20 ユーザー「7マン超えてるのあるけど」。カードごとの上限とは **別に**、
+#   会社としての仕入上限 (¥70,000) がある。両方を満たさないと出せない。
+#   実害: レックウザEX 122/XY-P は 上限仕入れ値 ¥87,200 なのでカードの門は通るが、
+#   会社の上限を超えるので出品できない (◎ に4件 混ざっていた)。
+#   値は `iMakeBayAPI/config/global.yaml` の cost_sanity。**自前で書かない**。
+HARD_CAP = r"C:/dev/iMak_data/shared/cost_sanity.json"
+
+
+def hard_cap():
+    """会社としての仕入上限 (円)。読めなければ None = 判定しない側に倒さず、呼び手が止める。"""
+    import json as _json
+    try:
+        with open(HARD_CAP, encoding="utf-8") as f:
+            v = _json.load(f)
+        return int(v.get("max_jpy")) if v.get("enabled", True) else None
+    except Exception:                                          # noqa: BLE001
+        return None
 TARGETS = r"C:/dev/iMak_data/hq/market_sold/demand_market.csv"
 
 
@@ -68,12 +85,19 @@ def load_caps():
     return out
 
 
-def mark_of(price, cap):
-    """その行に付ける印 (純関数)。cap が無ければ「売れ筋ではない」。"""
+def mark_of(price, cap, hard=None):
+    """その行に付ける印 (純関数)。cap が無ければ「売れ筋ではない」。
+
+    ★門は2つ。**両方**を満たさないと ◎ にしない。
+      ① カードごとの上限 (利益が出るか): +¥7,000 かつ ×1.5 の きつい方
+      ② 会社としての仕入上限 ¥70,000 (高額品は売れないという経営判断)
+    """
     if not cap:
         return MARK_NONE
     if not price:
         return MARK_HIGH                      # 値段が読めない = 出せない側に倒す
+    if hard and price > hard:
+        return MARK_HIGH                      # 会社の上限を超える
     return MARK_GO if (price <= cap + CAP_ADD and price <= cap * CAP_MUL) else MARK_HIGH
 
 
@@ -85,6 +109,7 @@ def plan(rows, conn, caps=None):
     """
     import re as _re
     caps = caps if caps is not None else {}
+    hard = hard_cap()
     out, miss, marks = {}, 0, {}
     for i, r in enumerate(rows[1:], start=2):        # 1行目は見出し
         def g(k):
@@ -101,7 +126,7 @@ def plan(rows, conn, caps=None):
                 miss += 1
         pid = key.split(":")[-1].upper() if key else ""
         price = int(_re.sub(r"[^0-9]", "", g(COL_PRICE) or "0") or 0)
-        marks[i] = mark_of(price, caps.get(pid))
+        marks[i] = mark_of(price, caps.get(pid), hard)
     return out, miss, marks
 
 
@@ -111,6 +136,9 @@ def main(argv):
     rows = S.read_tab(TAB, sheet_id=SHEET_ID)
     if not rows:
         print("シートが読めません")
+        return 1
+    if hard_cap() is None:
+        print("⚠ 会社の仕入上限が読めません → python iMakHQ/tools/export_cost_sanity.py")
         return 1
     caps = load_caps()
     if not caps:
