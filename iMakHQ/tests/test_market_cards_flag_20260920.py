@@ -128,3 +128,23 @@ def test_決められなければ当てない():
     conn = sqlite3.connect(M.CATALOG_DB)
     # 手がかりが何も無いタイトルでは当てない
     assert M.lookup_by_number_text("020/019", "PSA10 pokemon card", conn) is None
+
+
+def test_英語のカード名で決める():
+    """★市場のタイトルは英語なので、ここが一番効く。カタログは name_en を
+    22,435/22,492件 持っている (Articuno → フリーザー / Radiant Greninja → かがやくゲッコウガ)。
+    """
+    import sqlite3
+    conn = sqlite3.connect(M.CATALOG_DB)
+    got = M.lookup_by_number_text("009/032", "PSA10 GEM MINT Articuno 009/032 Classic", conn)
+    assert got and got[0] == "CLK-009"
+    got = M.lookup_by_number_text("004/038", "PSA10 Radiant Greninja 004/038 Japanese", conn)
+    assert got and got[0] == "SVF-004"
+
+
+def test_eBayライブの日付を番号と読まない():
+    """★実例: "ebay Live 07/25-021 [PSA10] Mega Gengar MA 230/193" の 07/25 を
+    カード番号として拾い、カタログに無い = 要補充 と出していた。
+    """
+    assert M.card_no("ebay Live 07/25-021 [PSA10] Mega Gengar MA 230/193") == "230/193"
+    assert M.card_no("PSA10 Charizard 212/172 VSTAR Universe") == "212/172"

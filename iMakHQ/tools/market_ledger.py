@@ -148,6 +148,10 @@ def card_no(title):
     if not title:
         return None
     t = title.upper().replace(" /", "/").replace("/ ", "/")
+    # ★2026-09-20: eBay ライブ配信の日付を番号と読まない。
+    #   実例: "ebay Live 07/25-021 [PSA10] Mega Gengar MA 230/193" の 07/25 を
+    #   カード番号として拾い、カタログに無い = 要補充 と出していた。
+    t = re.sub(r"EBAY\s*LIVE\s*\d{1,2}/\d{1,2}(-\d+)?", " ", t)
     m = _CARD_NO.search(t)
     if m:
         return m.group(1).replace(" ", "")
@@ -513,7 +517,7 @@ def lookup_by_number_text(num_text, title, conn):
       決められなければ当てない (推測で別のカードを掴まない)。
     """
     rows = conn.execute(
-        "SELECT product_id, name, name_jp, category, images, set_name FROM products "
+        "SELECT product_id, name, name_jp, category, images, set_name, name_en FROM products "
         "WHERE specs LIKE ?", ('%"card_number_text": "' + num_text + '"%',)).fetchall()
     if not rows:
         return None
@@ -523,6 +527,14 @@ def lookup_by_number_text(num_text, title, conn):
     tu = re.sub(r"[^A-Z0-9]", "", t.upper())
     for r in rows:                                   # 和名がタイトルに在る
         if r[2] and r[2] in t:
+            return r[:5]
+    # ★2026-09-20: **英語のカード名**で決める。市場のタイトルは英語なので、ここが一番効く
+    #   (Articuno → フリーザー / Radiant Greninja → かがやくゲッコウガ)。
+    #   カタログは name_en を 22,435/22,492 件 持っている。
+    #   長い名前から先に見る ("Flareon GX" を "Flareon" より先に)。
+    named = sorted([r for r in rows if r[6]], key=lambda r: -len(r[6]))
+    for r in named:
+        if re.sub(r"[^A-Z0-9]", "", r[6].upper()) in tu:
             return r[:5]
     for r in rows:                                   # 弾コードがタイトルに在る
         code = re.sub(r"[^A-Z0-9]", "", r[0].split("-")[0].upper())
