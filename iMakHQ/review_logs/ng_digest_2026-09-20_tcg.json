@@ -1,0 +1,151 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [],
+  "log_signal_lines": [],
+  "recurring_missing": [
+    {
+      "category": "pokemon_tcg",
+      "item_id": "cert160479905",
+      "target_field": "catalog_add",
+      "finding_type": "resolver_gap",
+      "seen_count": 3,
+      "seen_days": 3,
+      "status": "pending",
+      "act_verdict": "誤検出(3日目): catalog に SM3H-053 が在る。真因=psa_preflight 2b が catalog 側を正規化せず HOOH が Ho-Oh に当たらない。修正提案 hq/requests/2026-09-19_act_code_proposals_tcg.md 提案1 (2026-09-19 Act)"
+    }
+  ],
+  "recurring_dropped": [
+    {
+      "cert": "140273536",
+      "days": 14,
+      "reason": "OUT-OF-SCOPE"
+    },
+    {
+      "cert": "146117881",
+      "days": 14,
+      "reason": "OUT-OF-SCOPE"
+    },
+    {
+      "cert": "157112832",
+      "days": 14,
+      "reason": "OUT-OF-SCOPE"
+    },
+    {
+      "cert": "152136358",
+      "days": 14,
+      "reason": "OUT-OF-SCOPE"
+    },
+    {
+      "cert": "150712266",
+      "days": 14,
+      "reason": "LIVE-DUP"
+    },
+    {
+      "cert": "15123139",
+      "days": 14,
+      "reason": "写真なし"
+    },
+    {
+      "cert": "55281762",
+      "days": 14,
+      "reason": "写真なし"
+    },
+    {
+      "cert": "123143536",
+      "days": 13,
+      "reason": "COST-CAP"
+    },
+    {
+      "cert": "158444373",
+      "days": 13,
+      "reason": "COST-CAP"
+    },
+    {
+      "cert": "159397890",
+      "days": 13,
+      "reason": "COST-CAP"
+    },
+    {
+      "cert": "157799487",
+      "days": 10,
+      "reason": "OUT-OF-SCOPE"
+    },
+    {
+      "cert": "63355290",
+      "days": 10,
+      "reason": "写真なし"
+    },
+    {
+      "cert": "936643273",
+      "days": 9,
+      "reason": "PSA照会失敗"
+    },
+    {
+      "cert": "15370649",
+      "days": 9,
+      "reason": "写真なし"
+    },
+    {
+      "cert": "157208456",
+      "days": 8,
+      "reason": "COST-CAP"
+    },
+    {
+      "cert": "14261910",
+      "days": 6,
+      "reason": "写真なし"
+    },
+    {
+      "item_id": "358609093013",
+      "days": 5,
+      "reason": "cert#未解決"
+    },
+    {
+      "item_id": "358434963108",
+      "days": 5,
+      "reason": "cert#未解決"
+    },
+    {
+      "cert": "98911418",
+      "days": 5,
+      "reason": "OUT-OF-SCOPE"
+    },
+    {
+      "cert": "10197043",
+      "days": 5,
+      "reason": "写真なし"
+    },
+    {
+      "item_id": "358411398378",
+      "days": 4,
+      "reason": "cert#未解決"
+    },
+    {
+      "item_id": "358604221711",
+      "days": 4,
+      "reason": "COST-CAP"
+    },
+    {
+      "cert": "44110427",
+      "days": 4,
+      "reason": "写真なし"
+    },
+    {
+      "cert": "159106501",
+      "days": 3,
+      "reason": "OUT-OF-SCOPE"
+    },
+    {
+      "cert": "113410191",
+      "days": 3,
+      "reason": "出品見送り"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 1,
+    "recurring_dropped": 25
+  }
+}
