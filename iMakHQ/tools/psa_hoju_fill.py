@@ -1767,13 +1767,19 @@ def confirm_survivors(t, vals, cache, ctx, today, *, ref_of, art_of, stats):
     import psa_resource_gate as gate
     c = gate.combine(mr.get("best"), entry.get("snkrdunk"),
                      mercari_cands=mr.get("cands"), max_aux=AUXN)
-    cands = gate._build_visual_candidates(mr, c)
-    if not cands:
-        stats["no_cand"] += 1
-        return [], "", "no_cand", []
     # ★fail-closed: card_no が今取れない(探索不能)= stale cache の誤候補リスク(別カード/別ジャンル)
     import mercari_psa_resource as mp
     cn = build_search_query(t, mp).get("card_no") or ""
+    # ★2026-09-20: 絵柄が複数あるカードでは「番号未確認」枠を出さない。
+    #   card_no を先に出してから候補を組む (cache に残った分もここで落ちる)。
+    try:
+        _cat = mp.split_key(t.get("key"))[0]
+    except Exception:                                          # noqa: BLE001
+        _cat = ""
+    cands = gate._build_visual_candidates(mr, c, card_no=cn, category=_cat)
+    if not cands:
+        stats["no_cand"] += 1
+        return [], "", "no_cand", []
     if not cn:
         stats["no_cardno"] += 1
         return [], "", "no_cardno", []

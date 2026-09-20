@@ -1,0 +1,39 @@
+# -*- coding: utf-8 -*-
+"""見せる側でも「番号未確認」枠を落とす (2026-09-20)。
+
+ユーザー「同じようなこと二度とするなよ」。探す側 (`should_offer_loose`) だけ直して
+cache を洗わなかったため、同じ候補が何十回も目視に出ていた。
+**探す側と見せる側の両方に同じ判定を置く** ので、片方だけ直しても漏れない。
+"""
+from __future__ import annotations
+
+import os
+import sys
+
+sys.path.insert(0, os.path.join(r"C:\dev\iMak\iMakHQ", "tools"))
+
+import psa_resource_gate as G  # noqa: E402
+
+_MR = {"all_cands": [], "cands": [],
+       "loose_cands": [(6700, "https://jp.mercari.com/item/m58955733903",
+                        "ゾロ77 【PSA10】トニートニー・チョッパー EB02-003")]}
+_C = {"snkrdunk_urls": [], "mercari_url": "", "mercari_jpy": None}
+
+
+def _urls(**kw):
+    return [x["url"] for x in G._build_visual_candidates(dict(_MR), dict(_C), **kw)]
+
+
+def test_多変種なら番号未確認の候補を出さない():
+    assert _urls(card_no="EB02-003", category="one_piece_tcg") == []
+
+
+def test_単一変種なら今までどおり出す():
+    """絵柄が1つなら番号一致=正なので、救済枠は今までどおり出す。
+    (SV8A-093 は catalog で1変種。実測 2026-09-20 に cache から拾った実例)"""
+    assert len(_urls(card_no="SV8A-093", category="pokemon_tcg")) == 1
+
+
+def test_card_noが無ければ今までどおり():
+    """どのカードか判らない時に勝手に落とさない (fail-closed)。"""
+    assert len(_urls()) == 1

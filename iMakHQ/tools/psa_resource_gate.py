@@ -153,7 +153,7 @@ def key_from_verified_cert(cert, verified):
     return ""
 
 
-def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
+def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, category=""):
     """視覚確証に出す仕入候補リストを作る(純関数)。
 
     mercari は最安1件でなく **all_cands(同番号の全変種)** を複数並べ、ユーザーが現物と一致する
@@ -228,7 +228,18 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
     #   厳密一致が0件のときだけ mercari 側が積む枠。「候補なし」で終わらせず、
     #   目視で弾ける形にして人に見せる (ユーザー方針: 最終は目視なので近しいのも出す)。
     #   number_ok=False を持たせ、UI で明確に区別できるようにする。
-    for t in (mr.get("loose_cands") or [])[:max_mercari]:
+    # ★2026-09-20: **絵柄が複数あるカードでは、番号未確認の枠そのものを出さない**。
+    #   探索側 (`should_offer_loose`) で塞いだが、**既に貯まった cache から出続けていた**
+    #   (実測 83出品 / 392本。ユーザー「何十回も出てくる」)。
+    #   探す側と見せる側の両方で同じ判定を持つ = 片方だけ直しても漏れない。
+    _multi = False
+    if card_no:
+        try:
+            import mercari_psa_resource as _mpv
+            _multi = bool(_mpv._is_multi_variant(card_no, category or ""))
+        except Exception:                                      # noqa: BLE001
+            _multi = False
+    for t in ([] if _multi else (mr.get("loose_cands") or []))[:max_mercari]:
         url = t[1] if (t and len(t) > 1) else ""
         _p = t[0] if (t and isinstance(t[0], int)) else None
         if (url and url not in seen and url not in _ng_urls and _ok(_p)
