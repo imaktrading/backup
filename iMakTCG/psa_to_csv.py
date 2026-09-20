@@ -2978,6 +2978,17 @@ def load_targets_from_sheet_psa():
                               already_listed_reason as _already_listed,
                               zero_qty_ghost_certs as _ghost_certs,
                               PRODUCT_COL_KEY as _KEY_COL)
+        # ★2026-09-20 (提案2): cert ガードが **古い live cache** で判定していた。
+        #   実測 2026-09-19: 16.3時間前の cache で判定したため、その後に出品された
+        #   cert161735335 を見逃し、scrape/目視/生成/価格付けを全部済ませてから
+        #   入稿直前の SKU ガードで落ちた (9/18 も同じ cert)。1走行1件の丸損。
+        #   年齢は新しさを保証しない (dup_guard.py:605 と同じ理由) ので force で取り直す。
+        try:
+            import dup_guard as _dg_cert
+            _dg_cert.ensure_fresh_live_cache(force=True)
+        except Exception as _e_fresh:                          # noqa: BLE001
+            print(f"  ⚠️ live cache 取り直し失敗 (cert ガードは古い cache のまま): "
+                  f"{type(_e_fresh).__name__}")
         _listed = _listed_key_forms(all_values)
         # 出品済 cert は2つの根拠を union する。片方だけでは漏れる:
         #   シートB列 … 書き戻し漏れがある (実測 live PSA10 638件中 36件が空)

@@ -59,12 +59,12 @@ def test_set_name_candidates_come_first(monkeypatch):
     pf = _load("psa_preflight")
     con = sqlite3.connect(":memory:")
     con.execute("CREATE TABLE products (category TEXT, product_id TEXT, name_en TEXT,"
-                " name TEXT, set_name_official TEXT)")
-    rows = [("one_piece_tcg", f"P-001_{i}", "Monkey D. Luffy", "", "プロモーションカード")
+                " name TEXT, set_name_official TEXT, specs TEXT)")
+    rows = [("one_piece_tcg", f"P-001_{i}", "Monkey D. Luffy", "", "プロモーションカード", "")
             for i in range(10)]
     rows.append(("one_piece_tcg", "ST21-001_p2", "Monkey D. Luffy", "",
-                 "ONE PIECEカードゲーム BASE SHOPリミテッドカードコレクションvol.1"))
-    con.executemany("INSERT INTO products VALUES (?,?,?,?,?)", rows)
+                 "ONE PIECEカードゲーム BASE SHOPリミテッドカードコレクションvol.1", ""))
+    con.executemany("INSERT INTO products VALUES (?,?,?,?,?,?)", rows)
     con.commit()
     monkeypatch.setattr(pf, "_ensure_catalog", lambda: None)
     monkeypatch.setattr(pf, "_FRANCHISE",

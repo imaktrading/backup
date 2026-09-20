@@ -78,7 +78,7 @@ class _FakeCon:
         # ★2026-08-26: 2b の SELECT に set_name_official が増えた。ここの fixture は
         #   **記号 (prefix) の仕分け**を見るテストなのでセット名は空のままにする
         #   (空なら `_brand_matches_set_name` は必ず False = 従来の判定がそのまま出る)。
-        return [tuple(r) + ("",) * (4 - len(r)) for r in self._rows]
+        return [tuple(r) + ("",) * (5 - len(r)) for r in self._rows]
 
 
 def _classify(brand, subject, num, rows, monkeypatch):

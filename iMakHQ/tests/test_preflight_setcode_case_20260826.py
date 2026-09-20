@@ -37,9 +37,9 @@ def _fake_db():
     """catalog を模した最小 DB (小文字混じりの product_id)。"""
     con = sqlite3.connect(":memory:")
     con.execute("CREATE TABLE products (category TEXT, product_id TEXT, name_en TEXT,"
-                " name TEXT, set_name_official TEXT)")
+                " name TEXT, set_name_official TEXT, specs TEXT)")
     con.execute("INSERT INTO products VALUES "
-                "('pokemon_tcg','SM9a-067','Gardevoir & Sylveon GX','','NIGHT UNISON')")
+                "('pokemon_tcg','SM9a-067','Gardevoir & Sylveon GX','','NIGHT UNISON','')")
     con.commit()
     return con
 

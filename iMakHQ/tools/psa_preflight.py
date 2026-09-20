@@ -223,7 +223,17 @@ def _set_prefix_in_brand(product_id: str, brand: str) -> bool:
     return head in b
 
 
-def _brand_matches_set_name(brand: str, set_name_official: str) -> bool:
+def _set_name_ebay(specs) -> str:
+    """products.specs (JSON文字列) から set_name_ebay を取り出す (純関数・失敗は空)。"""
+    try:
+        d = json.loads(specs) if isinstance(specs, str) else (specs or {})
+        return str(d.get("set_name_ebay") or "")
+    except Exception:                                          # noqa: BLE001
+        return ""
+
+
+def _brand_matches_set_name(brand: str, set_name_official: str,
+                            set_name_ebay: str = "") -> bool:
     """PSA の Brand と catalog の set_name_official が同じセットを指すか (純関数)。
 
     ★2026-08-26: cert163955605 の正解 `ST21-001_p2` は set_name_official が
@@ -235,9 +245,15 @@ def _brand_matches_set_name(brand: str, set_name_official: str) -> bool:
       `_NOISE` で落とすので、`ONE PIECE` のようにゲーム名しか合わない時でも
       catalog の大半 (set_name_official が日本語) とは区別できる。
       依頼書: hq/requests/2026-08-26_act_code_proposals_tcg.md 提案4 (a)
+
+    ★2026-09-20 (提案1b): set_name_official は日本語しか無いことが多く、英語の
+      Brand (`...TO HAVE SEEN THE BATTLE RAINBOW`) と当たらない。specs の
+      `set_name_ebay` (`Sm3h: to Have Seen the Battle Rainbow`) を照合対象に足す。
+      依頼書: hq/requests/2026-09-19_act_code_proposals_tcg.md 提案1b
     """
     a = {t.upper() for t in re.findall(r"[A-Za-z]{3,}", brand or "")} - _NOISE
-    b = {t.upper() for t in re.findall(r"[A-Za-z]{3,}", set_name_official or "")} - _NOISE
+    b = {t.upper() for t in re.findall(r"[A-Za-z]{3,}",
+                                       (set_name_official or "") + " " + (set_name_ebay or ""))} - _NOISE
     return bool(a and b and (a & b))
 
 
@@ -263,13 +279,13 @@ def pids_by_subject(cur, cat: str, subject: str, brand: str = "", limit: int = 8
     toks = _subject_tokens(subject)
     if not toks or not cat:
         return []
-    order, set_name, score = [], {}, {}
+    order, set_name, set_ebay, score = [], {}, {}, {}
     for t in toks:
         try:
             rows = cur.execute(
                 # ★2026-09-19: catalog 側も同じ形に均してから比べる (提案2)。
                 #   `HOOH` が `Ho-Oh` に当たらないと、正規化した意味が無い。
-                "SELECT product_id,name_en,set_name_official FROM products "
+                "SELECT product_id,name_en,set_name_official,specs FROM products "
                 "WHERE category=? AND REPLACE(REPLACE(REPLACE(UPPER(name_en),'-',''),"
                 "'.',''),' ','') LIKE ? LIMIT 50",
                 (cat, f"%{t}%")).fetchall()
@@ -282,11 +298,13 @@ def pids_by_subject(cur, cat: str, subject: str, brand: str = "", limit: int = 8
             if pid not in score:
                 order.append(pid)
                 set_name[pid] = (r[2] if len(r) > 2 else "") or ""
+                set_ebay[pid] = _set_name_ebay(r[3] if len(r) > 3 else "")
                 score[pid] = 0
             score[pid] += 1
     # 並び: brand とセット名が一致 → 一致した語が多い → 見つけた順 (安定)
     seq = {p: i for i, p in enumerate(order)}
-    order.sort(key=lambda p: (0 if _brand_matches_set_name(brand, set_name.get(p)) else 1,
+    order.sort(key=lambda p: (0 if _brand_matches_set_name(
+                                  brand, set_name.get(p), set_ebay.get(p)) else 1,
                               -score[p], seq[p]))
     return order[:limit]
 
@@ -363,17 +381,22 @@ def classify(cert: str, meta: dict, con: sqlite3.Connection):
     toks = _subject_tokens(subject)
     hits = []
     set_name_by_pid = {}
+    set_ebay_by_pid = {}
     if num and toks:
         for pat in (f"%-{num}", f"%-{num}\\_%"):
             for r in cur.execute(
-                "SELECT product_id,name_en,name,set_name_official FROM products "
+                "SELECT product_id,name_en,name,set_name_official,specs FROM products "
                 "WHERE category=? AND product_id LIKE ? ESCAPE '\\'",
                 (cat, pat)).fetchall():
                 pid, nen, njp = r[0], (r[1] or ""), (r[2] or "")
-                hay = (nen + " " + njp).lower()
-                if any(t.lower() in hay for t in toks):
+                # ★2026-09-20 (提案1): catalog 側も `_norm_name` で均す。
+                #   `HO-OH GX` → `HOOH` は `"ho-oh gx ..."` に当たらず、番号 053 で
+                #   SM3H-053 を引けているのに弾いていた (cert160479905 が3日連続 GAP)。
+                hay = _norm_name(nen + " " + njp)
+                if any(t in hay for t in toks):
                     hits.append(pid)
                     set_name_by_pid[pid] = r[3] or ""
+                    set_ebay_by_pid[pid] = _set_name_ebay(r[4])
     hits = sorted(set(hits))
     if hits:
         # name+番号 で候補在り = 索引不備の疑いだが別セット同番号の偶然もある → 断定せず REVIEW。
@@ -391,7 +414,8 @@ def classify(cert: str, meta: dict, con: sqlite3.Connection):
         #   番号の綴りだけで系列を決めず、Brand ↔ set_name_official が一致する候補を先に出す。
         #   依頼書: hq/requests/2026-08-26_act_code_proposals_tcg.md 提案4 (a)
         by_set = [p for p in hits
-                  if p not in same and _brand_matches_set_name(brand, set_name_by_pid.get(p))]
+                  if p not in same and _brand_matches_set_name(
+                      brand, set_name_by_pid.get(p), set_ebay_by_pid.get(p))]
         other = [p for p in hits if p not in same and p not in by_set]
         prefixes = sorted({p.split("-")[0].upper() for p in hits if p})
         res["status"] = "REVIEW"
