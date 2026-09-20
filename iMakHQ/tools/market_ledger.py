@@ -260,7 +260,35 @@ def find_files(paths):
         for d in SEARCH_DIRS:
             out += glob.glob(os.path.join(d, "terapeak_*.csv"))
     # summary は 2026-09-18 に廃止。古いものが残っていても取り込まない
-    return sorted(set(p for p in out if "_summary_" not in os.path.basename(p)))
+    out = sorted(set(p for p in out if "_summary_" not in os.path.basename(p)))
+    # ★2026-09-20: **取り込んだファイルは二度と取り込まない**。
+    #   Downloads に残ったままなので、取り込むたびに古い条件のデータが戻っていた
+    #   (実害: 買い手の国で絞った 9/18 の469行が、退避したのに また入った)。
+    done = _ingested()
+    return [p for p in out if os.path.basename(p) not in done]
+
+
+INGESTED = os.path.join(LEDGER_DIR, "ingested.json")
+
+
+def _ingested():
+    """もう取り込んだファイル名 (I/O)。読めなければ空。"""
+    try:
+        with open(INGESTED, encoding="utf-8") as f:
+            v = json.load(f)
+        return set(v) if isinstance(v, list) else set()
+    except Exception:                                          # noqa: BLE001
+        return set()
+
+
+def _remember_ingested(names):
+    """取り込んだファイル名を覚える (I/O)。書けなくても走行は止めない。"""
+    try:
+        os.makedirs(LEDGER_DIR, exist_ok=True)
+        with open(INGESTED, "w", encoding="utf-8") as f:
+            json.dump(sorted(_ingested() | set(names)), f, ensure_ascii=False)
+    except Exception:                                          # noqa: BLE001
+        pass
 
 
 def cmd_ingest(paths):
@@ -273,6 +301,7 @@ def cmd_ingest(paths):
     for p in files:
         rows, added, updated = merge(rows, _read(p))
         print(f"  {os.path.basename(p):<32} 新規 {added:4} / 更新 {updated:4}")
+    _remember_ingested([os.path.basename(p) for p in files])
     save_ledger(rows)
     print(f"\n台帳 {before} → {len(rows)}行  ({LEDGER})")
     warn = warn_if_wrong_filter(rows)

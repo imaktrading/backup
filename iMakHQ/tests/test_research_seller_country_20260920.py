@@ -77,3 +77,15 @@ def test_ゲームの値はeBayの正式値():
     assert M.PRESETS["ポケモン"] == ["Pokémon TCG"]
     assert M.PRESETS["ワンピース"] == ["One Piece CCG"]
     assert M.PRESETS["ドラゴンボール"] == ["Dragon Ball Super Card Game"]
+
+
+def test_取り込んだファイルは二度と拾わない():
+    """★2026-09-20 実害: 買い手の国で絞った 9/18 の469行を退避したのに、
+    Downloads に CSV が残っていたせいで 取り込むたびに また入ってきた。
+    """
+    src = open(os.path.join(HQ, "tools", "market_ledger.py"), encoding="utf-8").read()
+    body = src.split("def find_files(")[1].split("\ndef ")[0]
+    assert "_ingested()" in body
+    assert "def _remember_ingested(" in src
+    ing = src.split("def cmd_ingest(")[1].split("\ndef ")[0]
+    assert "_remember_ingested(" in ing          # 取り込んだら覚える
