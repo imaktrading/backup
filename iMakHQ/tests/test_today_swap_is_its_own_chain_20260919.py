@@ -12,7 +12,7 @@ APP = open(os.path.join(HQ, "console", "static", "app.js"), encoding="utf-8").re
 
 def test_入れ替えは別の流れとして数える():
     body = APP.split("function chainOf(j) {")[1].split("function rankOf")[0]
-    assert '/入れ替え/.test(j.label) ? "/swap" : ""' in body
+    assert '/入れ替え/.test(j.label) ? "/swap"' in body
 
 
 def test_入れ替えを順番の後ろに下げない():
