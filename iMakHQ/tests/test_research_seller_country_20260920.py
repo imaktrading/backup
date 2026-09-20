@@ -64,3 +64,16 @@ def test_条件を変えたら台帳を退避できる():
     src = open(os.path.join(HQ, "tools", "market_ledger.py"), encoding="utf-8").read()
     assert "def cmd_archive(" in src
     assert '"archive": cmd_archive' in src
+
+
+def test_ゲームの値はeBayの正式値():
+    """★2026-09-20 eBay に直接聞いて確認 (Taxonomy API / category 183454 / 候補値168件)。
+
+    Pok… は "Pokémon TCG" の1つだけ、One Piece は "One Piece CCG" の1つだけ。
+    Dragon Ball は4つ (CCG / GT TCG / Super Card Game / Z TCG) あり、うちが扱うのは
+    Super Card Game (フュージョンワールド) だけ。CCG の中身は実データでも
+    イタジャガ・ヒーローズで、別物だった。
+    """
+    assert M.PRESETS["ポケモン"] == ["Pokémon TCG"]
+    assert M.PRESETS["ワンピース"] == ["One Piece CCG"]
+    assert M.PRESETS["ドラゴンボール"] == ["Dragon Ball Super Card Game"]

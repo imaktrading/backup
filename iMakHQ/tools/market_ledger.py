@@ -54,6 +54,13 @@ CATEGORY_CCG = "183454"
 #     何か分からない物 が混ざる)。
 #   取りこぼす約10%より、判別できないゴミが267件入る方が害が大きい。
 #   ★外すのは **カタログと引き方の精度が上がってから**。
+# ★2026-09-20 eBay に直接聞いて確認した (Taxonomy API / category 183454 / 候補値168件)。
+#   Game は **自由入力**なので、セラーは候補値を使わなくても出品できる。だから
+#   絞り込みは候補値の分しか効かない (約10%が取りこぼし) = 構造的な天井。
+#     Pok…        → "Pokémon TCG" の1つだけ
+#     One Piece   → "One Piece CCG" の1つだけ
+#     Dragon Ball → 4つある (CCG / GT TCG / Super Card Game / Z TCG)。
+#                   うちが扱うのは Super Card Game (フュージョンワールド) だけ。
 PRESETS = {
     "ポケモン": ["Pokémon TCG"],
     "ワンピース": ["One Piece CCG"],
