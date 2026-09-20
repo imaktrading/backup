@@ -91,3 +91,25 @@ def judge_cost(title: str, cost_jpy: int | None, limits: dict[str, int]) -> str:
     if limit is None or cost_jpy is None:
         return ""
     return "上限内" if cost_jpy <= limit else "超過"
+
+
+# ---------------------------------------------------------------------------
+# カードごとの上限仕入れ値の門 (2026-09-20 user 確定 / HQ 依頼 treasure_new_targets)
+# ---------------------------------------------------------------------------
+# 「上限仕入れ値」は HQ が eBay 実売中央値から pricing_engine で逆算した値。 自前で計算しない。
+# 上限ぴったりで切ると 8% しか残らないので上振れを許す。 ただし13倍の差は埋まらない。
+#   仕入値 <= 上限 + 7,000  かつ  仕入値 <= 上限 x 1.5   (厳しい方が効く)
+CARD_LIMIT_MARGIN_JPY = 7000
+CARD_LIMIT_MARGIN_RATIO = 1.5
+
+
+def card_cost_ok(title: str, cost_jpy: int | None, limits: dict[str, int]) -> bool:
+    """カードごとの上限の門 (純関数). 通してよければ True.
+
+    番号が読めない / 一覧に無い / 価格不明 は **この門では落とさない**
+    (¥70,000 の門だけが効く = 従来どおり)。
+    """
+    limit = limits.get(extract_number(title))
+    if limit is None or cost_jpy is None:
+        return True
+    return cost_jpy <= min(limit + CARD_LIMIT_MARGIN_JPY, limit * CARD_LIMIT_MARGIN_RATIO)

@@ -44,6 +44,7 @@ from scrapers import mercari_item_detail  # noqa: E402
 from scrapers import mercari_search as MSch  # noqa: E402
 from scrapers import mercari_seller as MS  # noqa: E402
 from scrapers import psa_cert  # noqa: E402
+from scrapers import treasure_keywords  # noqa: E402
 from scrapers import psa_game  # noqa: E402
 from scrapers import psa_grade_gate  # noqa: E402
 from scrapers import psa_search_terms  # noqa: E402
@@ -336,6 +337,10 @@ def _process_one(url, driver, args, claimed, rej, vision_errors, failed=None):
             return None
         if cost_rejected(detail.get("price_jpy"), args.cost_cfg):
             rej["cost_over_limit"] = rej.get("cost_over_limit", 0) + 1
+            return None
+        if not treasure_keywords.card_cost_ok(
+                detail.get("title") or "", detail.get("price_jpy"), args.card_limits):
+            rej["card_cost_over"] = rej.get("card_cost_over", 0) + 1
             return None
 
     q = MSch.extract_seller_quality(driver)  # 直前に開いた商品ページから

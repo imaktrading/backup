@@ -29,3 +29,18 @@ def test_foreign_edition():
     assert is_foreign_edition("English Pikachu")
     assert not is_foreign_edition("PSA10 ピカチュウ 020/M-P")
     assert not is_foreign_edition("Korra")
+
+
+def test_card_cost_ok_matches_hq_table():
+    from scrapers.treasure_keywords import card_cost_ok
+    t = "PSA10 ピカチュウ 020/M-P"
+    for limit, top in [(400, 600), (3000, 4500), (10000, 15000), (50000, 57000)]:
+        lim = {"020/M-P": limit}
+        assert card_cost_ok(t, top, lim)
+        assert not card_cost_ok(t, top + 1, lim)
+
+
+def test_card_cost_ok_unknown_number_passes():
+    from scrapers.treasure_keywords import card_cost_ok
+    assert card_cost_ok("PSA10 ピカチュウ", 60000, {"020/M-P": 400})
+    assert card_cost_ok("PSA10 ピカチュウ 020/M-P", None, {"020/M-P": 400})
