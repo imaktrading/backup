@@ -1607,6 +1607,19 @@ SCRIPTS = [
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit#gid=1505533226",  # 取下再出品
     },
     {
+        # ★2026-09-20 ユーザー「よく売れているカードというボタンを作って、押したら別で HTML が
+        #   立ち上がるようにして。コンソールが汚れるやろ」。
+        #   何のカードか / 何個売れたか / 実売の中央値 / うちの値段 / 出品済か未出品か を
+        #   **カタログのカード画像つき**で出す。カタログに無い物は「要補充」と出る。
+        "category": None, "type": "utility",
+        "label": "🃏 よく売れているカード",
+        "label_fg": "blue",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "market_ledger.py", "html"],
+        "params": [],
+        "tip": "市場で2個以上売れたカードを画像つきで一覧にする (別画面で開く)",
+    },
+    {
         # ①効果測定ループ: 直近2世代の funnel を突合し「直した結果が効いたか」を測る (2026-06-05)
         "category": None, "type": "utility",
         "label": "📉 効果測定",

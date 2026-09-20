@@ -7,6 +7,7 @@
     python iMakHQ/tools/market_ledger.py report          # 売れているカードと前回との差
     python iMakHQ/tools/market_ledger.py targets         # 探す先 (売れているのに出していない)
     python iMakHQ/tools/market_ledger.py cards           # 売れ筋 (出品済/未出品 の印つき・値段の差)
+    python iMakHQ/tools/market_ledger.py html            # 売れ筋を HTML にして開く (画像つき)
 
 ★台帳に貯めるのは **出品ごとの行** (eBay が出した「期間中に何個売れたか」付き)。
   カード単位の集計は report の時に作る。集計を焼いて保存すると、後から数え直せなくなる。
@@ -682,6 +683,115 @@ def cmd_cards(argv):
     return 0
 
 
+CARDS_HTML = os.path.join(LEDGER_DIR, "market_cards.html")
+
+_HTML_HEAD = """<!doctype html><html lang="ja"><meta charset="utf-8">
+<title>よく売れているカード</title>
+<style>
+ :root{--bg:#14161a;--card:#1b1e24;--line:#2a2f38;--ink:#e8eaed;--ink2:#a9b0bb;--ink3:#767d88;
+       --sunken:#20242b}
+ body{margin:0;background:var(--bg);color:var(--ink);
+      font:14px/1.6 "Yu Gothic UI","Segoe UI",system-ui,sans-serif}
+ header{padding:18px 22px;border-bottom:1px solid var(--line)}
+ h1{margin:0 0 4px;font-size:20px}
+ .sum{color:var(--ink2);font-size:13px}
+ .bar{display:flex;gap:6px;padding:12px 22px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+ .chip{background:var(--card);border:1px solid var(--line);color:var(--ink2);border-radius:20px;
+       padding:5px 14px;font-size:13px;cursor:pointer}
+ .chip.on{background:#1e3a5f;color:#8ec8ff;border-color:#2f5d94}
+ table{width:100%;border-collapse:collapse}
+ th,td{padding:7px 12px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+ th{position:sticky;top:0;background:var(--sunken);color:var(--ink2);font-size:12px}
+ td.num{text-align:right;font-variant-numeric:tabular-nums}
+ tr:hover td{background:var(--sunken)}
+ .nm{white-space:normal;max-width:380px}
+ .sub{color:var(--ink3);font-size:11px}
+ img.c{width:72px;height:100px;object-fit:contain;display:block;border:1px solid var(--line);
+       border-radius:4px;background:var(--sunken)}
+ .none{width:72px;height:100px;display:flex;align-items:center;justify-content:center;
+       border:1px dashed #a8703a;border-radius:4px;color:#ffc48e;font-size:11px}
+ .st{border-radius:20px;padding:2px 9px;font-size:11px;font-weight:700}
+ .st.yes{background:#1e3a5f;color:#8ec8ff} .st.no{background:#5f3a1e;color:#ffc48e}
+ .gain{color:#7ddc9a;font-weight:700}
+ td:first-child{width:84px;padding:5px 8px}
+</style>
+"""
+
+
+def cards_html(rows, summary):
+    """売れ筋の一覧を1枚の HTML にする (純関数)。コンソールには埋めない。
+
+    ★2026-09-20 ユーザー「よく売れているカードというボタンを作って、押したら別で HTML が
+      立ち上がるようにして。コンソールが汚れるやろ」。
+    """
+    def esc(v):
+        return (str(v) if v is not None else "").replace("&", "&amp;")             .replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+    def money(v):
+        return "—" if v in ("", None) else "$%.2f" % float(v)
+
+    body = []
+    for r in sorted(rows, key=lambda x: -x["売れた数"]):
+        img = (f"<img class='c' src='{esc(r['画像'])}' loading='lazy' alt=''>"
+               if r.get("画像") else "<div class='none'>要補充</div>")
+        gain = ("<span class='gain'>+%.2f</span>" % r["差額"])             if (r["差額"] != "" and r["差額"] > 0) else "—"
+        st = ("<span class='st yes'>出品済</span>" if r["出品状況"] == "出品済"
+              else "<span class='st no'>未出品</span>")
+        body.append(
+            f"<tr data-st='{esc(r['出品状況'])}' data-gain='{1 if gain != '—' else 0}'"
+            f" data-cat='{1 if r['product_id'] else 0}'>"
+            f"<td>{img}</td>"
+            f"<td class='nm'>{esc(r['和名'] or r['英名'] or '(カタログ未収録)')}"
+            f"<div class='sub'>{esc(r['市場のタイトル例'])}</div></td>"
+            f"<td>{esc(r['番号'])}</td>"
+            f"<td class='num'>{r['売れた数']}</td>"
+            f"<td class='num'>{money(r['実売中央値'])}</td>"
+            f"<td class='num'>{money(r['うちの値段'])}</td>"
+            f"<td class='num'>{gain}</td><td>{st}</td></tr>")
+    sm = summary
+    return (_HTML_HEAD +
+            "<header><h1>よく売れているカード</h1><div class='sum'>"
+            f"市場で2個以上売れた {sm['カード']}種類 — 出品済 {sm['出品済']} / "
+            f"未出品 {sm['未出品']} · カタログを引けなかった {sm['引けなかった']}種類 · "
+            f"番号が読めなかった販売 {sm['番号が読めなかった販売']}個</div></header>"
+            "<div class='bar'>"
+            "<button class='chip on' data-f='all'>全部</button>"
+            "<button class='chip' data-f='no'>未出品だけ</button>"
+            "<button class='chip' data-f='yes'>出品済だけ</button>"
+            "<button class='chip' data-f='gain'>値上げできる</button>"
+            "<button class='chip' data-f='nocat'>カタログ要補充</button></div>"
+            "<table><thead><tr><th></th><th>カード</th><th>番号</th><th>売れた</th>"
+            "<th>実売の中央値</th><th>うちの値段</th><th>差</th><th>出品</th></tr></thead>"
+            "<tbody>" + "".join(body) + "</tbody></table>"
+            "<script>"
+            "document.querySelectorAll('.chip').forEach(function(b){b.onclick=function(){"
+            "document.querySelectorAll('.chip').forEach(function(x){x.classList.remove('on')});"
+            "b.classList.add('on');var f=b.dataset.f;"
+            "document.querySelectorAll('tbody tr').forEach(function(tr){var ok=true;"
+            "if(f==='no')ok=tr.dataset.st==='未出品';"
+            "if(f==='yes')ok=tr.dataset.st==='出品済';"
+            "if(f==='gain')ok=tr.dataset.gain==='1';"
+            "if(f==='nocat')ok=tr.dataset.cat==='0';"
+            "tr.style.display=ok?'':'none';});};});"
+            "</script></html>")
+
+
+def cmd_html(_argv):
+    """売れ筋の一覧を HTML にしてブラウザで開く。"""
+    import webbrowser
+    rows, summary = build_cards()
+    if not rows:
+        print(summary.get("error") or "空です")
+        return 1
+    with open(CARDS_HTML, "w", encoding="utf-8") as f:
+        f.write(cards_html(rows, summary))
+    print(f"売れ筋 {summary['カード']}種類 — 出品済 {summary['出品済']} / "
+          f"未出品 {summary['未出品']} / カタログ要補充 {summary['引けなかった']}")
+    print(f"→ {CARDS_HTML}")
+    webbrowser.open("file:///" + CARDS_HTML.replace("\\", "/"))
+    return 0
+
+
 def cmd_report(_):
     rows = load_ledger()
     if not rows:
@@ -709,7 +819,7 @@ def cmd_report(_):
 
 def main(argv):
     cmds = {"ingest": cmd_ingest, "report": cmd_report, "targets": cmd_targets,
-            "cards": cmd_cards}
+            "cards": cmd_cards, "html": cmd_html}
     if len(argv) < 2 or argv[1] not in cmds:
         print(__doc__)
         return 1
