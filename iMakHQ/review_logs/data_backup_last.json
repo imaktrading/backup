@@ -1,17 +1,17 @@
 {
- "at": "2026-09-20T05:00:01",
+ "at": "2026-09-21T05:00:02",
  "ok": true,
  "dest": "G:\\マイドライブ\\iMak_backup\\daily",
- "files": 4464,
- "raw_mb": 250.6,
- "skipped_type": 263,
+ "files": 6599,
+ "raw_mb": 260.6,
+ "skipped_type": 267,
  "skipped_big": [
   "dedupe\\requests\\2026-06-10_step4b_ambiguous74_viewer.html"
  ],
  "db_rows": 100609,
- "zip": "G:\\マイドライブ\\iMak_backup\\daily\\iMak_daily_20260920_0500.zip",
- "zip_mb": 65.5,
- "zip_entries": 4465,
+ "zip": "G:\\マイドライブ\\iMak_backup\\daily\\iMak_daily_20260921_0500.zip",
+ "zip_mb": 74.0,
+ "zip_entries": 6600,
  "pruned": [],
- "sec": 72
+ "sec": 92
 }

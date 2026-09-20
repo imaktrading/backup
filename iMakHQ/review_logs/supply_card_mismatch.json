@@ -1,10 +1,10 @@
 {
- "checked": 430,
+ "checked": 437,
  "stat": {
-  "listed": 568,
-  "compared": 430,
+  "listed": 579,
+  "compared": 437,
   "no_cost": 0,
-  "no_market": 138
+  "no_market": 142
  },
  "ratio": 0.6,
  "verified": false,
@@ -42,21 +42,6 @@
    ]
   },
   {
-   "itemID": "820041238478",
-   "cert": "161379803",
-   "key": "one_piece_tcg:OP01-120_PRB01_1",
-   "cost": 7199,
-   "cheapest": 29999.0,
-   "ratio": 0.24,
-   "title": "803 【PSA10】シャンクス SEC [OP01-120] THE BEST",
-   "urls": [
-    "https://jp.mercari.com/item/m88120780062",
-    "https://jp.mercari.com/item/m58891474856",
-    "https://jp.mercari.com/item/m23662158067",
-    "https://snkrdunk.com/apparels/328421/used/47748582"
-   ]
-  },
-  {
    "itemID": "358921182510",
    "cert": "150266286",
    "key": "one_piece_tcg:PRB02-014",
@@ -67,6 +52,21 @@
    "urls": [
     "https://jp.mercari.com/shops/product/2JTRTxCpvm5bBiNmAydJsP",
     "https://snkrdunk.com/apparels/656343/used/45703476"
+   ]
+  },
+  {
+   "itemID": "820041238478",
+   "cert": "161379803",
+   "key": "one_piece_tcg:OP01-120_PRB01_1",
+   "cost": 8780,
+   "cheapest": 29999.0,
+   "ratio": 0.293,
+   "title": "803 【PSA10】シャンクス SEC [OP01-120] THE BEST",
+   "urls": [
+    "https://jp.mercari.com/item/m88120780062",
+    "https://jp.mercari.com/item/m58891474856",
+    "https://jp.mercari.com/item/m23662158067",
+    "https://snkrdunk.com/apparels/328421/used/47748582"
    ]
   },
   {
@@ -127,54 +127,5 @@
    ]
   }
  ],
- "drops": [
-  {
-   "itemID": "820141671656",
-   "prev": 24000,
-   "now": 12222,
-   "ratio": 0.509,
-   "key": "pokemon_tcg:SV6-113",
-   "title": "ラッキー AR スカーレット&バイオレット 拡張パック 変幻の仮面 113/1…"
-  },
-  {
-   "itemID": "358632857689",
-   "prev": 9200,
-   "now": 5000,
-   "ratio": 0.543,
-   "key": "pokemon_tcg:M2a-229",
-   "title": "【PSA10】メガルチャブルex MA"
-  },
-  {
-   "itemID": "820034337387",
-   "prev": 28888,
-   "now": 15800,
-   "ratio": 0.547,
-   "key": "pokemon_tcg:SV9a-071",
-   "title": "【PSA10】カスミのコダック AR 071/063 sv9a 熱風のアリーナ"
-  },
-  {
-   "itemID": "820000791250",
-   "prev": 60000,
-   "now": 33599,
-   "ratio": 0.56,
-   "key": "pokemon_tcg:M2a-246",
-   "title": "【PSA10】メガカイリューex（SAR)〈246/193〉[M2a]5992"
-  },
-  {
-   "itemID": "820070750789",
-   "prev": 7980,
-   "now": 4497,
-   "ratio": 0.564,
-   "key": "pokemon_tcg:M1L-070",
-   "title": "【PSA10】キョジオーン AR"
-  },
-  {
-   "itemID": "820141672196",
-   "prev": 12800,
-   "now": 7499,
-   "ratio": 0.586,
-   "key": "pokemon_tcg:S12a-015",
-   "title": "【PSA10】かがやくリザードン"
-  }
- ]
+ "drops": []
 }
