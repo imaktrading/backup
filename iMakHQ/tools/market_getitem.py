@@ -4,6 +4,20 @@
 
     python iMakHQ/tools/market_getitem.py fetch [--limit N]   # 台帳の itemID を引く
     python iMakHQ/tools/market_getitem.py report              # 取れた物の中身を見る
+    python iMakHQ/tools/market_getitem.py missing            # まだ取れていない物を数える
+
+■ 何のために取るのか (2026-09-20 ユーザー確定。**取り違えないこと**)
+
+  ① **利益を取りこぼさない**
+     出品価格は仕入値からの積み上げ (cost-plus) で決めているが、そこに縛られない。
+     **市場が実際にその値段で買っているなら、そこまで取る**。
+     今は実売より安く出している分を、そのまま取り逃している。
+  ② **ライバルの出品を多面的に分析して、出品内容を強くする**
+     タイトルの組み立て / Item Specifics の埋め方 / 発送・返品の条件 / 写真の枚数 /
+     説明文 / 誰が売っているか。**うちに足りないものを見つけて直す**。
+
+  どちらも「売上を増やす」ための話。突き合わせの精度を上げるのは ①の手段であって、
+  目的ではない。
 
 ★2026-09-20 ユーザー確定「丸ごとなら、取り直し要らないね」。
   集計して保存すると、後から「これも見たい」となった時に全件取り直しになる。
@@ -35,6 +49,59 @@ def _tools():
     sys.path.insert(0, HERE)
     import live_set_revise as L
     return L
+
+
+# ★2026-09-20: **2つ目の鍵 (imaktrading) で走る**。ユーザー指示「あたらしいKEYでやってね」。
+#   市場調査で今 動いている方 (imax-64) の枠を減らさないため。鍵は用途ごとに分ける。
+KEYS = r"C:/dev/iMak_data/credentials/imaktrading.txt"
+TOKEN = r"C:/dev/iMak_data/credentials/ebay_oauth_token_imaktrading.json"
+
+
+def _keys():
+    d = {}
+    with open(KEYS, encoding="utf-8-sig") as f:
+        for ln in f:
+            if "=" in ln:
+                k, v = ln.split("=", 1)
+                d[k.strip()] = v.strip()
+    return d
+
+
+def access_token():
+    """imaktrading 側の access_token を返す。切れていれば refresh_token で更新して保存する。"""
+    import base64
+    import datetime
+    import requests
+    tok = json.load(open(TOKEN, encoding="utf-8"))
+    got = tok.get("_obtained_at")
+    fresh = False
+    if got:
+        age = (datetime.datetime.now() - datetime.datetime.fromisoformat(got)).total_seconds()
+        fresh = age < int(tok.get("expires_in", 7200)) - 300      # 5分の余裕を見る
+    if fresh:
+        return tok["access_token"]
+    d = _keys()
+    auth = base64.b64encode(f"{d['AppID']}:{d['AppSecret']}".encode()).decode()
+    r = requests.post("https://api.ebay.com/identity/v1/oauth2/token",
+                      headers={"Content-Type": "application/x-www-form-urlencoded",
+                               "Authorization": "Basic " + auth},
+                      data={"grant_type": "refresh_token",
+                            "refresh_token": tok["refresh_token"]}, timeout=30)
+    if r.status_code != 200:
+        raise RuntimeError(f"トークン更新に失敗: {r.status_code} {r.text[:120]}")
+    new = r.json()
+    tok["access_token"] = new["access_token"]
+    tok["expires_in"] = new.get("expires_in", 7200)
+    tok["_obtained_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+    with open(TOKEN, "w", encoding="utf-8") as f:
+        json.dump(tok, f, ensure_ascii=False, indent=1)
+    return tok["access_token"]
+
+
+def headers(call="GetItem"):
+    return {"X-EBAY-API-IAF-TOKEN": access_token(), "X-EBAY-API-SITEID": "0",
+            "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+            "X-EBAY-API-CALL-NAME": call, "Content-Type": "text/xml"}
 
 
 def path_of(item_id):
@@ -137,12 +204,24 @@ QUOTA_FLOOR = 1500
 
 def remaining_getitem():
     """GetItem の残り回数 (I/O)。取れなければ None = 分からない。"""
-    sys.path.insert(0, HERE)
+    import base64
+    import requests
     try:
-        import ebay_rate_limits as R
-        for row in R.fetch_rate_limits(R.get_app_token()):
-            if (row.get("resource") or "") == "GetItem":
-                return int(row.get("remaining"))
+        d = _keys()
+        auth = base64.b64encode(f"{d['AppID']}:{d['AppSecret']}".encode()).decode()
+        t = requests.post("https://api.ebay.com/identity/v1/oauth2/token",
+                          headers={"Content-Type": "application/x-www-form-urlencoded",
+                                   "Authorization": "Basic " + auth},
+                          data={"grant_type": "client_credentials",
+                                "scope": "https://api.ebay.com/oauth/api_scope"},
+                          timeout=30).json()["access_token"]
+        g = requests.get("https://api.ebay.com/developer/analytics/v1_beta/rate_limit/",
+                         headers={"Authorization": "Bearer " + t}, timeout=30).json()
+        for grp in g.get("rateLimits", []):
+            for res in grp.get("resources", []):
+                if res.get("name") == "GetItem":
+                    for rk in res.get("rates", []):
+                        return int(rk.get("remaining"))
     except Exception:                                          # noqa: BLE001
         return None
     return None
@@ -171,6 +250,7 @@ def cmd_fetch(argv):
             print("  → 今日はここまで。16:00 のリセット後にもう一度どうぞ")
             return 0
     print(f"未取得 {total}件 / 今回 {len(ids)}件 を取ります (GetItem 残り {left}回)")
+    failed = []
     ok = err = 0
     for n, iid in enumerate(ids, 1):
         body = ('<?xml version="1.0" encoding="utf-8"?>'
@@ -183,7 +263,7 @@ def cmd_fetch(argv):
         for attempt in range(3):
             try:
                 r = requests.post(EP, data=body.encode("utf-8"),
-                                  headers=L._oauth_headers("GetItem"), timeout=40)
+                                  headers=headers("GetItem"), timeout=40)
                 xml = L.decode_xml(r.content)
                 L._check_auth(xml)          # 認証で落ちたら例外 (空を残して黙らない)
                 break
@@ -194,15 +274,45 @@ def cmd_fetch(argv):
                 else:
                     time.sleep(3)
         if xml is None:
+            # ★通信で落ちた分は **保存しない** = 次の走行でもう一度取りに行く (取りこぼさない)
             err += 1
+            failed.append((iid, "通信"))
             continue
-        # ★取れなかった物も「取れなかった」と分かる形で残す (空ファイルにしない)
+        # ★eBay が「取れない」と答えた物も残す (空ファイルにしない)。
+        #   残さないと毎回 同じ物を取りに行って、枠だけ減る。
         save_raw(iid, xml)
-        ok += 1 if "<Ack>Success</Ack>" in xml or "<Ack>Warning</Ack>" in xml else 0
+        if "<Ack>Success</Ack>" in xml or "<Ack>Warning</Ack>" in xml:
+            ok += 1
+        else:
+            m = re.search(r"<ShortMessage>(.*?)</ShortMessage>", xml, re.S)
+            failed.append((iid, (m.group(1) if m else "不明")[:40]))
         if n % 50 == 0 or n == len(ids):
             print(f"  {n}/{len(ids)} 件", flush=True)
         time.sleep(0.2)
-    print(f"取得 {ok}件 / 失敗 {err}件 → {OUT_DIR}")
+    left = [i for i in ledger_item_ids() if not have(i)]
+    print(f"取得 {ok}件 / 取れなかった {len(failed)}件 / **まだ残り {len(left)}件**")
+    if failed:
+        print("  取れなかった物 (理由):")
+        for iid, why in failed[:10]:
+            print(f"    {iid}  {why}")
+        if len(failed) > 10:
+            print(f"    … 他 {len(failed) - 10}件")
+    if left:
+        print("  ★残りはもう一度 fetch すれば続きから取ります (取れた分は取り直しません)")
+    print(f"→ {OUT_DIR}")
+    return 0
+
+
+def cmd_missing(_argv):
+    """まだ取れていない物を数える。取りこぼしを黙って見逃さないため。"""
+    ids = ledger_item_ids()
+    left = [i for i in ids if not have(i)]
+    bad = []
+    for i in ids:
+        if have(i) and "<Ack>Failure</Ack>" in load_raw(i):
+            bad.append(i)
+    print(f"台帳 {len(ids)}件 / 取れた {len(ids) - len(left)}件 / まだ {len(left)}件")
+    print(f"eBay が「取れない」と答えた物: {len(bad)}件 (これは何度やっても取れない)")
     return 0
 
 
@@ -244,7 +354,7 @@ def cmd_report(_argv):
 
 
 def main(argv):
-    cmds = {"fetch": cmd_fetch, "report": cmd_report}
+    cmds = {"fetch": cmd_fetch, "report": cmd_report, "missing": cmd_missing}
     if len(argv) < 2 or argv[1] not in cmds:
         print(__doc__)
         return 1

@@ -87,3 +87,26 @@ def test_分からない時は動かさない():
 def test_他の処理のぶんを残す():
     import market_getitem as G2
     assert G2.QUOTA_FLOOR >= 1000
+
+
+# ---- 2つ目の鍵で走る (2026-09-20 ユーザー「あたらしいKEYでやってね」) ----
+
+def test_imaktrading側の鍵を使う():
+    """市場調査で、今 動いている方 (imax-64) の枠を減らさない。"""
+    import market_getitem as G3
+    assert "imaktrading" in G3.KEYS
+    assert "imaktrading" in G3.TOKEN
+
+
+def test_トークンが切れたら自分で更新する():
+    src = open(r"C:/dev/iMak/iMakHQ/tools/market_getitem.py", encoding="utf-8").read()
+    body = src.split("def access_token(")[1].split("\ndef ")[0]
+    assert "refresh_token" in body
+    assert "_obtained_at" in body            # 取った時刻で残り時間を見る
+
+
+def test_取れなかった分を黙って捨てない():
+    src = open(r"C:/dev/iMak/iMakHQ/tools/market_getitem.py", encoding="utf-8").read()
+    body = src.split("def cmd_fetch(")[1]
+    assert "failed.append" in body
+    assert "まだ残り" in body                 # 走行の最後に残件を出す
