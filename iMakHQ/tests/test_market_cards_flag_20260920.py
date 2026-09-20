@@ -99,3 +99,32 @@ def test_弾が枝分かれしている時は和名で決める():
     conn = sqlite3.connect(M.CATALOG_DB)
     assert M.lookup_by_set_and_no("SV11", "136", "ズルッグ", conn) == "SV11W-136"
     assert M.lookup_by_set_and_no("SV11", "136", "", conn) is None
+
+
+# ---- カード番号そのもので引く (2026-09-20) ----
+# ★ユーザー指摘で発覚: 「カタログ要補充 17件」のうち **16件はカタログに在った**。
+#   番号が `212/172` の形の時、弾コードをタイトルから拾えないと候補が空になり、
+#   引きもせずに「無い」と言っていた (②引き方の誤り)。17件 → 7件に減った。
+
+def test_番号そのものを候補に残す():
+    assert "212/172" in M.product_id_candidates("212/172", "PSA10 Charizard 212/172")
+    assert "020/M-P" in M.product_id_candidates("020/M-P", "PSA10 Pikachu 020/M-P")
+
+
+def test_番号そのもので引ける():
+    import sqlite3
+    conn = sqlite3.connect(M.CATALOG_DB)
+    row = M.lookup_by_number_text("212/172", "PSA10 Charizard 212/172 VSTAR Universe", conn)
+    assert row and row[0] == "S12a-212"
+
+
+def test_決められなければ当てない():
+    """★同じ番号の別カードを掴まないこと。
+
+    実例: 020/019 は マリィのモルペコ (SVOM-020) と ゲンガーVMAX が同じ番号で、
+    ゲンガーの $2,475 を拾うと「8倍 値上げできる」に見えてしまう。
+    """
+    import sqlite3
+    conn = sqlite3.connect(M.CATALOG_DB)
+    # 手がかりが何も無いタイトルでは当てない
+    assert M.lookup_by_number_text("020/019", "PSA10 pokemon card", conn) is None

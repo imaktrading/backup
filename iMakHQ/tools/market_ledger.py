@@ -491,14 +491,50 @@ def product_id_candidates(key, title):
         return [key.upper()]                      # OP03-057 / P-043 はそのまま
     num, suffix = key.split("/", 1)
     if not suffix.isdigit():                      # 020/M-P → M-P-020
-        return [f"{suffix.upper()}-{num}"]
+        return [f"{suffix.upper()}-{num}", key]
     out = []
     for m in _SET_CODE.finditer(title or ""):     # 175/165 は弾コードをタイトルから拾う
         code = m.group(1)
         if code.upper() in ("M", "S", "SV"):      # 単独の文字は弾ではない
             continue
         out.append(f"{code}-{num}")
+    out.append(key)                               # ★番号そのものも残す (最後の手)
     return out
+
+
+def lookup_by_number_text(num_text, title, conn):
+    """カタログの **カード番号そのもの** (specs の card_number_text) で引く (I/O)。
+
+    ★2026-09-20 ユーザー指摘で発覚。「カタログ要補充 17件」のうち **16件はカタログに在った**。
+      番号が `212/172` の形のとき、弾コードをタイトルから拾えないと候補が空になり、
+      引かずに「無い」と言っていた (②引き方の誤り)。
+      カタログは番号そのものを持っているので、まずそれで引く。
+      1つに決まればそれ。複数なら **タイトルの和名 / 弾コード / 英語のセット名**で決める。
+      決められなければ当てない (推測で別のカードを掴まない)。
+    """
+    rows = conn.execute(
+        "SELECT product_id, name, name_jp, category, images, set_name FROM products "
+        "WHERE specs LIKE ?", ('%"card_number_text": "' + num_text + '"%',)).fetchall()
+    if not rows:
+        return None
+    if len(rows) == 1:
+        return rows[0][:5]
+    t = (title or "")
+    tu = re.sub(r"[^A-Z0-9]", "", t.upper())
+    for r in rows:                                   # 和名がタイトルに在る
+        if r[2] and r[2] in t:
+            return r[:5]
+    for r in rows:                                   # 弾コードがタイトルに在る
+        code = re.sub(r"[^A-Z0-9]", "", r[0].split("-")[0].upper())
+        if code and code in tu:
+            return r[:5]
+    code = set_code_from_title(t, conn)              # 英語のセット名から
+    if code:
+        cu = re.sub(r"[^A-Z0-9]", "", code.upper())
+        for r in rows:
+            if re.sub(r"[^A-Z0-9]", "", r[0].split("-")[0].upper()) == cu:
+                return r[:5]
+    return None
 
 
 def lookup_catalog(cands, conn, title=""):
@@ -543,6 +579,12 @@ def lookup_catalog(cands, conn, title=""):
                 return conn.execute(
                     "SELECT product_id, name, name_jp, category, images "
                     "FROM products WHERE product_id=?", (got,)).fetchone()
+    # ★最後に **カード番号そのもの** で引く (弾コードが分からなくても決まることが多い)
+    for pid in (cands or []):
+        if "/" in (pid or ""):
+            got = lookup_by_number_text(pid, title, conn)
+            if got:
+                return got
     return None
 
 
@@ -694,6 +736,30 @@ def _our_prices():
     return out
 
 
+def _our_sold():
+    """itemID → うちが売った数 (I/O)。一番新しいファネルCSVから。
+
+    ★2026-09-20 ユーザー「この中でうちのSOLD実績はあるの? あれば、SOLD実績を入れて欲しい」。
+      市場で売れている数の横に **うちが何個売れたか**を並べる。売れているカードなのに
+      うちは0個、が見える。
+    """
+    files = sorted(glob.glob(os.path.join(FUNNEL_DIR, "funnel_*.csv")))
+    if not files:
+        return {}
+    out = {}
+    with open(files[-1], encoding="utf-8-sig", newline="") as f:
+        for r in csv.DictReader(f):
+            if (r.get("site") or "") != "US":
+                continue
+            try:
+                n = int(float(r.get("sold_qty") or 0))
+            except (TypeError, ValueError):
+                n = 0
+            if r.get("item_id") and n:
+                out[r["item_id"].strip()] = n
+    return out
+
+
 # ★2026-09-20: 番号だけで突き合わせると **別物の値段**を掴む (実測)。
 #   シャンクス OP09-004: うち $272 に対して "Manga Alt Art comic parallel" が $19,447。
 #   満身創痍 ST01-012: うち $186 に対して "1st Anniversary 尾田サイン入り" が $5,165。
@@ -808,6 +874,7 @@ def _live_rows():
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import sheet_io as _S
     usd = _our_prices()
+    sold = _our_sold()
     rows2d = _S._product_ws().get_all_values()[1:]
     live_ids = [(r[1].strip() if len(r) > 1 else "") for r in rows2d
                 if (len(r) > 1 and r[1].strip()) and not (len(r) > 3 and r[3].strip())]
@@ -821,7 +888,7 @@ def _live_rows():
         # ★2026-09-20: 比べるのは **うちの eBay タイトル** (ファネル)。シートの C列は
         #   仕入元 (メルカリ) の日本語タイトルなので、市場の英語タイトルとは比べられない。
         p, t = usd.get(g(1)) or tuple(extra.get(g(1)) or (None, ""))
-        out.append((g(34), p, g(1), t or g(2)))
+        out.append((g(34), p, g(1), t or g(2), sold.get(g(1), 0)))
     return out
 
 
@@ -870,9 +937,9 @@ def build_cards(min_sold=2):
         return [], {"error": "台帳が空です。先に ingest してください"}
     live = _live_rows()
     _, unknown = by_card(rows)
-    cards = cards_with_flag(rows, [k for k, _p, _i, _t in live], min_sold)
+    cards = cards_with_flag(rows, [k for k, _p, _i, _t, _s in live], min_sold)
 
-    ours = [(price, title, mine_index([key])) for key, price, _i, title in live if price]
+    ours = [(price, title, mine_index([key])) for key, price, _i, title, _s in live if price]
     mine_of = collections.defaultdict(list)
     for k, v, have in cards:
         if not have:
@@ -881,8 +948,14 @@ def build_cards(min_sold=2):
             if is_mine(k, v["title"], one):
                 mine_of[k].append((price, title))
     mine_pids = collections.defaultdict(list)
-    for key, price, _iid, title in live:
+    our_sold = collections.defaultdict(int)
+    for key, price, _iid, title, nsold in live:
         pid = (key or "").split(":")[-1].upper()
+        if pid and nsold:
+            our_sold[pid] += nsold
+            base = pid.split("_", 1)[0]
+            if base != pid:
+                our_sold[base] += nsold
         if pid and price and "/" not in pid:
             mine_pids[pid].append((price, title))      # 鍵は大文字に揃えてある
             # ★2026-09-20 ユーザー「FB05-119とかも値上げできるのでは?」「OP05-119とか」。
@@ -929,6 +1002,8 @@ def build_cards(min_sold=2):
             "画像": first_image(row[4]) if (row and len(row) > 4) else "",
             "ゲーム": row[3] if row else "",
             "出品状況": "出品済" if have else "未出品",
+            # ★2026-09-20 ユーザー「うちのSOLD実績はあるの? あれば、SOLD実績を入れて欲しい」
+            "うちが売れた数": our_sold.get(pid, 0) if pid else 0,
             "売れた数": v["sold"],
             "出品本数": v["listings"],
             "実売中央値": med,
