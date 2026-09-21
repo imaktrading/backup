@@ -781,13 +781,33 @@ def pick_psa10_candidates(items, card_no, variant_hint=None, limit=5, market_no=
 
 def _norm_name(s):
     """カード名の比較用正規化 (純関数)。空白・中黒・ハイフン差を吸収する。"""
-    t = (s or "").upper()
+    import unicodedata
+    # ★2026-09-21: 全角英数も吸収 (公式「モンキー・Ｄ・ルフィ」/ 出品「モンキー・D・ルフィ」)
+    t = unicodedata.normalize("NFKC", s or "").upper()
     for ch in " 　・･-‐‑–—ー~〜「」『』【】()()[]":
         t = t.replace(ch, "")
     return t
 
 
-def pick_psa10_loose_candidates(items, name_jp, limit=6):
+def should_offer_loose_single(c) -> bool:
+    """名前だけの再検索をしてよいか (純関数)。名前が無ければしない (fail-closed)。"""
+    return bool((c or {}).get("name_jp"))
+
+
+def loose_rarity(c):
+    """カタログのレアリティ (hint[4])。AR/SR 等の2文字以上だけ使う (U/C は出品名に書かれない)。"""
+    h = (c or {}).get("hint") or []
+    r = (h[4] if len(h) > 4 else "") or ""
+    return r if len(r) >= 2 else ""
+
+
+def loose_search_kw(c):
+    """番号なしの検索語 = 'PSA10 <名前> <レアリティ>' (純関数)。"""
+    r = loose_rarity(c)
+    return f"PSA10 {search_name(c.get('name_jp'))}" + (f" {r}" if r else "")
+
+
+def pick_psa10_loose_candidates(items, name_jp, limit=6, rarity=""):
     """★2026-08-01: **番号を確認できない**が名前は一致する PSA10 候補 (純関数)。
 
     なぜ要るか:
@@ -809,7 +829,10 @@ def pick_psa10_loose_candidates(items, name_jp, limit=6):
             for it in items
             if it.get("price", 0) > 0 and is_psa10(it.get("name") or "")
             and not _is_lot(it.get("name") or "")   # ★まとめ売り/連番は1枚だけ買えない
-            and key in _norm_name(it.get("name"))][:limit]
+            and key in _norm_name(it.get("name"))
+            # 番号なしで引いた分は、レアリティが分かる時は出品名にも書かれている物だけ
+            # (同じ名前の別セット・別レアを減らす)
+            and (not rarity or rarity.upper() in (it.get("name") or "").upper())][:limit]
 
 
 def parse_image_search_results(src):
@@ -1192,23 +1215,32 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
                 #   人が「違う」を3回押し、走行ログが「検索の事故」として毎回鳴っていた。
                 #   救済枠は「番号で引けなかった」時のためのもので、「変種を確証できない」
                 #   時のためのものではない (番号が合っても絵柄が別なら買えない)。
-                if should_offer_loose(all_cands, _failclosed):
-                    loose = pick_psa10_loose_candidates(items, c.get("name_jp"))
-                    # ★2026-08-02: 救済枠は **同じ検索結果から** 拾う作りなので、検索自体が
-                    #   0件だと道連れで空になる(実測: 補0本の候補ゼロ33件は all/loose とも0
-                    #   = 検索が空振り)。番号を外して名前だけで引き直し、初めて救済が機能する。
-                    #   番号未確認のまま出す枠なので best/価格判定には使わない(従来どおり)。
-                    if not loose and not items and c.get("name_jp"):
-                        kw2 = f"PSA10 {c['name_jp']}"
+                # ★2026-09-21 ユーザー承認「番号なしで探すのは絵柄が1種類のカードだけ」:
+                #   監視くんに確認した補URL 630本 (買える) のうち 314本が検索結果に出ていなかった。
+                #   出品者が番号を書かない (実例「PSA10 ヨマワル AR ポケモンカードゲーム」) ので、
+                #   番号入りの検索語では出てこない。従来は **検索が完全に0件の時だけ** 名前で
+                #   引き直していたため、番号付きの別カードが1件でも返ると引き直さなかった。
+                #   → 絵柄が1種類のカードは **毎回** 名前だけでも引き、厳密一致に無い物を
+                #     「番号未確認」枠で足す。多変種は出さない (別の絵が混ざる / 2026-09-20)。
+                if (not _failclosed and not c.get("multi_variant")
+                        and should_offer_loose_single(c)):
+                    _have = {t[1] for t in all_cands if t and len(t) > 1}
+                    loose = [t for t in pick_psa10_loose_candidates(items, c.get("name_jp"))
+                             if t[1] not in _have]
+                    kw2 = loose_search_kw(c)
+                    try:
                         url2 = ("https://jp.mercari.com/search?keyword="
                                 + urllib.parse.quote(kw2) + "&status=on_sale&order=asc&sort=price")
-                        try:
-                            drv.get(url2); time.sleep(8)
-                            items2 = parse_mercari_items(drv.page_source)
-                            loose = pick_psa10_loose_candidates(items2, c.get("name_jp"))
-                            via += f"+番号なし再検索({len(items2)}件)"
-                        except Exception as _e2:
-                            print(f"    ⚠️ 番号なし再検索 失敗: {type(_e2).__name__}", flush=True)
+                        drv.get(url2); time.sleep(8)
+                        items2 = parse_mercari_items(drv.page_source)
+                        _seen = _have | {t[1] for t in loose}
+                        loose += [t for t in pick_psa10_loose_candidates(
+                                      items2, c.get("name_jp"), rarity=loose_rarity(c))
+                                  if t[1] not in _seen]
+                        loose = sorted(loose, key=lambda t: t[0])[:6]
+                        via += f"+番号なし再検索({len(items2)}件)"
+                    except Exception as _e2:
+                        print(f"    ⚠️ 番号なし再検索 失敗: {type(_e2).__name__}", flush=True)
                     if loose:
                         via += f"+番号未確認{len(loose)}件"
                 out[i] = {"best": best, "cands": cands, "all_cands": all_cands,
