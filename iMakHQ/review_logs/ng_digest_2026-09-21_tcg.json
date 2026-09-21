@@ -1,0 +1,154 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [
+    "error: 1件"
+  ],
+  "log_signal_lines": [
+    "❌ 除外(出品しない): 3件 (行 [3, 5, 12])"
+  ],
+  "recurring_missing": [],
+  "recurring_dropped": [
+    {
+      "cert": "140273536",
+      "days": 14,
+      "reason": "OUT-OF-SCOPE"
+    },
+    {
+      "cert": "146117881",
+      "days": 14,
+      "reason": "OUT-OF-SCOPE"
+    },
+    {
+      "cert": "157112832",
+      "days": 14,
+      "reason": "OUT-OF-SCOPE"
+    },
+    {
+      "cert": "152136358",
+      "days": 14,
+      "reason": "OUT-OF-SCOPE"
+    },
+    {
+      "cert": "150712266",
+      "days": 14,
+      "reason": "LIVE-DUP"
+    },
+    {
+      "cert": "123143536",
+      "days": 14,
+      "reason": "COST-CAP"
+    },
+    {
+      "cert": "158444373",
+      "days": 14,
+      "reason": "COST-CAP"
+    },
+    {
+      "cert": "159397890",
+      "days": 14,
+      "reason": "COST-CAP"
+    },
+    {
+      "cert": "15123139",
+      "days": 14,
+      "reason": "写真なし"
+    },
+    {
+      "cert": "55281762",
+      "days": 14,
+      "reason": "写真なし"
+    },
+    {
+      "cert": "157799487",
+      "days": 10,
+      "reason": "OUT-OF-SCOPE"
+    },
+    {
+      "cert": "15370649",
+      "days": 10,
+      "reason": "写真なし"
+    },
+    {
+      "cert": "63355290",
+      "days": 9,
+      "reason": "写真なし"
+    },
+    {
+      "cert": "936643273",
+      "days": 8,
+      "reason": "PSA照会失敗"
+    },
+    {
+      "cert": "157208456",
+      "days": 7,
+      "reason": "COST-CAP"
+    },
+    {
+      "cert": "14261910",
+      "days": 7,
+      "reason": "写真なし"
+    },
+    {
+      "cert": "98911418",
+      "days": 6,
+      "reason": "OUT-OF-SCOPE"
+    },
+    {
+      "cert": "10197043",
+      "days": 6,
+      "reason": "写真なし"
+    },
+    {
+      "item_id": "358609093013",
+      "days": 5,
+      "reason": "cert#未解決"
+    },
+    {
+      "item_id": "358434963108",
+      "days": 5,
+      "reason": "cert#未解決"
+    },
+    {
+      "cert": "44110427",
+      "days": 5,
+      "reason": "写真なし"
+    },
+    {
+      "item_id": "358411398378",
+      "days": 4,
+      "reason": "cert#未解決"
+    },
+    {
+      "item_id": "358604221711",
+      "days": 4,
+      "reason": "COST-CAP"
+    },
+    {
+      "cert": "113410191",
+      "days": 4,
+      "reason": "出品見送り"
+    },
+    {
+      "cert": "159106501",
+      "days": 3,
+      "reason": "OUT-OF-SCOPE"
+    },
+    {
+      "cert": "12827559",
+      "days": 3,
+      "reason": "PSA照会失敗"
+    },
+    {
+      "cert": "160479905",
+      "days": 3,
+      "reason": "出品見送り"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 1,
+    "recurring_missing": 0,
+    "recurring_dropped": 27
+  }
+}
