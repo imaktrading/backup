@@ -165,6 +165,10 @@ def select_backfill_targets(rows2d, max_backups=1, min_backups=0, watch=None):
         cert = _cell(r, CERT)
         if not iid:                     # 未出品 = 対象外(補は live 出品の延命策)
             continue
+        # ★2026-09-21 ユーザー「9999は対象外として」: B列=9999 は「出品しない」確定の
+        #   見送りマーカー (ended_sweep / relist_from_funnel と同じ意味)。出品が無いので補も要らない
+        if iid == "9999":
+            continue
         if _cell(r, D):                 # 売り切れ(取下げ済) = 対象外
             continue
         if _cell(r, CATEGORY) != "TCG":  # R列=カテゴリ。PSA は 'TCG'(psa_to_csv と同じ絞り込み)

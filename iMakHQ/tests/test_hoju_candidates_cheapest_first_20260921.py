@@ -121,3 +121,10 @@ def test_安い候補なら一番高い既存と入れ替わる():
     pbi = H.add_existing_prices({0: {H._norm_url(new): 4000}}, {0: [new]}, t, vals, prices=table)
     _wb, added, _d, removed = H.plan_aux_writeback({0: [new]}, t, vals, {}, True, price_by_url=pbi)
     assert added == 1 and [u for _i, u in removed] == [aux[4]]
+
+
+def test_B列9999の見送り行は補URLの対象外():
+    ncol = max(H.B, H.CERT, H.CATEGORY, H.KEY, H.D, H.C) + 1
+    row = [""] * ncol
+    row[H.B], row[H.CERT], row[H.CATEGORY], row[H.KEY] = "9999", "149064758", "TCG", "one_piece_tcg:OP01-025"
+    assert H.select_backfill_targets([[""] * ncol, row], max_backups=6) == []
