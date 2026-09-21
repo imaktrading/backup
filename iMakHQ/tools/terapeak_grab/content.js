@@ -139,7 +139,10 @@
   }
 
   // ---- まとめて取る (人が押した時だけ、開いているタブでだけ動く) ----
-  const MAX_PAGES = 50;
+  // ★2026-09-21: 50 → 200。`PSA 10` は価格で $50〜$760 に絞っても50ページで届かず、
+  //   1個売れの出品 (うちの売れ方) が丸ごと取れなかった。最後のページまで行けば自然に止まる。
+  //   容量は manifest の unlimitedStorage で外してある (既定10MBだと6タブ分で足りなくなる)。
+  const MAX_PAGES = 200;
   let running = false;
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -194,9 +197,13 @@
         // 人が捲るのと同じ間合いを空ける
         await sleep(5000 + Math.floor(Math.random() * 3000));
       }
-      if (pages >= MAX_PAGES) msg(`${MAX_PAGES}ページで打ち止めにしました`, true);
-      else if (!running) msg(`止めました (${pages}ページ)`, true);
-      // 最後まで行ったら CSV も出す (押し忘れを無くす)。途中で止めた時は出さない
+      // ★2026-09-21: 打ち止めでも CSV を出す。以前は「最後まで行った時だけ」出していたので、
+      //   件数の多い検索 (`PSA 10`) が50ページで止まると、取った2,500件が保存されずに残った。
+      //   人が「止める」を押した時だけは出さない (途中で止めた = 要らない、の意思なので)。
+      if (pages >= MAX_PAGES) {
+        msg(`${MAX_PAGES}ページで打ち止めにしました (この先はまだ取れていません)`, true);
+        await exportCsv();
+      } else if (!running) msg(`止めました (${pages}ページ)`, true);
       else await exportCsv();
     } finally {
       running = false;

@@ -97,7 +97,9 @@ def test_条件は毎回同じものが焼かれる():
     assert q["sellerCountry"] == ["JP"]
     assert q["keywords"] == ["PSA10"]   # 2026-09-18 ユーザー確定
     assert q["sorting"] == ["-itemssold"]
-    assert q["dayRange"] == ["90"]
+    # ★2026-09-21 90 → 30 (ユーザー「次からは30日でいいやん」)。90日だと PSA 10 のポケモンが
+    #   1検索1万件の上限を超えた
+    assert q["dayRange"] == ["30"]
     assert "buyerCountry" not in q          # 買い手の国で絞るのは誤り (2026-09-18)
     assert "price" not in q                 # 価格の下限は入れない
 

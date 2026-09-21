@@ -116,7 +116,7 @@ class TestViewerReasonIsRecordedNotSubtracted:
                                        fixes=(), unavailable=["5"]))
         assert got["目視に出せなかった (PSAデータ/カテゴリ不明)"] == ["5"]
         assert got["未回答"] == ["4"], "答える機会が無かった分を未回答に混ぜない"
-        assert got["該当なし (カタログに依頼)"] == ["2"]
+        assert got["該当なし (目視で当てはまる候補が無かった)"] == ["2"]
         assert got["保留 (次の走行でまた出ます)"] == ["3"]
 
     def test_confirmed_certs_are_not_listed(self):
@@ -139,7 +139,7 @@ class TestMailCountsAddUp:
 
     LOG = ("20件を処理します。（仕入値あり: 20件）\n"
            "  ⏭️ 目視で出品しなかった内訳 (引き算せず記録した理由):\n"
-           "     ・該当なし (カタログに依頼): 2件 [#78976849, #168157629]\n"
+           "     ・該当なし (目視で当てはまる候補が無かった): 2件 [#78976849, #168157629]\n"
            "     ・目視に出せなかった (PSAデータ/カテゴリ不明): 1件 [#146333918]\n")
     POST = {"drops": [{"cert": "1", "reason": "live-dup", "title": "(KEY=x) PSA 10 Ace"},
                       {"cert": "2", "reason": "live-dup", "title": "(KEY=y) PSA 10 Luffy"},

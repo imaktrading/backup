@@ -560,8 +560,10 @@ def research_open(preset, tabs, days):
     """条件を焼いた Research の URL を Chrome で開く (SOLD / ACTIVE を選べる)。"""
     m = _market_ledger()
     chrome, urls = _chrome(), []
-    for tab in tabs or ["SOLD"]:
-        url = m.build_url(preset, tab=tab, days=int(days or m.DEFAULT_DAYS))
+    # ★検索語は2本 (`PSA10` / `PSA 10`)。片方だけだと空白ありの出品がほぼ全部抜ける (2026-09-21)
+    pairs = [(tab, kw) for tab in (tabs or ["SOLD"]) for kw in m.KEYWORDS]
+    for tab, kw in pairs:
+        url = m.build_url(preset, tab=tab, days=int(days or m.DEFAULT_DAYS), keywords=kw)
         if chrome:
             # ★--new-window: 付けないと「最後に使っていた窓」に入る。Gemini などを
             #   Chrome のアプリとして開いていると、その窓にタブが出てしまう (2026-09-18)

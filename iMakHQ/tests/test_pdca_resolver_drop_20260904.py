@@ -126,3 +126,17 @@ def test_queue_resolver_drop_writes_own_filename_to_last_writer():
     row = con.execute("SELECT last_writer FROM improvement_queue WHERE queue_id=?",
                       (qid,)).fetchone()
     assert "auto_catalog_add_request" in row["last_writer"]
+
+
+def test_カタログに在ると判断した件はカタログに送らない_20260921():
+    """resolver_drop は ②出品くんの引き方の問題。catalog 宛ての層A に入れない (layer=code)。
+
+    cert160479905 が 9/18〜9/20 と毎日 catalog に「追加依頼→取消」を繰り返した。
+    """
+    con = ps.connect(":memory:")
+    qid = acr._queue_resolver_drop("pokemon_tcg", "160479905", "HO-OH GX #053", "REVIEW",
+                                   "SM3H-053", con=con)
+    row = con.execute("select layer, finding_type from improvement_queue where queue_id=?",
+                      (qid,)).fetchone()
+    assert row["layer"] == "code"
+    assert row["finding_type"] == "resolver_drop"

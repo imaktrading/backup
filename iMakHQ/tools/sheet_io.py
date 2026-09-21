@@ -7,6 +7,7 @@
 """
 import functools
 import os
+import re
 import re as _re
 import time as _t
 
@@ -367,6 +368,57 @@ def _first_row_of_updated_range(rng):
     return int(m.group(1)) if m else None
 
 
+# ★2026-09-21: **1点ものの仕入元** (現物1つ = 仕入れられるのは1回だけ)。HIGH に同じ URL が
+#   既に在る行を足すと、1つの現物に eBay 出品が2つ付き、2つ目が売れた時に仕入れられない。
+#   実害: 再出品用の行 (psa_resource_gate) が 出品中の行と同じスニダン/メルカリの URL で作られ、
+#   2件が HIGH に入っていた (監視くん指摘 hq/requests/2026-09-21_candidate_reuses_listed_source.md)。
+#   公式サイト等 (同じ URL で何度でも買える) は対象外。形を足すのはこの表だけ。
+ONE_OF_A_KIND_SUPPLY = (
+    r"jp\.mercari\.com/item/",
+    r"mercari\.com/.*/item/",
+    r"snkrdunk\.com/.*/used/",
+    r"fril\.jp/",
+    r"item\.fril\.jp/",
+    r"paypayfleamarket\.yahoo\.co\.jp/item/",
+    r"auctions\.yahoo\.co\.jp/jp/auction/",
+    r"page\.auctions\.yahoo\.co\.jp/",
+)
+
+
+def is_one_of_a_kind(url):
+    """その仕入元が1点ものか (純関数)。"""
+    return bool(url) and any(re.search(p, url) for p in ONE_OF_A_KIND_SUPPLY)
+
+
+def claimed_supply_urls(rows2d):
+    """HIGH の A列 (仕入元) と 補URL (AC〜AG) に出てくる URL の集合 (純関数)。見出し行は除く。"""
+    out = set()
+    cols = [0] + list(range(PRODUCT_COL_AUX_START, PRODUCT_COL_AUX_START + PRODUCT_AUX_MAX))
+    for r in rows2d[1:]:
+        for c in cols:
+            v = (r[c] if len(r) > c else "").strip()
+            if v:
+                out.add(v)
+    return out
+
+
+def drop_claimed_supply(rows, claimed):
+    """足す行のうち、1点ものの仕入元が既に押さえられている行を外す (純関数)。
+
+    戻り: (足す行, 外した[(URL, 理由)])。同じ呼び出しの中での重複も1行にする。
+    """
+    keep, dropped, seen = [], [], set(claimed or ())
+    for r in rows:
+        url = (r[0] if r else "").strip()
+        if is_one_of_a_kind(url):
+            if url in seen:
+                dropped.append((url, "HIGH に同じ仕入元が在る" if url in (claimed or ()) else "同時に足す行と重複"))
+                continue
+            seen.add(url)
+        keep.append(r)
+    return keep, dropped
+
+
 def append_product_rows(rows, value_input_option="RAW"):
     """商品管理シートに行を足す (**N列と AN列を1セルも踏まない**)。
 
@@ -382,6 +434,14 @@ def append_product_rows(rows, value_input_option="RAW"):
     if not rows:
         return 0
     ws = _product_ws()
+    # ★1点ものの仕入元は、HIGH に既に在れば足さない (上の ONE_OF_A_KIND_SUPPLY)。黙って捨てない
+    rows, dropped = drop_claimed_supply(rows, claimed_supply_urls(ws.get_all_values()))
+    if dropped:
+        print(f"  ⚠️ 仕入元が既に HIGH に在るので足さなかった: {len(dropped)}行")
+        for url, why in dropped[:20]:
+            print(f"     - {why}: {url}")
+    if not rows:
+        return 0
     width = PRODUCT_COL_COST_OVERRIDE                  # 39 = A..AM (AN は含めない)
     body = [(list(r) + [""] * width)[:width] for r in rows]
     resp = ws.append_rows([r[:PRODUCT_COL_COST] for r in body],   # A..M

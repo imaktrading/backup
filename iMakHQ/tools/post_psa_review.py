@@ -2119,7 +2119,7 @@ _SKIP_REASONS = (
     "cert番号の訂正 (今回は出品しない)",
     "目視に出せなかった (PSAデータ/カテゴリ不明)",
     "既に別出品として live (二重出品ガード。識別ではなく在庫側の判断待ち)",
-    "該当なし (カタログに依頼)",
+    "該当なし (目視で当てはまる候補が無かった)",
     "保留 (次の走行でまた出ます)",
     "未回答",
 )
@@ -2152,7 +2152,7 @@ def viewer_skip_reasons(certs, confirmed, results, fixes=(), unavailable=(), dup
         elif cert in unavail:
             r = "目視に出せなかった (PSAデータ/カテゴリ不明)"
         elif by.get(cert) in ("NONE", "NG"):
-            r = "該当なし (カタログに依頼)"
+            r = "該当なし (目視で当てはまる候補が無かった)"
         elif by.get(cert):
             r = "保留 (次の走行でまた出ます)"
         else:

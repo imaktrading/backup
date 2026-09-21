@@ -26,8 +26,12 @@ import newcand_confirm as N     # noqa: E402
 
 
 class _FakeWS:
-    def __init__(self):
+    def __init__(self, existing=None):
         self.appended, self.batches = [], []
+        self.existing = existing or [["URL"]]
+
+    def get_all_values(self):
+        return self.existing
 
     def append_row(self, row, value_input_option=None):
         return self.append_rows([row], value_input_option)

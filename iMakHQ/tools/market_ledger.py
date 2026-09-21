@@ -76,13 +76,24 @@ DAY_RANGES = {
     "7日": 7, "30日": 30, "90日": 90, "6ヶ月": 180,
     "1年": 365, "2年": 730, "3年": 1095,
 }
-DEFAULT_DAYS = 90
-# ★2026-09-18 ユーザー確定: `PSA10`。eBay の検索は `PSA 10` (間にスペース) も拾うので
-#   取りこぼさない (実データで確認済み: "PSA 10 Red's Pikachu 270/SM-P" が入っていた)
-KEYWORDS = "PSA10"
+DEFAULT_DAYS = 30   # ★2026-09-21 ユーザー「30日にした方がいいかもね」。90日だと `PSA 10` のポケモンが eBay の上限 (1検索1万件) を超えた
+# ★2026-09-21 訂正: **`PSA10` では `PSA 10` (空白あり) の出品はほぼ拾えない**。
+#   9/18 に「`PSA 10` も拾う」と書いたが、根拠は1件だけだった。実測 (2026-09-21):
+#     台帳1,970件のうち タイトルに `PSA10` があるのが 1,943件 / `PSA 10` だけは 1件。
+#     うちが90日で売った PSA10 は 19件で、**全部 `PSA 10` 表記 → 台帳に1件も入っていなかった**
+#     (itemId で突合して0件)。うちは日本のセラーなので、本来は台帳に入っていないとおかしい。
+#   → 検索語を **2本** にして両方取る。同じ出品は merge で1行にまとめる (_ledger_key)。
+KEYWORDS = ("PSA10", "PSA 10")
+# ★2026-09-21 ユーザー確定「上下入れたら？7マンまでしか出さないわけだし」。
+#   価格で絞らないと `PSA 10` は50ページ (2,500件) で打ち止めになり、1個売れの出品
+#   (うちの売れ方) まで届かない (実測: 50ページ目でも「2個売れ」だった)。
+#   上限 $760 = 会社の仕入上限 7万円を v9 で出品価格にした値 ($755.98)。
+#   下限 $50 = 仕入1,000円でも $35.98 になるので、それ未満は出せない。うちの売れた最安は $60。
+#   URL の書き方はユーザーが画面で設定して確認した (minPrice / maxPrice)。
+PRICE_MIN, PRICE_MAX = 50, 760
 
 
-def build_url(preset, tab="SOLD", days=DEFAULT_DAYS, keywords=KEYWORDS, now=None):
+def build_url(preset, tab="SOLD", days=DEFAULT_DAYS, keywords=KEYWORDS[0], now=None):
     """条件セットから Research の URL を作る。
 
     tab は "SOLD" か "ACTIVE"。days は DAY_RANGES の値 (既定 90)。
@@ -105,6 +116,8 @@ def build_url(preset, tab="SOLD", days=DEFAULT_DAYS, keywords=KEYWORDS, now=None
         ("categoryId", CATEGORY_CCG),
         ("format", "BEST_OFFER"),
         ("format", "FIXED_PRICE"),
+        ("minPrice", str(PRICE_MIN)),
+        ("maxPrice", str(PRICE_MAX)),
     ]
     q += [("aspect", f"Game:::{g}") for g in PRESETS[preset]]   # 空 = 絞らない
     q += [
@@ -178,13 +191,28 @@ def load_ledger():
     return _read(LEDGER) if os.path.exists(LEDGER) else []
 
 
+def _ledger_key(r):
+    """台帳の鍵 (純関数)。検索語は空白と大小を無視する。
+
+    ★`PSA10` と `PSA 10` の2本で取ると、両方の語を書いた出品が2回入る。
+      同じ出品を2行にすると売れた数が倍に数えられるので、鍵の上では同じ語として扱う。
+    """
+    out = []
+    for c in KEY_COLS:
+        v = r.get(c, "") or ""
+        if c == "検索語":
+            v = re.sub(r"\s+", "", v).upper()
+        out.append(v)
+    return tuple(out)
+
+
 def merge(kept, incoming, ingested_at=None):
     """台帳 kept に incoming を混ぜる。鍵が同じなら新しい方を残す。
 
     返り値は (混ぜた後の行, 足された数, 上書きした数)。
     """
     stamp = ingested_at or datetime.date.today().isoformat()
-    index = {tuple(r.get(c, "") for c in KEY_COLS): i for i, r in enumerate(kept)}
+    index = {_ledger_key(r): i for i, r in enumerate(kept)}
     rows = list(kept)
     added = updated = 0
     for r in incoming:
@@ -192,7 +220,7 @@ def merge(kept, incoming, ingested_at=None):
             continue
         r = dict(r)
         r.setdefault("取込日", stamp)
-        k = tuple(r.get(c, "") for c in KEY_COLS)
+        k = _ledger_key(r)
         if k in index:
             r["取込日"] = rows[index[k]].get("取込日", stamp)  # 初めて見た日を残す
             rows[index[k]] = r
@@ -359,18 +387,30 @@ def is_japanese(row, lang=None):
     return v.startswith("japan")
 
 
+# ★2026-09-21 ユーザー確定「日本人セラーにしなくていい」。セラーの国は GetItem で1件ずつ
+#   引かないと分からず、台帳 11,231件のうち分かっているのは 2,082件だけ (残り約9,000件 =
+#   約9,000回・1時間超・1日の枠をほぼ使い切る)。「そんなに時間かける価値なし」。
+#   代わりに **タイトルに言語の印がある物 (英語版/中国語版/韓国語版) を外す**。
+#   米国セラーの英語版を、番号が同じ日本語版と取り違えないため。
+JP_SELLER_ONLY = False
+_OTHER_LANG = {"英語版", "中国語版", "韓国語版"}
+
+
 def by_card(rows, kind="Sold", lang=None, seller=None):
     """カード番号ごとに 売れた数・出品本数・実売中央値 をまとめる。"""
     agg = collections.defaultdict(lambda: {"sold": 0, "listings": 0, "prices": [], "title": ""})
     unknown = 0
     lang = lang_by_item() if lang is None else lang
-    seller = seller_country_by_item() if seller is None else seller
+    if JP_SELLER_ONLY:
+        seller = seller_country_by_item() if seller is None else seller
     for r in rows:
         if r.get("種別") != kind:
             continue
         if not is_japanese(r, lang):       # 英語版・中国語版は別の商品なので数えない
             continue
-        if not is_jp_seller(r, seller):    # 日本のセラーだけ (入口で絞れないので ここで)
+        if JP_SELLER_ONLY and not is_jp_seller(r, seller):
+            continue
+        if markers(r.get("タイトル")) & _OTHER_LANG:   # セラーで絞らない分、言語の印で落とす
             continue
         try:
             n = int(r.get("売れた数") or 0)
@@ -977,7 +1017,9 @@ def cmd_archive(_argv):
     if not os.path.exists(LEDGER):
         print("台帳がありません")
         return 1
-    dst = LEDGER.replace(".csv", "_" + _dt.date.today().isoformat() + "_buyerCountryで取った分.csv")
+    # ★退避の理由をファイル名に残す (2026-09-21: 以前は「buyerCountryで取った分」で決め打ちだった)
+    why = (_argv[0] if _argv else "退避").strip() or "退避"
+    dst = LEDGER.replace(".csv", "_" + _dt.date.today().isoformat() + "_" + why + ".csv")
     shutil.move(LEDGER, dst)
     print(f"退避しました → {dst}")
     print("次: リサーチを開いて取り直し → ingest")

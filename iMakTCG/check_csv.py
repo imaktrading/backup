@@ -41,6 +41,11 @@ BANNED_TITLE_WORDS = [
     "gem mt", "gem-mt", "gemmt",
     "mint", "graded", "l@@k", "look", "wow", "nr",
 ]
+# ★2026-09-21: 「Gem Mint」だけは許す。2026-09-20 のユーザー指示で、生成側がタイトルの
+#   余った枠を `Gem Mint` で埋めるようにした (commit 4bf9e5cb / tcg_listing_fields.py)。
+#   禁止語の `mint` を直し忘れていて、9/21 の入稿で3件 (ジンベエ/カモネギ/サンダースGXデッキ)
+#   が「禁止ワード 'mint'」で除外された。`Near Mint` や `Mint` 単独は今まで通り弾く。
+ALLOWED_TITLE_PHRASES = ["Gem Mint"]
 
 
 def _banned_title_words_in(title, words):
@@ -55,7 +60,11 @@ def _banned_title_words_in(title, words):
     if _p not in _s.path:
         _s.path.insert(0, _p)
     from listing_common import banned_title_words_in
-    return banned_title_words_in(title, words)
+    import re as _re
+    t = str(title or "")
+    for ph in ALLOWED_TITLE_PHRASES:
+        t = _re.sub(r"(?i)(?<![A-Za-z0-9])" + _re.escape(ph) + r"(?![A-Za-z0-9])", " ", t)
+    return banned_title_words_in(t, words)
 
 
 # 必須Item Specifics（空欄だと品質低下）

@@ -102,7 +102,12 @@ def test_入口では絞れないので出口で落とす():
     src = open(os.path.join(HQ, "tools", "market_ledger.py"), encoding="utf-8").read()
     assert "def is_jp_seller(" in src
     body = src.split("def by_card(")[1].split("\ndef ")[0]
-    assert "is_jp_seller(r, seller)" in body          # 集計で必ず通す
+    # ★2026-09-21 決定を変えた (ユーザー「日本人セラーにしなくていい」): セラー国は GetItem を
+    #   約9,000回引かないと分からず、時間をかける価値が無い。絞りは JP_SELLER_ONLY で切替、
+    #   既定は切る。代わりに言語の印 (英語版/中国語版/韓国語版) で落とす
+    assert "JP_SELLER_ONLY and not is_jp_seller(r, seller)" in body
+    assert M.JP_SELLER_ONLY is False
+    assert "_OTHER_LANG" in body
     assert "sellerCountry=JP" in M.build_url(PRESET, "SOLD", 90)   # 入口の指定は残す
 
 

@@ -238,6 +238,11 @@ def _queue_resolver_drop(category: str, cert: str, model: str, status: str, foun
             con, category, f"cert{cert}", "catalog_add",
             evidence=f"resolver={status} 候補={found} (依頼は出さずここに積んだ)",
             source="missing_models", finding_type="resolver_drop",
+            # ★2026-09-21: 層を指定しないと既定の "A" (= catalog に即対応を頼む分) に入る。
+            #   ここに来るのは「catalog に在る」と判断した件 = ②出品くんの引き方の問題なので、
+            #   catalog に送らない "code" (HQ が直す分) に積む。cert160479905 が 9/18〜9/20 と
+            #   毎日 catalog に依頼→取消を繰り返した真因 (止まっていたのは status=done の守りだけ)
+            layer="code",
             identity=model[:200],
             ts=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             observed_ts=datetime.datetime.now().strftime("%Y-%m-%d"),
