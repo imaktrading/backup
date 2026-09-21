@@ -56,12 +56,36 @@ def find_targets(vals, category="TCG"):
     for n, r in enumerate(vals[1:], start=2):
         if _cell(r, CAT) != category:
             continue
-        if not _cell(r, B) or _cell(r, SOLD) or _cell(r, KEY):
+        if not _cell(r, B) or _cell(r, B) == "9999" or _cell(r, SOLD) or _cell(r, KEY):
             continue
         if not _cell(r, CERT):
             continue
         out.append({"row": n, "itemID": _cell(r, B), "cert": _cell(r, CERT),
                     "title": _cell(r, 2)})
+    return out
+
+
+def find_mismatched(vals, pid_of, category="TCG"):
+    """KEY は入っているが、**目視で確定した版と違う** live 行 (pid_of 注入で純関数)。
+
+    ★2026-09-22 (ユーザー「放置せずに深堀」): KEY は候補を作る時点で市場タイトルから先に
+      入る。その後の目視でパラレル等に決まっても「KEY が入っている行は触らない」ため、
+      **通常版の KEY が残り続けていた** (実測: 生きている出品 84件。9/21 出品分でも 7件)。
+      出品の中身は目視の版で作られている (CSV のタイトル/項目で確認) ので、KEY だけが古い。
+      KEY がずれると 補URL検索が別の版で探し / 重複チェックが効かない。
+      目視の答え (canonical_pid_for_cert) が正。比較は prefix と大小文字を無視する。
+    """
+    out = []
+    for n, r in enumerate(vals[1:], start=2):
+        if _cell(r, CAT) != category:
+            continue
+        b, key, cert = _cell(r, B), _cell(r, KEY), _cell(r, CERT)
+        if not b or b == "9999" or _cell(r, SOLD) or not key or not cert:
+            continue
+        pid = (pid_of(cert) or "").strip()
+        if pid and sheet_io.normalize_key(key) != pid.lower():
+            out.append({"row": n, "itemID": b, "cert": cert, "title": _cell(r, 2),
+                        "old_key": key})
     return out
 
 
@@ -105,12 +129,16 @@ def main():
     vals = sheet_io._product_ws().get_all_values()
     targets = find_targets(vals, a.category)
     print(f"▶ KEY が空の live 出品: {len(targets)}件 ({a.category})")
+    _mis = find_mismatched(vals, canonical_pid_for_cert, a.category)
+    print(f"▶ KEY が目視で確定した版と違う live 出品: {len(_mis)}件 → 目視の版に合わせる")
+    targets = targets + _mis
     if not targets:
         return
     ok, unresolved, ambiguous = plan(targets, canonical_pid_for_cert,
                                      dup_guard.catalog_categories)
     for t in ok:
-        print(f"  + row{t['row']} cert={t['cert']} → KEY='{t['key']}'  {t['title'][:34]}")
+        _was = f" (旧 {t['old_key']})" if t.get("old_key") else ""
+        print(f"  + row{t['row']} cert={t['cert']} → KEY='{t['key']}'{_was}  {t['title'][:34]}")
     for t in ambiguous:
         print(f"  ⚠ row{t['row']} cert={t['cert']} '{t['pid']}' は {t['categories']} "
               f"の複数カテゴリに実在 → 書かない")
