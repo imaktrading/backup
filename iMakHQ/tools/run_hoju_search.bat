@@ -229,8 +229,13 @@ python -u run_kuji_night.py >> "%LOG%" 2>&1
 
 REM --- 6e) lists that the daytime buttons only display: price-down candidates
 REM          and title-rework candidates. Both write a spreadsheet tab only.
+REM   2026-09-22: pricedown MUST NOT write the AL flag at night. Revise reads AL and
+REM   lowers the eBay price every morning, so writing it here changed prices without
+REM   the user deciding (334 listings -5% since 9/3). List only; the button writes AL.
 echo [pricedown] %date% %time% >> "%LOG%"
+set NOCONVERT_NO_FLAG_WRITE=1
 python -u noconvert_pricedown.py >> "%LOG%" 2>&1
+set NOCONVERT_NO_FLAG_WRITE=
 echo [title-rework] %date% %time% >> "%LOG%"
 python -u noclick_targets.py >> "%LOG%" 2>&1
 
