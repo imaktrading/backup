@@ -371,6 +371,17 @@ def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products
     return out[:limit]
 
 
+def search_name(name_jp):
+    """検索語に入れる名前 (純関数)。**照合や表示には使わない** (公式名は name_jp のまま)。
+
+    ★2026-09-21: 公式の表記そのままで検索して空振りしていた (補URL 休み中31件の深堀)。
+      - 全角英数 → 半角 (公式「モンキー・Ｄ・ルフィ」/ 市場「モンキー・D・ルフィ」)
+      - 空白を詰める (公式「アローラ ナッシーV」/ 市場「アローラナッシーV」)
+    """
+    import unicodedata
+    return "".join(unicodedata.normalize("NFKC", name_jp or "").split())
+
+
 def build_card_query(title, set_no, key=None):
     """1カード分の検索情報を作る → {kw, card_no, name_jp, key, image}。
 
@@ -396,7 +407,8 @@ def build_card_query(title, set_no, key=None):
         return {"kw": "", "card_no": "", "market_no": market_no, "name_jp": nj, "key": key or "",
                 "image": image or "", "hint": hint, "multi_variant": mv}
     kw_no = market_no or card_no
-    kw = f"PSA10 {nj} {kw_no}" if nj else f"PSA10 {kw_no}"
+    _snj = search_name(nj)
+    kw = f"PSA10 {_snj} {kw_no}" if _snj else f"PSA10 {kw_no}"
     return {"kw": kw, "card_no": card_no, "market_no": market_no, "name_jp": nj, "key": key or "",
             "image": image or "", "hint": hint, "multi_variant": mv}
 
