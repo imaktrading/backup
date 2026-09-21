@@ -164,9 +164,9 @@
     var oj = job("offer_calc");
     var ot = oj ? (oj.state === "error" ? "数えられない"
       : (oj.n ? "来ている <b>" + num(oj) + "</b>件" : "来ていない")) : "件数なし";
-    $("g-offer").innerHTML = '<div class="gh"><h3>オファー</h3><span class="target">値下げ交渉が来た出品</span>' +
-      '<span class="purpose">受けるか決める / ミラーにも交渉を付ける</span><span class="tot">' + ot + "</span></div>" +
-      '<div class="rows" id="offer-rows"></div>';
+    // ★2026-09-22 ユーザー「オファーは在庫メンテじゃなくて今日やることに。監視くん-巡回状況の上に同じ形で」
+    $("offer-line").innerHTML = "オファー — " + ot;
+    $("offerbar").className = "watch offer" + (oj && oj.n ? " on" : "");
     $("offer-rows").innerHTML = rowsFor(ROWS.offer);
     $("fix-rows").innerHTML = rowsFor(ROWS.fix);
 
@@ -180,8 +180,6 @@
     $("maint-bar").innerHTML =
       pill("g-hoju", "補URL", "--g-hoju", h) + pill("g-restock", "再仕入れ", "--g-restock", r) +
       pill("g-shelf", "取下げ・棚", "--g-shelf", { todo: todoOf(sl).length, total: sum(sl, function (j) { return j.n; }) }) +
-      '<a class="pill" href="#g-offer" style="--gc:var(--g-fix)">オファー <b>' +
-        (oj && oj.n != null ? num(oj) : "—") + '</b><span>' + (oj && oj.n ? "来ている" : "件数なし") + '</span></a>' +
       '<a class="pill" href="#g-fix" style="--gc:var(--g-fix)">在庫あり・直す <b>—</b><span>件数なし</span></a>';
     return { todo: todo, hold: hold };
   }
@@ -272,7 +270,7 @@
 
     // ★2026-09-19 ユーザー「オファーの件、重要だからTOP画面に出してほしい」。
     //   オファーは期限が短い (実例: 受信から丸1日) ので、一番上の枠に入れる。
-    var lanes = [["maint", "在庫メンテ", "--p-maint", ["offer", "hoju", "restock", "shelf"]],
+    var lanes = [["maint", "在庫メンテ", "--p-maint", ["hoju", "restock", "shelf"]],
                  ["new", "新規出品", "--p-new", ["seed"]]];
     var waiting = 0;
     var html = lanes.map(function (L) {
