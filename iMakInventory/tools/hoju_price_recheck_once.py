@@ -67,13 +67,15 @@ def _blocked() -> str | None:
 
 
 def _verdict(res: dict | None) -> tuple[str, str]:
-    if not res:
+    """scraper の in_stock で判定 (status 名はサイトごとに違う: mercari=ON_SALE / snkrdunk=IN_STOCK).
+    メルカリのオークション出品は定価で買えるか判らないので判定不能."""
+    if not res or res.get("status") in ("AUCTION", "UNKNOWN"):
         return "判定不能", ""
-    st = res.get("status")
-    price = (res.get("skus") or [{}])[0].get("price_jpy")
-    if st == "IN_STOCK":
+    sku = (res.get("skus") or [{}])[0]
+    if sku.get("in_stock") is True:
+        price = sku.get("price_jpy")
         return "買える", "" if price is None else str(price)
-    if st in ("SOLD_OUT", "DELETED"):
+    if sku.get("in_stock") is False:
         return "売り切れ", ""
     return "判定不能", ""
 
