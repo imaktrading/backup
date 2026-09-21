@@ -648,12 +648,37 @@ def filter_candidates_by_cost(cands, t, vals):
         prices = _price_cache_get(_hd)
     except Exception:                                          # noqa: BLE001
         return list(cands or []), []
+    now_cost = swap_baseline(now_cost, t, vals, prices) if min_gain else now_cost
     keep, drop = [], []
     for c in (cands or []):
         p = prices.get(_norm_url(c.get("url")))
         (drop if candidate_cost_conflicts(p, now_cost, main_dead, min_gain)
          else keep).append(c)
     return keep, drop
+
+
+def swap_baseline(now_cost, t, vals, prices, aux_max=None):
+    """入れ替えの「¥1,000以上安い」を何と比べるか (純関数, test可)。
+
+    ★2026-09-21 ユーザー「入れ替えで同じ候補が出る」。今の仕入値 (N列) と比べていたので、
+      補URLに安い5本が入った後も、**同じ値段の別出品** (スニダンの同じ店の連番など) が
+      毎回「仕入値より¥1,000安い」を通り、入れ替わらないのに目視に出続けていた
+      (実測: ゼクロム ¥5,800 が6本ずつ繰り上がって出た)。
+      入れ替えは **今の5本のうち一番高い物を追い出せる時だけ**意味がある。
+      5本とも値段が分かる時は、その一番高い値段と今の仕入値の低い方を基準にする。
+      1本でも値段が分からない時は今までどおり仕入値 (判断材料が無いので広げない)。
+    """
+    aux_max = aux_max or AUXN
+    row = (t or {}).get("row")
+    r = vals[row - 1] if (row and 0 < row <= len(vals)) else []
+    aux = [u for u in (_cell(r, AUX0 + k) for k in range(aux_max)) if u]
+    if len(aux) < aux_max:
+        return now_cost
+    ps = [(prices or {}).get(_norm_url(u)) for u in aux]
+    if any(not isinstance(p, (int, float)) or p <= 0 for p in ps):
+        return now_cost
+    top = max(ps)
+    return min(now_cost, top) if now_cost else top
 
 
 _PRICE_CACHE = {}

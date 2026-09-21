@@ -78,3 +78,22 @@ def test_見送りは枠を食わず値段が下がった物だけ出る():
     out = G._build_visual_candidates({"all_cands": cands}, {}, skipped=skipped)
     urls = [c["url"] for c in out]
     assert cands[0][1] not in urls and cands[1][1] in urls and len(urls) == 6
+
+
+# ── 入れ替えは今の5本の一番高い物と比べる (同日 ユーザー「再走しても同じ候補」) ──
+def test_入れ替えの基準は今の5本の一番高い値段():
+    aux = [f"https://snkrdunk.com/apparels/1/used/{i}" for i in range(5)]
+    vals = _vals_with_aux(aux)
+    prices = {H._norm_url(u): 5800 for u in aux}
+    t = {"row": 2}
+    base = H.swap_baseline(9000, t, vals, prices)
+    assert base == 5800
+    # 同額の ¥5,800 は出さない / ¥4,800 は出す
+    assert H.candidate_cost_conflicts(5800, base, False, H.SWAP_MIN_GAIN) is True
+    assert H.candidate_cost_conflicts(4800, base, False, H.SWAP_MIN_GAIN) is False
+
+
+def test_補URLの値段が1本でも分からなければ仕入値のまま():
+    aux = [f"https://a/{i}" for i in range(5)]
+    prices = {H._norm_url(u): 5800 for u in aux[:4]}
+    assert H.swap_baseline(9000, {"row": 2}, _vals_with_aux(aux), prices) == 9000
