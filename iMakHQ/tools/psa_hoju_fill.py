@@ -657,6 +657,37 @@ def filter_candidates_by_cost(cands, t, vals):
     return keep, drop
 
 
+def add_existing_prices(price_by_idx, confirmed, item_targets, vals, prices=None, aux_max=None):
+    """今付いている補URLの値段を {idx: {URL: 値段}} に足す (prices 注入で純関数)。
+
+    画面の候補から取った値段が先 (今日の値段)。無い分だけ値段表から埋める。
+    値段表が読めない時は何も足さない (今までどおり)。
+    """
+    aux_max = aux_max or AUXN
+    if prices is None:
+        try:
+            import hoju_url_from_dupes as _hd
+            prices = _price_cache_get(_hd)
+        except Exception:                                      # noqa: BLE001
+            return price_by_idx
+    out = {k: dict(v) for k, v in (price_by_idx or {}).items()}
+    for idx in (confirmed or {}):
+        t = item_targets[idx] if idx < len(item_targets) else None
+        if not t:
+            continue
+        row = t.get("row")
+        r = vals[row - 1] if (row and 0 < row <= len(vals)) else []
+        d = out.setdefault(idx, {})
+        have = {_norm_url(u) for u in d}
+        for u in (_cell(r, AUX0 + k) for k in range(aux_max)):
+            if not u or _norm_url(u) in have:
+                continue
+            p = (prices or {}).get(_norm_url(u))
+            if isinstance(p, (int, float)) and p > 0:
+                d[_norm_url(u)] = int(p)      # rank_backurls は正規化URLで引く
+    return out
+
+
 def swap_baseline(now_cost, t, vals, prices, aux_max=None):
     """入れ替えの「¥1,000以上安い」を何と比べるか (純関数, test可)。
 
@@ -2389,6 +2420,10 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             cand_info_by_url((items[_i] or {}).get("candidates") if _i < len(items) else None).items()
             if isinstance(_p, int) and _p > 0
         }
+    # ★2026-09-21 ユーザー「安いのを捨てたらあかんやろ」: 今付いている補URLは候補から
+    #   外しているので値段が分からず後ろに回り、高い候補を選ぶと **安い既存が押し出されて**
+    #   いた。既存の値段も夜の検索の値段表から足す (入れ替えの基準と同じ表)。
+    _price_by_idx = add_existing_prices(_price_by_idx, confirmed, item_targets, vals)
     aux_writeback, added_total, dropped, replaced = plan_aux_writeback(
         confirmed, item_targets, vals, _owner_by_url, _guard_ok,
         price_by_url=_price_by_idx)

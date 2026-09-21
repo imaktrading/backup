@@ -97,3 +97,27 @@ def test_補URLの値段が1本でも分からなければ仕入値のまま():
     aux = [f"https://a/{i}" for i in range(5)]
     prices = {H._norm_url(u): 5800 for u in aux[:4]}
     assert H.swap_baseline(9000, {"row": 2}, _vals_with_aux(aux), prices) == 9000
+
+
+# ── 安い既存の補URLを押し出さない (同日 ユーザー「安いのを捨てたらあかんやろ」) ──
+def test_高い候補を選んでも安い既存は残る():
+    aux = [f"https://snkrdunk.com/apparels/1/used/{i}" for i in range(5)]
+    vals = _vals_with_aux(aux)
+    t = [{"row": 2, "itemID": "111"}]
+    new = "https://jp.mercari.com/item/mEXPENSIVE"
+    table = {H._norm_url(u): 5000 for u in aux}
+    pbi = H.add_existing_prices({0: {H._norm_url(new): 8000}}, {0: [new]}, t, vals, prices=table)
+    wb, added, _d, removed = H.plan_aux_writeback({0: [new]}, t, vals, {}, True, price_by_url=pbi)
+    assert added == 0 and removed == []          # 高い方は入らず、安い5本がそのまま
+    assert wb == {}
+
+
+def test_安い候補なら一番高い既存と入れ替わる():
+    aux = [f"https://snkrdunk.com/apparels/1/used/{i}" for i in range(5)]
+    vals = _vals_with_aux(aux)
+    t = [{"row": 2, "itemID": "111"}]
+    new = "https://jp.mercari.com/item/mCHEAP"
+    table = {H._norm_url(u): 5000 + i * 100 for i, u in enumerate(aux)}
+    pbi = H.add_existing_prices({0: {H._norm_url(new): 4000}}, {0: [new]}, t, vals, prices=table)
+    _wb, added, _d, removed = H.plan_aux_writeback({0: [new]}, t, vals, {}, True, price_by_url=pbi)
+    assert added == 1 and [u for _i, u in removed] == [aux[4]]
