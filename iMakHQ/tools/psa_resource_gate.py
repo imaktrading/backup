@@ -153,7 +153,8 @@ def key_from_verified_cert(cert, verified):
     return ""
 
 
-def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, category=""):
+def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, category="",
+                             exclude=()):
     """視覚確証に出す仕入候補リストを作る(純関数)。
 
     mercari は最安1件でなく **all_cands(同番号の全変種)** を複数並べ、ユーザーが現物と一致する
@@ -165,6 +166,19 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
     """
     mr = mr or {}
     out, seen = [], set()
+    # ★2026-09-21 ユーザー「補充で出たカードが入れ替えで何で出てくるの？」:
+    #   上限 (各6件) で切ってから、呼び手が「既に付いている補URL」等を除いていたので、
+    #   補充では枠が既存URLに食われて安い候補が7件目以降に隠れ、補URLが入った後の
+    #   入れ替え画面で繰り上がって出ていた (実測 2026-09-21: 5出品が両方の画面に出た)。
+    #   → **除く物を先に除き、安い順に並べてから**上限で切る。
+    def _nu(u):
+        # psa_hoju_fill._norm_url と同じ正規化 (比較がずれると除き漏れる)
+        return (u or "").strip().split("?", 1)[0].split("#", 1)[0].rstrip("/").lower()
+    _excl = {_nu(u) for u in (exclude or ()) if u}
+    seen.update(_excl)
+
+    def _price_key(p):
+        return (0, p) if isinstance(p, int) and p > 0 else (1, 0)
     # ★2026-09-04: 一度 開いて「買えない」と分かった URL は、どの出品でも出さない。
     #   ユーザー報告「補URL③に AUC がまだ出てる」。オークションは詳細ページでしか
     #   判らず、all_cands / loose_cands は詳細を開いていないので素通りしていた。
@@ -214,7 +228,10 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
         _is_lot = (lambda _n: False)
     verified = {t[1] for t in (mr.get("cands") or []) if t and len(t) > 1 and t[1]}
     merc = mr.get("all_cands") or mr.get("cands") or []
-    merc = sorted(merc, key=lambda t: 0 if (t and len(t) > 1 and t[1] in verified) else 1)
+    merc = [t for t in merc if t and len(t) > 1 and _nu(t[1]) not in _excl]
+    # 絵柄確認済を先 (2026-08-01 の決め)。その中は安い順
+    merc = sorted(merc, key=lambda t: (0 if t[1] in verified else 1,
+                                       _price_key(t[0] if isinstance(t[0], int) else None)))
     for t in merc[:max_mercari]:
         url = t[1] if (t and len(t) > 1) else ""
         _p = t[0] if (t and isinstance(t[0], int)) else None
@@ -239,7 +256,10 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
             _multi = bool(_mpv._is_multi_variant(card_no, category or ""))
         except Exception:                                      # noqa: BLE001
             _multi = False
-    for t in ([] if _multi else (mr.get("loose_cands") or []))[:max_mercari]:
+    _loose = [t for t in ([] if _multi else (mr.get("loose_cands") or []))
+              if t and len(t) > 1 and _nu(t[1]) not in _excl]
+    _loose.sort(key=lambda t: _price_key(t[0] if isinstance(t[0], int) else None))
+    for t in _loose[:max_mercari]:
         url = t[1] if (t and len(t) > 1) else ""
         _p = t[0] if (t and isinstance(t[0], int)) else None
         if (url and url not in seen and url not in _ng_urls and _ok(_p)
@@ -256,7 +276,9 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
             and _ok(c.get("mercari_jpy"))
             and not _is_lot(_best[2] if (len(_best) > 2 and _best[1] == c["mercari_url"]) else "")):
         out.append({"channel": "mercari", "url": c["mercari_url"], "price": c.get("mercari_jpy")})
-    for d in (c.get("snkrdunk_urls") or [])[:max_snkr]:
+    _snk = [d for d in (c.get("snkrdunk_urls") or []) if _nu(d.get("url")) not in _excl]
+    _snk.sort(key=lambda d: _price_key(d.get("price")))
+    for d in _snk[:max_snkr]:
         if (d.get("url") and d["url"] not in seen
                 and d["url"] not in _ng_urls and _ok(d.get("price"))):
             seen.add(d["url"])

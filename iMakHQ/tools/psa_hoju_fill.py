@@ -1805,19 +1805,29 @@ def confirm_survivors(t, vals, cache, ctx, today, *, ref_of, art_of, stats):
         _cat = mp.split_key(t.get("key"))[0]
     except Exception:                                          # noqa: BLE001
         _cat = ""
-    cands = gate._build_visual_candidates(mr, c, card_no=cn, category=_cat)
+    # ★既に自分が使っている供給(主URL/既存補URL)は出さない = 目視が成立しない
+    #   2026-09-21: 候補を上限で切る **前** に除く (切った後だと安い候補が隠れ、
+    #   補URLが入った後の入れ替え画面で繰り上がって同じカードがまた出ていた)。
+    _row0 = t.get("row")
+    _rv0 = vals[_row0 - 1] if (_row0 and 0 < _row0 <= len(vals)) else []
+    _known = [_cell(_rv0, A)] + [_cell(_rv0, AUX0 + k) for k in range(AUXN)]
+    _pre_ex = [u for u in _known if u] + list(ctx["ng_by_iid"].get(iid) or ())
+    cands = gate._build_visual_candidates(mr, c, card_no=cn, category=_cat, exclude=_pre_ex)
+    # 自分が使用中で除いた本数は今までどおり数える (件数の内訳表示用)
+    _kn = {_norm_url(u) for u in _known if u}
+    _n_known = sum(1 for _c in gate._build_visual_candidates(mr, c, card_no=cn, category=_cat)
+                   if _norm_url(_c.get("url")) in _kn)
+    stats["cand_known"] += _n_known
     if not cands:
+        if _n_known:
+            stats["all_known"] += 1
+            return [], "", "all_known", []
         stats["no_cand"] += 1
         return [], "", "no_cand", []
     if not cn:
         stats["no_cardno"] += 1
         return [], "", "no_cardno", []
-    # ★既に自分が使っている供給(主URL/既存補URL)は出さない = 目視が成立しない
-    _row0 = t.get("row")
-    _rv0 = vals[_row0 - 1] if (_row0 and 0 < _row0 <= len(vals)) else []
-    _known = [_cell(_rv0, A)] + [_cell(_rv0, AUX0 + k) for k in range(AUXN)]
-    cands, dropped_known = filter_candidates_known_urls(cands, _known)
-    stats["cand_known"] += len(dropped_known)
+    cands, _dk = filter_candidates_known_urls(cands, _known)   # 念のため (最後の逃げ道の分)
     if not cands:
         stats["all_known"] += 1
         return [], "", "all_known", []
