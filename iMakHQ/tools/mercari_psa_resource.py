@@ -641,6 +641,29 @@ def parse_mercari_items(src):
     return items
 
 
+def _slash_set_code(card_no, market_no):
+    """ポケカ等「177/165」表記のカードの set コード (SV2A / SV-P) を返す。該当しなければ ''。
+
+    ★2026-09-21: 市場表記が `NNN/MMM` のカードは、**同じ出品名に set コード (SV2a 等) と
+      その番号が両方書いてあれば** set 名が無くても別カードではない
+      (コードと番号の組は1枚にしか決まらない)。set 名必須だと、番号もコードも書いてある
+      出品まで落としていた (補0本の「全部ふるい落とし」の主因の1つ)。
+      プロモ (291/SV-P) は set 名トークンが元々空で、候補が必ず0件になっていた。
+    """
+    if "/" not in (market_no or ""):
+        return ""
+    m = re.match(r"^(.+)-[0-9]+[A-Za-z]?$", (card_no or "").strip())
+    return m.group(1).upper().replace("-", "") if m else ""
+
+
+def _slash_code_confirms(name, code, market_no):
+    """出品名に `NNN/MMM` 番号と set コードが **両方** 書いてあるか (純関数)。"""
+    if not code or not _name_matches_card(name, "", market_no):
+        return False
+    t = (name or "").upper().replace("-", "").replace("　", " ")
+    return bool(re.search(r"(?<![A-Z0-9])" + re.escape(code) + r"(?![A-Z0-9])", t))
+
+
 def _variant_matches(items, card_no, variant_hint=None, market_no=None):
     """価格昇順 items から PSA10 かつ対象カード番号一致の **正変種** 候補を昇順 list で返す(純関数)。
 
@@ -663,10 +686,12 @@ def _variant_matches(items, card_no, variant_hint=None, market_no=None):
     # 含めると同キャラ別変種を誤確証する(2026-06-19 ゼウス/ナミ等)。set-code(OP11等)は番号と被り、
     # 一般語(拡張/パック/BOOSTER PACK 等)はどのセットにも出るので、どちらも確証に数えない。
     toks = set_confirm_tokens(variant_hint)
-    if not toks:
+    code = _slash_set_code(card_no, market_no)
+    if not toks and not code:
         return []                         # 確証材料が無い → 番号一致だけ = 採らない
     # ①set トークン採点で最高スコア群(=正set)に絞る → ②同setで複数なら print種別で tie-break。
-    scored = [(sum(1 for t in toks if t in _norm_match(it["name"])), it)
+    scored = [(sum(1 for t in toks if t in _norm_match(it["name"]))
+               + (1 if _slash_code_confirms(it["name"], code, market_no) else 0), it)
               for it in matches]   # matches は価格昇順を保持
     top = max(s for s, _ in scored)
     if top == 0:
@@ -688,13 +713,19 @@ def _variant_matches(items, card_no, variant_hint=None, market_no=None):
     target = _print_signal(variant_hint)
     # ① 候補が print種別を **書いていて** target と違うものは落とす (候補が1件でも)。
     #    「通常が欲しいのに『リーダーパラレル』」は、書いてある時点で確実に別物。
-    kept = [it for it in topgroup if _item_print(it["name"]) in ("", target)]
+    # ★2026-09-21: プロモ番号「291/SV-P」の `-P` を print種別(パラレル)と読んでいたので、
+    #   print を見る時は市場番号そのものを名前から外す。
+    def _pr(name):
+        if code and market_no:
+            name = re.sub(re.escape(market_no), " ", name or "", flags=re.I)
+        return _item_print(name)
+    kept = [it for it in topgroup if _pr(it["name"]) in ("", target)]
     if not kept:
         return []
     # ② 書いていない候補は落とさない。メルカリは変種を書かない出品が多く、
     #    落とすと在庫が実在するのに候補ゼロになる (2026-06-10 からの既存挙動)。
     #    ただし **書いてあって一致する**候補が在るなら、そちらを優先する。
-    exact = [it for it in kept if _item_print(it["name"]) == target]
+    exact = [it for it in kept if _pr(it["name"]) == target]
     return exact if exact else kept
 
 
@@ -893,7 +924,16 @@ def buyable_from_detail(src):
     """
     if 'data-testid="bid-button"' in src:
         return False                      # オークション = 確定価格で買えない
-    return 'data-testid="checkout-button"' in src
+    if 'data-testid="checkout-button"' in src:
+        return True
+    # ★2026-09-21: メルカリShops は **ログインしないと checkout-button が出ない**。
+    #   買える時 = `<button aria-label="ログイン">購入手続きへ</button>` (押せる)、
+    #   売り切れ = `data-testid="disabled-purchase-button"` (押せない)。
+    #   以前は checkout-button だけを見ていたので Shops は全部「買えない」になり、
+    #   not_buyable に 318本 焼かれていた (実物12本を開いて確認: 11本は買える状態)。
+    if 'disabled-purchase-button' in src:
+        return False
+    return bool(re.search(r'<button(?![^>]*disabled)[^>]*>\s*購入手続きへ\s*</button>', src))
 
 
 def candidate_passes_filter(cond, ship, reviews, is_shops, min_reviews=100,
@@ -1084,12 +1124,16 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
                 drv.get(url); time.sleep(8)
                 # item-cell 単位で抽出 (name·price·href 対応保証 + 通常出品のみ=オークション除外)
                 items = parse_mercari_items(drv.page_source)
-                cands = pick_psa10_candidates(items, card_no, c.get("hint"))   # 正変種 価格昇順 最大5
+                cands = pick_psa10_candidates(items, card_no, c.get("hint"),
+                                              market_no=c.get("market_no"))   # 正変種 価格昇順 最大5
+                # ★2026-09-21: market_no を渡していなかった。検索は「177/165」で引くのに
+                #   照合は「SV2A-177」だけで行い、番号の書いてある出品まで落としていた。
                 # all_cands = 視覚確証に並べる枠 (cands より広め=最大8)。
                 # ★2026-08-28: ここは以前 variant_hint 無し = **番号一致だけ**で拾っていた。
                 #   同じ番号は別セットにも在るので、別カードが目視候補に載っていた(精度事故)。
                 #   hint を渡して set 確証を通す = 確証できなければ候補を出さない(fail-closed)。
-                all_cands = pick_psa10_candidates(items, card_no, c.get("hint"), limit=8)
+                all_cands = pick_psa10_candidates(items, card_no, c.get("hint"), limit=8,
+                                                  market_no=c.get("market_no"))
                 best = cands[0] if cands else None
                 via = "kw"
                 _failclosed = False
