@@ -128,3 +128,14 @@ def test_B列9999の見送り行は補URLの対象外():
     row = [""] * ncol
     row[H.B], row[H.CERT], row[H.CATEGORY], row[H.KEY] = "9999", "149064758", "TCG", "one_piece_tcg:OP01-025"
     assert H.select_backfill_targets([[""] * ncol, row], max_backups=6) == []
+
+
+# ── 監視くんに個別に見てもらった値段を値段表に足す (2026-09-22) ──
+def test_個別確認の値段を読める(tmp_path):
+    import json
+    import hoju_url_from_dupes as HD
+    p = tmp_path / "r.json"
+    p.write_text(json.dumps({"https://snkrdunk.com/apparels/1/used/9?x=1": 5800}), encoding="utf-8")
+    got = HD.load_recheck_prices(str(p))
+    assert got == {HD._norm("https://snkrdunk.com/apparels/1/used/9"): 5800.0}
+    assert HD.load_recheck_prices(str(tmp_path / "none.json")) == {}

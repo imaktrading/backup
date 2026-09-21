@@ -241,7 +241,25 @@ def price_by_url_from_cache():
                         pass
     except Exception:                                          # noqa: BLE001
         return {}
+    # ★2026-09-22: 検索結果に出てこなかった補URLの値段を、監視くんに1本ずつ見てもらった分で埋める
+    #   (640本中 630本が買える・値段あり。検索キャッシュに無い = 値段不明で、安い既存が
+    #   押し出される原因だった)。検索キャッシュの値段がある物はそちらを優先 (同じ夜の実値)。
+    for n, p in load_recheck_prices().items():
+        out.setdefault(n, p)
     return out
+
+
+RECHECK_PRICES_PATH = r"C:/dev/iMak_data/hq/aux_price_recheck.json"
+
+
+def load_recheck_prices(path=RECHECK_PRICES_PATH):
+    """{正規化URL: 値段} (監視くんの個別確認の結果)。読めなければ空。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f) or {}
+        return {_norm(k): float(v) for k, v in d.items() if v}
+    except Exception:                                          # noqa: BLE001
+        return {}
 
 
 def row_price(r):
