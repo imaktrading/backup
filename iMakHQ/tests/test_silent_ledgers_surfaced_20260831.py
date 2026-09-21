@@ -74,13 +74,24 @@ def test_missing_ledger_is_not_an_error(tmp_path, monkeypatch):
 # ── ② listing_common.py: HOLDキューの中身を出す ────────────────────
 def test_hold_queue_shows_real_detail_not_just_count(tmp_path, monkeypatch):
     p = tmp_path / "csv_hold_queue.jsonl"
-    rec = {"ts": "2026-08-01T00:00:00", "category": "gshock", "sku": "m1",
+    import datetime as _dt
+    rec = {"ts": _dt.datetime.now().isoformat(), "category": "gshock", "sku": "m1",
            "title": "some title", "violations": [{"field": "*StartPrice",
            "issue": "Price too high", "severity": "error"}]}
     p.write_text(json.dumps(rec, ensure_ascii=False) + NL, encoding="utf-8")
     monkeypatch.setattr(SN, "CSV_HOLD_QUEUE", str(p))
     got = " ".join(SN._csv_hold_queue())
     assert "m1" in got and "Price too high" in got
+
+
+def test_hold_queue_old_records_are_one_line(tmp_path, monkeypatch):
+    """直近30日に HOLD が無ければ1行 (2026-09-22: 6/28 以前の104件が毎回宿題に見えていた)。"""
+    p = tmp_path / "csv_hold_queue.jsonl"
+    rec = {"ts": "2026-06-28T00:00:00", "sku": "m1", "violations": []}
+    p.write_text(json.dumps(rec) + NL, encoding="utf-8")
+    monkeypatch.setattr(SN, "CSV_HOLD_QUEUE", str(p))
+    got = SN._csv_hold_queue()
+    assert len(got) == 1 and "HOLD なし" in got[0]
 
 
 def test_hold_queue_filters_out_the_test_fixture_sku(tmp_path, monkeypatch):

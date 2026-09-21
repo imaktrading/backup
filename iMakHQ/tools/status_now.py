@@ -214,6 +214,12 @@ def _csv_hold_queue(limit=5):
     if not recs:
         return []
     last = recs[-1]
+    # ★2026-09-22: 直近30日に HOLD が無ければ1行で済ませる。6/28 以前の104件が毎回出て、
+    #   宿題に見えていた (深堀の結果: 門はつながっていて、6/28 以降 本当に0件だった)。
+    import datetime as _dt
+    _since = (_dt.date.today() - _dt.timedelta(days=30)).isoformat()
+    if (last.get("ts") or "")[:10] < _since:
+        return [f"直近30日の HOLD なし (最終 {last.get('ts', '')[:10]} / 古い記録 {len(recs)}件は履歴)"]
     out = [f"計 {len(recs)}件 (最終 {last.get('ts', '')[:19]})"]
     for r in recs[-limit:][::-1]:
         issues = "; ".join((v.get("issue") or "")[:50] for v in (r.get("violations") or [])[:2])
