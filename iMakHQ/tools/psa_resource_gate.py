@@ -154,7 +154,7 @@ def key_from_verified_cert(cert, verified):
 
 
 def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, category="",
-                             exclude=()):
+                             exclude=(), skipped=None):
     """視覚確証に出す仕入候補リストを作る(純関数)。
 
     mercari は最安1件でなく **all_cands(同番号の全変種)** を複数並べ、ユーザーが現物と一致する
@@ -175,6 +175,14 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
         # psa_hoju_fill._norm_url と同じ正規化 (比較がずれると除き漏れる)
         return (u or "").strip().split("?", 1)[0].split("#", 1)[0].rstrip("/").lower()
     _excl = {_nu(u) for u in (exclude or ()) if u}
+    # 見送り {正規化URL: その時の値段}。値段が下がった物だけ残す (psa_hoju_fill と同じ規則)
+    _skp = {_nu(k): v for k, v in (skipped or {}).items()}
+
+    def _skip_out(url, price):
+        if _nu(url) not in _skp:
+            return False
+        was = _skp[_nu(url)]
+        return not (isinstance(price, int) and isinstance(was, int) and price < was)
     seen.update(_excl)
 
     def _price_key(p):
@@ -228,7 +236,8 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
         _is_lot = (lambda _n: False)
     verified = {t[1] for t in (mr.get("cands") or []) if t and len(t) > 1 and t[1]}
     merc = mr.get("all_cands") or mr.get("cands") or []
-    merc = [t for t in merc if t and len(t) > 1 and _nu(t[1]) not in _excl]
+    merc = [t for t in merc if t and len(t) > 1 and _nu(t[1]) not in _excl
+            and not _skip_out(t[1], t[0] if isinstance(t[0], int) else None)]
     # 絵柄確認済を先 (2026-08-01 の決め)。その中は安い順
     merc = sorted(merc, key=lambda t: (0 if t[1] in verified else 1,
                                        _price_key(t[0] if isinstance(t[0], int) else None)))
@@ -257,7 +266,8 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
         except Exception:                                      # noqa: BLE001
             _multi = False
     _loose = [t for t in ([] if _multi else (mr.get("loose_cands") or []))
-              if t and len(t) > 1 and _nu(t[1]) not in _excl]
+              if t and len(t) > 1 and _nu(t[1]) not in _excl
+              and not _skip_out(t[1], t[0] if isinstance(t[0], int) else None)]
     _loose.sort(key=lambda t: _price_key(t[0] if isinstance(t[0], int) else None))
     for t in _loose[:max_mercari]:
         url = t[1] if (t and len(t) > 1) else ""
@@ -276,7 +286,8 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
             and _ok(c.get("mercari_jpy"))
             and not _is_lot(_best[2] if (len(_best) > 2 and _best[1] == c["mercari_url"]) else "")):
         out.append({"channel": "mercari", "url": c["mercari_url"], "price": c.get("mercari_jpy")})
-    _snk = [d for d in (c.get("snkrdunk_urls") or []) if _nu(d.get("url")) not in _excl]
+    _snk = [d for d in (c.get("snkrdunk_urls") or []) if _nu(d.get("url")) not in _excl
+            and not _skip_out(d.get("url"), d.get("price"))]
     _snk.sort(key=lambda d: _price_key(d.get("price")))
     for d in _snk[:max_snkr]:
         if (d.get("url") and d["url"] not in seen

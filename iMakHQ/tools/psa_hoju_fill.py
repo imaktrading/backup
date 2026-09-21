@@ -1579,6 +1579,41 @@ def confirmed_but_nothing_written(confirmed, item_targets, vals, aux_writeback, 
     return out
 
 
+def pushed_out_as_skipped(confirmed, item_targets, vals, aux_writeback, price_by_idx, today,
+                          already=(), aux_max=None):
+    """書込で5本に残らなかった URL → 「見送り」台帳の行 (純関数, test可)。
+
+    対象 = (その出品の既存補URL + 人が確認した候補) のうち、書込後の5本に居ない物。
+    書込が無い行 (並びも変わらない) は何も押し出していないので対象外。
+    """
+    aux_max = aux_max or AUXN
+    already = set(already or ())
+    out = []
+    for idx, urls in (confirmed or {}).items():
+        t = item_targets[idx] if idx < len(item_targets) else None
+        if not t:
+            continue
+        row = t.get("row")
+        full = (aux_writeback or {}).get(row)
+        if full is None:
+            continue
+        r = vals[row - 1] if (row and 0 < row <= len(vals)) else []
+        keep = {_norm_url(u) for u in full if u}
+        main = _norm_url(_cell(r, A))
+        prices = {_norm_url(u): p for u, p in ((price_by_idx or {}).get(idx) or {}).items()}
+        pool = [u for u in (_cell(r, AUX0 + k) for k in range(aux_max)) if u] + list(urls or [])
+        seen = set()
+        for u in pool:
+            n = _norm_url(u)
+            if not n or n in keep or n == main or n in seen or (t["itemID"], n) in already:
+                continue
+            seen.add(n)
+            p = prices.get(n, "")
+            out.append([t["itemID"], t.get("cert", ""), u, (t.get("title") or "")[:60],
+                        today, "", p if isinstance(p, int) else "", "見送り"])
+    return out
+
+
 def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, aux_max=None,
                        price_by_url=None):
     """確定URL → 補URL書込計画 {row: [URL×5]} を決める **純関数**(I/Oなし・test可)。
@@ -1812,7 +1847,8 @@ def confirm_survivors(t, vals, cache, ctx, today, *, ref_of, art_of, stats):
     _rv0 = vals[_row0 - 1] if (_row0 and 0 < _row0 <= len(vals)) else []
     _known = [_cell(_rv0, A)] + [_cell(_rv0, AUX0 + k) for k in range(AUXN)]
     _pre_ex = [u for u in _known if u] + list(ctx["ng_by_iid"].get(iid) or ())
-    cands = gate._build_visual_candidates(mr, c, card_no=cn, category=_cat, exclude=_pre_ex)
+    cands = gate._build_visual_candidates(mr, c, card_no=cn, category=_cat, exclude=_pre_ex,
+                                          skipped=(ctx.get("skipped_by") or {}).get(iid))
     # 自分が使用中で除いた本数は今までどおり数える (件数の内訳表示用)
     _kn = {_norm_url(u) for u in _known if u}
     _n_known = sum(1 for _c in gate._build_visual_candidates(mr, c, card_no=cn, category=_cat)
@@ -2486,6 +2522,13 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             _ct2, _cp2 = _ci2.get(_n2, ("", ""))
             _sk_new.append([_t2["itemID"], _t2.get("cert", ""), _u2,
                             (_t2.get("title") or "")[:60], today, _ct2, _cp2, "見送り"])
+    # ★2026-09-21 ユーザー「入れ替えで、今日1回目に見た候補がまた出ている」:
+    #   安い候補が入って **5本から押し出された既存の補URL** と、確認したが安い5本に
+    #   入らなかった候補は、どこにも記録されず、次の入れ替えでまた候補に並んでいた。
+    #   これも「見送り」(値段が下がったらまた出す) として残す。
+    _sk_new.extend(pushed_out_as_skipped(confirmed, item_targets, vals, aux_writeback,
+                                         _price_by_idx, today,
+                                         already={(r[0], _norm_url(r[2])) for r in _sk_new}))
     if _sk_new:
         try:
             from sheet_io import read_tab, write_rows_to_tab

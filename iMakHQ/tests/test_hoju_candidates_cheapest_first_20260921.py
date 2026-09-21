@@ -38,3 +38,43 @@ def test_スニダンも安い順で既存を除いてから切る():
     out = G._build_visual_candidates({}, {"snkrdunk_urls": snk}, exclude=known)
     prices = [c["price"] for c in out if c["channel"] == "snkrdunk"]
     assert prices == [23000, 24000, 25000, 26000, 27000, 28000]
+
+
+# ── 押し出した候補を「見送り」に残す (同日 ユーザー「入れ替えで1回目に見た候補がまた出る」) ──
+import psa_hoju_fill as H  # noqa: E402
+
+
+def _vals_with_aux(aux):
+    ncol = H.AUX0 + H.AUXN + 1
+    row = [""] * ncol
+    row[H.A] = "https://jp.mercari.com/item/mMAIN"
+    for k, u in enumerate(aux):
+        row[H.AUX0 + k] = u
+    return [[""] * ncol, row]
+
+
+def test_5本から押し出した既存と入らなかった候補は見送りに残る():
+    old = [f"https://snkrdunk.com/apparels/1/used/{i}" for i in range(5)]
+    new = ["https://snkrdunk.com/apparels/1/used/new1", "https://snkrdunk.com/apparels/1/used/new2"]
+    vals = _vals_with_aux(old)
+    t = [{"row": 2, "itemID": "111", "cert": "9", "title": "x"}]
+    full = [new[0]] + old[:4]                        # new1 が入り old4 が押し出され new2 は入らず
+    rows = H.pushed_out_as_skipped({0: new}, t, vals, {2: full},
+                                   {0: {new[1]: 20000}}, "2026-09-21")
+    got = {r[2]: r[6] for r in rows}
+    assert got == {old[4]: "", new[1]: 20000}
+    assert all(r[7] == "見送り" for r in rows)
+
+
+def test_書込が無い行は何も記録しない():
+    vals = _vals_with_aux(["https://a/1"])
+    t = [{"row": 2, "itemID": "111"}]
+    assert H.pushed_out_as_skipped({0: ["https://a/2"]}, t, vals, {}, {}, "d") == []
+
+
+def test_見送りは枠を食わず値段が下がった物だけ出る():
+    cands = _merc(8)
+    skipped = {cands[0][1]: 10000, cands[1][1]: 12000}   # 0番は同額 / 1番は 11000 に値下がり
+    out = G._build_visual_candidates({"all_cands": cands}, {}, skipped=skipped)
+    urls = [c["url"] for c in out]
+    assert cands[0][1] not in urls and cands[1][1] in urls and len(urls) == 6
