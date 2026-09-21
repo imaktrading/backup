@@ -133,6 +133,49 @@ def build_restock_input(restock_rows, itemid_to_cert, itemid_to_key, sold_out_su
     return {"certs": certs, "forced": forced, "cost": cost, "supply_url": supply}, skipped
 
 
+def split_dead_confirmed(rows, sold_out_supply):
+    """RESTOCK確定の2d行 → (残す行, 外す itemID)。純関数。
+
+    ★2026-09-22 ユーザー「止めているってのがよくわからない。リセットでいいのでは？」→「直して」。
+      確定した仕入元が監視くんで売り切れ (D列) になった行は、② では作れず、
+      ① は「RESTOCK確定に載っている」ので探し直さない = **どちらにも進まず永久に残っていた**
+      (実測 14件)。その行を確定から外して ① に戻す。判定は build_restock_input の門と同じ。
+      実行済/終了済の行 (履歴) は触らない。
+    """
+    if not rows or len(rows) < 2 or not sold_out_supply:
+        return rows, []
+    h = rows[0]
+    ii = h.index("itemID") if "itemID" in h else 0
+    si = h.index("RESTOCK状態") if "RESTOCK状態" in h else None
+    cu = h.index("確認済仕入URL") if "確認済仕入URL" in h else None
+    keep, dropped = [h], []
+    for r in rows[1:]:
+        iid = ((r[ii] if ii < len(r) else "") or "").strip()
+        st = ((r[si] if si is not None and si < len(r) else "") or "")
+        conf = next((u.strip() for u in ((r[cu] if cu is not None and cu < len(r) else "") or "")
+                     .split(" | ") if u.strip()), "")
+        dead = sold_out_supply.get(iid)
+        if (iid and dead and conf and "実行済" not in st and "終了済" not in st
+                and _norm_supply(conf) == _norm_supply(dead)):
+            dropped.append(iid)
+            continue
+        keep.append(r)
+    return keep, dropped
+
+
+def reset_dead_confirmed(product_vals=None):
+    """RESTOCK確定から「確定した仕入元が売り切れ」の行を外して ① に戻す (I/O)。外した itemID を返す。"""
+    from sheet_io import read_tab, write_rows_to_tab, _product_ws
+    rows = read_tab("RESTOCK確定")
+    if product_vals is None:
+        product_vals = _product_ws().get_all_values()
+    keep, dropped = split_dead_confirmed(rows, sold_out_supply_by_item(product_vals))
+    if dropped:
+        write_rows_to_tab("RESTOCK確定", keep)
+        print(f"  ↩ 確定した仕入元が売り切れ {len(dropped)}件を RESTOCK確定から外し、再仕入れ①に戻した")
+    return dropped
+
+
 def _read_restock_confirmed():
     """「RESTOCK確定」タブ → [{itemID, cost, supply_url}] (I/O)。
 
@@ -338,6 +381,10 @@ def main():
     from sheet_io import product_index, build_cert_map, _product_ws
     import psa_restock_revise_csv as rv
 
+    try:
+        reset_dead_confirmed()
+    except Exception as _e:                                    # noqa: BLE001
+        print(f"  ⚠ 売り切れ確定の差し戻しskip ({type(_e).__name__}: {_e})")
     rows = _read_restock_confirmed()
     if not rows:
         sys.exit("「RESTOCK確定」タブが空。先に PSA再仕入れ照合→視覚確証で確定してください。")

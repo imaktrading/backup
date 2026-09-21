@@ -618,6 +618,13 @@ def main():
         print("🌙 夜間モード: 変種確定済のみ / ブラウザなし / 台帳更新まで "
               "(目視・カタログ依頼・RESTOCK確定は人のボタンで)")
 
+    # ★2026-09-22: 確定した仕入元が売り切れの行を RESTOCK確定 から外す (外さないと ① で探し直されない)
+    try:
+        from psa_restock_build import reset_dead_confirmed
+        reset_dead_confirmed()
+    except Exception as _e:                                    # noqa: BLE001
+        print(f"  ⚠ 売り切れ確定の差し戻しskip ({type(_e).__name__}: {_e})")
+
     rows, mp = _load_restock_psa10()
     if not rows:
         sys.exit("RESTOCK∩PSA10 がありません (先にファネル分析)。")
