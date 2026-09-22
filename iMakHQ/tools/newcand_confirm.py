@@ -133,6 +133,8 @@ def guess_category(title, variants=()):
 
 # カード番号の書式。TCG は `OP05-002` / `FB01-071` 系、ポケモンは印刷番号 `006/020` 系。
 _CARD_NO_RE = re.compile(r"([A-Z]{1,4}\d{1,2}[a-z]?-\d{2,4}|\d{2,3}/\d{2,3})", re.I)
+_OP_PROMO_RE = re.compile(r"(?<![A-Za-z0-9-])(P-\d{3})(?!\d)")
+_OP_SPACED_RE = re.compile(r"(?<![A-Za-z0-9])((?:OP|ST|EB|PRB)\d{2})[\s_]+(\d{3})(?!\d)", re.I)
 
 # ★2026-09-05: 抽出番号 (`it["card_no"]`) を catalog 再チェックにかける時の正規化候補作り。
 # `127/193` (ポケモン印刷番号=分母つき) はそのままでは catalog の product_id (`M2a-127`) に
@@ -196,8 +198,18 @@ def extract_card_no(title):
     例: '【PSA10】ベロ・ベティ(L★){赤/黄}〈OP05-002〉…' → 'OP05-002'
         'PSA10 わるいヘルガー 006/020 ポケモンカード'   → '006/020'
     """
-    m = _CARD_NO_RE.search(str(title or ""))
-    return m.group(1).upper() if m else ""
+    t = str(title or "")
+    m = _CARD_NO_RE.search(t)
+    if m:
+        return m.group(1).upper()
+    # ★2026-09-22: ワンピのプロモ `P-006` と、区切りが空白の `st30 001` を読めていなかった
+    #   (タイトルがあるのに番号なし = 候補が出ない)。空白区切りはワンピの記号だけに限る
+    #   (`PSA10 001` を番号と読まないため)。
+    m = _OP_PROMO_RE.search(t)
+    if m:
+        return m.group(1).upper()
+    m = _OP_SPACED_RE.search(t)
+    return (m.group(1) + "-" + m.group(2)).upper() if m else ""
 
 
 def url_title_map(cache):
@@ -576,6 +588,11 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
     except Exception as e:
         print(f"⚠ 探索cache を読めない ({type(e).__name__}) → タイトル復元なしで続行")
         u2t, u2i, u2n = {}, {}, {}
+    # ★2026-09-22: 探索cache から消えた古い候補はタイトルが無く、番号も読めなかった。
+    #   詳細ページで拾った出品名を足す (drop_sold_before_review が保存する)
+    for _u, _t in load_seen_titles().items():
+        if _t and not (u2t.get(_u) or (None, ""))[1]:
+            u2t[_u] = ((u2t.get(_u) or (None, ""))[0], _t)
 
     # 既に結論が出ているカード + **既に eBay に出品中**のカード
     #   どちらも「人に見せる必要が無い」= 供給URLだけ補URLとして拾えばいい。
@@ -708,6 +725,43 @@ def mercari_urls(urls):
     return [u for u in dict.fromkeys(urls) if u and "jp.mercari.com/" in u]
 
 
+SEEN_TITLES_PATH = r"C:/dev/iMak_data/hq/newcand_seen_titles.json"
+
+
+def load_seen_titles(path=SEEN_TITLES_PATH):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_seen_titles(new, path=SEEN_TITLES_PATH):
+    if not new:
+        return
+    d = load_seen_titles(path)
+    d.update(new)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=1)
+
+
+def fill_titles(items, titles):
+    """タイトルが無い候補に、詳細ページで拾った出品名を入れて番号と版を引き直す。入れた件数を返す。"""
+    n = 0
+    for it in items:
+        for p in [it] + list(it.get("dups") or []):
+            t = titles.get(p.get("url"))
+            if not t or (p.get("title") or "").strip():
+                continue
+            p["title"] = t
+            if not p.get("no_from_typed"):
+                p["card_no"] = extract_card_no(t) or p.get("card_no") or ""
+            if p is it and not it.get("variants"):
+                it["variants"] = catalog_candidates(t, it.get("card_no"))
+            n += 1
+    return n
+
+
 def drop_sold_before_review(items, write=True):
     """目視の前に売り切れの候補を外す (I/O)。外した分は NG タブに理由つきで残す = 次回も出さない。"""
     urls = []
@@ -736,6 +790,13 @@ def drop_sold_before_review(items, write=True):
             alive, dead = _hud.verify_alive(rest)
             status.update({u: "in_stock" for u in alive})
             status.update({u: "sold" for u, _why in dead})
+            _got = dict(getattr(_hud, "LAST_TITLES", {}) or {})
+            if _got:
+                if write:
+                    save_seen_titles(_got)
+                _nf = fill_titles(items, _got)
+                if _nf:
+                    print(f"  🏷 詳細ページから出品名を補った: {_nf}件 (番号を読み直して候補を出します)")
         except Exception as e:                                 # noqa: BLE001
             print(f"  ⚠️ 在庫を確認できず → 売り切れ判定なしで見せます: {type(e).__name__}: {e}")
     keep, sold = split_by_stock(items, status)

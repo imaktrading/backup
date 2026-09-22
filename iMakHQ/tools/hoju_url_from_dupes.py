@@ -111,6 +111,24 @@ def verify_order(urls, pending):
     return pend + rest
 
 
+# ★2026-09-22: 詳細ページを開いたついでに出品名も拾う (新規候補でタイトルが無く番号が
+#   読めない候補が多かった)。{URL: 出品名}。verify_alive を呼ぶたびに足していく
+LAST_TITLES = {}
+
+
+def title_from_detail(src):
+    """メルカリ詳細ページの HTML → 出品名 (純関数)。取れなければ ""。"""
+    import html as _h
+    import re as _re
+    m = (_re.search(r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"', src or "")
+         or _re.search(r"<title>([^<]+)</title>", src or ""))
+    if not m:
+        return ""
+    t = _h.unescape(m.group(1)).strip()
+    t = _re.sub(r"\s*(by|\||｜|-|－)\s*メルカリ.*$", "", t).strip()
+    return "" if t in ("", "メルカリ") else t
+
+
 def verify_alive(urls, verbose=True, budget_sec=VERIFY_BUDGET_SEC, now=None):
     """詳細ページを開いて **今そのまま買えるか**を確かめる (I/O)。
 
@@ -155,6 +173,9 @@ def verify_alive(urls, verbose=True, budget_sec=VERIFY_BUDGET_SEC, now=None):
                     _t.sleep(0.25)
                     src = drv.page_source
                 ok = mp.buyable_from_detail(src)
+                _tt = title_from_detail(src)
+                if _tt:
+                    LAST_TITLES[u] = _tt
             except Exception as e:                             # noqa: BLE001
                 if verbose:
                     print(f"  ⚠ {u[:50]} 開けず ({type(e).__name__}) → 落とさない")
