@@ -797,12 +797,17 @@ def banned_title_words_in(title: str, banned_words) -> list:
     "Shenron" は "nr" に一致しない / "NR" 単独や "Near Mint" の "mint" は一致する。
     """
     t = str(title or "")
+    # ★2026-09-22: `Gem Mint` は PSA10 の鑑定の正式な呼び名 (事実) なので `mint` として数えない。
+    #   2026-09-20 に生成側が余った枠へ `Gem Mint` を足したのに、この照合が `mint` で弾いて
+    #   PSA 走行の 25% が出品除外になっていた (hq/requests/2026-09-21_act_code_proposals_tcg.md 提案1)。
+    #   単独の `Mint` / `Near Mint` / `gem mt` 等は今までどおり弾く。
+    t_mint = re.sub(r'(?i)(?<![A-Za-z0-9])gem\s+mint(?![A-Za-z0-9])', ' ', t)
     hits = []
     for w in banned_words or []:
         if not w:
             continue
         pat = r'(?i)(?<![A-Za-z0-9])' + re.escape(str(w)) + r'(?![A-Za-z0-9])'
-        if re.search(pat, t):
+        if re.search(pat, t_mint if str(w).lower() == "mint" else t):
             hits.append(w)
     return hits
 
