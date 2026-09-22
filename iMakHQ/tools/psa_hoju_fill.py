@@ -2427,6 +2427,23 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     # ★2026-09-21 ユーザー「安いのを捨てたらあかんやろ」: 今付いている補URLは候補から
     #   外しているので値段が分からず後ろに回り、高い候補を選ぶと **安い既存が押し出されて**
     #   いた。既存の値段も夜の検索の値段表から足す (入れ替えの基準と同じ表)。
+    # ★2026-09-22 ユーザー「件数減らんし、もう一度押したら同じカード出てくる」:
+    #   シートは画面を開く前に読んだまま。目視の数分の間に別の処理が同じ行の補URLを
+    #   書き換えると、どちらかの書込が消える (実例 820133533285: 追加した 50105661 が
+    #   3分後には無く、同じ候補がまた出た)。**書く直前に読み直して**、今の5本を元に並べる。
+    try:
+        _fresh = _read_high()
+        _moved = [t["itemID"] for t in item_targets
+                  if t.get("row") and _cell(_fresh[t["row"] - 1] if t["row"] <= len(_fresh) else [], B)
+                  != t["itemID"]]
+        if _moved:
+            print(f"⚠️要対応 行がずれた出品があるので補URL書込を中止: {_moved[:5]}")
+            _guard_ok = False
+        else:
+            vals = _fresh
+    except Exception as _e_fr:                                   # noqa: BLE001
+        print(f"⚠️要対応 書く直前の読み直しに失敗 → 書込を中止: {type(_e_fr).__name__}: {_e_fr}")
+        _guard_ok = False
     _price_by_idx = add_existing_prices(_price_by_idx, confirmed, item_targets, vals)
     aux_writeback, added_total, dropped, replaced = plan_aux_writeback(
         confirmed, item_targets, vals, _owner_by_url, _guard_ok,
@@ -2444,6 +2461,16 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             written = write_aux_urls(aux_writeback)
             print(f"🔗 補URL(AC-AG) 書込: {written}行 / 追加URL {added_total}本 "
                   f"/ 入替 {len(replaced)}本 (安い順に最大{AUXN}本)")
+            # 書いた後に読み返して、入ったことを確かめる (入っていなければ要対応と言う)
+            _after = _read_high()
+            _bad = [row for row, full in aux_writeback.items()
+                    if [_cell(_after[row - 1], AUX0 + k) for k in range(AUXN)]
+                    != (list(full) + [""] * AUXN)[:AUXN]]
+            if _bad:
+                print(f"⚠️要対応 補URLを書いたのに読み返すと違う行: {_bad[:10]} "
+                      "(別の処理が同時に書いた可能性。もう一度押してください)")
+            else:
+                print(f"  ✅ 読み返して確認: {len(aux_writeback)}行とも書いた通り")
         except Exception as e:
             print(f"⚠ 補URL書込失敗: {type(e).__name__}: {e}")
     else:
