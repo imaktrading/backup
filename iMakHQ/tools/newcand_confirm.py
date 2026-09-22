@@ -745,6 +745,43 @@ def save_seen_titles(new, path=SEEN_TITLES_PATH):
         json.dump(d, f, ensure_ascii=False, indent=1)
 
 
+def snkrdunk_title_from_html(src):
+    """スニダンの出品ページ HTML → 出品名 (純関数)。404 のページや取れない時は ""。"""
+    import html as _h
+    m = (re.search(r'property="og:title"[^>]*content="([^"]+)"', src or "")
+         or re.search(r"<title>([^<]+)</title>", src or ""))
+    if not m:
+        return ""
+    t = _h.unescape(m.group(1)).strip()
+    if t.startswith("404") or "Not Found" in t:
+        return ""
+    return re.sub(r"\s*1枚のシングルトレカ通販.*$|\s*[｜|]\s*スニダン.*$", "", t).strip()
+
+
+def snkrdunk_titles(urls, timeout=15):
+    """スニダンの出品ページを取って {URL: 出品名} と 消えた(404) URL を返す (I/O)。
+
+    ★2026-09-22 ユーザー「クリックしたらタイトル出てくるけど」。ブラウザ無しで取れる。
+      取れない (通信エラー等) 物は どちらにも入れない = 今までどおり見せる。
+    """
+    import requests
+    got, gone = {}, []
+    ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) Chrome/140 Safari/537.36"}
+    for u in urls:
+        try:
+            r = requests.get(u, headers=ua, timeout=timeout)
+        except Exception:                                      # noqa: BLE001
+            continue
+        if r.status_code == 404:
+            gone.append(u)
+            continue
+        t = snkrdunk_title_from_html(r.text) if r.status_code == 200 else ""
+        if t:
+            got[u] = t
+    return got, gone
+
+
 def fill_titles(items, titles):
     """タイトルが無い候補に、詳細ページで拾った出品名を入れて番号と版を引き直す。入れた件数を返す。"""
     n = 0
@@ -799,6 +836,20 @@ def drop_sold_before_review(items, write=True):
                     print(f"  🏷 詳細ページから出品名を補った: {_nf}件 (番号を読み直して候補を出します)")
         except Exception as e:                                 # noqa: BLE001
             print(f"  ⚠️ 在庫を確認できず → 売り切れ判定なしで見せます: {type(e).__name__}: {e}")
+    # ★2026-09-22: スニダンはタイトルが無い候補だけ出品ページを取る (出品名 + 消えていれば売り切れ)
+    _sd = [u for u in urls if "snkrdunk.com/apparels/" in u and u not in status
+           and not any((p.get("url") == u and (p.get("title") or "").strip())
+                       for it in items for p in [it] + list(it.get("dups") or []))]
+    if _sd:
+        print(f"  🔎 スニダンの出品ページを確認: {len(_sd)}件 (タイトル無しの分)")
+        _got, _gone = snkrdunk_titles(_sd)
+        status.update({u: "sold" for u in _gone})
+        if _got:
+            if write:
+                save_seen_titles(_got)
+            _nf = fill_titles(items, _got)
+            if _nf:
+                print(f"  🏷 スニダンの出品名を補った: {_nf}件")
     keep, sold = split_by_stock(items, status)
     n_unknown = sum(1 for u in urls if status.get(u) not in ("sold", "in_stock"))
     print(f"  🧹 売り切れを除外: {len(sold)}件 / 見せる {len(keep)}件"

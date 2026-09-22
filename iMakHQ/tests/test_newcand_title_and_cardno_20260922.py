@@ -30,3 +30,10 @@ def test_fill_titles_rereads_number_but_keeps_typed():
     assert N.fill_titles([it], {"u1": "ルフィ P-006", "u2": "ルフィ P-106"}) == 2
     assert it["card_no"] == "P-006" and it["variants"] == [{"pid": "P-006"}]
     assert it["dups"][0]["card_no"] == "X"
+
+
+def test_snkrdunk_title_from_html():
+    h = ('<meta property="og:title" content="【PSA10】サボ P-SPC [P-105](ブースターパック) '
+         '1枚のシングルトレカ通販｜スニダン">')
+    assert N.snkrdunk_title_from_html(h) == "【PSA10】サボ P-SPC [P-105](ブースターパック)"
+    assert N.snkrdunk_title_from_html("<title>404 Not Found | スニーカーダンク</title>") == ""
