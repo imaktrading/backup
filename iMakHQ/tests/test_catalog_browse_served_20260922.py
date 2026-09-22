@@ -28,3 +28,13 @@ def test_local_catalog_images_served_only_inside_catalog_dir():
     assert S._catalog_img_url("C:/dev/iMak_data/catalog/_don_images/a.png").startswith("/catalog/img?p=")
     assert S.catalog_img_path("C:/Windows/win.ini") is None
     assert S.catalog_img_path("C:/dev/iMak_data/catalog/../hq/x.png") is None
+
+
+def test_same_site_official_images_are_relayed_only_for_listed_hosts():
+    sys.path.insert(0, os.path.join(HERE, "..", "console"))
+    import server as S
+    u = "https://www.onepiece-cardgame.com/images/cardlist/card/EB01-015_p1.png"
+    assert S._catalog_img_url(u).startswith("/catalog/img?u=")
+    assert S._catalog_img_url("https://www.pokemon-card.com/a.jpg") == "https://www.pokemon-card.com/a.jpg"
+    assert S.catalog_img_remote("https://evil.example.com/a.png") is None
+    assert S.catalog_img_remote("http://www.onepiece-cardgame.com/a.png") is None

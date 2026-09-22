@@ -518,11 +518,43 @@ def research_cards(refresh=False):
 CATALOG_IMG_ROOT = os.path.normcase(os.path.normpath(r"C:/dev/iMak_data/catalog"))
 
 
+# ★2026-09-22 (catalog 依頼 hq/requests/2026-09-22_catalog_viewer_image_proxy.md):
+#   ワンピ・ガンダム公式の画像は `Cross-Origin-Resource-Policy: same-site` を返し、ブラウザが
+#   他所への埋め込みを拒む (ワンピ 2,226行が出なかった)。この2つだけ、ここで取って配る。
+#   一度取った物は手元に置く (次から速い)。
+CATALOG_IMG_PROXY_HOSTS = ("www.onepiece-cardgame.com", "www.gundam-gcg.com")
+CATALOG_IMG_CACHE = r"C:/dev/iMak_data/hq/catalog_img_cache"
+
+
 def _catalog_img_url(img):
+    from urllib.parse import quote, urlparse
     if img and not img.lower().startswith(("http://", "https://")):
-        from urllib.parse import quote
         return "/catalog/img?p=" + quote(img)
+    if img and urlparse(img).hostname in CATALOG_IMG_PROXY_HOSTS:
+        return "/catalog/img?u=" + quote(img, safe="")
     return img
+
+
+def catalog_img_remote(u):
+    """中継してよい画像なら (bytes, 拡張子)、だめなら None。取った物は手元に置く。"""
+    import hashlib
+    import urllib.request
+    from urllib.parse import urlparse
+    pu = urlparse(u or "")
+    if pu.scheme != "https" or pu.hostname not in CATALOG_IMG_PROXY_HOSTS:
+        return None
+    ext = os.path.splitext(pu.path)[1].lower() or ".png"
+    path = os.path.join(CATALOG_IMG_CACHE, hashlib.sha1(u.encode("utf-8")).hexdigest() + ext)
+    if os.path.isfile(path):
+        with open(path, "rb") as f:
+            return f.read(), ext
+    req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        b = r.read()
+    os.makedirs(CATALOG_IMG_CACHE, exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(b)
+    return b, ext
 
 
 def catalog_img_path(p):
@@ -1006,7 +1038,22 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:                       # noqa: BLE001 画面に出して知らせる
                 return self._json(200, {"error": str(e)})
         if u.path == "/catalog/img":
-            path = catalog_img_path((parse_qs(u.query).get("p") or [""])[0])
+            qs = parse_qs(u.query)
+            if qs.get("u"):
+                try:
+                    got = catalog_img_remote(qs["u"][0])
+                except Exception:                            # noqa: BLE001 取れなければ画像なし
+                    got = None
+                if not got:
+                    return self._json(404, {"error": "not found"})
+                b, ext = got
+                self.send_response(200)
+                self.send_header("Content-Type", _TYPES.get(ext, "application/octet-stream"))
+                self.send_header("Cache-Control", "max-age=86400")
+                self.send_header("Content-Length", str(len(b)))
+                self.end_headers()
+                return self.wfile.write(b)
+            path = catalog_img_path((qs.get("p") or [""])[0])
             if not path:
                 return self._json(404, {"error": "not found"})
             with open(path, "rb") as f:
