@@ -116,3 +116,29 @@ def category_of(product_id, db=CATALOG_DB):
         return (r[0] or "") if r else ""
     except sqlite3.Error:
         return ""
+
+
+# ★2026-09-22: 「新規出品候補」の目視で人が決めたカードを、鑑定番号ごとに渡す。
+#   新規候補の画面では鑑定番号を入れて行を足すが、出品時は鑑定番号から引き直すので
+#   人が決めたカードが使われず、版違い (ST29-001 / _p1 等) で目視を選び直していた。
+#   PSA 新規の目視はこれを期待値に使う (目視は省かない)。
+CERT_PATH = r"C:/dev/iMak_data/hq/cert_expected_pid.json"
+
+
+def remember_cert_pids(pairs, path=CERT_PATH):
+    """[(cert, KEY)] を覚える。KEY は `category:pid` でも `pid` でもよい。覚えた件数を返す。"""
+    data, n = load(path), 0
+    for cert, key in pairs:
+        cert, key = str(cert or "").strip(), str(key or "").strip()
+        if cert and key:
+            data[cert] = {"key": key, "at": datetime.now().isoformat(timespec="seconds")}
+            n += 1
+    if n:
+        save(data, path)
+    return n
+
+
+def expected_pid_for_cert(cert, path=CERT_PATH):
+    """人が決めたカードの product_id (カテゴリ抜き)。無ければ ""。"""
+    e = load(path).get(str(cert or "").strip()) or {}
+    return str(e.get("key") or "").split(":")[-1]

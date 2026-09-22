@@ -636,6 +636,18 @@ def weak_promo_guess(log_text: str, min_score: int = _PROMO_FALLBACK_MIN_SCORE) 
     return bool(m) and int(m.group(1)) < min_score
 
 
+def _cert_expected(cert) -> str:
+    """新規候補の目視で人が決めたカード (鑑定番号ごと)。無ければ ""。★2026-09-22"""
+    try:
+        import psa_label_learned as _PLL
+        pid = _PLL.expected_pid_for_cert(cert)
+        if pid:
+            print("    📘 新規候補の目視で決めたカードを期待値にする: %s" % pid)
+        return pid
+    except Exception:                                          # noqa: BLE001 読めなくても従来どおり
+        return ""
+
+
 def _catalog_lookup_expected(brand: str, subject: str, card_number: str, category: str) -> str | None:
     """catalog lookup 経由で expected product_id 取得 (= 5/28 lookup_one_piece Promo 拡張 + lookup_don 等を活用)."""
     if not category:
@@ -2297,7 +2309,7 @@ def _build_target_for_cert(cert: str):
     if not category or category == "yugioh_tcg":
         return None
     set_code = _extract_set_code(brand, category)
-    csv_expected = _catalog_lookup_expected(brand, subject, card_number, category)
+    csv_expected = _cert_expected(cert) or _catalog_lookup_expected(brand, subject, card_number, category)
     if not csv_expected:
         csv_expected = synthesized_expected(set_code, card_number)
     candidates = _get_candidates(category, set_code, card_number, brand=brand,
@@ -2701,7 +2713,7 @@ def run_post_psa_review(csv_path: str, append_log_func) -> bool:
             continue
         set_code = _extract_set_code(brand, category)
         # 期待値 = catalog lookup 経由 (= 信頼性 ↑、 brand 推定より確実)
-        csv_expected = _catalog_lookup_expected(brand, subject, card_number, category)
+        csv_expected = _cert_expected(cert) or _catalog_lookup_expected(brand, subject, card_number, category)
         if not csv_expected and set_code and card_number:
             # fallback: brand 推定
             csv_expected = f"{set_code}-{card_number}"

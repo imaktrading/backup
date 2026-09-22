@@ -1900,6 +1900,16 @@ def run_append_high(timeout=10800, dry_run=False):
         #   全行の仕入値が #REF! で消える。N/AN を踏まないヘルパ経由にする。
         sheet_io.append_product_rows(rows)
         print("  + 商品管理シートに %d行 追加 (B列=itemID は空 = 出品くんが拾う)" % len(rows))
+        # ★2026-09-22: ここで決めたカードを鑑定番号ごとに残す → PSA 新規の目視の期待値になる
+        try:
+            import psa_label_learned as _PLL
+            _certs = res.get("certs") or {}
+            _n = _PLL.remember_cert_pids([(str(_certs.get(it["i"], "")).strip(),
+                                           it.get("key") or it.get("pid"))
+                                          for it in items if it["i"] in marked])
+            print("  📘 決めたカードを鑑定番号ごとに記録: %d件 (出品時の目視で最初から出ます)" % _n)
+        except Exception as _e:                                # noqa: BLE001
+            print("  ⚠ 決めたカードの記録skip (%s: %s)" % (type(_e).__name__, _e))
     else:
         print("  足す行はありませんでした")
     if not rows and not sold and not nonum:
