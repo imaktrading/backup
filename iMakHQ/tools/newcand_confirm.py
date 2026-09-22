@@ -74,6 +74,8 @@ SRC_STATUS_HEADER = "状態"
 USE_LIST, USE_AUX = "出品", "補URL(2枚目以降)"
 SHEET_CATEGORY = "TCG"   # 商品管理シート R列。PSA は 'TCG'
 NG_TAB = "新規候補NG"
+# 新規候補NG のうち「カタログに依頼した」印。この行はカタログに版が入れば また候補に出す
+CATREQ_REASON = "カタログ未収録"
 NG_HEADER = ["url", "理由", "日付", "候補タイトル"]
 # ★2026-08-13 ユーザー指示「カード番号とかを目視でいれて、次回にカタログから引けばいいのでは」。
 #   タイトルが残っていない候補 (実測32件) は機械では何も引けないが、**人がページを見れば
@@ -548,7 +550,13 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
     #   **保管済 URL が1件も除外されていなかった**。列は名前/定数で引く。
     done = {_nurl(r[OUT_URL_COL]) for r in migrate_out_rows(_read_tab(OUT_TAB))
             if len(r) > OUT_URL_COL and r[OUT_URL_COL]}
-    done |= {_nurl(r[0]) for r in _read_tab(NG_TAB)[1:] if r and r[0]}
+    # ★2026-09-22 ユーザー「カタログに依頼したのは、次回出てくるかな？」→ 出てこなかった。
+    #   「カタログに無い→追加依頼」も NG に入れて永久に外していたので、カタログが足しても
+    #   戻らなかった。依頼した分は外さず、**カタログに版が入った時だけ**また候補に出す。
+    _ng_all = [r for r in _read_tab(NG_TAB)[1:] if r and r[0]]
+    catreq_urls = {_nurl(r[0]) for r in _ng_all
+                   if len(r) > 1 and str(r[1]).startswith(CATREQ_REASON)}
+    done |= {_nurl(r[0]) for r in _ng_all} - catreq_urls
     # 前回 目視で入れたカード番号 (タイトルが無くてもここから引ける)
     typed_no = {}
     typed_by_card = {}
@@ -598,6 +606,8 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
                 ("スニダンの項目" if _from_sd else
                  ("商品名から" if _from_title else "読めない"))] += 1
         variants = catalog_candidates(title, card_no) if resolve else []
+        if _nurl(p["url"]) in catreq_urls and not (card_no and catalog_variants(card_no)):
+            continue                      # 依頼中でまだ番号でカタログに無い = 出しても選べない
         p.update({"price": price, "title": title, "card_no": card_no, "variants": variants,
                   "image": u2i.get(p["url"], "")})
         all_items.append(p)
@@ -1515,7 +1525,7 @@ def save(items, res):
             n_no_number += 1
             continue
         creqs.append([cat, model, f"{today} 00:00:00"])
-        creq_ng.append([it["url"], "カタログ未収録 → 追加依頼を起票", today,
+        creq_ng.append([it["url"], CATREQ_REASON + " → 追加依頼を起票", today,
                         (it["title"] or "")[:60]])
     if n_recheck:
         print(f"  ↩ 入力された番号で catalog に在った {n_recheck}件 → 依頼せず次回に候補を出す")
