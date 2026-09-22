@@ -544,7 +544,7 @@ NIGHTLY = False
 SHEET_READ_OK = True
 
 
-def _run_mismatch_pdca(rejected, confirmed_idx, idx_row, targets, cert_map, mp):
+def _run_mismatch_pdca(rejected, confirmed_idx, idx_row, targets, cert_map, mp, known_iids=()):
     """確認ゲートの不一致(OFF)を PDCA で回す: read台帳→reconcile→write→原因別ルーティング→トレンド。
 
     Check止まりにしない(pdca_spiral_up_expectation): 前回比 新規/再発/再燃/解決 を出し、
@@ -566,6 +566,10 @@ def _run_mismatch_pdca(rejected, confirmed_idx, idx_row, targets, cert_map, mp):
                      "catalog_image": t.get("ref_image", ""), "ebay_url": r.get("ebay_url", "")})
     confirmed_iids = {mp._ebay_item_id(idx_row[i].get("ebay_url", "") or "")
                       for i in confirmed_idx if i in idx_row}
+    # ★2026-09-22: KEY が既に決まっている itemID (商品管理シートAI列 / PSA目視確定済) も解決扱いにする。
+    #   終わった出品は今回の行に出てこないので「確定」に数えられず、KEY を入れても台帳が
+    #   未対処のまま → 同じ4件の依頼が毎回カタログに届いていた (9/20・9/22 回答「再発しています」)
+    confirmed_iids |= set(known_iids or ())
     confirmed_iids.discard("")
     try:
         import psa_mismatch_pdca as pdca
@@ -638,6 +642,7 @@ def main():
     keyed = 0
     itemid_row = {}
     cert_map = {}
+    keymap = {}
     try:
         from sheet_io import product_index
         keymap, itemid_row, cert_map = product_index()
@@ -842,7 +847,9 @@ def main():
         # (= Catalog への同一依頼の無限再発行。2026-06-18 真因)。
         if not NIGHTLY:
             _run_mismatch_pdca(rejected, list(auto_idx) + [c["idx"] for c in confirmed],
-                               idx_row, targets_by_idx, cert_map, mp)
+                               idx_row, targets_by_idx, cert_map, mp,
+                               known_iids=(set(confirmed_prev) | set(new_confirmed)
+                                           | {k for k, v in keymap.items() if v}))
         if learn:
             try:
                 print(f"📘 目視で決めたカードを覚えました: {_PLL.record_picks(learn)}件")
