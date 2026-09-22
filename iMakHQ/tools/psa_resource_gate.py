@@ -698,6 +698,7 @@ def main():
         print("  (--no-confirm) 確認ゲートskip、全件探索")
     else:
         import psa_resource_confirm as prc
+        import psa_label_learned as _PLL
         # 目視確定済(過去に目視で確定した itemID→KEY)を読み、再目視をスキップ。
         # = 一度確定したカードは再走で再目視しない(目視は資産・負担は使うほど減る)。--review-all で全件再目視。
         confirmed_prev = {}
@@ -773,12 +774,30 @@ def main():
                 base = f'[{c["product_id"]}] {c.get("name_jp", "")}'
                 return base + (f' ｜ {extra}' if extra else "")
 
+            # ★2026-09-22: KEY が未解決なら、前に目視で選ばれたカード (PSA ラベルごとの覚え書き) を
+            #   既定選択にする。候補に無ければ足す。人は確かめて押すだけ
+            if not rk:
+                _psa = (prc._load_psa_cache() or {}).get(str(cert_map.get(iid) or "")) or {}
+                # 候補の product_id にはカテゴリが付かないので、PSA の商材を順に当てる
+                for _cat in ("pokemon_tcg", "one_piece_tcg", "dragonball_scg", "gundam_tcg"):
+                    _lp = _PLL.learned_pid(_PLL.load(), _PLL.key_for_psa(_cat, _psa))
+                    if _lp:
+                        rk = _lp
+                        if not any(c["product_id"] == _lp for c in variants):
+                            meta = mp.card_meta_for_key(_lp) or {}
+                            variants = [{"product_id": _lp, "name_jp": meta.get("name_jp", ""),
+                                         "set": meta.get("set", ""), "image": meta.get("image", ""),
+                                         "variant_type": meta.get("variant_type", ""),
+                                         "rarity": meta.get("rarity", ""),
+                                         "get_info": meta.get("get_info", "")}] + variants
+                        print(f"   📘 前に目視で選んだカードを既定にする: {_lp}")
+                        break
             candidates = [{"key": c["product_id"], "image": c["image"], "label": _label(c)}
                           for c in variants]
             targets_by_idx[i] = {
                 "idx": i, "title": (r.get("title") or "")[:90], "card_no": card_no,
                 "psa_image": psa_img, "candidates": candidates,
-                "resolved_key": r.get("key"),          # 既定選択(itemID join 済なら)
+                "resolved_key": rk,                    # 既定選択(itemID join 済 / 覚え書き)
                 "ebay_url": r.get("ebay_url", ""), "no_image": not psa_img,
             }
             if (n + 1) % 20 == 0:
@@ -797,6 +816,7 @@ def main():
         idx_row = {i: r for i, r in enumerate(rows)}    # filter前に idx→row 固定
         # 選択された変種KEYを各行に反映 + 商品管理シート書戻し + 目視確定済 追記用に収集
         writeback = {}
+        learn = []             # [(PSAラベルのキー, KEY, cert)] 覚え書き用
         new_confirmed = {}     # itemID→KEY 今回新規に目視確定(次回スキップ用)
         for c in confirmed:
             i, key = c["idx"], (c.get("key") or "")
@@ -810,6 +830,12 @@ def main():
                 new_confirmed[iid] = key
                 if key != old:                          # 新規解決 or 訂正のみ書戻し
                     writeback[iid] = key
+                    # ★2026-09-22: 人が決めたカードを PSA ラベルごとにも覚える (次の別の出品に効かせる)
+                    _cert = cert_map.get(iid) or ""
+                    _psa = (prc._load_psa_cache() or {}).get(str(_cert)) or {}
+                    _kc, _kp = mp.split_key(key)
+                    _kc = _kc or mp.split_key(old)[0] or _PLL.category_of(_kp)
+                    learn.append((_PLL.key_for_psa(_kc, _psa), _kp or key, _cert))
         # PDCA: 不一致(OFF)を台帳に蓄積 → 原因別振り分け → 再発/解決トレンド
         # auto_idx(itemID join / 過去目視で KEY 解決済=今回スキップ)も「確定」として渡す。
         # これを渡さないと、KEY が入って解決済の行が台帳で永久に「未対処」のまま毎日再発行される
@@ -817,6 +843,11 @@ def main():
         if not NIGHTLY:
             _run_mismatch_pdca(rejected, list(auto_idx) + [c["idx"] for c in confirmed],
                                idx_row, targets_by_idx, cert_map, mp)
+        if learn:
+            try:
+                print(f"📘 目視で決めたカードを覚えました: {_PLL.record_picks(learn)}件")
+            except Exception as e:                                 # noqa: BLE001
+                print(f"⚠ 覚え書きに書けません: {type(e).__name__}: {e}")
         # 確定した変種KEYを商品管理シートAI列に書戻し(目視を資産化=次回から解決済)
         if writeback:
             try:

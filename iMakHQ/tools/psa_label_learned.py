@@ -78,3 +78,41 @@ def record_chosen(results, targets_by_cert, path=PATH):
     if n:
         save(data, path)
     return n
+
+
+def key_for_psa(category, psa):
+    """PSA の鑑定データ (Brand / CardNumber / Subject) からキーを作る。無ければ ""。"""
+    psa = psa or {}
+    if not category or not psa.get("Brand"):
+        return ""
+    return label_key(category, psa.get("Brand"), psa.get("CardNumber"), psa.get("Subject"))
+
+
+def record_picks(picks, path=PATH):
+    """[(key, product_id, cert)] をまとめて覚える (補URLの確証から)。覚えた件数を返す。"""
+    data, n = load(path), 0
+    for key, pid, cert in picks:
+        if key and pid:
+            remember(data, key, pid, cert=str(cert or ""))
+            n += 1
+    if n:
+        save(data, path)
+    return n
+
+
+CATALOG_DB = r"C:/dev/iMak_data/catalog/products.sqlite"
+
+
+def category_of(product_id, db=CATALOG_DB):
+    """カタログIDのカテゴリ (KEY にカテゴリが付いていない時に引く)。引けなければ ""。"""
+    import sqlite3
+    try:
+        conn = sqlite3.connect(db)
+        try:
+            r = conn.execute("SELECT category FROM products WHERE product_id=? LIMIT 1",
+                             (product_id,)).fetchone()
+        finally:
+            conn.close()
+        return (r[0] or "") if r else ""
+    except sqlite3.Error:
+        return ""
