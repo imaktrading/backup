@@ -640,6 +640,15 @@ def _catalog_lookup_expected(brand: str, subject: str, card_number: str, categor
     """catalog lookup 経由で expected product_id 取得 (= 5/28 lookup_one_piece Promo 拡張 + lookup_don 等を活用)."""
     if not category:
         return None
+    # ★2026-09-22: 目視で人が選び直したラベルは、次からそれを期待値にする (psa_label_learned)
+    try:
+        import psa_label_learned as _PLL
+        _learned = _PLL.learned_pid(_PLL.load(), _PLL.label_key(category, brand, card_number, subject))
+        if _learned:
+            print("    📘 前に目視で選んだカードを期待値にする: %s" % _learned)
+            return _learned
+    except Exception:                                          # noqa: BLE001 覚え書きが読めなくても従来どおり
+        pass
     _orig_stdout = sys.stdout
     _tee = _SafeStdout(_orig_stdout)
     sys.stdout = _tee
@@ -1672,6 +1681,12 @@ def _record_verified(results: list[dict]) -> None:
                 "product_id": pid,
             }
     _save_verified_certs(verified)
+    # ★2026-09-22: 選び直したカードは PSA のラベルごとにも覚える (次の別の鑑定品に効かせる)
+    try:
+        import psa_label_learned as _PLL
+        _PLL.record_chosen(results, _TARGETS_BY_CERT)
+    except Exception as e:                                     # noqa: BLE001
+        print("    ⚠️ 選び直しを覚えられませんでした: %s" % e)
 
 
 # run_post_psa_review が受け取る「最終入稿 CSV」パス (= .bak ではなく実 CSV)。
