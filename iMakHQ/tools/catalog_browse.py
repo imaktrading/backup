@@ -97,6 +97,10 @@ _PAGE = """<!doctype html><html lang="ja"><meta charset="utf-8">
  .tag{display:inline-block;border-radius:20px;padding:1px 9px;font-size:11px;font-weight:700;
       background:var(--sunken);color:var(--ink2);margin-right:5px}
  .tag.cert{background:#5f3a1e;color:#ffc48e}
+ .kv{display:flex;gap:8px;font-size:13px;line-height:1.5;margin:2px 0}
+ .kv .k{flex:none;width:74px;color:var(--ink3);font-size:12px}
+ .kv span:last-child{word-break:break-all}
+ .miss{color:#a8703a}
  .msg{padding:40px 22px;color:#ffc48e;font-size:15px;font-weight:700}
 </style>
 <header><h1>カタログを見る</h1><div class="sum" id="sum">読み込み中…</div></header>
@@ -135,11 +139,15 @@ function load(){
         var tags = "<span class='tag'>"+esc(r.category)+"</span>";
         if(r.rarity) tags += "<span class='tag'>"+esc(r.rarity)+"</span>";
         if(r.cert) tags += "<span class='tag cert'>鑑定画像</span>";
+        function kv(k,v){ return "<div class='kv'><span class='k'>"+k+"</span><span>"+
+          (v ? esc(v) : "<span class='miss'>(なし)</span>")+"</span></div>"; }
         return "<div class='it'><div class='ph'>"+img+"</div>"+
-          "<div class='nm'>"+esc(r.name_jp||r.name||r.product_id)+"</div>"+
-          "<div class='en'>"+esc(r.name!==r.name_jp?r.name:"")+"</div>"+
-          "<div class='no'>"+esc(r.product_id)+" · "+esc(r.no)+"</div>"+
-          "<div>"+tags+"</div><div class='set'>"+esc(r.set_name||"")+"</div></div>";
+          kv("カード名", r.name_jp||r.name)+
+          (r.name && r.name!==r.name_jp ? kv("英語名", r.name) : "")+
+          kv("カード№", r.no)+
+          kv("セット", r.set_name)+
+          kv("カタログID", r.product_id)+
+          "<div style='margin-top:6px'>"+tags+"</div></div>";
       }).join("") : "<div class='msg'>0件 — この条件ではカタログに在りません "+
                     "(引き方ではなく、データが無い)</div>";
       var s = rows.length+"件";
