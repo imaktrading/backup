@@ -271,7 +271,12 @@ def _parse_detail_html(html: str, card_id: int | str) -> dict | None:
         #   (2026-09-04 実測 40枚)。タグを剥がして取り直す。
         m = re.search(r"<h1[^>]*>(.*?)</h1>", html_decoded, re.S)
         if m:
-            nm = re.sub(r"<[^>]+>", "", m.group(1))
+            # ★XY 期のメガは「M」が券面の印で、公式は `<span class="pcg pcg-megamark">` で出す。
+            #   剥がすだけだと `ギャラドスEX` (メガでない別カードと同名) になるので M に置き換える
+            #   (2026-09-22 実測: 公式の印付き 101枚、うち 94枚が未登録だった)。
+            #   プリズムスター (`pcg-prismstar`) は既存43行に合わせて印を付けない。
+            nm = re.sub(r'<span class="pcg pcg-megamark"></span>', "M", m.group(1))
+            nm = re.sub(r"<[^>]+>", "", nm)
             nm = re.sub(r"\s+", " ", nm).strip()
             if nm:
                 out["name"] = nm

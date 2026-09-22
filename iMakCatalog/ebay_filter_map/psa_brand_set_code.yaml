@@ -1,0 +1,90 @@
+# PSA のセット名 (Brand) → catalog の set_code (product_id の頭)
+# 作成 2026-09-22 / 依頼 requests/2026-09-22_psa_brand_set_code_table.md
+#
+# 根拠: products の set_name_official (公式の取り込み値) を 2026-09-22 に引き、
+#       PSA 表記の日本語セット名と一致する set_code を採った。推測で埋めない。
+#
+# set_codes の読み方
+#   1つ         … そのセットの行は product_id がこの頭で始まる
+#   2つ以上     … 同じ商品に別の頭の行が入っている (再録・プロモ同梱)。頭だけでは1枚に決まらない。
+#                 番号 (PSA の #) と組んで各 set_code に当て、1件だけ当たった時に採ること
+#   []          … 決められない。status に理由
+#
+# status
+#   ok             … 使ってよい
+#   multi          … 上の「2つ以上」
+#   not_in_catalog … catalog にそのセットの行が無い
+#   out_of_scope   … 扱わない商材 (DB ヒーローズ / DIVERS / いたジャガ / 英語版カード)
+
+pokemon_tcg:
+  - {psa_brand: "POKEMON JAPANESE SWORD & SHIELD SHINY STAR V", set_codes: [S4a], status: ok, note: "依頼書の実害例 (メタモンV S4a-323)"}
+  - {psa_brand: "POKEMON JAPANESE SWORD & SHIELD AMAZING VOLT TACKLE", set_codes: [S4], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SWORD & SHIELD PEERLESS FIGHTERS", set_codes: [S5a], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SWORD & SHIELD SWORD", set_codes: [S1W], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SWORD & SHIELD FAMILY POKEMON CARD GAME", set_codes: [SH], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SWORD & SHIELD START DECK 100", set_codes: [SI], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SWORD & SHIELD REBELLION CRASH", set_codes: [S2], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SWORD & SHIELD LEGENDARY HEARTBEAT", set_codes: [S3a], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SWORD & SHIELD JET-BLACK SPIRIT", set_codes: [S6K], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SWORD & SHIELD FUSION ARTS", set_codes: [S8], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SUN & MOON MIRACLE TWINS", set_codes: [SM11], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SUN & MOON ULTRADIMENSIONAL BEASTS", set_codes: [SM4A], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SUN & MOON TAG BOLT", set_codes: [SM9], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SUN & MOON SUPER-BURST IMPACT", set_codes: [SM8], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SUN & MOON SKY-SPLITTING CHARISMA", set_codes: [SM7], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SUN & MOON DOUBLE BLAZE", set_codes: [SM10], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SUN & MOON ULTRA SHINY GX", set_codes: [SM8b], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SUN & MOON TO HAVE SEEN THE BATTLE RAINBOW", set_codes: [SM3H], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SUN & MOON SKY LEGEND", set_codes: [SM10b], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SUN & MOON ALTER GENESIS", set_codes: [SM12], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SUN & MOON EEVEE GX STARTER SET", set_codes: [], status: not_in_catalog}
+  - {psa_brand: "POKEMON JAPANESE XY RED FLASH", set_codes: [XY8-Br], status: ok}
+  - {psa_brand: "POKEMON JAPANESE XY BLUE SHOCK", set_codes: [XY8-Bb], status: ok}
+  - {psa_brand: "POKEMON JAPANESE XY POKEKYUN COLLECTION", set_codes: [CP3], status: ok}
+  - {psa_brand: "POKEMON JAPANESE XY PHANTOM GATE", set_codes: [XY4], status: ok}
+  - {psa_brand: "POKEMON JAPANESE XY BANDIT RING", set_codes: [XY7-B, XY7], status: multi}
+  - {psa_brand: "POKEMON JAPANESE XY EMERALD BREAK", set_codes: [XY6-B, XY6], status: multi}
+  - {psa_brand: "POKEMON JAPANESE PREMIUM CHAMPION PACK", set_codes: [CP4], status: ok}
+  - {psa_brand: "POKEMON JAPANESE MYTHICAL & LEGENDARY DREAM SHINE COLLECTION", set_codes: [CP5], status: ok}
+  - {psa_brand: "POKEMON JAPANESE EXPANSION 20TH ANNIVERSARY", set_codes: [CP6], status: ok}
+  - {psa_brand: "POKEMON JAPANESE M AUDINO-EX MEGA BATTLE DECK", set_codes: [XYH], status: ok}
+  - {psa_brand: "POKEMON JAPANESE MBD-MEGA STARTER SET MEGA DIANCIE EX", set_codes: [MBD], status: ok}
+  - {psa_brand: "POKEMON JAPANESE MBG-MEGA STARTER SET MEGA GENGAR EX", set_codes: [MBG], status: ok}
+  - {psa_brand: "POKEMON JAPANESE CLF-TRADING CARD GAME CLASSIC VENUSAUR & LUGIA EX DECK", set_codes: [CLF], status: ok}
+  - {psa_brand: "POKEMON JAPANESE CLK-TRADING CARD GAME CLASSIC BLASTOISE & SUICUNE EX DECK", set_codes: [CLK], status: ok}
+  - {psa_brand: "POKEMON JAPANESE CLL-TRADING CARD GAME CLASSIC CHARIZARD & HO-OH EX DECK", set_codes: [CLL], status: ok}
+  - {psa_brand: "POKEMON JAPANESE SOULSILVER COLLECTION", set_codes: [L1-Bss], status: ok}
+  - {psa_brand: "POKEMON JAPANESE BLACK & WHITE PLASMA GALE", set_codes: [BW7-B], status: ok}
+  - {psa_brand: "POKEMON JAPANESE BLACK & WHITE EX BATTLE BOOST", set_codes: [BW10-B, EBB], status: multi}
+  - {psa_brand: "POKEMON JAPANESE EXTRA REGULATION BOX", set_codes: [BW, XY-ERB], status: multi}
+  - {psa_brand: "POKEMON JAPANESE BLACK DECK KIT", set_codes: [BDK], status: ok, note: "catalog は2行 (BDK-005/006) だけ"}
+  - {psa_brand: "POKEMON JAPANESE BLACK & WHITE NATIONAL BEGINNING", set_codes: [], status: not_in_catalog}
+  - {psa_brand: "POKEMON JAPANESE ROCKET", set_codes: [], status: not_in_catalog, note: "旧裏面"}
+  - {psa_brand: "POKEMON JAPANESE NEO", set_codes: [], status: not_in_catalog, note: "旧裏面。弾名が無く1つに決まらない"}
+  - {psa_brand: "POKEMON JAPANESE WEB", set_codes: [], status: not_in_catalog}
+  - {psa_brand: "POKEMON SWORD AND SHIELD CROWN ZENITH", set_codes: [], status: out_of_scope, note: "英語版カード (JAPANESE が付いていない)"}
+
+one_piece_tcg:
+  - {psa_brand: "ONE PIECE JAPANESE PREMIUM BOOSTER -ONE PIECE CARD THE BEST- STORAGE BOX SET", set_codes: [], status: not_in_catalog, note: "ストレージボックスセット付属のカードは catalog に行が無い"}
+  - {psa_brand: "ONE PIECE JAPANESE FILM RED: ENCORE PACK", set_codes: [P, ST11], status: multi}
+  - {psa_brand: "ONE PIECE JAPANESE LIMITED CARD COLLECTION VOL.1", set_codes: [OP05, OP06, OP08, OP10, ST21], status: multi, note: "BASE SHOP リミテッドカードコレクション vol.1。元のカード番号のまま収録"}
+  - {psa_brand: "ONE PIECE JAPANESE ADMIRABLE COLLECTION VOL 1 VINSMOKE REIJU", set_codes: [OP06], status: ok, note: "Admirable Collection vol.1 は OP06/OP12 の2行。product_id に _AC01"}
+
+dragonball_scg:
+  - {psa_brand: "DRAGON BALL SUPER CARD GAME FUSION WORLD JAPANESE WISH FOR SHENRON", set_codes: [FB07], status: ok, note: "FB04/FP/FS05 の再録が各1行ある"}
+  - {psa_brand: "DRAGON BALL SUPER DIVERS ADVANCE PACK DRAGON BALL 40TH ANNIVERSARY EDITION", set_codes: [], status: out_of_scope, note: "DIVERS は対象外 (2026-07-29 確定)"}
+  - {psa_brand: "DRAGON BALL SUPER DIVERS 7", set_codes: [], status: out_of_scope}
+  - {psa_brand: "DRAGON BALL SUPER DIVERS 4", set_codes: [], status: out_of_scope}
+  - {psa_brand: "SUPER DRAGON BALL HEROES ULTRA GOD MISSION 5", set_codes: [], status: out_of_scope, note: "DB ヒーローズは catalog に無い"}
+  - {psa_brand: "SUPER DRAGON BALL HEROES ULTRA GOD MISSION 6", set_codes: [], status: out_of_scope}
+  - {psa_brand: "SUPER DRAGON BALL HEROES ULTRA GOD MISSION 1", set_codes: [], status: out_of_scope}
+  - {psa_brand: "SUPER DRAGON BALL HEROES METEOR MISSION 2", set_codes: [], status: out_of_scope}
+  - {psa_brand: "SUPER DRAGON BALL HEROES METEOR MISSION 3", set_codes: [], status: out_of_scope}
+  - {psa_brand: "SUPER DRAGON BALL HEROES BIG BANG MISSION 12", set_codes: [], status: out_of_scope}
+  - {psa_brand: "DRAGON BALL HEROES GOD MISSION 1", set_codes: [], status: out_of_scope}
+  - {psa_brand: "DRAGON BALL HEROES GALAXY MISSION 10", set_codes: [], status: out_of_scope}
+  - {psa_brand: "ITAJAGA DRAGON BALL VOL.8", set_codes: [], status: out_of_scope, note: "いたジャガは出品対象外"}
+  - {psa_brand: "ITAJAGA DRAGON BALL VOL.7", set_codes: [], status: out_of_scope}
+
+gundam_tcg:
+  - {psa_brand: "GUNDAM JAPANESE PB01-PREMIUM GOODS SET -MOBILE SUIT GUNDAM WING-", set_codes: [ST02, GD01], status: multi, note: "プレミアムグッズセット [PB01]。元のカード番号のまま収録"}
