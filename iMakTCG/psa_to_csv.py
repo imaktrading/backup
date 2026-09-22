@@ -2141,6 +2141,10 @@ def _pad_title_with_facts(title, year, rarity_short, set_code, target_min=70, ma
     return title
 
 
+# PSA10 以外で build_row が止めた cert (規定どおりの除外。失敗とは数えない・2026-09-22 Act 提案3)
+GRADE_EXCLUDED = set()
+
+
 def build_row(cert_number, price, data, description, driver=None, catalog_misses=None, pid_by_cert=None):
     subject = data.get('Subject', 'Unknown')
     card_number = data.get('CardNumber', '')
@@ -2708,6 +2712,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         _g = (str(_vision_grade or "").strip() or detected_grade_from_title(claude_title))
         _src = "PSAページ" if _page_grade else ("ラベル画像" if _vision_grade else "")
         if _g and _g != "10":
+            GRADE_EXCLUDED.add(str(cert_number))       # 門が正しく効いた = 失敗ではない (Act 提案3)
             print(f"    🚫 PSA{_g} を検出({_src}) → **出品しない** (PSA10 のみ出品する規定。"
                   f"グレード誤表示 + PSA10 相場の誤参照になるため)")
         else:
@@ -3833,6 +3838,12 @@ def main():
             row = build_row(cert, DEFAULT_PRICE, data, description, driver=driver, catalog_misses=catalog_misses, pid_by_cert=pid_by_cert)
             if row is None:
                 # selfcheck弾かれ → rows/card_info の後段ループで None参照クラッシュを防ぐためスキップ
+                if str(cert) in GRADE_EXCLUDED:
+                    # ★2026-09-22 (Act 提案3): PSA10 以外の除外は規定どおり。失敗に混ぜると
+                    #   監査くんの error 件数が毎回ふくらむ
+                    print(f"    ⏭ #{cert}: PSA10 以外なので規定どおり除外")
+                    card_info.append((cert, None))
+                    continue
                 print(f"    ⚠️ Skipping #{cert}: selfcheck failed in build_row")
                 errors.append(cert)
                 card_info.append((cert, None))
@@ -4181,7 +4192,8 @@ def main():
         run_self_audit(output_file, brief=True)
     except Exception as _e:
         print(f"⚠️ セルフ監査 失敗 (非致命): {type(_e).__name__}: {_e}")
-    print(f"成功: {len(rows)-1}件 / 失敗: {len(errors)}件")
+    print(f"成功: {len(rows)-1}件 / 失敗: {len(errors)}件"
+          + (f" / PSA10以外で除外: {len(GRADE_EXCLUDED)}件" if GRADE_EXCLUDED else ""))
     if errors:
         print(f"失敗: {', '.join(errors)}")
 

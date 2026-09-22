@@ -257,6 +257,11 @@ def build_listing_fields(cert: str, game_hint: str = "", forced_card_id: str = "
                         else f"forced card_id {forced_card_id} がどのゲームか決まらない")
         # 人が確定したのは card_id (ID)。名前が現物 Subject と合うかは別に確かめる (提案1)。
         if not _name_matches_psa_subject(specs, cert):
+            # ★2026-09-22 (Act 提案2): 英語名が空だと、日本語名と英語の Subject を比べて必ず外れる。
+            #   落とすのは同じ (fail-closed) だが、理由を分けて直す場所 (catalog の name_en) を伝える
+            if not str(specs.get("_name_en") or "").strip():
+                return {}, (f"forced card_id {forced_card_id} は catalog の name_en が空 "
+                            f"(PSA Subject と照合できない・catalog に英語名の補充を依頼)")
             return {}, (f"forced card_id {forced_card_id} の名前が PSA Subject と不一致 "
                         f"(catalog側の疑い)")
         fields = map_specs_to_fields(specs, _psa_year(cert))
