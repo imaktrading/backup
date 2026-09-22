@@ -1658,20 +1658,23 @@ SCRIPTS = [
     #   一度きりの調査ツールで在庫あり文脈で紛らわしいためパネルから除外 (tools/ に .py は残置=直叩き可)。
     {
         "category": None, "type": "utility",
-        "label": "🛒 PSA 再仕入れ ① 探す",
+        "label": "🛒 PSA 再仕入れ ① 目視",
         "badge": "psa_gate",
-        "tip": "在庫切れしたPSA10のうち、まだ需要がある物の仕入元 (メルカリ/スニダン) を探して、"
-               "現物と見比べて確定します。確定した分は次の ♻ でCSVになります。"
-               "1回で新規10件見つかるまで掘ります。",
+        "tip": "在庫切れしたPSA10の仕入元候補 (メルカリ/スニダン) を、すぐ目視の画面で出します。"
+               "候補は前の晩 (23:30) に探した結果で、押しても探しに行きません。"
+               "絵柄が何種類かあるカードは、先に版を選びます。"
+               "現物と同じと答えた分が確定し、次の ② でCSVになります。"
+               "夜にまだ探していない分は、その夜に探します。",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         # 2チャネル(Mercari＆SNKRDUNK)ゲート。探索前に①現物(出品PSA)=②catalog の目視確認ゲートが
         # ブラウザで開く→一致分だけ探索。不一致はPDCA台帳(原因別振り分け)。旧 mercari_psa_resource.py
         # (Mercari単体・確認/PDCA無し)から張替 (2026-06-17)。
         "cmd": ["python", "psa_resource_gate.py"],
+        # ★2026-09-22: 昼は探さない (夜 23:30 に全件探した結果を使う) ので「探す」ではなく「目視」。
         "params": [],
         # ★新規再仕入れ可が10件見つかるまで保留分を検索(2026-07-26 ユーザー要望「10件出したい」)。
         # SNKRDUNK先取り→メルカリ保留分をtargetまで掘る。BAN上限=RESTOCK_MAX_SCRAPE(既定60)/1走行。
-        "env": {"RESTOCK_TARGET_NEW": "10"},
+        "env": {"RESTOCK_TARGET_NEW": "10"},   # 昼は探さないので効かない (RESTOCK_DAY_SCRAPE=1 の時だけ)
         # 結果は「既存メンテ」スプシ PSA再仕入れタブに集約 (CSV廃止。再仕入れ系をシート統一)
         
     },
@@ -4735,7 +4738,7 @@ class ListingPanel:
                     rb_txt += "\n※cert が引けず生成できない %s件は含めていません" % rb["blocked"]
                     rb_txt += "\n  (商品管理シートに その itemID の行が無い / 見送り)"
                 if not rb.get("actionable"):
-                    rb_txt += " (先に ① 探す で仕入元を確定)"
+                    rb_txt += " (先に ① 目視 で仕入元を確定)"
             else:
                 rb_txt = ""
             # 🔄 RESTOCK状態同期: 何件の実状態を確かめに行くか

@@ -98,7 +98,7 @@ def build_restock_input(restock_rows, itemid_to_cert, itemid_to_key, sold_out_su
         _dead = (sold_out_supply or {}).get(iid)
         _conf = r.get("confirmed_url") or ""
         if _dead and _conf and _norm_supply(_conf) == _norm_supply(_dead):
-            skipped.append((iid, "確定した仕入元が監視くんで売り切れ (D列) → 再仕入れ①で探し直す→生成不可"))
+            skipped.append((iid, "確定した仕入元が監視くんで売り切れ (D列) → 確定から外し、今夜探し直して再仕入れ①に出す"))
             continue
         if cert in seen:
             continue

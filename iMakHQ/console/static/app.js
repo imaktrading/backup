@@ -16,7 +16,7 @@
     },
     restock: {
       title: "再仕入れ", target: "売り切れ (在庫0)", purpose: "また買える仕入元を見つけて在庫を戻す",
-      cols: ["① 探す", "② 目視・CSV", "③ 確認・数量を戻す"],
+      cols: ["① 仕入元を決める", "② 目視・CSV", "③ 確認・数量を戻す"],
       rows: [["PSA", ["psa_gate", "restock_build", "restock_wb"]],
              ["UT", ["ut_restock_search", "ut_restock_confirm", "ut_restore"]],
              ["一番くじ", ["kuji_supply", "kuji_refresh", null]]],
