@@ -1543,6 +1543,23 @@ def count_workload(today=None):
         return {"error": "%s: %s" % (type(e).__name__, e)}
 
 
+def _mark_restock_excluded(pairs):
+    """[(itemID, 理由)] を RESTOCK対象外 タブに足す (既に在る itemID は足さない)。足した件数を返す。"""
+    if not pairs:
+        return 0
+    try:
+        from sheet_io import read_tab, _open, MAINT_SHEET_ID
+        have = {(rr[0] or "").strip() for rr in (read_tab("RESTOCK対象外")[1:] or []) if rr}
+        rows = [[str(i), why] for i, why in pairs if str(i).strip() and str(i) not in have]
+        if rows:
+            _open(MAINT_SHEET_ID).worksheet("RESTOCK対象外").append_rows(
+                rows, value_input_option="RAW")
+        return len(rows)
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ RESTOCK対象外 への記録skip ({type(e).__name__}: {e}) → 次回また ① に出ます")
+        return 0
+
+
 def _build_review_skip_rows(restock_cands, shown_idxs, confirmed_idxs, diff_idxs, today,
                             notpsa_idxs=None, sold_idxs=None):
     """視覚確証でレビュー済だが未確定(違う/見送り/PSA10でない)の行を作る(純関数)。
@@ -1698,10 +1715,14 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
             new_rows, _relist = split_confirmed_by_listing_alive(new_rows, _alive_of)
             if _relist:
                 n = _append_new_listing_rows(_relist)
-                print(f"  ♻→🆕 出品が終了していた {n}件は **新規出品**に回しました "
-                      f"(商品管理シートに追加。リストックでは戻せないため)")
+                print(f"  ♻→🆕 出品が終了していた {len(_relist)}件は **新規出品**に回しました "
+                      f"(商品管理シートに新しく足した行 {n} / 残りは既に在った。リストックでは戻せないため)")
                 for r in _relist:
                     print(f"       {r[0]} {(r[2] or '')[:52]}")
+                # ★2026-09-22: 再仕入れの対象からも外す。どこにも記録しないと ① の残りに
+                #   毎回数えられ、押すたびに同じ1件が出て「HIGH に在る」で終わっていた
+                _mark_restock_excluded([(r[0], "出品終了 → 新規出品に回した (%s)" % today)
+                                        for r in _relist if r and r[0]])
         except Exception as e:                                 # noqa: BLE001
             print(f"  ⚠ 出品状態の確認skip → 全件リストック扱い ({type(e).__name__}: {e})")
 
