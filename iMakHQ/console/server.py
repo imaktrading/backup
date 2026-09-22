@@ -512,6 +512,26 @@ def research_cards(refresh=False):
 # ★2026-09-20 ユーザー「これだと、開ける前に条件入れないとダメでしょ。開けてから絞り込みたい」。
 #   カタログは10万件あって1枚の HTML には収まらないので、画面から ここに聞く形にする。
 #   引くのは tools/catalog_browse.fetch が唯一の口。
+# ★2026-09-22: カタログの画像がこの PC 内のファイル (ドン!!カード等) の物は、ブラウザから読めず
+#   画面に出なかった。カタログの置き場の中だけ、ここから配る (それ以外の場所は配らない)。
+CATALOG_IMG_ROOT = os.path.normcase(os.path.normpath(r"C:/dev/iMak_data/catalog"))
+
+
+def _catalog_img_url(img):
+    if img and not img.lower().startswith(("http://", "https://")):
+        from urllib.parse import quote
+        return "/catalog/img?p=" + quote(img)
+    return img
+
+
+def catalog_img_path(p):
+    """配ってよいファイルなら実パス、だめなら None (カタログの置き場の外は配らない)。"""
+    path = os.path.normcase(os.path.normpath(p or ""))
+    if not path.startswith(CATALOG_IMG_ROOT + os.sep) or not os.path.isfile(path):
+        return None
+    return path
+
+
 def catalog_rows(game="", q="", limit=400):
     if TOOLS not in sys.path:
         sys.path.insert(0, TOOLS)
@@ -521,7 +541,7 @@ def catalog_rows(game="", q="", limit=400):
     out = []
     for pid, name, name_jp, cat, set_name, images, specs in CB.fetch(conn, game, q, limit):
         out.append({"product_id": pid, "name": name, "name_jp": name_jp, "category": cat,
-                    "set_name": set_name, "image": CB.first_image(images),
+                    "set_name": set_name, "image": _catalog_img_url(CB.first_image(images)),
                     "cert": CB.is_cert_image(CB.first_image(images)),
                     "rarity": CB.spec_of(specs, "rarity"),
                     "no": CB.spec_of(specs, "card_number_text") or pid})
@@ -938,7 +958,8 @@ def _run_worker(script, cmd=None):
 
 _TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
           ".js": "application/javascript; charset=utf-8", ".svg": "image/svg+xml",
-          ".png": "image/png", ".ico": "image/x-icon"}
+          ".png": "image/png", ".ico": "image/x-icon", ".jpg": "image/jpeg",
+          ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -983,6 +1004,17 @@ class Handler(BaseHTTPRequestHandler):
                     min(int((p.get("limit") or ["400"])[0] or 400), 2000)))
             except Exception as e:                       # noqa: BLE001 画面に出して知らせる
                 return self._json(200, {"error": str(e)})
+        if u.path == "/catalog/img":
+            path = catalog_img_path((parse_qs(u.query).get("p") or [""])[0])
+            if not path:
+                return self._json(404, {"error": "not found"})
+            with open(path, "rb") as f:
+                b = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", _TYPES.get(os.path.splitext(path)[1].lower(), "application/octet-stream"))
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            return self.wfile.write(b)
         if u.path == "/catalog":
             # 画面もここから配る。file:/// で開くとブラウザが問い合わせを止める (同じ出所に揃える)
             import catalog_browse as CB

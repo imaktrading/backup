@@ -19,3 +19,12 @@ def test_console_serves_catalog_page_same_origin():
 def test_opens_console_url_not_file():
     src = open(C.__file__, encoding="utf-8").read()
     assert '+ "/catalog"' in src
+
+
+def test_local_catalog_images_served_only_inside_catalog_dir():
+    sys.path.insert(0, os.path.join(HERE, "..", "console"))
+    import server as S
+    assert S._catalog_img_url("https://x/a.png") == "https://x/a.png"
+    assert S._catalog_img_url("C:/dev/iMak_data/catalog/_don_images/a.png").startswith("/catalog/img?p=")
+    assert S.catalog_img_path("C:/Windows/win.ini") is None
+    assert S.catalog_img_path("C:/dev/iMak_data/catalog/../hq/x.png") is None
