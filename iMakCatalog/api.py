@@ -136,6 +136,19 @@ def search_prefix(category: str, prefix: str, limit: int = 100) -> list[dict]:
 # 英語版の絵の URL の印 (bandai-tcg-plus の EN フォルダ / ガンダムの _EN_)
 _EN_IMAGE_MARKS = ("/OP-EN/", "/DBFW-EN/", "/GC-EN/", "_EN_")
 
+# 他のページへの埋め込みを断る公式サイト (Cross-Origin-Resource-Policy: same-site。2026-09-22 実測)
+_BLOCKED_IMAGE_HOSTS = ("onepiece-cardgame.com", "gundam-gcg.com")
+_MIRROR_DIR = Path(r"C:/dev/iMak_data/catalog/_official_images")
+
+
+def _is_blocked_host(url: str) -> bool:
+    return url.startswith("http") and any(h in url for h in _BLOCKED_IMAGE_HOSTS)
+
+
+def _mirror_path(category: str, url: str) -> Path:
+    """公式の絵の控えの置き場所 (ファイル名は URL の最後の部分。クエリは落とす)."""
+    return _MIRROR_DIR / category / url.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+
 
 def upsert(
     category: str,
@@ -182,6 +195,13 @@ def upsert(
             images = [u for u in images if u not in en]
             specs = dict(specs)
             specs["images_en"] = list(dict.fromkeys((specs.get("images_en") or []) + en))
+    # ★公式サイトの絵は目視画面に埋め込めない (CORP same-site)。保存済みの控えがあれば先頭に置く
+    #   (2026-09-22。控えは tools/mirror_blocked_images.py が作る)。
+    if images and _is_blocked_host(images[0]):
+        p = _mirror_path(category, images[0])
+        if p.exists():
+            local = str(p).replace("\\", "/")
+            images = [local] + [u for u in images if u != local]
     now = datetime.now().isoformat(timespec="seconds")
     specs_json = json.dumps(specs, ensure_ascii=False)
     images_json = json.dumps(images or [], ensure_ascii=False)

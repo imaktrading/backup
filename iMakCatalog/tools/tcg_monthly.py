@@ -58,6 +58,7 @@ STEPS = (
         ("公式突合 (ポケモン)",       ["tools/official_drift_pokemon.py", "--all"]),
         ("公式突合 (ワンピース)",     ["tools/official_drift_check.py", "--n", "200"]),
         ("公式突合 (バンダイ2種)",    ["tools/official_drift_bandai.py"]),
+        ("公式の絵の控え",            ["tools/mirror_blocked_images.py", "--commit"]),
         ("検収",                     ["tools/claim_check.py"]),
     ]
 )
