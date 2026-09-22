@@ -2434,7 +2434,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     for _u, _own in dropped:
         print(f"  ⛔ 補URL除外(他出品が使用中 {_own}): {_u[:70]}")
     for _iid, _u in replaced:
-        print(f"  ♻ 補URL入替(もっと安いのが5本そろった) {_iid}: {_u[:70]}")
+        print(f"  ♻ 補URL入替 — もっと安いのが5本そろったので外した {_iid}: {_u[:70]}")
     written = 0
     if not _guard_ok:
         print("  (ガード不成立のため書込0行。確証結果は台帳に残るので再実行で復帰できます)")
