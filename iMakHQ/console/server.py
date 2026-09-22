@@ -172,8 +172,9 @@ def summarize(d, nightly_ok=False):
     if nc.get("error"):
         err(("newcand",), nc)
     elif nc:
-        n = _num(nc.get("show")) + _num(nc.get("auto"))
-        put("newcand", n, n > 0)
+        # ★2026-09-22: 件数は目視する分だけ。自動分 (auto) は夜に保存される
+        n = _num(nc.get("show"))
+        put("newcand", n, n > 0, ("今夜 自動で保存 %d件" % _num(nc.get("auto"))) if _num(nc.get("auto")) else "")
 
     kj = d.get("kuji") or {}
     kk = ("kuji_search", "kuji_confirm", "kuji_supply", "kuji_refresh")

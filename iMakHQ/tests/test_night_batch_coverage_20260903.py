@@ -92,7 +92,9 @@ def test_only_sold_restock_is_allowed_to_write_at_night():
 
 def test_no_visual_confirm_runs_at_night():
     """目視の画面を無人で開かない (誰も見ないまま待ち続ける)。"""
-    assert not _runs("newcand_confirm.py")
+    # ★2026-09-22: 種ボタンの自動保存 (--auto-aux-only) は画面を開かないので可
+    for m in re.finditer(r"newcand_confirm\.py([^\r\n]*)", _BAT):
+        assert "--auto-aux-only" in m.group(1), m.group(0)
     # PSA の目視は --dry-run (画面を出さず、翌朝の下ごしらえだけ) なら可
     m = re.search(r"psa_hoju_fill\.py confirm([^\r\n]*)", _BAT)
     assert m and "--dry-run" in m.group(1)

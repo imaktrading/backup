@@ -1154,6 +1154,7 @@ def _generate_html(targets: list[dict]) -> None:
         '    .then(function (d) {',
         '      if (!d.n) { msg.textContent = "見つかりません (" + q + ")"; return; }',
         '      document.getElementById("grid_" + cert).innerHTML = d.html;',
+        '      document.getElementById("cands_" + cert).classList.add("show");',
         '      msg.textContent = d.n + "件 出しました (選ぶと「違う→この候補」になります)";',
         '    })',
         '    .catch(function () { msg.textContent = "探せませんでした"; });',
@@ -1376,15 +1377,16 @@ def _generate_html(targets: list[dict]) -> None:
         is_open = (not (t.get("csv_expected") and expected_img)
                    or has_sibling_variants(t.get("csv_expected"),
                                            [c[0] for c in t["candidates"]]))
-        html.append(f'<div class=candidates-toggle onclick="toggleCands(\'{cert}\')">▼ 候補 {len(t["candidates"])} 件 表示/非表示</div>')
-        cls = "candidates show" if is_open else "candidates"
-        html.append(f'<div id="cands_{cert}" class="{cls}">')
         # ★2026-09-16: 候補に無い時は番号で探し直す (UT の目視と同じ口)
+        # ★2026-09-22: 候補一覧の外に出す。一覧が閉じていると欄が見えず使えなかった
         html.append('<div class=findbox>'
-                    f'<input id="q_{cert}" class="findq" placeholder="候補に無い時: カード番号や名前で探す (例 SV8a-218)" '
+                    f'<input id="q_{cert}" class="findq" placeholder="候補に無い時: 「カタログを見る」のカタログIDを入れる (例 SV8a-218)" '
                     f'onkeydown="if(event.key===\'Enter\'){{findCands(\'{cert}\');}}">'
                     f'<button class="btn btn-find" onclick="findCands(\'{cert}\')">探す</button>'
                     f'<span id="qmsg_{cert}" class=findmsg></span></div>')
+        html.append(f'<div class=candidates-toggle onclick="toggleCands(\'{cert}\')">▼ 候補 {len(t["candidates"])} 件 表示/非表示</div>')
+        cls = "candidates show" if is_open else "candidates"
+        html.append(f'<div id="cands_{cert}" class="{cls}">')
         html.append(f'<div class=grid id="grid_{cert}">')
         import re as _re
         for i, cand in enumerate(t["candidates"], 1):

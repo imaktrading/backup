@@ -309,6 +309,9 @@ def _fetch_image(url, retries=4):
 
 
 _CSS = """
+.findbox{margin:6px 0;display:flex;gap:6px;align-items:center}
+.findq{flex:1;max-width:380px;padding:4px 6px;font-size:13px}
+.findmsg{font-size:12px;color:#06a}
 body{font-family:'Segoe UI',Meiryo,sans-serif;margin:0;background:#f4f4f4;font-size:15px}
 h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
 /* ★2026-08-02: bar を sticky top:0 にする。以前は h1 が sticky top:0 / bar が top:46px 固定で、
@@ -447,6 +450,24 @@ function tog(i){var c=document.getElementById('c'+i);
   c.classList.toggle('off', !c.querySelector('input[type=checkbox]').checked);}
 function setAll(v){document.querySelectorAll('.card input[type=checkbox]').forEach(function(b){
   b.checked=v; tog(b.closest('.card').dataset.idx);});}
+/* ★2026-09-22: 候補に無い時は「カタログを見る」のカタログIDを入れて探し、その場で選べるようにする */
+function findCat(i){
+  var c=document.getElementById('c'+i), q=c.querySelector('.findq').value.trim();
+  var m=c.querySelector('.findmsg');
+  if(q.length<2){ m.textContent='2文字以上で'; return; }
+  m.textContent='探しています…';
+  fetch('/api/find?idx='+i+'&q='+encodeURIComponent(q)).then(function(r){return r.json();})
+   .then(function(d){
+     if(d.error){ m.textContent='探せませんでした: '+d.error; return; }
+     if(!d.n){ m.textContent='カタログに無い ('+q+')'; return; }
+     var box=c.querySelector('.cands');
+     if(!box){ var ph=c.querySelector('.col.cat .ph'); box=document.createElement('div'); box.className='cands';
+       if(ph) ph.replaceWith(box); else c.querySelector('.col.cat').appendChild(box); }
+     box.insertAdjacentHTML('afterbegin', d.html);
+     var cb=c.querySelector('input[type=checkbox]'); cb.checked=true; tog(i);
+     m.textContent=d.n+'件 出しました。現物と同じ物を選んでください';
+   }).catch(function(){ m.textContent='探せませんでした'; });
+}
 function go(){
   var conf=[], rej=[], unset=0, first=null;
   document.querySelectorAll('.card').forEach(function(c){
@@ -475,6 +496,35 @@ function go(){
   });
 }
 """
+
+
+def cand_option_html(idx, c, psa_img="", checked=False):
+    """候補1枚分 (ラジオ)。最初の一覧と、カタログIDで探し直した結果で共用する。"""
+    ck = c.get("key", "")
+    cimg = c.get("image") or ""
+    ctag = (f"<img src='{_proxied(cimg)}' loading='lazy' onerror='imgFail(this,0)'>" if cimg
+            else "<div class='cph'>画像なし</div>")
+    # ★2026-09-01 ユーザー要望「虫眼鏡つけて」: 目視の目的は絵柄の見比べなので、
+    #   ①現物 と 候補 を **並べて**拡大する (viewer_zoom = 他の目視画面と同じ物)。
+    #   単独で全画面にすると見比べられない、は初版で踏んだ失敗。
+    zbtn = zoom_button(_proxied(cimg), _proxied(psa_img)) if cimg else ""
+    chk = " checked" if checked else ""
+    return (f"<label class='cand'><input type='radio' name='pick{idx}' value='{_html.escape(_s(ck))}'{chk}>"
+            f"{ctag}<span class='clbl'>{_html.escape(_s(c.get('label')))} {zbtn}</span></label>")
+
+
+def find_catalog_cands(q, limit=12):
+    """カタログID・名前でカタログを探す → [{key,image,label}]。「カタログを見る」と同じ引き方。"""
+    import sqlite3
+    import catalog_browse as CB
+    conn = sqlite3.connect(CB.DB)
+    try:
+        rows = CB.fetch(conn, "", " ".join(str(q or "").split()), limit)
+    finally:
+        conn.close()
+    return [{"key": pid, "image": CB.first_image(images) or "",
+             "label": f"[{pid}] {name_jp or name or ''}" + (f" ｜ {set_name}" if set_name else "")}
+            for pid, name, name_jp, _cat, set_name, images, _specs in rows]
 
 
 def build_confirm_html(items):
@@ -506,18 +556,7 @@ def build_confirm_html(items):
             default = resolved if resolved in keys else (keys[0] if len(keys) == 1 else None)
             opts = []
             for c in cands:
-                ck = c.get("key", "")
-                chk = " checked" if ck == default else ""
-                cimg = c.get("image") or ""
-                ctag = (f"<img src='{_proxied(cimg)}' loading='lazy' onerror='imgFail(this,0)'>" if cimg
-                        else "<div class='cph'>画像なし</div>")
-                # ★2026-09-01 ユーザー要望「虫眼鏡つけて」: 目視の目的は絵柄の見比べなので、
-                #   ①現物 と 候補 を **並べて**拡大する (viewer_zoom = 他の目視画面と同じ物)。
-                #   単独で全画面にすると見比べられない、は初版で踏んだ失敗。
-                zbtn = zoom_button(_proxied(cimg), _proxied(psa_img)) if cimg else ""
-                opts.append(
-                    f"<label class='cand'><input type='radio' name='pick{idx}' value='{_html.escape(_s(ck))}'{chk}>"
-                    f"{ctag}<span class='clbl'>{_html.escape(_s(c.get('label')))} {zbtn}</span></label>")
+                opts.append(cand_option_html(idx, c, psa_img, checked=(c.get("key", "") == default)))
             cat_inner = "<div class='cands'>" + "".join(opts) + "</div>"
         else:
             # ★2026-09-01: 「未収録→要追加」と一律に出していたため、**番号が読めていないだけ**の時も
@@ -544,6 +583,9 @@ def build_confirm_html(items):
             f"<label class='sel'><input type='checkbox'{chk_cb} onchange=\"tog({idx})\"> 仕入れる(①=選択②)</label>"
             f"<div class='no'>{cardno}</div>"
             f"<div class='pair'>{psa_col}{cat_col}</div>"
+            f"<div class='findbox'><input class='findq' placeholder='候補に無い時: 「カタログを見る」のカタログIDを入れる (例 SV8a-218)' "
+            f"onkeydown=\"if(event.key==='Enter')findCat({idx})\">"
+            f"<button onclick='findCat({idx})'>探す</button> <span class='findmsg'></span></div>"
             f"<div class='t'>{_html.escape(_s(it.get('title')))}</div>"
             f"<a href='{_html.escape(_s(it.get('ebay_url')))}' target='_blank'>元eBay出品を見る</a>"
             f"{rsn}"
@@ -657,7 +699,16 @@ def confirm_targets(items, timeout=10800):   # 2026-07-24 ユーザー要望で 
                               for d in (data.get("confirmed") or []) if d.get("idx") is not None],
                 "rejected": [{"idx": int(d["idx"]), "reason": d.get("reason") or "unknown"}
                              for d in (data.get("rejected") or []) if d.get("idx") is not None]}
-    return _serve_confirm(build_confirm_html(items).encode("utf-8"), _ex, timeout)
+    psa_by_idx = {str(it.get("idx")): it.get("psa_image") or "" for it in items}
+
+    def _api(path, q):
+        if path != "/api/find":
+            return None
+        idx = q.get("idx", "")
+        found = find_catalog_cands(q.get("q", ""))
+        return {"n": len(found), "html": "".join(
+            cand_option_html(idx, c, psa_by_idx.get(idx, ""), checked=(len(found) == 1)) for c in found)}
+    return _serve_confirm(build_confirm_html(items).encode("utf-8"), _ex, timeout, api=_api)
 
 
 _JS_RESTOCK = """

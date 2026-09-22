@@ -35,7 +35,7 @@ def test_blue_only_when_pressing_yields_something():
     assert 'fg=("#0066cc" if act_kind.get(kind) else "black")' in src
     for kind in ('"hoju_search": bool(s.get("can"))',
                  '"hoju_confirm": bool(cf.get("ready") or cf.get("unjudged"))',
-                 '"newcand": bool(nc.get("show") or nc.get("auto"))'):
+                 '"newcand": bool(nc.get("show"))'):
         assert kind in src, f"判定が無い: {kind}"
 
 

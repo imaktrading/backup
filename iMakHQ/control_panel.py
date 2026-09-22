@@ -4906,7 +4906,7 @@ class ListingPanel:
                         "hoju_confirm": bool(cf.get("ready") or cf.get("unjudged")),
                         "hoju_swap": bool((w.get("swap") or {}).get("ready")
                                           or (w.get("swap") or {}).get("unjudged")),
-                        "newcand": bool(nc.get("show") or nc.get("auto")),
+                        "newcand": bool(nc.get("show")),
                         # 人が証明番号を打たないと永遠に減らない = 残件があれば青
                         "newcand_high": bool(_nh.get("pending")),
                         "kuji_confirm": bool((kj.get("confirm") or {}).get("ready")),

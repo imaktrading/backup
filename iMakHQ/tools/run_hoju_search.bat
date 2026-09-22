@@ -127,6 +127,11 @@ REM         of the matching listing. 2026-09-05: those rows had no destination a
 REM         all, so 163 of them were sitting unused while 45 listings had no spare
 REM         supplier at all. The card is already confirmed by a human, so no new
 REM         judgement is needed here.
+REM         2026-09-22: first save the other suppliers of cards that are already
+REM         decided (no human judgement needed). This used to happen only when the
+REM         daytime button was pressed, so the button showed 387 while only 52 needed eyes.
+echo [newcand-autoaux] %date% %time% >> "%LOG%"
+python -u newcand_confirm.py --auto-aux-only >> "%LOG%" 2>&1
 echo [newcand-aux] %date% %time% >> "%LOG%"
 python -u psa_hoju_fill.py newcand-aux >> "%LOG%" 2>&1
 

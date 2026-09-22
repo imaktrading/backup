@@ -1061,7 +1061,7 @@ def build_html(items):
                if it.get("dups") else "")
             + "</div>"
             f"<div class='vslot'>{body_v}</div>"
-            f"<div class='act'>カード番号 <input class='cno' "
+            f"<div class='act'>カード番号 / カタログID <input class='cno' "
             f"value=\"{_html.escape(it['card_no'] or '')}\" placeholder='例 OP05-002' "
             f"onchange='lookupNo(this)' onblur='lookupNo(this)'>"
             "<button class='go' data-a='go' onclick='setAct(this)'>出品する</button>"
@@ -1963,9 +1963,20 @@ def main():
                     help="目視は開かず、HIGH転記済/結論の印だけ付け直す")
     ap.add_argument("--append-high", action="store_true",
                     help="用途=出品 の候補に証明番号を入れて商品管理シートへ足す")
+    # ★2026-09-22 ユーザー「387と表示するのは間違っているのでは？」。目視が要るのは52件で、
+    #   残り335件 (結論済カードの別の仕入元) は押した時にしか保存されず件数に混ざっていた。
+    #   その保存を夜に回し (--auto-aux-only)、ボタンの件数は目視の分だけにする。
+    ap.add_argument("--auto-aux-only", action="store_true",
+                    help="目視は開かず、結論済カードの別の仕入元だけ補URLとして保存する (夜間用)")
     a = ap.parse_args()
 
     print("▶ 捨てた仕入候補 → 新規出品の種 (目視)")
+    if a.auto_aux_only:
+        sync_status()
+        st = {}
+        load_items(limit=0, write=True, resolve=False, stats=st)
+        print(f"  自動保存の対象 {st.get('auto', 0)}件 / 目視が要る分は昼のボタンで")
+        return 0
     if a.sync_only:
         sync_status()
         return 0
