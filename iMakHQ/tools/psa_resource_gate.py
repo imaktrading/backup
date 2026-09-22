@@ -899,9 +899,15 @@ def main():
             _rcache = {}
     _iids = [mp._ebay_item_id(r.get("ebay_url", "") or "") for r in rows]
 
+    # ★2026-09-22 ユーザー「探しに行くのは夜間にしてよ。待つ時間無駄やん」。
+    #   夜 (23:30 の search-restock と --nightly) が全件を探して同じ cache に入れているのに、
+    #   昼のボタンは **今日の日付の分しか使わず**、日付が変わった夜の結果を捨てて探し直していた。
+    #   昼は前日の夜の分まで使う (_day_fresh)。夜は従来どおり当日分だけ (夜が探し直す役)。
     def _cache_hit(iid):
         c = _rcache.get(iid)
-        return c if (c and c.get("date") == _today) else None
+        if not c:
+            return None
+        return c if (c.get("date") == _today or (not NIGHTLY and _day_fresh(c.get("date"), _today))) else None
 
     # --- SNKRDUNK (HTTP-only。当日キャッシュ分は再利用) ---
     # ★2026-07-26: SNKRDUNK(全件・HTTP高速)を **先に** 取得 → メルカリは「新規再仕入れ可が N件
@@ -981,6 +987,14 @@ def main():
 
     _batch = int(os.environ.get("RESTOCK_SCRAPE_BATCH", "10"))
     _target = int(os.environ.get("RESTOCK_TARGET_NEW", "0"))       # >0 で「新規N件見つかるまで」ループ
+    # ★2026-09-22: 昼はメルカリを探さない (ブラウザ検索で待たされる)。夜に探していない分は
+    #   「判定保留」のまま残り、その夜の 23:30 で探される (在庫なし扱いにはしない = fail-closed)。
+    #   どうしても今探したい時だけ RESTOCK_DAY_SCRAPE=1。
+    if not NIGHTLY and os.environ.get("RESTOCK_DAY_SCRAPE") != "1":
+        if _to_scrape_all:
+            print(f"▶ メルカリ: 昼は探しません (夜の結果を使用)。まだ夜に探していない {len(_to_scrape_all)}件は"
+                  "今夜 23:30 に探します")
+        _batch, _target = 0, 0
     _max_scrape = int(os.environ.get("RESTOCK_MAX_SCRAPE", "60"))  # BAN安全: 1走行のメルカリ検索上限
     _cache_reuse = len(rows) - len(_to_scrape_all)
 
@@ -1021,6 +1035,12 @@ def main():
         return isinstance(m, dict) and m.get("_error")
     for i in range(len(rows)):
         if _iids[i]:
+            _old = _cache_hit(_iids[i])
+            if _old and "mercari" in _old and _old.get("date") != _today:
+                # 夜の結果をそのまま使った行は日付を書き換えない (古い結果が「今日」に化けない)
+                if "snkrdunk" not in _old:
+                    _rcache[_iids[i]] = {**_old, "snkrdunk": snkr_res.get(i)}
+                continue
             _entry = {"snkrdunk": snkr_res.get(i), "date": _today}
             _m = mercari_res.get(i)
             if not _mercari_errored(_m):
@@ -1183,6 +1203,16 @@ def main():
     # 確定分を「RESTOCK確定」タブに出力(eBay書込はしない=手動GO。POC-B/iMakReviseで revise)。
     if not NIGHTLY and "--no-confirm" not in sys.argv and restock_cands:
         _run_restock_confirm(restock_cands, mp, cert_map)
+
+
+def _day_fresh(date_str, today):
+    """昼のボタンが使ってよい cache か (純関数)。今日か前日 (= 前の晩に探した分) なら True。"""
+    import datetime as _d
+    try:
+        age = (_d.date.fromisoformat(today) - _d.date.fromisoformat(date_str or "")).days
+    except Exception:                                          # noqa: BLE001
+        return False
+    return 0 <= age <= 1
 
 
 def _v8_label(cost_jpy, cur_usd, mp):

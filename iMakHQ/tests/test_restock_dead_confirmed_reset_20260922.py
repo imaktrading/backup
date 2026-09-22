@@ -22,3 +22,13 @@ def test_dead_pending_row_is_dropped_others_kept():
 def test_nothing_sold_out_keeps_rows_as_is():
     rows = [H, ["1", "", "", "入稿待ち", "u"]]
     assert split_dead_confirmed(rows, {}) == (rows, [])
+
+
+def test_day_button_uses_last_nights_cache():
+    """★2026-09-22 昼の①は前の晩 (23:30) に探した結果を使う。2日前以前・未来・壊れた日付は使わない。"""
+    from psa_resource_gate import _day_fresh
+    assert _day_fresh("2026-09-22", "2026-09-22")
+    assert _day_fresh("2026-09-21", "2026-09-22")
+    assert not _day_fresh("2026-09-20", "2026-09-22")
+    assert not _day_fresh("2026-09-23", "2026-09-22")
+    assert not _day_fresh("", "2026-09-22")
