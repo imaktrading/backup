@@ -159,9 +159,9 @@ chips(); load();
 """
 
 
-def page():
+def page(api=None):
     """画面の本体 (純関数)。中身は開いてから出品くんに聞く。"""
-    return _PAGE.replace("__API__", API).replace("__GAMES__", json.dumps(GAMES, ensure_ascii=False))
+    return _PAGE.replace("__API__", api or API).replace("__GAMES__", json.dumps(GAMES, ensure_ascii=False))
 
 
 def main(_argv):
@@ -176,7 +176,16 @@ def main(_argv):
     except Exception as e:                                     # noqa: BLE001
         print("⚠ カタログを読めません: %s" % e)
     print("→ %s (絞り込みは画面の中で)" % OUT)
-    webbrowser.open("file:///" + OUT.replace("\\", "/"))
+    # ★file:/// で開くとブラウザがコンソールへの問い合わせを止める (2026-09-22「聞けませんでした」)。
+    #   コンソールが配る画面を開く。止まっている時だけファイルを開く (その時は画面が止まっていると言う)
+    url = API.rsplit("/api/", 1)[0] + "/catalog"
+    try:
+        import urllib.request
+        urllib.request.urlopen(url, timeout=3).close()
+    except Exception:                                          # noqa: BLE001
+        print("⚠ コンソールが動いていません → ファイルで開きます (中身は出ません)")
+        url = "file:///" + OUT.replace("\\", "/")
+    webbrowser.open(url)
     return 0
 
 

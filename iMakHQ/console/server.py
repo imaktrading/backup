@@ -983,6 +983,16 @@ class Handler(BaseHTTPRequestHandler):
                     min(int((p.get("limit") or ["400"])[0] or 400), 2000)))
             except Exception as e:                       # noqa: BLE001 画面に出して知らせる
                 return self._json(200, {"error": str(e)})
+        if u.path == "/catalog":
+            # 画面もここから配る。file:/// で開くとブラウザが問い合わせを止める (同じ出所に揃える)
+            import catalog_browse as CB
+            b = CB.page(api="/api/catalog").encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            return self.wfile.write(b)
         if u.path == "/api/research/cards":
             try:
                 q = parse_qs(u.query)
