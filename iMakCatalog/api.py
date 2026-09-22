@@ -133,6 +133,10 @@ def search_prefix(category: str, prefix: str, limit: int = 100) -> list[dict]:
         conn.close()
 
 
+# 英語版の絵の URL の印 (bandai-tcg-plus の EN フォルダ / ガンダムの _EN_)
+_EN_IMAGE_MARKS = ("/OP-EN/", "/DBFW-EN/", "/GC-EN/", "_EN_")
+
+
 def upsert(
     category: str,
     product_id: str,
@@ -168,6 +172,16 @@ def upsert(
     set_name = unicodedata.normalize("NFC", set_name) if set_name else set_name
     set_name_official = (unicodedata.normalize("NFC", set_name_official)
                          if set_name_official else set_name_official)
+    # ★英語版の絵は images に入れない (2026-09-22 ユーザー確定「保有はいいが使えないように」)。
+    #   images は日本語の現物と照合する絵だけ。英語版は specs.images_en に保有のみ。
+    #   目視画面が images[0] に英語版を出し、日本語版と取り違える恐れがあった (P-106)。
+    #   掃除は migrations/2026-09-22_tcg_images_en_split.py、ここは再発防止。
+    if images:
+        en = [u for u in images if any(k in u for k in _EN_IMAGE_MARKS)]
+        if en:
+            images = [u for u in images if u not in en]
+            specs = dict(specs)
+            specs["images_en"] = list(dict.fromkeys((specs.get("images_en") or []) + en))
     now = datetime.now().isoformat(timespec="seconds")
     specs_json = json.dumps(specs, ensure_ascii=False)
     images_json = json.dumps(images or [], ensure_ascii=False)

@@ -43,12 +43,16 @@ _CLAUDE_MD = _REPO / "CLAUDE.md"
 
 
 def _all_image_urls():
-    """(category, product_id, url) を全件返す."""
+    """(category, product_id, url) を全件返す.
+
+    ★2026-09-22 から英語版の絵は images でなく specs.images_en に置く (保有のみ)。
+      持っている絵を数える検査なので両方を見る。
+    """
     db = sqlite3.connect(str(api._DB_PATH))
     try:
-        for cat, pid, imgs in db.execute(
-                "SELECT category, product_id, images FROM products"):
-            for u in json.loads(imgs or "[]"):
+        for cat, pid, imgs, en in db.execute(
+                "SELECT category, product_id, images, json_extract(specs,'$.images_en') FROM products"):
+            for u in json.loads(imgs or "[]") + json.loads(en or "[]"):
                 yield cat, pid, u
     finally:
         db.close()
