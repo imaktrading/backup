@@ -1,10 +1,10 @@
 {
- "checked": 437,
+ "checked": 411,
  "stat": {
-  "listed": 579,
-  "compared": 437,
+  "listed": 594,
+  "compared": 411,
   "no_cost": 0,
-  "no_market": 142
+  "no_market": 183
  },
  "ratio": 0.6,
  "verified": false,
@@ -46,8 +46,8 @@
    "cert": "150266286",
    "key": "one_piece_tcg:PRB02-014",
    "cost": 11000,
-   "cheapest": 45000.0,
-   "ratio": 0.244,
+   "cheapest": 40000.0,
+   "ratio": 0.275,
    "title": "【PSA10】ワンピースカードゲーム サボ SR-P [PRB02-014](プレミアムブースター「ONE PIECE ",
    "urls": [
     "https://jp.mercari.com/shops/product/2JTRTxCpvm5bBiNmAydJsP",
@@ -70,62 +70,81 @@
    ]
   },
   {
-   "itemID": "820077374808",
-   "cert": "147210685",
-   "key": "pokemon_tcg:S8b-050",
-   "cost": 4700,
-   "cheapest": 9600.0,
-   "ratio": 0.49,
-   "title": "psa10 pop14 サンダー　s8b 050/184 VMAXクライマックス",
+   "itemID": "820065007508",
+   "cert": "153066117",
+   "key": "pokemon_tcg:SV5a-067",
+   "cost": 5999,
+   "cheapest": 12800.0,
+   "ratio": 0.469,
+   "title": "カイロス AR SV5a クリムゾンヘイズ 067/066 PSA10",
    "urls": [
-    "https://jp.mercari.com/item/m83303762389",
-    "https://jp.mercari.com/item/m48452016165"
+    "https://snkrdunk.com/apparels/210033/used/42186172",
+    "https://jp.mercari.com/item/m42686433942",
+    "https://snkrdunk.com/apparels/210033/used/42186172"
    ]
   },
   {
-   "itemID": "820017723507",
-   "cert": "157256442",
-   "key": "pokemon_tcg:S11a-080",
-   "cost": 8180,
-   "cheapest": 15000.0,
-   "ratio": 0.545,
-   "title": "【PSA10】ホウオウV ポケモンカード　SR 080/068",
+   "itemID": "820141671688",
+   "cert": "149501652",
+   "key": "pokemon_tcg:SV-P-243",
+   "cost": 5000,
+   "cheapest": 8980.0,
+   "ratio": 0.557,
+   "title": "【PSA10】ストリンダーex イラストレーションコンテスト",
    "urls": [
-    "https://jp.mercari.com/item/m30044417474",
-    "https://jp.mercari.com/item/m62803461264",
-    "https://jp.mercari.com/item/m80437063437",
-    "https://snkrdunk.com/apparels/95247/used/48945486",
-    "https://snkrdunk.com/apparels/95247/used/48712651"
-   ]
-  },
-  {
-   "itemID": "820114207903",
-   "cert": "83762395",
-   "key": "pokemon_tcg:SV1S-099",
-   "cost": 6666,
-   "cheapest": 12000.0,
-   "ratio": 0.555,
-   "title": "【PSA10】博士の研究 SR SV1S スカーレットex 099/078",
-   "urls": [
-    "https://jp.mercari.com/item/m16298074953",
-    "https://jp.mercari.com/item/m90633798729"
-   ]
-  },
-  {
-   "itemID": "358810782372",
-   "cert": "138131835",
-   "key": "pokemon_tcg:SV4a-339",
-   "cost": 5111,
-   "cheapest": 8600.0,
-   "ratio": 0.594,
-   "title": "【PSA10・ワンオーナー品】シャイニートレジャー イルカマン AR ポケモンカード",
-   "urls": [
-    "https://jp.mercari.com/shops/product/2JSfYophkR7opiYGJHwGTW",
-    "https://jp.mercari.com/shops/product/2JTtz5iAHWfpbJNuzxeKC2",
-    "https://jp.mercari.com/item/m84840168612",
-    "https://snkrdunk.com/apparels/162092/used/45516638"
+    "https://jp.mercari.com/item/m99886585588",
+    "https://jp.mercari.com/item/m14860387008"
    ]
   }
  ],
- "drops": []
+ "drops": [
+  {
+   "itemID": "358754893860",
+   "prev": 29080,
+   "now": 10000,
+   "ratio": 0.344,
+   "key": "pokemon_tcg:SM-P-253",
+   "title": "PSA10 ヤドン 253/SM-P PROMO プロモ ポケモンカード"
+  },
+  {
+   "itemID": "820093879666",
+   "prev": 55580,
+   "now": 27000,
+   "ratio": 0.486,
+   "key": "pokemon_tcg:SM4A-007",
+   "title": "PSA10 コイキング 007/050 C ポケモンカード"
+  },
+  {
+   "itemID": "820149547085",
+   "prev": 10000,
+   "now": 5350,
+   "ratio": 0.535,
+   "key": "pokemon_tcg:SV11B-161",
+   "title": "ゼクロムex SR SV11B ブラックボルト 169/086"
+  },
+  {
+   "itemID": "820000791250",
+   "prev": 60000,
+   "now": 32500,
+   "ratio": 0.542,
+   "key": "pokemon_tcg:M2a-246",
+   "title": "【PSA10】メガカイリューex（SAR)〈246/193〉[M2a]5992"
+  },
+  {
+   "itemID": "820009097704",
+   "prev": 25800,
+   "now": 14999,
+   "ratio": 0.581,
+   "key": "one_piece_tcg:ST04-003_OP03",
+   "title": "【PSA10】カイドウ(SP/SR){紫}〈ST04-003〉[ブースターパック 強大な敵]手配書"
+  },
+  {
+   "itemID": "820149546583",
+   "prev": 7499,
+   "now": 4444,
+   "ratio": 0.593,
+   "key": "pokemon_tcg:SV5M-078",
+   "title": "PSA10 アブリー AR②"
+  }
+ ]
 }

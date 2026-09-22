@@ -1,7 +1,10 @@
 {
-  "mode": "empty",
-  "candidates": 41,
-  "pending": 0,
-  "fetched": 0,
-  "at": "2026-09-21T01:30:53"
+  "mode": "run",
+  "candidates": 1074,
+  "pending": 1039,
+  "fetched": 40,
+  "failed": 0,
+  "stopped": "",
+  "remaining": 999,
+  "at": "2026-09-22T01:43:18"
 }
