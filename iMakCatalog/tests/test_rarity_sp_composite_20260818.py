@@ -32,7 +32,7 @@ CATS = ["pokemon_tcg", "one_piece_tcg", "gundam_tcg", "dragonball_scg"]
 DECIDED = {
     # 2026-09-04: 新弾「ムニキスゼロ」(M3-117 メガジガルデex) が入って 6 -> 7。
     #   MUR は各弾に1枚なので、新弾のたびに1つ増える。
-    ("pokemon_tcg", "MUR"): ("Ultra Rare", 7),
+    ("pokemon_tcg", "MUR"): ("Ultra Rare", 8),  # 2026-09-22 M6-113 メガレックウザex
     ("pokemon_tcg", "BWR"): ("Secret Rare", 2),
     ("pokemon_tcg", "C2"): ("Common", 1),
     ("pokemon_tcg", "U2"): ("Uncommon", 1),
