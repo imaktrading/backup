@@ -1200,6 +1200,88 @@ def _default_profile_dirs() -> tuple:
             getattr(amazon_scraper, "EBAY_AMAZON_PROFILE_DIR", "") or "")
 
 
+# ============================================================================
+# 途中再開 (checkpoint) — 2026-09-24 ADV 依頼 resume_after_crash (ユーザー判断: 落ちる前提で運用)
+# ============================================================================
+# PC が巡回の途中で落ちると、次の予約 (6時間後) まで最初からやり直しで、出品済の確認が
+# 約1日途切れた (9/23〜24 に HIGH が4回連続で途中停止)。確認した行の結果を1行ずつ残し、
+# 次に始まった時は続きから回す。1周の書込が終わったら消す。
+# 二重取下げは起きない: 取下げ待ちへの積込は「その行を確認した瞬間」だけで、再開時は
+# 確認済みの行を回さないので積み直さない。スプシ書込は最後に1回 (同じ値の上書き) だけ。
+# 読めない・条件が違う・古い記録は使わない (= 最初から回す側に倒す)。
+CHECKPOINT_MAX_AGE_HOURS = 8   # 6時間おきの巡回が1回飛んだ後の再開まで拾える幅
+
+
+def _checkpoint_path(sheet_label: str) -> Path:
+    return DECISION_LOG_DIR / f"checkpoint_{(sheet_label or 'SHEET').upper()}.jsonl"
+
+
+def _checkpoint_key(url, item_id) -> str:
+    return f"{str(url or '').strip()}|{str(item_id or '').strip()}"
+
+
+def load_checkpoint(sheet_label: str, meta: dict) -> dict:
+    """{行キー: [結果, ...]} を返す。使えない記録は {} (= 最初から)."""
+    p = _checkpoint_path(sheet_label)
+    if not p.exists():
+        return {}
+    try:
+        lines = p.read_text(encoding="utf-8").splitlines()
+        head = json.loads(lines[0])
+    except (OSError, ValueError, IndexError):
+        return {}
+    if not head.get("_checkpoint") or any(head.get(k) != v for k, v in meta.items()):
+        return {}
+    try:
+        age = (datetime.now() - datetime.fromisoformat(head["started"])).total_seconds()
+    except (KeyError, TypeError, ValueError):
+        return {}
+    if not 0 <= age <= CHECKPOINT_MAX_AGE_HOURS * 3600:
+        return {}
+    saved: dict = {}
+    for line in lines[1:]:
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue   # 落ちた瞬間の書きかけ行 = その行は回し直す
+        if isinstance(r, dict) and r.get("url"):
+            saved.setdefault(_checkpoint_key(r["url"], r.get("item_id")), []).append(r)
+    return saved
+
+
+def _write_checkpoint_lines(p: Path, lines: list, mode: str) -> None:
+    with open(p, mode, encoding="utf-8") as f:
+        for obj in lines:
+            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())   # PC ごと落ちるので OS のキャッシュに残さない
+
+
+def start_checkpoint(sheet_label: str, meta: dict, restored: list, started: Optional[str] = None) -> None:
+    DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    head = {"_checkpoint": 1, "started": started or datetime.now().isoformat(timespec="seconds"), **meta}
+    _write_checkpoint_lines(_checkpoint_path(sheet_label), [head] + list(restored), "w")
+
+
+def append_checkpoint(sheet_label: str, new_results: list) -> None:
+    _write_checkpoint_lines(_checkpoint_path(sheet_label), new_results, "a")
+
+
+def clear_checkpoint(sheet_label: str) -> None:
+    try:
+        _checkpoint_path(sheet_label).unlink()
+    except FileNotFoundError:
+        pass
+
+
+def checkpoint_started(sheet_label: str) -> Optional[str]:
+    try:
+        with open(_checkpoint_path(sheet_label), encoding="utf-8") as f:
+            return json.loads(f.readline()).get("started")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 def filter_rows_by_item_id(rows: list, rows_filter: str) -> list:
     """itemID の有無で行を選ぶ (純関数).
 
@@ -1412,7 +1494,27 @@ def process_sheet(
         rows = rows[:limit]
         log(f"  --limit {limit} で絞込: {len(rows)} 件")
 
-    if not rows:
+    # 途中再開: 全件を回す本番の巡回だけ (範囲指定・件数制限・dry-run は対象外)
+    use_ckpt = (not dry_run and limit is None and start_row == 2 and end_row is None)
+    ckpt_meta = {"sheet_id": sheet_id, "rows_filter": rows_filter, "supplier_filter": supplier_filter}
+    restored: list = []
+    if use_ckpt:
+        saved = load_checkpoint(sheet_label, ckpt_meta)
+        started = checkpoint_started(sheet_label) if saved else None
+        if saved:
+            remaining = []
+            for row in rows:
+                hit = saved.get(_checkpoint_key(row["url"], row.get("item_id")))
+                if hit:
+                    # 行番号は今のシートに合わせ直す (行の挿入/削除でずれるため)
+                    restored.append(dict(hit.pop(0), row_index=row["row_index"]))
+                else:
+                    remaining.append(row)
+            log(f"  [再開] 前回 {started} 開始の巡回の続きから: 確認済 {len(restored)} 件 / 残り {len(remaining)} 件")
+            rows = remaining
+        start_checkpoint(sheet_label, ckpt_meta, restored, started=started)
+
+    if not rows and not restored:
         log("  対象 0 件、終了")
         return {"processed": 0, "newly_sold": 0, "newly_in_stock": 0, "errors": 0}
 
@@ -1492,7 +1594,8 @@ def process_sheet(
                 f"Amazon driver 起動失敗 (= bot 検知防止のため cycle abort): {last_err}"
             )
 
-    results = []
+    results = list(restored)
+    ckpt_flushed = len(results)
     mercari_consec_none = 0  # Phase 9: mercari driver 自動再起動用カウンタ
     amazon_consec_dead = 0   # 2026-06-25: amazon driver 自動再起動用カウンタ
     mercari_scrape_count = 0  # 2026-06-11: 予防的 driver 再起動用 (実 scrape 件数)
@@ -1504,6 +1607,9 @@ def process_sheet(
         except Exception:
             pass
     for i, row in enumerate(rows, start=1):
+        if use_ckpt and len(results) > ckpt_flushed:
+            append_checkpoint(sheet_label, results[ckpt_flushed:])
+            ckpt_flushed = len(results)
         prefix = f"  [{i}/{total_rows}] row{row['row_index']:>4} "
         # 2026-05-25 mercari D=○ skip (= 監視くん最適化):
         # 主 URL が mercari + D=○ = 主補全 sold 確定 + 復活機能なし → scrape 完全 skip
@@ -1708,6 +1814,10 @@ def process_sheet(
             amazon_driver.quit()
         except Exception:
             pass
+
+    if use_ckpt and len(results) > ckpt_flushed:
+        append_checkpoint(sheet_label, results[ckpt_flushed:])
+        ckpt_flushed = len(results)
 
     # 売切済の行に後から itemID が入った分を取下げ待ちへ (最後まで回った時だけ = 途中で落ちたら次回に持越し)
     _sold_listed = {str(r["item_id"]).strip(): r for r in results
@@ -2152,6 +2262,8 @@ def process_sheet(
     except Exception as _re:
         log(f"  [!] revive gate 例外 (本筋に影響なし): {type(_re).__name__}: {_re}")
 
+    if use_ckpt:
+        clear_checkpoint(sheet_label)   # 1周の書込まで終わった = 続きは無い
     log(f"  完了 [{sheet_label}]")
     return {
         "processed":            len(results),

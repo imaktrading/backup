@@ -247,6 +247,27 @@ def _set_active_lock(sheet: str, sheet_id: Optional[str] = None,
     return _lock_path()
 
 
+def _lock_ts(content: str) -> Optional[datetime]:
+    m = re.search(r"ts=(\S+)", content or "")
+    try:
+        return datetime.fromisoformat(m.group(1)) if m else None
+    except ValueError:
+        return None
+
+
+def _last_boot_time() -> Optional[datetime]:
+    """PC の最終起動時刻 (取れなければ None = この判定を使わない)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes  # noqa: PLC0415
+        tick = ctypes.windll.kernel32.GetTickCount64
+        tick.restype = ctypes.c_ulonglong
+        return datetime.now() - timedelta(milliseconds=tick())
+    except Exception:
+        return None
+
+
 def _lock_pid_alive(content: str) -> Optional[bool]:
     """lock 内容の pid/host からプロセス生存を判定。True=生存 / False=死亡 / None=判定不能。
 
@@ -262,6 +283,13 @@ def _lock_pid_alive(content: str) -> Optional[bool]:
     if m_host and m_host.group(1) != socket.gethostname():
         return None
     pid = int(m_pid.group(1))
+    # ★ 2026-09-24: 再起動前に取った lock は、pid が何であれ死んでいる。Windows は再起動後に
+    #   pid を使い回すので、tasklist で「生きている」と出ても別プロセス (実測: CAND の lock
+    #   pid=16060 が再起動後 svchost.exe) のことがある → 45分待って巡回を飛ばしていた。
+    lock_ts = _lock_ts(content)
+    boot = _last_boot_time()
+    if lock_ts is not None and boot is not None and lock_ts < boot:
+        return False
     # ★ Windows では os.kill(pid,0) は TerminateProcess を呼び「プロセスを終了」してしまう危険がある
     #   (生存チェックにならない)。tasklist で該当 pid の存在を安全に確認する (ctypes handle の落とし穴回避)。
     if sys.platform == "win32":
