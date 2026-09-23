@@ -1035,8 +1035,11 @@ def remember_not_buyable(url, why, path=NOT_BUYABLE_PATH):
     d[url] = {"why": why, "at": _dt.datetime.now().isoformat(timespec="seconds")}
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        # ★2026-09-24: 一時ファイル → 置き換え。書いている最中に落ちて壊れると、読み込み側は
+        #   「空」として扱い、全部の仕入元を「買える」と見てしまう (sold_restock が危険側に倒れる)
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False)
+        os.replace(path + ".tmp", path)
     except Exception:                                          # noqa: BLE001
         pass
 

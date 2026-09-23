@@ -783,8 +783,11 @@ def _load_cache(path=CACHE_PATH):
 
 def _save_cache(cache, path=CACHE_PATH):
     import json
-    with open(path, "w", encoding="utf-8") as f:
+    # ★2026-09-24: 一時ファイルに書いてから置き換える (書いている最中に PC が落ちても、壊れた/空のファイルを残さない)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cache, f, ensure_ascii=False)
+    os.replace(tmp, path)
 
 
 def _clean_orphan_chrome():

@@ -294,8 +294,10 @@ def load_cache(path=CACHE_PATH):
 def save_cache(cache, path=CACHE_PATH):
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        # ★2026-09-24: 一時ファイルに書いてから置き換える (書いている最中に PC が落ちても、壊れた/空のファイルを残さない)
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
             json.dump(cache, f, ensure_ascii=False)
+        os.replace(path + ".tmp", path)
     except Exception:                                          # noqa: BLE001
         pass
 
@@ -437,8 +439,9 @@ def remember_cand_ng(pairs, path=NG_CAND_PATH):
             n += 1
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path + ".tmp", "w", encoding="utf-8") as f:   # 一時ファイル → 置き換え
             json.dump(d, f, ensure_ascii=False)
+        os.replace(path + ".tmp", path)
     except Exception:                                          # noqa: BLE001
         return 0
     return n

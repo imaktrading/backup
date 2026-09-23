@@ -991,11 +991,14 @@ def main():
         fields = ["item_id", "title", "site", "category", "price", "trend_price", "qty", "sold_qty",
                   "sales90", "watch", "impr", "ctr", "impr_total", "ctr_total", "photos", "keywords",
                   "has_lqr", "relist_status", "age_days", "supply_url", "flags", "ebay_url"]
-        with open(path, "w", newline="", encoding="utf-8") as f:
+        # ★2026-09-24: 一時ファイル → 置き換え。途中で切れた funnel を「一番新しいファイル」として
+        #   取下げ・棚②・価格見直しが読んでしまうのを防ぐ
+        with open(path + ".tmp", "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
             w.writeheader()
             for r in sorted(rows, key=lambda x: (-x["impr"], -x["watch"])):
                 w.writerow(r)
+        os.replace(path + ".tmp", path)
         print(f"CSV 出力: {path}")
 
     # ファネル全結果を「ファネル分析」スプシに集約 (Summary+在庫あり/なし+全9バケツ)。

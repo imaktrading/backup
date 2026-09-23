@@ -147,10 +147,12 @@ def exclude_rows_from_csv(csv_path: str, nogo_indices: List[int]) -> dict:
     shutil.copy2(csv_path, backup_path)
 
     # 上書き保存
-    with open(csv_path, "w", encoding="utf-8", newline="") as f:
+    # ★2026-09-24: 一時ファイルに書いてから置き換える (書いている最中に PC が落ちても、壊れた/空のファイルを残さない)
+    with open(csv_path + ".tmp", "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
         writer.writerow(header)
         writer.writerows(kept_data)
+    os.replace(csv_path + ".tmp", csv_path)
 
     return {
         "removed": len(removed_titles),

@@ -2136,10 +2136,13 @@ def _backup(path, tag):
 
 
 def _write_csv(path, headers, rows):
-    with open(path, "w", newline="", encoding="utf-8") as f:
+    # ★2026-09-24: 一時ファイルに書いてから置き換える (書いている最中に PC が落ちても、壊れた/空のファイルを残さない)
+    #   入稿CSVが途中で切れたまま「入稿OK」になるのを防ぐ
+    with open(path + ".tmp", "w", newline="", encoding="utf-8") as f:
         w = _csv.writer(f, quoting=_csv.QUOTE_NONNUMERIC)
         w.writerow(headers)
         w.writerows(rows)
+    os.replace(path + ".tmp", path)
 
 
 def _exclude(csv_path, nogo_indices):
