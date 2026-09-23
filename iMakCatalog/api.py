@@ -195,6 +195,15 @@ def upsert(
             images = [u for u in images if u not in en]
             specs = dict(specs)
             specs["images_en"] = list(dict.fromkeys((specs.get("images_en") or []) + en))
+            # 英語版しか無い行は「日本語の絵が無い」ので印を付ける
+            # (印の無い空欄は回帰テスト test_no_official_image_mark_20260824 が落とす)。
+            if not images and not specs.get("no_official_image"):
+                specs["no_official_image"] = True
+                specs["no_official_image_reason"] = (
+                    "日本語版の絵が無い。英語版の絵だけ持っている "
+                    "(specs.images_en。目視・出品には使わない)")
+                specs["no_official_image_checked_at"] = datetime.now().isoformat(timespec="seconds")
+                specs["no_official_image_probe"] = en[0]
     # ★公式サイトの絵は目視画面に埋め込めない (CORP same-site)。保存済みの控えがあれば先頭に置く
     #   (2026-09-22。控えは tools/mirror_blocked_images.py が作る)。
     if images and _is_blocked_host(images[0]):
