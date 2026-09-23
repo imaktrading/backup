@@ -1013,7 +1013,7 @@ values:
   # ── one_piece_tcg ──
   - value: "Promo Cards"
     category: one_piece_tcg
-    rows: 1538
+    rows: 1595
     jp_set: "プロモーションカード"
   - value: "Premium Booster One Piece The Best"
     category: one_piece_tcg
@@ -1047,6 +1047,10 @@ values:
     category: one_piece_tcg
     rows: 199
     jp_set: "BOOSTER -A FIST OF DIVINE SPEED- [OP-11]"
+  - value: "The World’s Strongest Warriors"
+    category: one_piece_tcg
+    rows: 199
+    jp_set: "BOOSTER PACK -THE WORLD’S STRONGEST WARRIORS- [OP-17]"
   - value: "Emperors in the New World"
     category: one_piece_tcg
     rows: 196
@@ -1075,10 +1079,6 @@ values:
     category: one_piece_tcg
     rows: 182
     jp_set: "ブースターパック 決戦の刻【OP-16】"
-  - value: "The World’s Strongest Warriors"
-    category: one_piece_tcg
-    rows: 181
-    jp_set: "BOOSTER PACK -THE WORLD’S STRONGEST WARRIORS- [OP-17]"
   - value: "Adventure on Kami's Island"
     category: one_piece_tcg
     rows: 171
@@ -1171,6 +1171,10 @@ values:
     category: one_piece_tcg
     rows: 30
     jp_set: "STARTER DECK -Uta- [ST-11]"
+  - value: "Set Sail Deck Set"
+    category: one_piece_tcg
+    rows: 30
+    jp_set: "Set Sail Deck Set [SD-01]"
   - value: "GREEN/YELLOW Yamato"
     category: one_piece_tcg
     rows: 25
@@ -1275,10 +1279,6 @@ values:
     category: one_piece_tcg
     rows: 12
     jp_set: "プレミアムカードコレクション-ベストセレクションvol.3-"
-  - value: "Set Sail Deck Set"
-    category: one_piece_tcg
-    rows: 10
-    jp_set: "Set Sail Deck Set [SD-01]"
   - value: "Admirable Collection vol.1"
     category: one_piece_tcg
     rows: 2
@@ -1286,7 +1286,7 @@ values:
   # ── dragonball_scg ──
   - value: "Promo Cards"
     category: dragonball_scg
-    rows: 1848
+    rows: 1856
     jp_set: "Promotion Cards"
   - value: "Manga Booster 02"
     category: dragonball_scg
@@ -1611,7 +1611,7 @@ values:
   # ── gundam_tcg ──
   - value: "Promo Cards"
     category: gundam_tcg
-    rows: 403
+    rows: 448
     jp_set: "Promotion Card"
   - value: "Steel Requiem"
     category: gundam_tcg
@@ -1627,16 +1627,16 @@ values:
     jp_set: "Dual Impact [GD02]"
   - value: "Newtype Rising"
     category: gundam_tcg
-    rows: 213
+    rows: 214
     jp_set: "Newtype Rising [GD01]"
+  - value: "Freedom Ascension"
+    category: gundam_tcg
+    rows: 192
+    jp_set: "Freedom Ascension [GD05]"
   - value: "Limited Box Beta Ver."
     category: gundam_tcg
     rows: 162
     jp_set: "リミテッドBOX Ver.β"
-  - value: "Freedom Ascension"
-    category: gundam_tcg
-    rows: 135
-    jp_set: "Freedom Ascension [GD05]"
   - value: "Eternal Nexus"
     category: gundam_tcg
     rows: 125
@@ -1693,6 +1693,22 @@ values:
     category: gundam_tcg
     rows: 45
     jp_set: "Deck Build Box Freedom Ascension [SC01]"
+  - value: "Silent Barrage [ST13]"
+    category: gundam_tcg
+    rows: 17
+    jp_set: "Silent Barrage [ST13]"
+  - value: "Aquatic Assault [ST11]"
+    category: gundam_tcg
+    rows: 17
+    jp_set: "Aquatic Assault [ST11]"
+  - value: "Heavy Dominion [ST14]"
+    category: gundam_tcg
+    rows: 16
+    jp_set: "Heavy Dominion [ST14]"
+  - value: "Raging Onslaught [ST12]"
+    category: gundam_tcg
+    rows: 16
+    jp_set: "Raging Onslaught [ST12]"
   - value: "Premium Card Collection GQuuuuuuX"
     category: gundam_tcg
     rows: 7
