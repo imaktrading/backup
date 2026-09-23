@@ -63,6 +63,14 @@ def run_category(cwd, cmd, pending):
     return r.returncode
 
 
+def existing_add_csvs():
+    """① が作った最新の UP_* フォルダに既にある Add CSV (*_upload_*.csv) の一覧。"""
+    ups = sorted(glob.glob(os.path.join(REVISE_DIR, "UP_*")), key=os.path.getmtime)
+    if not ups:
+        return []
+    return sorted(os.path.basename(a) for a in glob.glob(os.path.join(ups[-1], "*_upload_*.csv")))
+
+
 def main():
     pending = latest_pending()
     if not pending:
@@ -71,6 +79,16 @@ def main():
     cats = categories_in(pending)
     print(f"   カテゴリ内訳: {dict(cats)}")
 
+    # ★2026-09-24: ② を2回押すと (PC が落ちて押し直した時など)、同じ品の Add CSV が
+    #   ① のフォルダに2本入り、両方上げると **二重出品** になる。既に Add CSV があれば止める。
+    _dup = existing_add_csvs()
+    if _dup and "--force" not in sys.argv:
+        print("\n⛔ ① のフォルダに Add CSV が既にあります → 二重出品を防ぐため止めます")
+        for a in _dup:
+            print(f"    {a}")
+        print("  → まだ上げていない CSV ならそれを使ってください。作り直すなら、そのフォルダの"
+              " Add CSV を消してから押し直してください")
+        return
     _t0 = time.time()   # この②実行で生成された Add CSV を mtime で特定するため
     ran, skipped = [], []
     for cat, cnt in cats.items():

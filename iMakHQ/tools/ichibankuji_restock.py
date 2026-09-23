@@ -1478,12 +1478,38 @@ def pass_expand(cand_n, dry=False):
           f"\n   eBayは未変更 → 在庫復活+内容刷新は: python ichibankuji_restock.py refresh → refresh write")
 
 
-def _save_confirmed(confirmed):
-    """confirmed = {row:int → {item_id, a, aux}} を保存(書込失敗時の再適用用)。"""
-    payload = {"items": {str(k): v for k, v in confirmed.items()}}
+def _save_confirmed(confirmed, merge=True):
+    """confirmed = {row:int → {item_id, a, aux}} を保存(書込失敗時の再適用用)。
+
+    ★2026-09-24: 毎回まるごと上書きしていたので、① の後 ② の前に ① をもう一度押すと
+      (PC が落ちて押し直した時など)、1回目の確定分が消えていた。1回目の行はシートでは
+      売切が解除済み = ① にはもう出ないので、在庫0のまま戻す道が無くなる。
+      既存に **足す** (同じ行は新しい方)。② で CSV にした分は _consume_confirmed で外す。
+    """
+    items = {}
+    if merge and os.path.exists(CONFIRMED_FILE):
+        try:
+            items = {int(k): v for k, v in _load_confirmed().items()}
+        except Exception:  # noqa: BLE001  読めない時は今回分だけ (壊れたファイルを広げない)
+            items = {}
+    items.update(confirmed)
+    payload = {"items": {str(k): v for k, v in items.items()}}
     os.makedirs(os.path.dirname(CONFIRMED_FILE), exist_ok=True)
-    with open(CONFIRMED_FILE, "w", encoding="utf-8") as f:
+    tmp = CONFIRMED_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, CONFIRMED_FILE)
+
+
+def _consume_confirmed(item_ids):
+    """② で CSV にした itemID を確定の一覧から外す。外した件数を返す。"""
+    ids = {str(i) for i in item_ids if i}
+    if not ids or not os.path.exists(CONFIRMED_FILE):
+        return 0
+    cur = _load_confirmed()
+    keep = {k: v for k, v in cur.items() if str(v.get("item_id")) not in ids}
+    _save_confirmed(keep, merge=False)
+    return len(cur) - len(keep)
 
 
 def _load_confirmed():
@@ -2005,6 +2031,10 @@ def refresh_write():
     print()
     for path, cnt, kind in outputs:
         print(f"✅ {kind} CSV 出力: {path}  ({cnt}件)")
+    # ★2026-09-24: CSV にした分は確定の一覧から外す (次に ② を押しても同じ出品を二度作らない)
+    _used = _consume_confirmed([p.get("item_id") for p in revise_planned + add_planned])
+    if _used:
+        print(f"  (CSV にした {_used}件 を確定の一覧から外しました)")
     print("  → 出品くんで FileExchange 入稿(Revise=旧ID内容刷新 / Add=新ID出し直し)")
 
 
