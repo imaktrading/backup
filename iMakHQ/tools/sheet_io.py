@@ -731,14 +731,38 @@ def write_rows_to_tab(tab, rows2d, sheet_id=MAINT_SHEET_ID):
     ncols = max((len(r) for r in rows2d), default=4)
     try:
         ws = sh.worksheet(tab)
-        ws.clear()
-        # 既存タブの列数が不足だと update が grid limit で失敗する → 足りなければ拡張。
+        # 既存タブの列数/行数が不足だと update が grid limit で失敗する → 足りなければ拡張。
         if ws.col_count < ncols:
             ws.add_cols(ncols - ws.col_count)
+        if ws.row_count < len(rows2d):
+            ws.add_rows(len(rows2d) - ws.row_count)
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=tab, rows=max(10, len(rows2d) + 5), cols=max(4, ncols))
-    ws.update(range_name="A1", values=rows2d, value_input_option="RAW")
+    # ★2026-09-24: 先に clear() してから書いていたので、その間に PC が落ちると **タブが空** になり、
+    #   次に押した時は空のタブに今回の分だけを書く = 過去の記録 (RESTOCK確定・補URL候補NG 等) が消えた。
+    #   先に上書きし、余った所だけ後で消す。途中で落ちても、古い行が残るだけで記録は消えない。
+    #   短い行は "" で埋めて、前の長い行の値が右に残らないようにする。
+    ws.update(range_name="A1", values=pad_rows(rows2d, ncols), value_input_option="RAW")
+    stale = leftover_ranges(len(rows2d), ncols, ws.row_count, ws.col_count)
+    if stale:
+        ws.batch_clear(stale)
     return len(rows2d)
+
+
+def pad_rows(rows2d, ncols):
+    """各行を ncols 列に "" で埋める (純関数)。"""
+    return [list(r) + [""] * (ncols - len(r)) for r in rows2d]
+
+
+def leftover_ranges(nrows, ncols, row_count, col_count):
+    """書いた範囲 (nrows×ncols) の外で、前の中身が残りうる範囲 (A1 表記の list・純関数)。"""
+    from gspread.utils import rowcol_to_a1
+    out = []
+    if row_count > nrows:
+        out.append(f"{rowcol_to_a1(nrows + 1, 1)}:{rowcol_to_a1(row_count, col_count)}")
+    if col_count > ncols and nrows > 0:
+        out.append(f"{rowcol_to_a1(1, ncols + 1)}:{rowcol_to_a1(nrows, col_count)}")
+    return out
 
 
 def supply_id_from_url(url):
