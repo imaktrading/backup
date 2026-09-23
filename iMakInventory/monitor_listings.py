@@ -880,6 +880,48 @@ def append_pending_revise(sheet_label: str, result: dict, dry_run: bool) -> None
 
 
 # ============================================================================
+# 売切済の行に後から itemID が入った = 売切の源で出品された (2026-09-24)
+# ============================================================================
+# D=○ の 1点もの行は巡回を打ち切る (skip) ので newly_sold が二度と出ず、取下げに一度も
+# 載らない。9/9〜9/11 に D=○ の行へ itemID が入った4件が約2週間 eBay で買える状態のまま
+# 残っていた (reverse_audit が毎日「未承認4件」と出していた)。
+# 前回までに見た「D=○ + itemID」を覚えておき、新しく現れた itemID だけ取下げ待ちに積む。
+# 取下げ側は送る前に eBay の残り数を見て、0 なら何もしない (= 既に取下げ済みでも害なし)。
+SOLD_ROW_LISTED_SEEN_FILE = DECISION_LOG_DIR / "sold_row_listed_seen.json"
+
+
+def newly_listed_on_sold_rows(sheet_label: str, current: dict) -> tuple:
+    """(新しく現れた itemID の list, 初回か) を返す。current = {item_id: skip 結果}.
+
+    初回 (この label の記録なし) は全件を既知として登録するだけで積まない
+    (初回に数百件を一度に積むと急増ガードを踏む。導入時点の乖離は reverse_audit で 0 を確認済)。
+    """
+    try:
+        data = json.loads(SOLD_ROW_LISTED_SEEN_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    if sheet_label not in data:
+        return [], True
+    seen = set(data.get(sheet_label) or [])
+    return [iid for iid in current if iid not in seen], False
+
+
+def save_sold_row_listed_seen(sheet_label: str, current: dict) -> None:
+    try:
+        data = json.loads(SOLD_ROW_LISTED_SEEN_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    data[sheet_label] = sorted(current)
+    DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    SOLD_ROW_LISTED_SEEN_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+# ============================================================================
 # 復活 (revive) パス — 2 cycle 連続確定 state + pending_revive enqueue
 # ============================================================================
 def load_newly_in_stock_state() -> dict:
@@ -1666,6 +1708,20 @@ def process_sheet(
             amazon_driver.quit()
         except Exception:
             pass
+
+    # 売切済の行に後から itemID が入った分を取下げ待ちへ (最後まで回った時だけ = 途中で落ちたら次回に持越し)
+    _sold_listed = {str(r["item_id"]).strip(): r for r in results
+                    if r.get("raw_status") == "skipped_mercari_sold"
+                    and str(r.get("item_id") or "").strip()}
+    _new_ids, _first = newly_listed_on_sold_rows(sheet_label, _sold_listed)
+    if _first:
+        log(f"  [i] 売切済の出品行 {len(_sold_listed)} 件を既知として登録 (初回)")
+    for _iid in _new_ids:
+        _r = _sold_listed[_iid]
+        log(f"  [i] 売切済の行に新しく itemID → 取下げ待ちで eBay 残数を確認: row{_r['row_index']} {_iid} {_r.get('title', '')[:30]}")
+        append_pending_revise(sheet_label, dict(_r, raw_status="sold_row_newly_listed"), dry_run=dry_run)
+    if not dry_run:
+        save_sold_row_listed_seen(sheet_label, _sold_listed)
 
     # 集計
     newly_sold = sum(1 for r in results if r["delta"] == "newly_sold")
