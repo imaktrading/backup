@@ -1,5 +1,30 @@
 # iMakHarvest daily_report
 
+## 2026-09-24 — 夜間タスクのChrome調査(0台) + キャラ軸トレジャーハント新設 + クラッシュ再開対応
+
+**夜間タスクの所要時間・Chrome数** (ADV依頼 `night_job_duration_and_chrome`。作業PCが9/16から
+BSOD頻発の調査用)
+- 予約3タスク(Yodobashi収集21:00/Gshockマージ21:30/在庫snapshot22:00,06:00,14:00)は
+  実測14分・1秒・9〜11分。**全部Chrome不使用**(HTTP直叩き)。BSOD時刻とは重ならず、
+  Harvest側が原因である可能性は低いと回答
+
+**キャラ軸トレジャーハント新設** (HQ依頼 `chara_keywords_draft`。commit `6832dc42`)
+- `chara_market.csv`(テラピーク実売をキャラ名に束ねた一覧)の和名から検索語を作り、
+  別タブ `mercari_psa10_chara` に書く。カード個別の仕入上限は無し(会社上限¥70,000のみ)
+- 実装時に実データを読んだら**184行**(依頼時点の想定52の3.5倍。プロモ/パラレルが別行)。
+  単純比例で全件走行は約8時間。走らせ方(全部/優先順で上位のみ/ファイル側で束ね直す)は
+  HQに判断を返した(未決定)
+
+**クラッシュ後の再開対応** (ADV依頼 `resume_after_crash`。commit `5a0f6631`)
+- 途中再開自体は既存の`--resume-from-json`(1語ごと保存)で対応済みだったので変更なし
+- 手動長時間収集(トレジャー/キャラハント)に、正常終了時だけ消える「クラッシュ印」
+  (`debug/treasure_running.flag` / `chara_running.flag`)を追加。自動再開はしない
+  (依頼どおり。印が残っていれば`dump_path`から手で`--resume-from-json`)
+- 予約5タスクが `StartWhenAvailable=False` だったのを実機確認 → 全部`True`に変更
+  (PCが落ちていても次起動ですぐ実行される)
+
+依頼2件・回答2件は各`_response.md`。push済み(`5a0f6631`)。
+
 ## 2026-09-20 — トレジャーハント 初回フル走行 (1,129件) + 収集の保存/再開 + SKIP_UNREADABLE 定義漏れ
 
 HQ の依頼 (`2026-09-20_treasure_hunt_run_now`) で 初めてフル走行。回答は同名 `_response.md`。
