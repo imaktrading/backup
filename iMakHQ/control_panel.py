@@ -1504,16 +1504,20 @@ SCRIPTS = [
         "cmd": ["python", "casio_finder_from_catalog.py"],
         "params": [],
     },
-    {
-        "category": None, "type": "utility",
-        "label": "モンベル公式アウトレット 巡回",
-        "cwd": f"{WORKSPACE}/iMakMercari",
-        "cmd": ["python", "montbell_outlet_scraper.py"],
-        "params": [
-            {"name": "--categories", "label": "カテゴリID(カンマ区切り)", "default": ""},
-            {"name": "--limit", "label": "各cat件数上限", "default": ""},
-        ],
-    },
+    # ★2026-09-24 ユーザー指示「今はやってないから停止して」でボタンを外した。
+    #   調査で、既存の行を更新する時に A〜T列を行ごと書き直し、B列 (itemID)・価格・
+    #   取下げ印 (T列) を空で上書きしている疑いが出ている (montbell_outlet_scraper.py:101,110-116,294)。
+    #   再開する時は、その点を直してから戻すこと。
+    # {
+    #     "category": None, "type": "utility",
+    #     "label": "モンベル公式アウトレット 巡回",
+    #     "cwd": f"{WORKSPACE}/iMakMercari",
+    #     "cmd": ["python", "montbell_outlet_scraper.py"],
+    #     "params": [
+    #         {"name": "--categories", "label": "カテゴリID(カンマ区切り)", "default": ""},
+    #         {"name": "--limit", "label": "各cat件数上限", "default": ""},
+    #     ],
+    # },
     {
         "category": None, "type": "utility",
         "label": "Mercari スカウト",
