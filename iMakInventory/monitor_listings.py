@@ -1600,7 +1600,7 @@ def process_sheet(
                         except Exception:
                             pass
                     try:
-                        mercari_driver = create_mercari_driver(headless=True)
+                        mercari_driver = create_mercari_driver(headless=True, profile_dir=mercari_profile)
                         log("    [OK] mercari driver 再起動完了 (続行)")
                         mercari_consec_none = 0
                     except Exception as _restart_err:
@@ -1674,7 +1674,7 @@ def process_sheet(
                 except Exception:
                     pass
                 try:
-                    mercari_driver = create_mercari_driver(headless=True)
+                    mercari_driver = create_mercari_driver(headless=True, profile_dir=mercari_profile)
                     mercari_consec_none = 0
                     log("    [OK] mercari driver 予防再起動完了")
                 except Exception as _prev_err:
