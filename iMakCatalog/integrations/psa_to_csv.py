@@ -665,8 +665,32 @@ def lookup_one_piece(
             print(f"    🎯 iMakCatalog hit: {record['product_id']} {record['name']}")
         return _to_legacy_dict(record)
 
+    # 0. ★PSA が「別絵柄」と言っている時は、通常版より先に別絵柄の行を見る (2026-09-23)。
+    #    依頼 `2026-09-22_lookup_one_piece_alt_art_st_deck.md`:
+    #    base (通常版) が名前一致で先に採られるので、step 2 の variant 試行まで届かなかった。
+    #    実害: cert149064738 `MONKEY D. LUFFY BLACK & WHITE ALT ART` が通常版 `ST29-001` に解決し、
+    #    シートの KEY `ST29-001_p1` と食い違って fail-closed (出品されず)。
+    #    ★採るのは **別絵柄の行がその番号に1つだけ**の時に限る。2つ以上 (OP06-022 は4つ) ある弾は
+    #      PSA のラベルからどれかを決められないので **出さない** (通常版を返すと別の絵で出てしまう)。
+    #    ★名前照合は従来どおり掛ける。
+    record = None
+    if "ALTERNATE ART" in (subject or "").upper() or "ALT ART" in (subject or "").upper():
+        alts = [r for r in api.search_prefix(CATEGORY, f"{base_pid}_", limit=50)
+                if (r.get("specs") or {}).get("variant_type") == "alt_art"
+                and _record_name_matches_subject(r, subject)]
+        if len(alts) == 1:
+            record = alts[0]
+            if verbose:
+                print(f"    🎯 iMakCatalog hit (別絵柄を優先): {record['product_id']}")
+        elif len(alts) > 1:
+            if verbose:
+                print(f"    ⚠️ {base_pid} の別絵柄が {len(alts)}種 "
+                      f"({', '.join(r['product_id'] for r in alts)}) → PSA ラベルでは決められないので Skip")
+            return None
+
     # 1. base lookup + 名前検証 (Bonney→Bepo 事件防止)
-    record = api.lookup(CATEGORY, base_pid)
+    if record is None:
+        record = api.lookup(CATEGORY, base_pid)
     if record and not _record_name_matches_subject(record, subject):
         if verbose:
             print(f"    ⚠️ iMakCatalog ID hit {base_pid} ({record['name']}) "

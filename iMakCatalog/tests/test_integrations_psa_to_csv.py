@@ -188,16 +188,37 @@ class TestLookupOnePiece:
             ord(ch) < 128 for ch in result["color_en"]
         ), f"color_en は英語であるべき: {result['color_en']!r}"
 
-    def test_alt_art_variant_resolution(self):
-        """PSA Subject に 'ALTERNATE ART' 含まれる + base が見つかる場合、base を返す
-        (variant 候補は base が None の時のみ試行)."""
-        # OP06-022 base はあるので variant は試さず base を返す
+    def test_alt_art_prefers_the_only_alt_row(self):
+        """PSA が ALT ART と言っていて、その番号の別絵柄が1つだけなら それを返す.
+
+        2026-09-23 変更 (依頼 `2026-09-22_lookup_one_piece_alt_art_st_deck.md`):
+        以前は base (通常版) を返していたが、**PSA は別絵柄だと言っている**ので誤り。
+        cert149064738 が通常版に解決し、シートの KEY と食い違って出品できなかった。
+        """
         result = catalog_psa.lookup_one_piece(
-            "ONE PIECE JAPANESE OP06", "022",
-            subject="YAMATO ALTERNATE ART", verbose=False,
+            "ONE PIECE JAPANESE STARTER DECK ST29-EGGHEAD", "001",
+            subject="MONKEY D. LUFFY BLACK & WHITE ALT ART", verbose=False,
         )
         assert result is not None
-        assert result["card_id"] == "OP06-022"  # base、_p ではない
+        assert result["card_id"] == "ST29-001_p1"
+
+    def test_alt_art_with_many_alt_rows_is_skipped(self):
+        """別絵柄が2つ以上ある番号は PSA ラベルで決められないので出さない (fail-closed).
+
+        OP06-022 (ヤマト) は別絵柄が4つ。通常版を返すと **別の絵で出品**してしまう。
+        """
+        assert catalog_psa.lookup_one_piece(
+            "ONE PIECE JAPANESE OP06", "022",
+            subject="YAMATO ALTERNATE ART", verbose=False) is None
+
+    def test_plain_subject_still_returns_base(self):
+        """ALT ART と書かれていなければ従来どおり通常版."""
+        result = catalog_psa.lookup_one_piece(
+            "ONE PIECE JAPANESE STARTER DECK ST29-EGGHEAD", "001",
+            subject="MONKEY D. LUFFY", verbose=False,
+        )
+        assert result is not None
+        assert result["card_id"] == "ST29-001"
 
 
 @REQUIRES_DB
