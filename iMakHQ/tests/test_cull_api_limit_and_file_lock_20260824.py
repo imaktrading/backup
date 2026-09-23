@@ -52,5 +52,5 @@ def test_send_happens_after_the_limit_guard():
     """上限ガードは送信より前 (後ろだと意味がない)."""
     src = _src()
     i_guard = src.find("半数以上が取れていません")
-    i_send = src.find("end_on_ebay(picked)")
+    i_send = src.find("end_on_ebay(picked, on_ok")
     assert 0 < i_guard < i_send

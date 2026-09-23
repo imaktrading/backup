@@ -445,13 +445,15 @@ def _fetch_active_live():
     return out
 
 
-def end_on_ebay(picked, post_fn=None, token_fn=None):
+def end_on_ebay(picked, post_fn=None, token_fn=None, on_ok=None):
     """1件ずつ eBay に取り下げを送る → (成功した itemID list, [(itemID, 失敗理由)])。
 
     ★2026-08-24: FileExchange を介さず直接送る (ユーザー指示「ボタンは元々自動」)。
       直前に verify_oos で 1件ずつ実状態を見ているので、ここは送るだけ。
       **「既に終了済み」は成功に数える** (目的は達成されている)。
       通信で落ちた分は失敗として残し、成功に混ぜない (silent drop を作らない)。
+    on_ok: 1件成功するたびに呼ぶ (itemID)。★2026-09-24: 全部送った後に記録していたので、
+      途中で PC が落ちると送った分の記録が丸ごと抜けていた。その場で記録するために渡す。
     """
     import re as _re
     if post_fn is None:
@@ -468,15 +470,38 @@ def end_on_ebay(picked, post_fn=None, token_fn=None):
                       f"<ItemID>{iid}</ItemID><EndingReason>NotAvailable</EndingReason>", tok)
         ack = _re.search(r"<Ack>(\w+)</Ack>", xml or "")
         msgs = _re.findall(r"<LongMessage>(.*?)</LongMessage>", xml or "")
-        if ack and ack.group(1) in ("Success", "Warning"):
+        if (ack and ack.group(1) in ("Success", "Warning")) or (
+                msgs and "already been closed" in msgs[0]):   # 後者 = 目的は達成済み
             ok.append(iid)
-        elif msgs and "already been closed" in msgs[0]:
-            ok.append(iid)                     # 目的は達成済み
+            if on_ok:
+                on_ok(iid)
         else:
             ng.append((iid, msgs[0][:80] if msgs else "応答不明"))
         if n % 50 == 0:
             print(f"    {n}/{len(picked)} 送信済 (成功 {len(ok)})", flush=True)
     return ok, ng
+
+
+def writeback_done_ledger():
+    """済み台帳に載っているのに B列がまだ埋まっている行の後始末をする (2026-09-24)。
+
+    End は1件ずつ台帳に記録するが、シートの後始末は送り終わった後にまとめてやる。
+    その間で PC が落ちると、次に押した時は台帳で「済み」なので候補にも上がらず、
+    B列に死んだ番号が残り続ける (= 出品済み扱いのまま二度と再出品されない)。
+    押すたびに最初にこれを通す。後始末は B列がその番号の行だけを直すので何度やっても同じ。
+    """
+    ids = load_done()
+    if not ids:
+        return 0
+    try:
+        import cull_writeback as CW
+        n = CW.apply(ids, commit=True)
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 済み分のスプシ後始末は次回に持ち越し: {type(e).__name__}: {e}")
+        return 0
+    if n:
+        print(f"  ▶ 前回までに落とした分で B列が残っていた {n}件を後始末しました (B列を空 + Q列に印)")
+    return n
 
 
 def writeback_previous():
@@ -515,6 +540,7 @@ def main():
     live = "--live" in argv
     if "--no-writeback" not in argv:
         writeback_previous()
+        writeback_done_ledger()
         sys.argv = argv                       # writeback で書き換えた分を戻す
         print()
     if live:
@@ -578,6 +604,17 @@ def main():
             #   (実測: 同じ43件が3回連続で除外され、その分だけ処理量が減っていた)。
             #   終わっている事実は同じなので、記録して二度と拾わない。
             remember_done([r["item_id"] for r in ended])
+            # ★2026-09-24: 終わっている分もシートの後始末 (B列を空 + Q列に印) に通す。
+            #   前回 End を送った後、後始末の前に PC が落ちると、その分は次に押した時
+            #   ここ (既に終了) に回るだけで、B列に死んだ番号が残り続けていた
+            #   (= 出品済み扱いのまま二度と再出品されない)。後始末は何度やっても同じ結果。
+            try:
+                import cull_writeback as CW
+                n = CW.apply({r["item_id"] for r in ended}, commit=True)
+                if n:
+                    print(f"  ▶ 終わっていた分のスプシ後始末 → {n}件 (B列を空 + Q列に印)")
+            except Exception as e:                             # noqa: BLE001
+                print(f"  ⚠ 終わっていた分のスプシ後始末は次回に持ち越し: {type(e).__name__}: {e}")
         if revived:
             print(f"  ⚠ 在庫復活で除外 = {len(revived)}件 (補充された listing の誤取下げ防止)")
             for r in revived:
@@ -639,8 +676,7 @@ def main():
     #     - 対象は CULL のみ / $100以上 / 14日以上 / 1回 CAP件 まで
     #     - qty=0 = そもそも買えない出品なので、売上を失わない
     #   人が事前に中身を見る機会は無くなるので、確認用一覧は残す (事後に見る)。
-    ok_ids, ng = end_on_ebay(picked)
-    remember_done(ok_ids)                      # 次回から候補に出さない
+    ok_ids, ng = end_on_ebay(picked, on_ok=lambda i: remember_done([i]))  # 1件ずつ記録
     print(f"\n▶ eBay に送信 → 成功 {len(ok_ids)}件 / {len(picked)}件")
     for iid, msg in ng[:8]:
         print(f"   ⚠ {iid}: {msg}")

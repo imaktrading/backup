@@ -68,7 +68,7 @@ def test_verify_runs_before_sending():
     src = open(SRC, encoding="utf-8").read()
     i_main = src.find("def main(")
     i_verify = src.find("verify_oos(picked", i_main)
-    i_send = src.find("end_on_ebay(picked)", i_main)
+    i_send = src.find("end_on_ebay(picked, on_ok", i_main)
     assert 0 < i_verify < i_send, "確認より先に送っている"
 
 

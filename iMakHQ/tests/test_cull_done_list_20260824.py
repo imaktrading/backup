@@ -65,7 +65,8 @@ def test_main_remembers_only_successful_sends():
     """失敗した分を憶えると二度と拾えなくなる。成功分だけ記録すること."""
     src = open(os.path.join(os.path.dirname(__file__), "..", "tools", "cull_end.py"),
                encoding="utf-8").read()
-    assert "remember_done(ok_ids)" in src
+    # ★2026-09-24: 成功した1件ごとに記録する形に変えた (途中で落ちても送った分は残る)
+    assert "end_on_ebay(picked, on_ok=lambda i: remember_done([i]))" in src
     assert "remember_done(picked" not in src
 
 

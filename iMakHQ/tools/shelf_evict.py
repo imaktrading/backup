@@ -907,6 +907,9 @@ def main():
     except Exception:                                          # noqa: BLE001
         pass
 
+    # ★2026-09-24: 前回 落とした後、シートの後始末の前に PC が落ちた分を先に直す
+    CE.writeback_done_ledger()
+
     listed = listed_today_amount()
     if a.amount is not None:
         target = a.amount
@@ -990,6 +993,7 @@ def main():
         return 1
     print(f"\n  現eBay状態を実機確認中 ({len(picked)}件)...", flush=True)
     keep, dropped = [], collections.Counter()
+    ended_ids = set()
     for t, r in picked:
         iid = r["item_id"]
         try:
@@ -1002,6 +1006,7 @@ def main():
         if st != "Active":
             dropped["既に終了"] += 1
             CE.remember_done([iid])
+            ended_ids.add(iid)
             continue
         try:
             q = fetch_listing_qty(iid)
@@ -1016,14 +1021,30 @@ def main():
         keep.append((t, r))
     for k, n in dropped.items():
         print(f"   ⏭ 除外 {k}: {n}件")
+    # ★2026-09-24: 終わっている分もシートの後始末に通す。前回 End を送った後、後始末の前に
+    #   PC が落ちると、B列に死んだ番号が残り続けていた (出品済み扱いのまま再出品されない)。
+    if ended_ids:
+        try:
+            import cull_writeback as CW
+            n = CW.apply(ended_ids, commit=True)
+            if n:
+                print(f"  ▶ 終わっていた分のスプシ後始末 → {n}行 (B列を空 + Q列に印)")
+        except Exception as e:                                 # noqa: BLE001
+            print(f"  ⚠ 終わっていた分のスプシ後始末は次回に持ち越し: {type(e).__name__}: {e}")
     if not keep:
         print("  実機確認後の対象なし。処理終了。")
         return 0
     picked = keep
     print(f"  → End 確定 = {len(picked)}件 (${sum(shelf_of(r) for _t, r in picked):,.0f})")
     ids = [r["item_id"] for _t, r in picked]
-    ok, ng = CE.end_on_ebay([{"item_id": i} for i in ids])
-    CE.remember_done(ok)
+    amount_of = {r["item_id"]: shelf_of(r) for _t, r in picked}
+
+    def _on_ok(iid):
+        # ★2026-09-24: 1件落とすごとに記録する。全部送った後に記録していたので、途中で落ちると
+        #   「今日落とした額」が0のまま = 次に押すと目標額をまた全部落としていた (落とし過ぎ)。
+        CE.remember_done([iid])
+        remember_evicted(amount_of.get(iid, 0))
+    ok, ng = CE.end_on_ebay([{"item_id": i} for i in ids], on_ok=_on_ok)
     print(f"\n▶ eBay に送信 → 成功 {len(ok)}件 / {len(ids)}件")
     for iid, msg in ng[:8]:
         print(f"   ⚠ {iid}: {msg}")
@@ -1032,8 +1053,6 @@ def main():
     #   落ちていないものは「要対応」として残す (状態同期の安全原則)。
     ok = _verify_ended(ok)
     if ok:
-        remember_evicted(sum(shelf_of(r) for _t, r in picked
-                             if r["item_id"] in set(ok)))
         import cull_writeback as CW
         n = CW.apply(set(ok), commit=True)
         print(f"▶ スプシ更新 → {n}行 (B列を空 + Q列に印)")
