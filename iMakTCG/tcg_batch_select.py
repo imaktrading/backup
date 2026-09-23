@@ -375,11 +375,17 @@ def balanced_sample(certs, title_map, limit, shuffle=None, cost_of=None,
             keep_random = g[:n_explore]              # ランダムのまま残す分 (順位で永久に殺さない)
             _known = getattr(popular_of, "known", None)
             _treasure = getattr(popular_of, "treasure", None)
+            _sold = getattr(popular_of, "market_sold", None)
             rest = sorted(g[n_explore:], key=lambda c: (
                 # ★トレジャーハント (2026-09-18 ユーザー確定): 市場で売れているのに
                 #   うちが出していないカードを最優先。件数が少ないので枠は切らない
                 #   (元: iMak_data/hq/market_sold/demand_market.csv)
                 not (_treasure(c) if _treasure else False),
+                # ★2026-09-24 ユーザー確定「ルフィの〇〇のカードのように、売れるカードで並べる。
+                #   ポケモンとかもね」: 市場で売れた枚数 (カード単位・テラピーク90日) の多い順。
+                #   キャラで拾うと同じキャラの売れないカードも混ざる (ルフィは20種55枚のうち
+                #   上位3種で36枚)。拾うのは広く、枠に入れる順で売れるカードを先にする。
+                -((_sold(c) or 0) if _sold else 0),
                 # カードを特定できていない物 (PSA データ未取得) は目視前の除外が効かず、
                 # 開けてみたら重複・対象外で枠を潰しやすいので後ろ (ランダム枠で出番は残る)
                 bool(_known) and not _known(c),
@@ -525,6 +531,32 @@ def title_card_key(title):
 
 
 TREASURE_CSV = r"C:/dev/iMak_data/hq/market_sold/demand_market.csv"
+# カード単位の「市場で売れた枚数」(テラピーク90日・絞り込み前の全カード)。作るのは market_ledger.py
+MARKET_SOLD_CSV = r"C:/dev/iMak_data/hq/market_sold/demand_full.csv"
+
+
+def load_market_sold(path=MARKET_SOLD_CSV):
+    """カード番号の鍵 (`T:P-043` / `T:232/193`) → 市場で売れた枚数。無ければ空 (並べ順は今まで通り)。"""
+    import csv as _csv
+    import os as _os
+    if not _os.path.exists(path):
+        return {}
+    out = {}
+    try:
+        with open(path, encoding="utf-8-sig", newline="") as f:
+            for r in _csv.DictReader(f):
+                k = title_card_key((r.get("番号") or "").strip())
+                if not (k.startswith("T:") and k != "T:"):
+                    continue
+                try:
+                    n = int(float(r.get("売れた枚数") or 0))
+                except ValueError:
+                    continue
+                out[k] = max(out.get(k, 0), n)
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 市場の売れた枚数を読めませんでした ({type(e).__name__})")
+        return {}
+    return out
 
 
 def load_treasure_ids(path=TREASURE_CSV):
@@ -654,14 +686,23 @@ def build_popular_of(certs, title_map, key_map=None, fallback_key_of=None, funne
         k = title_card_key((title_map or {}).get(c, ""))
         return bool(k) and k in treasure_ids
 
+    sold_by_key = load_market_sold()
+
+    def market_sold(c):
+        """その候補のカードが市場で売れた枚数 (タイトルのカード番号で引く)。分からなければ 0。"""
+        k = title_card_key((title_map or {}).get(c, ""))
+        return sold_by_key.get(k, 0) if k else 0
+
     n = sum(1 for c in certs if popular_of(c))
     nk = sum(1 for c in certs if catalog_key(c))
     nt = sum(1 for c in certs if treasure_of(c))
-    print(f"  ⭐ 並べ順: トレジャーハント {nt}件 → カード特定済 {nk}/{len(certs)}件 "
-          f"→ 人気キャラ {n}件 → 仕入値の安い順 (2割はランダム)")
+    ns = sum(1 for c in certs if market_sold(c))
+    print(f"  ⭐ 並べ順: トレジャーハント {nt}件 → 市場で売れた枚数の多い順 ({ns}件に実績) "
+          f"→ カード特定済 {nk}/{len(certs)}件 → 人気キャラ {n}件 → 仕入値の安い順 (2割はランダム)")
     popular_of.card_of = key_of
     popular_of.known = lambda c: bool(catalog_key(c))
     popular_of.treasure = treasure_of
+    popular_of.market_sold = market_sold
     return popular_of
 
 

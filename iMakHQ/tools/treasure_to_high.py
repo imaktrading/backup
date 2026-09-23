@@ -4,6 +4,7 @@
 
     python iMakHQ/tools/treasure_to_high.py            # 何行足すか見るだけ
     python iMakHQ/tools/treasure_to_high.py --write    # HIGH に足して、中間スプシを緑に塗る
+    python iMakHQ/tools/treasure_to_high.py --tab=chara [--write]   # キャラで拾った候補 (2026-09-24)
 
 ★2026-09-21 ユーザー確定「とりあえず、7マン以下は HIGH にコピーしたいね。重複があるなら除いて」
   「コピーしたら、色塗りして。重複も色塗り」。
@@ -79,9 +80,30 @@ def plan(treasure_rows, high_rows, cap=COST_CAP):
     return add, paint, n
 
 
+# ★2026-09-24: キャラで拾った候補 (抽出くんの `mercari_psa10_chara`) も同じ作りで HIGH に足せるようにする。
+#   列は treasure と同じ。枠に入れる順は tcg_batch_select が「市場で売れた枚数」で決める
+#   (キャラで広く拾い、売れるカードを先に出す。ユーザー確定 2026-09-24)
+TABS = {"treasure": T.TAB, "chara": "mercari_psa10_chara"}
+
+
+def tab_of(argv):
+    """--tab=treasure|chara (既定 treasure) → 中間スプシのタブ名。知らない名前は止める。"""
+    for a in argv:
+        if a.startswith("--tab="):
+            k = a.split("=", 1)[1]
+            if k not in TABS:
+                raise SystemExit(f"--tab は {'/'.join(TABS)} のどれか: {k}")
+            return TABS[k]
+    return TABS["treasure"]
+
+
 def main(argv):
     import psa_hoju_fill as H
-    tr = S.read_tab(T.TAB, sheet_id=T.SHEET_ID)[1:]
+    tab = tab_of(argv)
+    tr = S.read_tab(tab, sheet_id=T.SHEET_ID)[1:]
+    if not tr:
+        print(f"中間スプシ {tab} に行がありません")
+        return 0
     hi = H._read_high()[1:]
     add, paint, n = plan(tr, hi)
     print(f"中間スプシ {len(tr)}行 → HIGH に足す {len(add)}行 / 塗る {len(paint)}行")
@@ -94,7 +116,7 @@ def main(argv):
     # 確かめてから塗る: HIGH を読み直して、足した URL が本当に入ったか
     hi2 = {_g(r, 0) for r in H._read_high()[1:]}
     miss = [i for i, r in add if r[0] and r[0] not in hi2]
-    ws = S._open(T.SHEET_ID).worksheet(T.TAB)
+    ws = S._open(T.SHEET_ID).worksheet(tab)
     ok = [i for i in paint if i not in miss]
     last = S.col_letter(len(tr[0])) if hasattr(S, "col_letter") else "AL"
     reqs = [{"range": f"A{i}:{last}{i}", "format": {"backgroundColor": GREEN}} for i in ok]
