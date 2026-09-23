@@ -31,6 +31,9 @@ REM         Ending, relisting and restoring quantity stay manual buttons on
 REM         purpose (they are not reversible).
 REM   30 items per run = slow and steady, to keep the BAN risk low.
 REM   Google Sheets API can return 503, so step 1 retries up to 3 times.
+REM   2026-09-24: each step is guarded by night_step.py (--check / --done).
+REM   If the PC crashes, the next run (or night_resume.py at logon) skips the
+REM   steps already done. Steps that write to eBay or send mail are --no-retry.
 REM ---------------------------------------------------------------------------
 setlocal
 set PYTHONIOENCODING=utf-8
@@ -44,6 +47,7 @@ set LOG=C:\dev\iMak\iMakHQ\review_logs\hoju_search_cron_%TODAY%.log
 if not exist C:\dev\iMak\iMakHQ\review_logs mkdir C:\dev\iMak\iMakHQ\review_logs
 
 echo [start] %date% %time% >> "%LOG%"
+python -u night_step.py hoju --begin >> "%LOG%" 2>&1
 
 REM --- 0) fill the canonical KEY of live listings that are still blank.
 REM        2026-08-16: KEY was only filled for rows in that day's CSV, so a row
@@ -53,7 +57,10 @@ REM        duplicate check. The value comes from the cert (already confirmed by
 REM        a human at listing time), so no review is needed. fail-closed: it
 REM        writes nothing when the cert cannot be resolved.
 echo [keyfill] %date% %time% >> "%LOG%"
+python -u night_step.py hoju key_backfill_live --check >> "%LOG%" 2>&1 || goto :skip1
 python -u key_backfill_live.py >> "%LOG%" 2>&1
+python -u night_step.py hoju key_backfill_live --done %errorlevel% >> "%LOG%" 2>&1
+:skip1
 
 REM --- 0b) mirror ads + best offer (2026-09-11 user: "make it nightly").
 REM         Same as the Pm/Bo button. About 1 minute: one listing sweep, then it
@@ -61,7 +68,10 @@ REM         sends only to mirrors that still lack them; listings that can never
 REM         get best offer (category, eBay warning 20135) are skipped for 30 days.
 REM         Placed before step 1 because step 1 can jump to :done on failure.
 echo [pmbo] %date% %time% >> "%LOG%"
+python -u night_step.py hoju mirror_promo_bestoffer.--write --check --no-retry >> "%LOG%" 2>&1 || goto :skip2
 python -u -X utf8 mirror_promo_bestoffer.py --write >> "%LOG%" 2>&1
+python -u night_step.py hoju mirror_promo_bestoffer.--write --done %errorlevel% >> "%LOG%" 2>&1
+:skip2
 
 REM --- 0c) write the canonical KEY on UT rows that are already listed.
 REM         2026-09-12: the dedupe tool blocks double listings by KEY. UT rows are
@@ -70,7 +80,10 @@ REM         same colour and size could be listed twice. Only rows with an itemID
 REM         a decided colour/size get a KEY (never a row that is not listed yet:
 REM         a KEY on an unlisted row reads as "already listed" and blocks it forever).
 echo [ut-key] %date% %time% >> "%LOG%"
+python -u night_step.py hoju ut_key_backfill.--write --check >> "%LOG%" 2>&1 || goto :skip3
 python -u ut_key_backfill.py --write >> "%LOG%" 2>&1
+python -u night_step.py hoju ut_key_backfill.--write --done %errorlevel% >> "%LOG%" 2>&1
+:skip3
 
 REM --- 1) zero-backup listings (a listing whose only supplier died = instant death)
 for %%i in (1 2 3) do (
@@ -96,12 +109,18 @@ REM        adds roughly an hour; the night still ends well before the morning.
 REM        Do NOT narrow the daytime threshold instead: listings with 1-4 backups
 REM        must reach the screen or the cheaper-supplier swap never fires (2026-09-05).
 echo [topup] max-backups=5 %date% %time% >> "%LOG%"
+python -u night_step.py hoju psa_hoju_fill.search.--max-backups=5.--limit=130 --check >> "%LOG%" 2>&1 || goto :skip4
 python -u psa_hoju_fill.py search --max-backups=5 --limit=130 >> "%LOG%" 2>&1
+python -u night_step.py hoju psa_hoju_fill.search.--max-backups=5.--limit=130 --done %errorlevel% >> "%LOG%" 2>&1
+:skip4
 
 REM --- 3) prefetch for the RESTOCK gate (shares psa_research_cache, makes the
 REM        button answer instantly and cuts re-scraping)
 echo [restock] prefetch %date% %time% >> "%LOG%"
+python -u night_step.py hoju psa_hoju_fill.search-restock.--limit=0 --check >> "%LOG%" 2>&1 || goto :skip5
 python -u psa_hoju_fill.py search-restock --limit=0 >> "%LOG%" 2>&1
+python -u night_step.py hoju psa_hoju_fill.search-restock.--limit=0 --done %errorlevel% >> "%LOG%" 2>&1
+:skip5
 
 REM --- 3b) PSA restock: re-check whether supply came back, for listings whose variant
 REM         was already confirmed by eye, and update the waiting ledger.
@@ -117,7 +136,10 @@ REM         14-16 of 68 for a week (never converged). Raise the nightly batch to
 REM         (the per-run safety cap in psa_resource_gate is 60, so this stays inside it).
 set RESTOCK_TARGET_NEW=0
 set RESTOCK_SCRAPE_BATCH=40
+python -u night_step.py hoju psa_resource_gate.--nightly --check >> "%LOG%" 2>&1 || goto :skip6
 python -u psa_resource_gate.py --nightly >> "%LOG%" 2>&1
+python -u night_step.py hoju psa_resource_gate.--nightly --done %errorlevel% >> "%LOG%" 2>&1
+:skip6
 set RESTOCK_TARGET_NEW=
 set RESTOCK_SCRAPE_BATCH=
 
@@ -131,39 +153,60 @@ REM         2026-09-22: first save the other suppliers of cards that are already
 REM         decided (no human judgement needed). This used to happen only when the
 REM         daytime button was pressed, so the button showed 387 while only 52 needed eyes.
 echo [newcand-autoaux] %date% %time% >> "%LOG%"
+python -u night_step.py hoju newcand_confirm.--auto-aux-only --check >> "%LOG%" 2>&1 || goto :skip7
 python -u newcand_confirm.py --auto-aux-only >> "%LOG%" 2>&1
+python -u night_step.py hoju newcand_confirm.--auto-aux-only --done %errorlevel% >> "%LOG%" 2>&1
+:skip7
 echo [newcand-aux] %date% %time% >> "%LOG%"
+python -u night_step.py hoju psa_hoju_fill.newcand-aux --check >> "%LOG%" 2>&1 || goto :skip8
 python -u psa_hoju_fill.py newcand-aux >> "%LOG%" 2>&1
+python -u night_step.py hoju psa_hoju_fill.newcand-aux --done %errorlevel% >> "%LOG%" 2>&1
+:skip8
 
 REM --- 4) prefetch for ichibankuji aux URLs (candidates only, no UI, no sheet)
 echo [ichibankuji] prefetch %date% %time% >> "%LOG%"
+python -u night_step.py hoju ichibankuji_restock.prefetch.10 --check >> "%LOG%" 2>&1 || goto :skip9
 python -u ichibankuji_restock.py prefetch 10 >> "%LOG%" 2>&1
+python -u night_step.py hoju ichibankuji_restock.prefetch.10 --done %errorlevel% >> "%LOG%" 2>&1
+:skip9
 
 REM --- 5) prefetch for ichibankuji LIVE listings that are thin on aux URLs
 REM        2026-08-16: step 4 fills out-of-stock rows first and there are ~50 of
 REM        them, so live listings never got a slot. Aux URLs are insurance and
 REM        must be stocked BEFORE the supplier dies, so give live its own step.
 echo [ichibankuji] prefetch-live %date% %time% >> "%LOG%"
+python -u night_step.py hoju ichibankuji_restock.prefetch-live.10 --check >> "%LOG%" 2>&1 || goto :skip10
 python -u ichibankuji_restock.py prefetch-live 10 >> "%LOG%" 2>&1
+python -u night_step.py hoju ichibankuji_restock.prefetch-live.10 --done %errorlevel% >> "%LOG%" 2>&1
+:skip10
 
 REM --- 5b) pre-open the candidate detail pages (condition / shipping / seller
 REM         reviews). 2026-08-16: this was most of the 22 minutes the ichibankuji
 REM         restock button took (9 items x 10 candidates, 3s wait each). Those
 REM         fields never change, so cache them here and the button only shows.
 echo [ichibankuji] prefetch-detail %date% %time% >> "%LOG%"
+python -u night_step.py hoju ichibankuji_restock.prefetch-detail.120 --check >> "%LOG%" 2>&1 || goto :skip11
 python -u ichibankuji_restock.py prefetch-detail 120 >> "%LOG%" 2>&1
+python -u night_step.py hoju ichibankuji_restock.prefetch-detail.120 --done %errorlevel% >> "%LOG%" 2>&1
+:skip11
 
 REM --- 5c) UT (Uniqlo/GU collab tee) aux-supply candidates. Collect only; the
 REM         sheet is written after a human check in the daytime.
 REM         2026-09-03: the tee line stalled because the single supplier sold out
 REM         and the listing work was wasted. Same fix as PSA: keep spares.
 echo [ut] hoju search %date% %time% >> "%LOG%"
+python -u night_step.py hoju ut_hoju_fill.search --check >> "%LOG%" 2>&1 || goto :skip12
 python -u ut_hoju_fill.py search >> "%LOG%" 2>&1
+python -u night_step.py hoju ut_hoju_fill.search --done %errorlevel% >> "%LOG%" 2>&1
+:skip12
 
 REM --- 5d) UT restock: sold-out tees are still Active with qty 0 (verified
 REM         2026-09-03), so finding a live supplier is enough to bring them back.
 echo [ut] restock search %date% %time% >> "%LOG%"
+python -u night_step.py hoju ut_hoju_fill.restock-search --check >> "%LOG%" 2>&1 || goto :skip13
 python -u ut_hoju_fill.py restock-search >> "%LOG%" 2>&1
+python -u night_step.py hoju ut_hoju_fill.restock-search --done %errorlevel% >> "%LOG%" 2>&1
+:skip13
 
 REM --- 6) warm the daytime review screen (candidates -> ref image -> art match).
 REM        2026-08-16: pressing the daytime button spent ~7 of its 8 minutes
@@ -173,7 +216,10 @@ REM        human, so do it here. --dry-run does the same assembly but opens no
 REM        browser and writes nothing; both caches (listing image / art match)
 REM        are on disk, so the daytime run is then near-instant.
 echo [confirm-warm] %date% %time% >> "%LOG%"
+python -u night_step.py hoju psa_hoju_fill.confirm.--dry-run --check >> "%LOG%" 2>&1 || goto :skip14
 python -u psa_hoju_fill.py confirm --dry-run >> "%LOG%" 2>&1
+python -u night_step.py hoju psa_hoju_fill.confirm.--dry-run --done %errorlevel% >> "%LOG%" 2>&1
+:skip14
 
 REM --- 6b) mark which unlisted rows can actually be listed (AP column), so the
 REM         master sheet stops looking like "plenty of candidates left".
@@ -183,20 +229,35 @@ REM         is already live. The blank itemID read as "candidate", so the call
 REM         "no need to restock yet" was made on a false picture. A grey cell in
 REM         the itemID column now means "this row will never become a listing".
 echo [listable-flag] %date% %time% >> "%LOG%"
+python -u night_step.py hoju sheet_listable_flag.--write --check >> "%LOG%" 2>&1 || goto :skip15
 python -u sheet_listable_flag.py --write >> "%LOG%" 2>&1
+python -u night_step.py hoju sheet_listable_flag.--write --done %errorlevel% >> "%LOG%" 2>&1
+:skip15
 
 REM --- 6c) refresh the funnel and the analyses that read it. These only read
 REM          reports and write spreadsheet tabs, so they are safe unattended.
 REM          2026-09-03: doing this at night means the morning buttons (shelf /
 REM          cull / restock counts) already have fresh numbers to work from.
 echo [funnel] %date% %time% >> "%LOG%"
+python -u night_step.py hoju listing_funnel --check >> "%LOG%" 2>&1 || goto :skip16
 python -u listing_funnel.py >> "%LOG%" 2>&1
+python -u night_step.py hoju listing_funnel --done %errorlevel% >> "%LOG%" 2>&1
+:skip16
 echo [funnel-diff] %date% %time% >> "%LOG%"
+python -u night_step.py hoju funnel_diff --check >> "%LOG%" 2>&1 || goto :skip17
 python -u funnel_diff.py >> "%LOG%" 2>&1
+python -u night_step.py hoju funnel_diff --done %errorlevel% >> "%LOG%" 2>&1
+:skip17
 echo [demand] %date% %time% >> "%LOG%"
+python -u night_step.py hoju demand_winners --check >> "%LOG%" 2>&1 || goto :skip18
 python -u demand_winners.py >> "%LOG%" 2>&1
+python -u night_step.py hoju demand_winners --done %errorlevel% >> "%LOG%" 2>&1
+:skip18
 echo [restock-worklist] %date% %time% >> "%LOG%"
+python -u night_step.py hoju restock_worklist --check >> "%LOG%" 2>&1 || goto :skip19
 python -u restock_worklist.py >> "%LOG%" 2>&1
+python -u night_step.py hoju restock_worklist --done %errorlevel% >> "%LOG%" 2>&1
+:skip19
 
 REM --- 6c1) sold listings: put the quantity back to 1 at today's cost.
 REM          2026-09-14: nothing did this automatically. The monitor only revives when
@@ -208,7 +269,10 @@ REM          non-US (mirror) listings. At most 10 sends per night; each send is 
 REM          2026-09-15: switched on (--write) after the 09-14 list-only night matched the
 REM          daytime check exactly (3 to put back, Snorlax held for an unshipped order).
 echo [sold-restock] %date% %time% >> "%LOG%"
+python -u night_step.py hoju sold_restock.--orders-api.--write.--max=10 --check --no-retry >> "%LOG%" 2>&1 || goto :skip20
 python -u sold_restock.py --orders-api --write --max=10 >> "%LOG%" 2>&1
+python -u night_step.py hoju sold_restock.--orders-api.--write.--max=10 --done %errorlevel% >> "%LOG%" 2>&1
+:skip20
 
 REM --- 6c2) cull (take-down) candidates from the live listing list.
 REM          2026-09-10: the funnel above stops by itself when the Seller Hub
@@ -218,19 +282,28 @@ REM          list (about 20 API calls, shared 2h cache) has everything the cull
 REM          decision needs. Writes funnel_output\cull_live_YYYYMMDD.csv only;
 REM          nothing is ended here (the button checks each item before ending).
 echo [cull-live] %date% %time% >> "%LOG%"
+python -u night_step.py hoju cull_live --check >> "%LOG%" 2>&1 || goto :skip21
 python -u cull_live.py >> "%LOG%" 2>&1
+python -u night_step.py hoju cull_live --done %errorlevel% >> "%LOG%" 2>&1
+:skip21
 
 REM --- 6c3) UT: which works actually sell -> the order in which Harvest collects.
 REM          2026-09-12 (design iMakHQ/UT_FLOW.md, step 12): Harvest was going through the
 REM          catalog's sold-out collab names by count. This hands it the demand order
 REM          instead (sales x3 + watchers + shown). Writes one json in the shared area.
 echo [ut-demand] %date% %time% >> "%LOG%"
+python -u night_step.py hoju ut_demand_words.--write --check >> "%LOG%" 2>&1 || goto :skip22
 python -u ut_demand_words.py --write >> "%LOG%" 2>&1
+python -u night_step.py hoju ut_demand_words.--write --done %errorlevel% >> "%LOG%" 2>&1
+:skip22
 
 REM --- 6d) ichibankuji nightly search (was a manual button only; nothing else
 REM          ran it, so the daytime press had to do the searching itself).
 echo [kuji-night] %date% %time% >> "%LOG%"
+python -u night_step.py hoju run_kuji_night --check >> "%LOG%" 2>&1 || goto :skip23
 python -u run_kuji_night.py >> "%LOG%" 2>&1
+python -u night_step.py hoju run_kuji_night --done %errorlevel% >> "%LOG%" 2>&1
+:skip23
 
 REM --- 6e) lists that the daytime buttons only display: price-down candidates
 REM          and title-rework candidates. Both write a spreadsheet tab only.
@@ -238,11 +311,17 @@ REM   2026-09-22: pricedown MUST NOT write the AL flag at night. Revise reads AL
 REM   lowers the eBay price every morning, so writing it here changed prices without
 REM   the user deciding (334 listings -5% since 9/3). List only; the button writes AL.
 echo [pricedown] %date% %time% >> "%LOG%"
+python -u night_step.py hoju noconvert_pricedown --check >> "%LOG%" 2>&1 || goto :skip24
 set NOCONVERT_NO_FLAG_WRITE=1
 python -u noconvert_pricedown.py >> "%LOG%" 2>&1
 set NOCONVERT_NO_FLAG_WRITE=
+python -u night_step.py hoju noconvert_pricedown --done %errorlevel% >> "%LOG%" 2>&1
+:skip24
 echo [title-rework] %date% %time% >> "%LOG%"
+python -u night_step.py hoju noclick_targets --check >> "%LOG%" 2>&1 || goto :skip25
 python -u noclick_targets.py >> "%LOG%" 2>&1
+python -u night_step.py hoju noclick_targets --done %errorlevel% >> "%LOG%" 2>&1
+:skip25
 
 REM --- 6f) find listings whose supplier is a DIFFERENT card.
 REM          2026-09-08: found only because a buyer asked. A spare-supply URL pointed at
@@ -255,14 +334,21 @@ REM          a low price is often genuine - 2026-09-08: 14 flagged, 0 actually w
 REM          --mail sends the result every night, INCLUDING when nothing is wrong:
 REM          silence must not be ambiguous between "all clear" and "the job died".
 echo [supply-mismatch] %date% %time% >> "%LOG%"
+python -u night_step.py hoju supply_card_mismatch.--mail --check --no-retry >> "%LOG%" 2>&1 || goto :skip26
 python -u supply_card_mismatch.py --mail >> "%LOG%" 2>&1
+python -u night_step.py hoju supply_card_mismatch.--mail --done %errorlevel% >> "%LOG%" 2>&1
+:skip26
 
 REM --- 7) write the "no backup URL at all" listings into one tab so they can be
 REM        seen at a glance (they are scattered rows in the master sheet).
 REM        Writes only that tab; never touches the master sheet.
 echo [naked-list] %date% %time% >> "%LOG%"
+python -u night_step.py hoju hoju_naked_sheet --check >> "%LOG%" 2>&1 || goto :skip27
 python -u hoju_naked_sheet.py >> "%LOG%" 2>&1
+python -u night_step.py hoju hoju_naked_sheet --done %errorlevel% >> "%LOG%" 2>&1
+:skip27
 
 :done
+python -u night_step.py hoju --end >> "%LOG%" 2>&1
 echo [end] %date% %time% >> "%LOG%"
 endlocal

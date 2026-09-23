@@ -29,6 +29,12 @@ set LOG=C:\dev\iMak\iMakHQ\review_logs\psa_cache_warm_%TODAY%.log
 if not exist C:\dev\iMak\iMakHQ\review_logs mkdir C:\dev\iMak\iMakHQ\review_logs
 
 echo [start] %date% %time% >> "%LOG%"
+REM 2026-09-24: guarded by night_step.py so night_resume.py can rerun it after a crash.
+python -u C:/dev/iMak/iMakHQ/tools/night_step.py psawarm --begin >> "%LOG%" 2>&1
+python -u C:/dev/iMak/iMakHQ/tools/night_step.py psawarm psa_cache_warm --check >> "%LOG%" 2>&1 || goto :skip1
 python -u psa_cache_warm.py --limit 40 >> "%LOG%" 2>&1
+python -u C:/dev/iMak/iMakHQ/tools/night_step.py psawarm psa_cache_warm --done %errorlevel% >> "%LOG%" 2>&1
+:skip1
+python -u C:/dev/iMak/iMakHQ/tools/night_step.py psawarm --end >> "%LOG%" 2>&1
 echo [end] %date% %time% >> "%LOG%"
 endlocal
