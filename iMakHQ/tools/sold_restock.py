@@ -28,6 +28,7 @@
 """
 from __future__ import annotations
 
+import datetime
 import os
 import re
 import sys
@@ -582,6 +583,39 @@ def count_workload():
     return out
 
 
+RELISTED_LEDGER = r"C:/dev/iMak_data/hq/sold_restock_relisted.json"
+
+
+def _load_relisted(path=None):
+    import json as _j
+    try:
+        with open(path or RELISTED_LEDGER, encoding="utf-8") as f:
+            return _j.load(f) or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def relisted_to(old_id, path=None):
+    """その古い番号を前に再出品した時の新しい番号。無ければ ""。"""
+    return str((_load_relisted(path).get(str(old_id)) or {}).get("new") or "")
+
+
+def remember_relisted(old_id, new_id, path=None):
+    """再出品した「古い番号 → 新しい番号」を1件ずつ記録する (一時ファイル経由で壊さない)。"""
+    import json as _j
+    path = path or RELISTED_LEDGER
+    d = _load_relisted(path)
+    d[str(old_id)] = {"new": str(new_id), "at": datetime.datetime.now().isoformat(timespec="seconds")}
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _j.dump(d, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, path)
+    except OSError as e:
+        print(f"     ⚠ 再出品の記録を書けません ({e})。書き戻しの前に落ちると二重に出る恐れ")
+
+
 def main():
     argv = sys.argv[1:]
     write = "--write" in argv
@@ -735,6 +769,19 @@ def main():
             print(f"     → 1回の上限 {max_send}件に達したので、次の回に回します")
             skipped += 1
             continue
+        if act == "relist":
+            # ★2026-09-24: 前の回で再出品した後、新しい番号をシートに書く前に PC が落ちると、
+            #   シートは古い番号のまま = 押し直すと同じ古い出品をもう一度再出品していた (二重出品)。
+            #   再出品した記録があって、その新しい出品が生きていれば、送らずに書き戻しだけ回す。
+            _prev = relisted_to(target)
+            if _prev:
+                p_status, p_qty, _ = ebay_status(fx, U, _prev, tok)
+                if p_status == "Active":
+                    print(f"     ⏭ 前の回に再出品済み → ItemID {_prev} (在庫{p_qty})。"
+                          f"二重に出さず、番号の書き戻しだけ回します")
+                    relisted += 1
+                    skipped += 1
+                    continue
         call = "RelistFixedPriceItem" if act == "relist" else "ReviseFixedPriceItem"
         resp = fx.post(call, build_item_xml(target, price, profile), tok, U.SITE_US)
         ack, new_id, err = U.parse_ack(resp)
@@ -742,6 +789,8 @@ def main():
             print(f"     ❌ 失敗: {err[:120]}")
             continue
         new_id = new_id or target
+        if act == "relist" and new_id != target:
+            remember_relisted(target, new_id)          # その場で記録 (落ちても二重に出さない)
         # 送った後に読み直して、在庫1になったかを確かめる (送れた ≠ 戻った)
         v_status, v_qty, _v_site = ebay_status(fx, U, new_id, tok)
         if v_status == "Active" and v_qty >= 1:
