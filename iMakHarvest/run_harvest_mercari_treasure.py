@@ -28,6 +28,9 @@ sys.path.insert(0, str(ROOT))
 from scrapers import mercari_seller as MS  # noqa: E402
 from scrapers import treasure_keywords  # noqa: E402
 import run_harvest_mercari_psa10 as psa10  # noqa: E402
+import run_marker  # noqa: E402
+
+MARKER_PATH = ROOT / "debug" / "treasure_running.flag"
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -203,6 +206,9 @@ def _run(args) -> int:
     else:
         dump_path = psa10.DUMP_DIR / f"mercari_treasure_{datetime.now():%Y%m%dT%H%M%S}.json"
     _log(f"途中保存先: {dump_path}")
+    # ★手動長時間収集は自動再開しない(HQ/ADV確定)。 その代わり開始時に印を残し、
+    # 正常終了(mark_finished)でだけ消す。 印が残っている = 前回クラッシュ等で途中で止まった。
+    run_marker.mark_started(MARKER_PATH, dump_path)
     treasure_args = _build_treasure_args(keywords, args, cost_cfg, limits)
 
     # ★走行中にスプシへも書く。 最後にまとめて書くと、 落ちた時にその走行の成果が
@@ -243,17 +249,20 @@ def _run(args) -> int:
 
     if args.dry_run:
         _log("dry-run → 書込なし")
+        run_marker.mark_finished(MARKER_PATH)
         return 0
 
     rest_k = [c for c in kept if c.get("url") not in written]
     rest_u = [c for c in unreadable if c.get("url") not in written]
     if not rest_k and not rest_u:
         _log("[SHEET] 走行中に全部書込済")
+        run_marker.mark_finished(MARKER_PATH)
         return 0
 
     res = append_treasure_items(_treasure_items(rest_k, rest_u, limits),
                                known_keys=known)
     _log(f"[SHEET] {res}")
+    run_marker.mark_finished(MARKER_PATH)
     return 0
 
 

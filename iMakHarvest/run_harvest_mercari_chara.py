@@ -29,6 +29,9 @@ sys.path.insert(0, str(ROOT))
 from scrapers import chara_keywords  # noqa: E402
 from scrapers import mercari_seller as MS  # noqa: E402
 import run_harvest_mercari_psa10 as psa10  # noqa: E402
+import run_marker  # noqa: E402
+
+MARKER_PATH = ROOT / "debug" / "chara_running.flag"
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -178,6 +181,8 @@ def _run(args) -> int:
     else:
         dump_path = psa10.DUMP_DIR / f"mercari_chara_{datetime.now():%Y%m%dT%H%M%S}.json"
     _log(f"途中保存先: {dump_path}")
+    # ★手動長時間収集は自動再開しない(HQ/ADV確定)。 開始時に印を残し、正常終了でだけ消す。
+    run_marker.mark_started(MARKER_PATH, dump_path)
     chara_args = _build_chara_args(keywords, args, cost_cfg)
 
     # ★走行中にスプシへも書く (落ちた時に成果が0件になるのを防ぐ)。
@@ -211,16 +216,19 @@ def _run(args) -> int:
 
     if args.dry_run:
         _log("dry-run → 書込なし")
+        run_marker.mark_finished(MARKER_PATH)
         return 0
 
     rest_k = [c for c in kept if c.get("url") not in written]
     rest_u = [c for c in unreadable if c.get("url") not in written]
     if not rest_k and not rest_u:
         _log("[SHEET] 走行中に全部書込済")
+        run_marker.mark_finished(MARKER_PATH)
         return 0
 
     res = append_chara_items(psa10.build_sheet_items(rest_k, rest_u), known_keys=known)
     _log(f"[SHEET] {res}")
+    run_marker.mark_finished(MARKER_PATH)
     return 0
 
 
