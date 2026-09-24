@@ -71,3 +71,9 @@ def test_every_top_level_step_is_guarded_and_ebay_steps_are_no_retry():
     assert sum("--check" in l for l in b.splitlines() if l.startswith("python")) == b.count("--done %errorlevel%")
     w = _bat("run_psa_cache_warm.bat")
     assert "night_step.py psawarm psa_cache_warm --check" in w
+
+
+def test_resume_does_not_flash_a_window():
+    """ログオン時に走るので、powershell を窓なしで呼ぶ (2026-09-24 監視くんの tasklist で前面を奪った件と同じ)。"""
+    s = open(os.path.join(HERE, "..", "tools", "night_resume.py"), encoding="utf-8").read()
+    assert 'creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)' in s

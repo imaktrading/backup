@@ -37,7 +37,8 @@ def running_batches():
         out = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
              "Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine }"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60).stdout
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout   # 窓を出さない
     except Exception:                                          # noqa: BLE001
         return None                                            # 分からない時は再開しない
     return {os.path.basename(p).lower() for p in JOBS.values() if os.path.basename(p).lower() in out.lower()}
