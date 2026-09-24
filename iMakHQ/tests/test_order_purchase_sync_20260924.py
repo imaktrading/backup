@@ -89,7 +89,7 @@ def test_parse_mercari_purchases():
            '<a href="/transaction/m42175948060"><span>ヤドン PSA10</span><span>2026/09/20 02:57</span></a>')
     ps = MP.parse_purchases(src)
     assert [p["id"] for p in ps] == ["m83909619297", "m42175948060"]
-    assert ps[0]["url"] == "https://jp.mercari.com/item/m83909619297"
+    assert ps[0]["url"] == "https://jp.mercari.com/transaction/m83909619297"
     assert ps[0]["title"].startswith("ヤドン") and ps[0]["at"].day == 24
 
 

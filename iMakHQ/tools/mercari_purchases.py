@@ -29,7 +29,8 @@ def parse_purchases(src):
         texts = [_html.unescape(x.split(">", 1)[-1]).strip() for x in body.split("<")]
         texts = [x for x in texts if x]
         m = next((_DATE.search(x) for x in texts if _DATE.search(x)), None)
-        out.append({"id": parts[k], "url": "https://jp.mercari.com/item/" + parts[k],
+        # 表に入れるのは取引画面 (発送状況・取引メッセージが見られる)。ユーザー 2026-09-24「こっちの URL の方がよくない？」
+        out.append({"id": parts[k], "url": "https://jp.mercari.com/transaction/" + parts[k],
                     "title": texts[0] if texts else "",
                     "at": dt.datetime(*map(int, m.groups())) if m else None})
     return out
