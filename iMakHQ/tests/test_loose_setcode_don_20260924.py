@@ -35,3 +35,13 @@ def test_same_setcode_and_unnumbered_are_kept():
 def test_pokemon_numbers_unchanged():
     assert mp.loose_title_ok("PSA10 ライチュウ S 237/190", "SV4a-237", "S", "ライチュウ")
     assert not mp.loose_title_ok("PSA10 ライチュウ S 001/190", "SV4a-237", "S", "ライチュウ")
+
+
+def test_owner_prefixed_name_is_other_card():
+    """ミュウツーEX (EBB-045) に ロケット団のミュウツーex が出た (ユーザー「候補4枚とも全然違う」)。"""
+    for t in ("ロケット団のミュウツーex rr PSA10", "ロケット団のミュウツーex RR psa10",
+              "PSA10 ロケット団のミュウツーex RR ポケモン ポケカ"):
+        assert not mp.loose_title_ok(t, "EBB-045", "", "ミュウツーEX"), t
+    assert mp.loose_title_ok("PSA10 ミュウツーEX 1ED ポケモンカード", "EBB-045", "", "ミュウツーEX")
+    # 対象の名前そのものに「の」が入っている時は外さない
+    assert mp.loose_title_ok("PSA10 ロケット団のミュウツーex RR", "M2a-063", "", "ロケット団のミュウツーex")
