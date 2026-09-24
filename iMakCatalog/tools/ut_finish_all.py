@@ -57,9 +57,9 @@ def run(name: str, args: list[str]) -> None:
     log(f"終了 {name}: rc={rc}")          # ★落ちても後ろを止めない
 
 
-def pid_alive(pid: int) -> bool:
-    r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True)
-    return str(pid) in r.stdout
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from proc_nowindow import pid_alive  # noqa: E402  (tasklist を呼ぶと窓が開く。2026-09-24)
 
 
 def main() -> None:

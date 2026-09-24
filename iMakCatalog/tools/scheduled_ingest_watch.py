@@ -51,13 +51,17 @@ except Exception:
     pass
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from proc_nowindow import NO_WINDOW  # noqa: E402
+
+
 def task_result(name: str):
     """タスクの前回の結果コード。取れなければ None (落とさない)."""
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-Command",
                             f"(Get-ScheduledTask -TaskName '{name}' | Get-ScheduledTaskInfo)"
                             ".LastTaskResult"],
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, timeout=120, **NO_WINDOW)
         return int(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else None
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
