@@ -29,3 +29,19 @@ def test_every_candidate_path_reads_and_both_confirm_screens_write():
     assert 'url_verdict(_pidp, _p["url"], _uvp) == "diff"' in h                # 目視待ちを混ぜる所
     assert '"same", "再仕入れ①"' in g and '"diff", "再仕入れ①"' in g
     assert '"same", "補URL③"' in h and '"diff", "補URL③"' in h
+
+
+def test_url_same_pid_only_when_unique(tmp_path):
+    p = str(tmp_path / "u.json")
+    P.remember_url_verdicts([("A-1", "u1", "same", "x"), ("B-1", "u2", "same", "x"),
+                             ("C-1", "u2", "same", "y"), ("A-1", "u3", "diff", "x")], path=p)
+    d = P.load(p)
+    assert P.url_same_pid("u1", d) == "A-1"
+    assert P.url_same_pid("u2", d) == ""        # 割れている = 使わない
+    assert P.url_same_pid("u3", d) == ""
+
+
+def test_newcand_reads_and_writes():
+    s = SRC("newcand_confirm.py")
+    assert "_sp = _url_same(p[\"url\"])" in s
+    assert '"same", "新規候補")' in s

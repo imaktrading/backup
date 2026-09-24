@@ -634,9 +634,25 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
     #   残りの供給URLは**補URL**にすればいい (捨てない = 供給の厚み)。
     #   ① 既に結論が出ているカード → 人に見せず自動で補URLへ
     #   ② 今回まとめて出てくる同じカード → 先頭1件だけ見せ、残りは確定時に自動で補URLへ
+    try:
+        import psa_label_learned as _PLL
+        _uvd = _PLL.load(_PLL.URL_PATH)
+        _url_same = lambda u: _PLL.url_same_pid(u, _uvd)      # noqa: E731
+        _cat_of = _PLL.category_of
+    except Exception:                                          # noqa: BLE001 読めなければ従来どおり
+        _url_same = lambda u: ""                                # noqa: E731
+        _cat_of = lambda pid: ""                                # noqa: E731
     auto_aux, items, groups, over_cap = [], [], {}, []
     for p in all_items:
         no = p["card_no"]
+        # ★2026-09-24: どこかの画面で目視して「この URL はカード B」と決まっていれば、それを使う
+        #   (ユーザー「A が B と確定したら、どの処理で出てきても B として扱う」)
+        _sp = _url_same(p["url"])
+        if _sp:
+            _cat = _cat_of(_sp)
+            p["decided"] = (f"{_cat}:{_sp}" if _cat else _sp, _sp, _cat)
+            auto_aux.append(p)
+            continue
         if no and no in decided:
             p["decided"] = decided[no]
             auto_aux.append(p)
@@ -1585,6 +1601,12 @@ def save(items, res):
                           (d.get("price") if isinstance(d.get("price"), int) else ""),
                           "", SHEET_CATEGORY, key, p["pid"], d["src_itemid"], today])
     picks = mark_use(picks, already_listed_keys() | live_key_set())
+    # ★2026-09-24: 目視で決めた「この仕入元 URL はカード B」を、画面をまたいで使えるよう残す
+    try:
+        import psa_label_learned as _PLL
+        _PLL.remember_url_verdicts([(r[8], r[2], "same", "新規候補") for r in picks if r[8] and r[2]])
+    except Exception as _e_uv:                                  # noqa: BLE001
+        print(f"  ⚠ カード単位の記録skip ({type(_e_uv).__name__}: {_e_uv})")
     if picks:
         _append_tab(OUT_TAB, OUT_HEADER, picks)
         n_list = sum(1 for r in picks if r[0] == USE_LIST)

@@ -185,3 +185,11 @@ def url_verdict(card_pid, url, data=None):
     d = load(URL_PATH) if data is None else data
     e = (d.get(norm_url(url)) or {}).get(str(card_pid or "").split(":")[-1].strip()) or {}
     return e.get("v") or ""
+
+
+def url_same_pid(url, data=None):
+    """その仕入元 URL が目視で「同じ」と決まったカードが **1つだけ** なら、その product_id。"""
+    d = load(URL_PATH) if data is None else data
+    e = d.get(norm_url(url)) or {}
+    same = [pid for pid, v in e.items() if (v or {}).get("v") == "same"]
+    return same[0] if len(same) == 1 else ""
