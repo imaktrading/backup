@@ -10,8 +10,12 @@
      (NO. / 商品ID / 商品名 / 注文番号 / 販売日 / country / 商品価格 / 営業利益の式 / カテゴリ)。
      手数料・仕入原価・追跡番号などは **今までどおり手で入れる**。
   2. 右に仕入れの列を持つ (V〜Z。U は手のメモが入っているので触らない):
-       V 仕入済 (チェック欄・手で付ける) / W 仕入日 (チェックを見て自動) / X 仕入先URL (商品管理シートから)
+       V 仕入済 (チェック欄) / W 仕入日 / X 買った先URL (メルカリの購入履歴から自動)
        Y 発送期限 (eBay) / Z 注文の状態 (未発送 / 発送済 / キャンセル / 返金。eBay から毎回更新)
+  2b. メルカリの購入履歴 (mercari_purchases.py) を読み、売れた出品の仕入元・補URL と一致する購入があれば
+      X に買った先・V にチェック・W に購入日を自動で入れる。候補に無い URL で買った分は手でチェック。
+      ★2026-09-24 ユーザー「補も含めて最安を改めて探すから、どこの URL を入れているのかわからん」:
+        以前は X に商品管理シートの A列を入れていたが、実際に買った先と違うので **買った先だけ** にした。
   3. 仕入れ待ち (V 未チェック かつ Z=未発送) を赤く塗り、件数を STATUS に書く (コンソールの知らせ)。
 
 安全のため:
@@ -47,7 +51,7 @@ JST = dt.timezone(dt.timedelta(hours=9))
 C_NO, C_ITEM, C_TITLE, C_ORDER, C_DATE, C_COUNTRY, C_PRICE = 0, 1, 2, 3, 4, 5, 6
 C_TRACK, C_CAT = 13, 17
 C_DONE, C_DONE_AT, C_URL, C_SHIPBY, C_STATE = 21, 22, 23, 24, 25     # V W X Y Z
-HEAD = ["仕入済", "仕入日", "仕入先URL", "発送期限", "注文の状態"]
+HEAD = ["仕入済", "仕入日", "買った先URL", "発送期限", "注文の状態"]
 
 COUNTRY = {
     "US": "United States", "GB": "United Kingdom", "AU": "Australia", "DE": "Germany",
@@ -140,7 +144,7 @@ def country_of(order):
     return COUNTRY.get(cc, cc)
 
 
-def new_rows(orders, existing, next_no, url_of=lambda sku, iid: "", start=START_DATE):
+def new_rows(orders, existing, next_no, start=START_DATE):
     """表に足す行 (21列目まで + V〜Z)。existing = 表にある注文番号の集合。"""
     out = []
     for o in sorted(orders, key=lambda o: o.get("creationDate") or ""):
@@ -158,7 +162,6 @@ def new_rows(orders, existing, next_no, url_of=lambda sku, iid: "", start=START_
             r[C_DATE], r[C_COUNTRY], r[C_PRICE] = day.strftime("%Y/%m/%d"), country_of(o), price_usd(o, li)
             r[C_CAT] = category_of(title)
             r[C_DONE] = order_state(o) == "発送済"             # 送ってある = 仕入れ済み
-            r[C_URL] = url_of(li.get("sku") or "", iid)
             r[C_SHIPBY] = sb.strftime("%Y/%m/%d") if sb else ""
             r[C_STATE] = order_state(o)
             out.append(r)
@@ -210,20 +213,75 @@ def _ws():
     return gc.open_by_key(SALES_SHEET_ID).get_worksheet_by_id(SALES_GID)
 
 
-def _url_lookup():
-    """(sku, itemId) → 商品管理シートの仕入元 (A列)。読めなければ常に ''。"""
+def _candidate_lookup():
+    """(sku, itemId) → 売れた出品の仕入元 (A列 + 補URL) のメルカリ id の集合。読めなければ None。"""
     try:
+        import sheet_io as S
         import sold_restock_worklist as W
+        from mercari_purchases import mercari_id
         sheets = W._sheets()
     except Exception as e:                                     # noqa: BLE001
-        print(f"  (商品管理シートを読めませんでした: {e} — 仕入先URL は空で足します)")
-        return lambda sku, iid: ""
+        print(f"  (商品管理シートを読めませんでした: {e} — 買った先は今回は結びません)")
+        return None
+    cols = [0] + [S.PRODUCT_COL_AUX_START + k for k in range(S.PRODUCT_AUX_MAX)]
 
     def f(sku, iid):
         _l, _n, row = W.find_row(sheets, (sku or "").strip(), (iid or "").strip())
-        u = ((row[0] if row else "") or "").strip()
-        return u if u.startswith("http") else ""
+        if not row:
+            return set()
+        return {mercari_id(row[c]) for c in cols if len(row) > c and mercari_id(row[c])}
     return f
+
+
+def link_targets(rows, by_id):
+    """買った先を結ぶ対象の行 [(行番号, 行, 注文)] (純関数)。
+
+    未発送の注文だけ。発送済みは発送日より後の購入を結んでしまう
+    (実例 2026-09-24: 9/19 に発送済みのヤドンに、9/23 の注文のための 9/24 の購入が結ばれた)。
+    """
+    out = []
+    for n, r in enumerate(rows[1:], 2):
+        r = r + [""] * (C_STATE + 1 - len(r))
+        o = by_id.get(norm_order(r[C_ORDER]))
+        if o and not r[C_URL].strip() and r[C_STATE] == "未発送":
+            out.append((n, r, o))
+    return out
+
+
+def link_purchases(ws, by_id, today_rows):
+    """買った先を結ぶ (I/O)。書いたセル数を返す。仕入れ待ちが無い時はメルカリを読まない。"""
+    import gspread.utils as GU
+    import mercari_purchases as MP
+    targets = link_targets(today_rows, by_id)
+    if not any(r[C_STATE] == "未発送" and not is_checked(r[C_DONE]) for _n, r, _o in targets):
+        return 0
+    cand = _candidate_lookup()
+    if cand is None:
+        return 0
+    try:
+        buys = MP.fetch_purchases()
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ メルカリの購入履歴を読めませんでした: {e}")
+        return 0
+    orders = []
+    for n, r, o in targets:
+        ids = set()
+        for li in o.get("lineItems") or []:
+            ids |= cand(li.get("sku") or "", str(li.get("legacyItemId") or ""))
+        day = _jst_day(o.get("creationDate"))
+        if ids and day:
+            orders.append((n, day, ids))
+    hit = MP.match(orders, buys)
+    ups = []
+    for n, p in hit.items():
+        ups.append({"range": GU.rowcol_to_a1(n, C_DONE + 1), "values": [[True]]})
+        ups.append({"range": GU.rowcol_to_a1(n, C_DONE_AT + 1), "values": [[p["at"].strftime("%Y/%m/%d")]]})
+        ups.append({"range": GU.rowcol_to_a1(n, C_URL + 1), "values": [[p["url"]]]})
+        print(f"  買った先: {n}行目 ← {p['url']} ({p['at']:%m/%d %H:%M} {p['title'][:30]})")
+    if ups:
+        ws.batch_update(ups, value_input_option="USER_ENTERED")
+    print(f"  メルカリ購入履歴 {len(buys)}件 / 結べた注文 {len(hit)}件")
+    return len(ups)
 
 
 def _format(ws, last_row):
@@ -274,7 +332,7 @@ def main(argv):
     # 足す行の NO. は数字の最大 +1
     nos = [int(r[C_NO]) for r in rows[1:] if r and r[C_NO].strip().isdigit()]
     existing = {norm_order(r[C_ORDER]) for r in rows[1:] if len(r) > C_ORDER and norm_order(r[C_ORDER])}
-    add = new_rows(orders, set(existing), (max(nos) if nos else 0) + 1, _url_lookup())
+    add = new_rows(orders, set(existing), (max(nos) if nos else 0) + 1)
 
     # 既存の行: V〜Z だけを更新
     updates = []
@@ -301,7 +359,7 @@ def main(argv):
     print(f"注文 {len(orders)}件を読みました / 表 {len(rows) - 1}行")
     for r in add:
         print(f"  足す: NO.{r[C_NO]} {r[C_DATE]} {r[C_COUNTRY]} ${r[C_PRICE]} {r[C_STATE]} 期限{r[C_SHIPBY]} "
-              f"{r[C_TITLE][:50]} {'(仕入先あり)' if r[C_URL] else '(仕入先なし)'}")
+              f"{r[C_TITLE][:50]}")
     print(f"  既存の行の更新 {len(updates)}セル")
     if not write:
         print("(--write で書きます)")
@@ -325,6 +383,7 @@ def main(argv):
         ws.batch_update(updates, value_input_option="USER_ENTERED")
     last = start + len(add) - 1
     _format(ws, last)
+    link_purchases(ws, by_id, ws.get_all_values())
     st = _write_status(ws.get_all_values())
     print(f"  書きました: 足した {len(add)}行 / 仕入れ待ち {st['waiting']}件"
           + (f" (いちばん早い発送期限 {st['earliest_ship_by']})" if st["earliest_ship_by"] else ""))

@@ -23,13 +23,13 @@ def _order(oid="10-15206-37276", created="2026-09-24T01:00:00.000Z", pay="PAID",
 
 
 def test_new_order_becomes_row_with_purchase_columns():
-    rows = O.new_rows([_order()], set(), 147, lambda sku, iid: "https://jp.mercari.com/item/m1")
+    rows = O.new_rows([_order()], set(), 147)
     assert len(rows) == 1
     r = rows[0]
     assert r[O.C_NO] == 147 and r[O.C_ORDER] == "10-15206-37276"
     assert r[O.C_DATE] == "2026/09/24" and r[O.C_COUNTRY] == "Indonesia" and r[O.C_PRICE] == 650.0
     assert r[O.C_CAT] == "TCG" and r[O.C_DONE] is False
-    assert r[O.C_URL].startswith("https://jp.mercari.com")
+    assert r[O.C_URL] == ""          # 買った先は購入履歴から結ぶ (A列は入れない)
     assert r[O.C_SHIPBY] == "2026/10/05" and r[O.C_STATE] == "未発送"
 
 
@@ -80,3 +80,38 @@ def test_console_notice():
     assert "仕入れ待ち 6件" in server.order_notice(st, now) and "10/02" in server.order_notice(st, now)
     assert server.order_notice(dict(st, waiting=0), now) == ""
     assert "止まっています" in server.order_notice(dict(st, at="2026-09-24T07:00:00"), now)
+
+
+def test_parse_mercari_purchases():
+    import mercari_purchases as MP
+    src = ('<a href="/transaction/m83909619297"><span>ヤドン PSA10 ポケモンカード</span>'
+           '<svg><path d="x"/></svg><span>2026/09/24 09:24</span><span>発送待ち</span></a>'
+           '<a href="/transaction/m42175948060"><span>ヤドン PSA10</span><span>2026/09/20 02:57</span></a>')
+    ps = MP.parse_purchases(src)
+    assert [p["id"] for p in ps] == ["m83909619297", "m42175948060"]
+    assert ps[0]["url"] == "https://jp.mercari.com/item/m83909619297"
+    assert ps[0]["title"].startswith("ヤドン") and ps[0]["at"].day == 24
+
+
+def test_match_same_card_sold_twice_goes_in_order():
+    """9/19 と 9/23 に同じヤドンが売れた。9/20 の購入は 9/19 の注文、9/24 の購入は 9/23 の注文。"""
+    import datetime as d
+    import mercari_purchases as MP
+    buys = [{"id": "m2", "at": d.datetime(2026, 9, 24, 9, 24)}, {"id": "m1", "at": d.datetime(2026, 9, 20, 2, 57)},
+            {"id": "m9", "at": d.datetime(2026, 9, 21)}]
+    orders = [(146, d.date(2026, 9, 23), {"m1", "m2"}), (145, d.date(2026, 9, 19), {"m1", "m2"})]
+    hit = MP.match(orders, buys)
+    assert hit[145]["id"] == "m1" and hit[146]["id"] == "m2"
+    # 候補に無い購入 (m9) は結ばない / 注文より前の購入は結ばない
+    assert MP.match([(1, d.date(2026, 9, 25), {"m1", "m9"})], buys) == {}
+
+
+def test_shipped_orders_are_not_linked_to_purchases():
+    """発送済みの注文には購入を結ばない (9/19 発送済みのヤドンに 9/24 の購入が結ばれた実例)。"""
+    def row(oid, state, url=""):
+        r = [""] * (O.C_STATE + 1)
+        r[O.C_ORDER], r[O.C_STATE], r[O.C_URL] = oid, state, url
+        return r
+    by_id = {k: {"orderId": k} for k in "ABC"}
+    rows = [[], row("A", "発送済"), row("B", "未発送"), row("C", "未発送", "https://jp.mercari.com/item/m1")]
+    assert [n for n, _r, _o in O.link_targets(rows, by_id)] == [3]
