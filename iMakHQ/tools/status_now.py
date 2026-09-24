@@ -16,6 +16,7 @@
     補足したいことがあれば出力の**後ろに**足す。出力自体を書き換えない。
 """
 import datetime
+import json
 import os
 import re
 import subprocess
@@ -46,6 +47,37 @@ def _backlog():
     着手は `claim.py next` (状態を変えるのでこの道具ではやらない)。
     """
     return _run([sys.executable, os.path.join(HERE, "claim.py"), "list"])
+
+
+COUNTS_CACHE = r"C:/dev/iMak_data/hq/console_counts.json"     # コンソールが数えて保存した件数
+COUNTS_FRESH_H = 6
+
+
+def _fmt_hoju(w):
+    s, c = w["search"], w["confirm"]
+    return (f"live PSA(TCG) {w['live_psa']}件 / 補0本 {w['targets']}件 "
+            f"→ 目視できる {c['ready']}件 (絵柄が未判定 {c['unjudged']}) / "
+            f"検索できる {s['can']}件 (探索不能 {s['no_cardno']} = 番号なし)")
+
+
+def _hoju_cached():
+    """コンソールが数えた件数 (6時間以内) → 1行。無ければ ""。
+
+    ★2026-09-24: 数え直しに 90秒かかり、ADV の起動時フック (status_now) が Claude Code の
+      起動の制限 60秒を超えて「Subprocess initialization did not complete within 60000ms」で
+      ADV が使えなくなった。コンソールが同じ count_workload で数えた結果を読む。
+    """
+    import datetime as _dt
+    try:
+        with open(COUNTS_CACHE, encoding="utf-8") as f:
+            c = json.load(f)
+        at = _dt.datetime.fromisoformat(c.get("at") or "")
+        w = (c.get("d") or {}).get("hoju") or {}
+        if (_dt.datetime.now() - at).total_seconds() > COUNTS_FRESH_H * 3600 or not w:
+            return ""
+        return _fmt_hoju(w) + f" (コンソールが {at:%m/%d %H:%M} に数えた値)"
+    except Exception:                                          # noqa: BLE001
+        return ""
 
 
 def _hoju():
@@ -394,7 +426,11 @@ def main():
     print(_backlog().rstrip())
 
     print("\n## 3. 出品の数字\n")
-    print("  " + _hoju())
+    # 保存済みの件数があればそれを使う。--fast (起動時フック) は数え直さない (60秒の制限を超えるため)
+    _hj = _hoju_cached()
+    if not _hj:
+        _hj = "(件数はコンソールで「残件を数え直す」を押すと出ます)" if "--fast" in sys.argv else _hoju()
+    print("  " + _hj)
     _cc = _cost_column()
     if _cc:
         print("  " + _cc)
