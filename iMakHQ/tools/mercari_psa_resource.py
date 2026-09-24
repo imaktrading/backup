@@ -812,9 +812,31 @@ def loose_search_kw(c):
 # 番号なしで拾った候補から外す語 (日本語版を売っているので、海外版は別の商品)
 _FOREIGN_WORDS = ("英語版", "海外版", "英語", "中国語", "韓国語", "繁体", "簡体", "ENGLISH")
 _PRINT_NO_RE = re.compile(r"(?<!\d)(\d{1,3})\s*/\s*([A-Za-z0-9-]{1,6})")
+_HASH_NO_RE = re.compile(r"#\s*(\d{1,3})(?!\d)")            # 「RAICHU #009」の形
+# 名前の直後に付くと **別のカード** になる語 (カビゴン ≠ カビゴンGX / ライチュウ ≠ ライチュウV)
+_NAME_SUFFIXES = ("VMAX", "VSTAR", "GX", "EX", "V", "BREAK", "&", "＆", "☆", "◇")
+# 名前の直前に付くと別のカード (リージョンフォーム)
+_NAME_PREFIXES = ("アローラ", "ガラル", "ヒスイ", "パルデア")
 
 
-def loose_title_ok(title, card_no="", rarity=""):
+def _name_is_other_card(title, name_jp):
+    """出品名の中の名前が、対象の名前に語が付いた **別のカード** か (純関数)。"""
+    nm = unicodedata.normalize("NFKC", name_jp or "").replace(" ", "").upper()
+    if not nm:
+        return False
+    t = unicodedata.normalize("NFKC", title or "").replace(" ", "").replace("　", "").upper()
+    found = False
+    for m in re.finditer(re.escape(nm), t):
+        found = True
+        after, before = t[m.end():], t[:m.start()]
+        ok_after = not any(after.startswith(s) and not nm.endswith(s) for s in _NAME_SUFFIXES)
+        ok_before = not any(before.endswith(p) and not nm.startswith(p) for p in _NAME_PREFIXES)
+        if ok_after and ok_before:
+            return False                              # そのままの名前で出ている箇所がある
+    return found
+
+
+def loose_title_ok(title, card_no="", rarity="", name_jp=""):
     """番号なしで拾った候補の出品名が、その対象カードであり得るか (純関数)。
 
     ★2026-09-24 ユーザー報告「補URL③入れ替えで、目視で仕入候補が違うケースが多い」。
@@ -836,9 +858,12 @@ def loose_title_ok(title, card_no="", rarity=""):
     _cn = (card_no or "").split("/")[0]            # '237/190' → '237' / 'SV4A-237' → 'SV4A-237'
     want = [x for x in re.split(r"[^0-9]", _cn.split("-")[-1]) if x]
     if want:
-        for m in _PRINT_NO_RE.finditer(t):
+        for m in list(_PRINT_NO_RE.finditer(t)) + list(_HASH_NO_RE.finditer(t)):
             if int(m.group(1)) != int(want[-1]):
                 return False
+    # ★2026-09-24: 名前に GX/V/ex 等やリージョン名が付いた別のカード (カビゴン ≠ カビゴンGX)
+    if name_jp and _name_is_other_card(t, name_jp):
+        return False
     return True
 
 
@@ -866,7 +891,7 @@ def pick_psa10_loose_candidates(items, name_jp, limit=6, rarity="", card_no=""):
             and not _is_lot(it.get("name") or "")   # ★まとめ売り/連番は1枚だけ買えない
             and key in _norm_name(it.get("name"))
             # ★2026-09-24: レアリティ必須・別番号/海外版は外す (loose_title_ok)
-            and loose_title_ok(it.get("name") or "", card_no, rarity)][:limit]
+            and loose_title_ok(it.get("name") or "", card_no, rarity, name_jp)][:limit]
 
 
 def parse_image_search_results(src):

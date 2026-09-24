@@ -34,3 +34,14 @@ def test_display_side_uses_the_same_check_and_pending_dedup():
     i = h.index("for _p in _pend:")
     assert '_have.add(_norm_url(_p["url"]))' in h[i:i + 300]
     assert "ctx.get(\"ng_by_iid\")" in h[i - 900:i]
+
+
+def test_name_with_suffix_or_region_is_another_card():
+    assert not M.loose_title_ok("PSA10カビゴンGX PROMO SM-P", "SM10-076", "R", "カビゴン")
+    assert not M.loose_title_ok("PSA10 ライチュウ&アローラライチュウGX RR", "SV4A-237", "S", "ライチュウ")
+    assert M.loose_title_ok("PSA10 カビゴン 076/095 R", "SM10-076", "R", "カビゴン")
+    assert M.loose_title_ok("PSA10 ジガルデGX SSR", "SM8B-225", "SSR", "ジガルデGX")   # 対象自体が GX
+
+
+def test_hash_number_is_checked():
+    assert not M.loose_title_ok("PSA10 ライチュウ RAICHU #009 Classic", "SV4A-237", "S", "ライチュウ")

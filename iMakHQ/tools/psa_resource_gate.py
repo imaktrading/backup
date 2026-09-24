@@ -267,19 +267,20 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
             _multi = False
     # ★2026-09-24: 探す側と同じ照合 (レアリティ必須・別番号/海外版/他社鑑定を外す) を、
     #   **既に貯まった** 番号未確認の候補にも掛ける (ユーザー「目視で仕入候補が違うケースが多い」)
-    _loose_rarity = ""
+    _loose_rarity = _loose_name = ""
     if card_no and not _multi:
         try:
             import mercari_psa_resource as _mpl
             _vs = _mpl.catalog_variants_for_cardno(card_no, category=category or "")
             _loose_rarity = ((_vs[0].get("rarity") if _vs else "") or "")
+            _loose_name = ((_vs[0].get("name_jp") if _vs else "") or "")
         except Exception:                                      # noqa: BLE001
-            _loose_rarity = ""
+            _loose_rarity = _loose_name = ""
     try:
         import mercari_psa_resource as _mpl2
         _loose_ok = lambda t: (_mpl2.is_psa10(t[2] if len(t) > 2 else "")      # noqa: E731
                                and _mpl2.loose_title_ok(t[2] if len(t) > 2 else "", card_no or "",
-                                                        _loose_rarity))
+                                                        _loose_rarity, _loose_name))
     except Exception:                                          # noqa: BLE001
         _loose_ok = lambda t: False                            # noqa: E731  判らない時は出さない
     _loose = [t for t in ([] if _multi else (mr.get("loose_cands") or []))
