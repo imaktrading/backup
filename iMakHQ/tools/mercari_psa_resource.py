@@ -20,6 +20,7 @@ import glob
 import json
 import os
 import re
+import unicodedata
 import sys
 import time
 import urllib.parse
@@ -63,7 +64,8 @@ def search_keyword(title, set_no):
 #     `CGC pristine …` が `CGCPRISTINE` になり、後方境界 `(?![A-Z])` が P に当たって
 #     **すり抜ける** (2026-07-30 実データ `CGC pristine PSA10 ワンピースデイ25 ルフィ P-110`
 #     で確認)。PSA9/8/7 の方は `PSA 9` 表記を拾うため空白除去後に当てる = 使う文字列が違う。
-_OTHER_GRADER_RE = re.compile(r"(?<![A-Z])(CGC|SGC|AGS|HGA|BGS|ARS|BVG|GMA)(?![A-Z])")
+# ★2026-09-24: PCG を追加 (「【PCG10鑑定品】…（同PSA10）」が PSA10 の候補として目視に出ていた)
+_OTHER_GRADER_RE = re.compile(r"(?<![A-Z])(CGC|SGC|AGS|HGA|BGS|ARS|BVG|GMA|PCG)(?![A-Z])")
 
 
 def is_psa10(name):
@@ -807,7 +809,40 @@ def loose_search_kw(c):
     return f"PSA10 {search_name(c.get('name_jp'))}" + (f" {r}" if r else "")
 
 
-def pick_psa10_loose_candidates(items, name_jp, limit=6, rarity=""):
+# 番号なしで拾った候補から外す語 (日本語版を売っているので、海外版は別の商品)
+_FOREIGN_WORDS = ("英語版", "海外版", "英語", "中国語", "韓国語", "繁体", "簡体", "ENGLISH")
+_PRINT_NO_RE = re.compile(r"(?<!\d)(\d{1,3})\s*/\s*([A-Za-z0-9-]{1,6})")
+
+
+def loose_title_ok(title, card_no="", rarity=""):
+    """番号なしで拾った候補の出品名が、その対象カードであり得るか (純関数)。
+
+    ★2026-09-24 ユーザー報告「補URL③入れ替えで、目視で仕入候補が違うケースが多い」。
+      名前だけで照合していたので、ライチュウ S (SV4a-237) にライチュウ クラシック /
+      ライチュウ&アローラライチュウGX が、デデンネ AR に PCG 鑑定品が、ピカチュウV に英語版が出ていた。
+      **はっきり別物と言える物だけ** を外す (ユーザー「違うのが並ぶのはいいとして」= 見分けは目視に任せる。
+      絞り過ぎると、出品名にレアリティや番号を書かない正しい仕入元まで消える):
+      - 出品名に **別の番号** (001/032 等) が書いてある
+      - 海外版
+      - レアリティ (2文字以上: AR/SR/SAR 等) が分かっている時に、それが書かれていない
+    """
+    t = unicodedata.normalize("NFKC", title or "")
+    tu = t.upper()
+    if any(w.upper() in tu for w in _FOREIGN_WORDS):
+        return False
+    r = (rarity or "").strip().upper()
+    if len(r) >= 2 and not re.search(r"(?<![A-Z])" + re.escape(r) + r"(?![A-Z])", tu):
+        return False
+    _cn = (card_no or "").split("/")[0]            # '237/190' → '237' / 'SV4A-237' → 'SV4A-237'
+    want = [x for x in re.split(r"[^0-9]", _cn.split("-")[-1]) if x]
+    if want:
+        for m in _PRINT_NO_RE.finditer(t):
+            if int(m.group(1)) != int(want[-1]):
+                return False
+    return True
+
+
+def pick_psa10_loose_candidates(items, name_jp, limit=6, rarity="", card_no=""):
     """★2026-08-01: **番号を確認できない**が名前は一致する PSA10 候補 (純関数)。
 
     なぜ要るか:
@@ -830,9 +865,8 @@ def pick_psa10_loose_candidates(items, name_jp, limit=6, rarity=""):
             if it.get("price", 0) > 0 and is_psa10(it.get("name") or "")
             and not _is_lot(it.get("name") or "")   # ★まとめ売り/連番は1枚だけ買えない
             and key in _norm_name(it.get("name"))
-            # 番号なしで引いた分は、レアリティが分かる時は出品名にも書かれている物だけ
-            # (同じ名前の別セット・別レアを減らす)
-            and (not rarity or rarity.upper() in (it.get("name") or "").upper())][:limit]
+            # ★2026-09-24: レアリティ必須・別番号/海外版は外す (loose_title_ok)
+            and loose_title_ok(it.get("name") or "", card_no, rarity)][:limit]
 
 
 def parse_image_search_results(src):
@@ -1228,7 +1262,8 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
                 if (not _failclosed and not c.get("multi_variant")
                         and should_offer_loose_single(c)):
                     _have = {t[1] for t in all_cands if t and len(t) > 1}
-                    loose = [t for t in pick_psa10_loose_candidates(items, c.get("name_jp"))
+                    loose = [t for t in pick_psa10_loose_candidates(
+                                 items, c.get("name_jp"), rarity=loose_rarity(c), card_no=card_no)
                              if t[1] not in _have]
                     kw2 = loose_search_kw(c)
                     try:
@@ -1238,7 +1273,8 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
                         items2 = parse_mercari_items(drv.page_source)
                         _seen = _have | {t[1] for t in loose}
                         loose += [t for t in pick_psa10_loose_candidates(
-                                      items2, c.get("name_jp"), rarity=loose_rarity(c))
+                                      items2, c.get("name_jp"), rarity=loose_rarity(c),
+                                      card_no=card_no)
                                   if t[1] not in _seen]
                         loose = sorted(loose, key=lambda t: t[0])[:6]
                         via += f"+番号なし再検索({len(items2)}件)"

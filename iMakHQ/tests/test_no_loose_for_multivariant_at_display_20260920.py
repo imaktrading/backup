@@ -16,7 +16,9 @@ import psa_resource_gate as G  # noqa: E402
 
 _MR = {"all_cands": [], "cands": [],
        "loose_cands": [(6700, "https://jp.mercari.com/item/m58955733903",
-                        "ゾロ77 【PSA10】トニートニー・チョッパー EB02-003")]}
+                        # ★2026-09-24: 見せる側で「分かっているレアリティ (SV8a-093=RR) が書かれていない」
+                        #   候補は落とすようにしたので、材料の出品名に RR を足した (この試験の目的は多変種の扱い)
+                        "ゾロ77 【PSA10】トニートニー・チョッパー EB02-003 RR")]}
 _C = {"snkrdunk_urls": [], "mercari_url": "", "mercari_jpy": None}
 
 

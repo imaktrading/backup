@@ -2279,9 +2279,16 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         _pend = _pending_by_iid.get(iid) or []
         if _pend and ref:
             _have = {_norm_url(c.get("url")) for c in cands}
+            # ★2026-09-24 ユーザー報告「同じ仕入候補が連続で並んでいる」: _have を足した分で
+            #   更新しておらず、目視待ちに同じ URL が複数あると全部並んでいた。
+            #   もう補URLに入っている物・過去に「違う」にした物も出さない (通常の候補と同じ門)
+            _have |= {_norm_url(_cell(vals[t["row"] - 1], AUX0 + k))
+                      for k in range(AUXN) if t.get("row") and 0 < t["row"] <= len(vals)}
+            _have |= {_norm_url(u) for u in (ctx.get("ng_by_iid") or {}).get(iid, [])}
             for _p in _pend:
                 if _norm_url(_p["url"]) in _have:
                     continue
+                _have.add(_norm_url(_p["url"]))
                 cands = list(cands) + [{"url": _p["url"], "site": _p.get("site") or "",
                                         "channel": _p.get("channel") or "",
                                         "image": _p.get("image") or "",
