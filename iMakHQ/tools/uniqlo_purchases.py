@@ -18,6 +18,12 @@ import datetime as dt
 import re
 import time
 
+try:                                     # 後片付けで uc が quit を2回呼び「ハンドルが無効」を出す (結果には無害)。
+    import undetected_chromedriver as _uc   # こちらは必ず明示的に quit するので、GC 時の quit は止める
+    _uc.Chrome.__del__ = lambda self: None
+except Exception:                        # noqa: BLE001
+    pass
+
 PROFILE = r"C:\Users\imax2\local_data\iMakHQ\uniqlo_buyer_profile"
 URL = "https://www.uniqlo.com/jp/ja/member/orders/products"
 MONITOR_SHEET_ID = "101KL6KxMugKqZeSp2W5L2ykTvT0Zwd3RzlfsHgiJsg0"   # 在庫監視シート (iMakeBayAPI/inventory_monitor)

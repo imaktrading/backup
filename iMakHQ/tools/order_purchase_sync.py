@@ -50,7 +50,7 @@ JST = dt.timezone(dt.timedelta(hours=9))
 # 0 始まりの列番号
 C_NO, C_ITEM, C_TITLE, C_ORDER, C_DATE, C_COUNTRY, C_PRICE = 0, 1, 2, 3, 4, 5, 6
 C_SHIP, C_TAX, C_FEE, C_AD, C_NET = 7, 8, 9, 10, 11
-C_TRACK, C_CAT = 13, 17
+C_COST, C_TRACK, C_CAT = 12, 13, 17
 C_DONE, C_DONE_AT, C_URL, C_SHIPBY, C_STATE = 21, 22, 23, 24, 25     # V W X Y Z
 HEAD = ["仕入済", "仕入日", "買った先URL", "発送期限", "注文の状態"]
 
@@ -395,6 +395,34 @@ def link_purchases(ws, by_id, today_rows):
     return len(ups)
 
 
+def fill_mercari_cost(ws, rows):
+    """買った先がメルカリで 仕入原価 (M列) が空の行に、商品ページの値段を入れる (I/O)。書いた件数。
+
+    手で入れた値は上書きしない。値段が読めなかった行は空のまま (手で入れる)。
+    """
+    import gspread.utils as GU
+    import mercari_purchases as MP
+    want = {}
+    for n, r in enumerate(rows[1:], 2):
+        r = r + [""] * (C_STATE + 1 - len(r))
+        m = re.search(r"jp\.mercari\.com/transaction/(m\d+)", r[C_URL])
+        if m and not r[C_COST].strip():
+            want[n] = m.group(1)
+    if not want:
+        return 0
+    try:
+        price = MP.item_prices(sorted(set(want.values())))
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ メルカリの値段を読めませんでした: {str(e)[:60]}")
+        return 0
+    ups = [{"range": GU.rowcol_to_a1(n, C_COST + 1), "values": [[price[mid]]]}
+           for n, mid in want.items() if price.get(mid)]
+    if ups:
+        ws.batch_update(ups, value_input_option="USER_ENTERED")
+    print(f"  仕入原価 (メルカリの値段) {len(ups)}件 / 読めなかった {len(want) - len(ups)}件")
+    return len(ups)
+
+
 def _link_mercari(targets):
     import mercari_purchases as MP
     cand = _candidate_lookup()
@@ -544,6 +572,7 @@ def main(argv):
     _format(ws, last)
     fill_money(ws, by_id, ws.get_all_values())
     link_purchases(ws, by_id, ws.get_all_values())
+    fill_mercari_cost(ws, ws.get_all_values())
     st = _write_status(ws.get_all_values())
     print(f"  書きました: 足した {len(add)}行 / 仕入れ待ち {st['waiting']}件"
           + (f" (いちばん早い発送期限 {st['earliest_ship_by']})" if st["earliest_ship_by"] else ""))

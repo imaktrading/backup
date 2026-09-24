@@ -154,3 +154,12 @@ def test_uniqlo_purchase_parse_and_match():
     assert hit[9]["size"] == "MEN XXL"                      # サイズ違い (XL) は結ばない
     assert UQ.match([(9, d.date(2026, 9, 24), {("486159", "01")}, "XXL")], ps) == {}   # 色違い
     assert UQ.match([(9, d.date(2026, 9, 26), keys, "XXL")], ps) == {}                 # 注文より前の購入
+
+
+def test_mercari_item_price_parse():
+    """商品ページの値段 (送料込み) を読む。2026-09-24 実際の HTML の形。"""
+    import mercari_purchases as MP
+    src = ('<div data-testid="price" class="sc-33425bfe-0 hifYq"><span class="currency">¥</span>'
+           '<span>68,888</span></div><p>(税込) 送料込み</p>')
+    assert MP.parse_item_price(src) == 68888
+    assert MP.parse_item_price("<div>売り切れ</div>") is None

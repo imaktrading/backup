@@ -15,6 +15,12 @@ import html as _html
 import re
 import time
 
+try:                                     # 後片付けで uc が quit を2回呼び「ハンドルが無効」を出す (結果には無害)。
+    import undetected_chromedriver as _uc   # こちらは必ず明示的に quit するので、GC 時の quit は止める
+    _uc.Chrome.__del__ = lambda self: None
+except Exception:                        # noqa: BLE001
+    pass
+
 PROFILE = r"C:\Users\imax2\local_data\iMakHQ\mercari_buyer_profile"
 URL = "https://jp.mercari.com/mypage/purchases"
 _DATE = re.compile(r"(\d{4})/(\d{2})/(\d{2}) (\d{2}):(\d{2})")
@@ -83,6 +89,47 @@ def login():
         return False
     finally:
         d.quit()
+
+
+_PRICE = re.compile(r'data-testid="price"[^>]*>\s*<span[^>]*>[¥￥]</span>\s*<span>([\d,]+)</span>')
+
+
+def parse_item_price(src):
+    """商品ページの HTML → 値段 (円, 送料込み)。読めなければ None (純関数)。"""
+    m = _PRICE.search(src or "")
+    return int(m.group(1).replace(",", "")) if m else None
+
+
+def item_prices(ids):
+    """買った商品の値段 {id: 円} (I/O)。★ログインしない Chrome で商品ページを読む。
+
+    ユーザー (2026-09-24)「メルカリも仕入値入るの？」→「うん」。購入履歴の一覧には値段が無く、
+    取引画面はより強い本人確認を求めてログインが切れた。商品ページは売り切れ後も値段が残る。
+    入るのは出品価格 (送料込み)。ポイント・クーポンで引いた分は反映されない。
+    """
+    if not ids:
+        return {}
+    import undetected_chromedriver as uc
+    from mercari_psa_resource import _chrome_major, _quiet_chromedriver
+    _quiet_chromedriver()
+    o = uc.ChromeOptions()
+    for a in ("--headless=new", "--lang=ja-JP", "--window-size=1280,1400"):
+        o.add_argument(a)
+    maj = _chrome_major()
+    d = uc.Chrome(options=o, version_main=maj) if maj else uc.Chrome(options=o)
+    out = {}
+    try:
+        for mid in ids:
+            d.get("https://jp.mercari.com/item/" + mid)
+            for _ in range(10):
+                time.sleep(1.5)
+                v = parse_item_price(d.page_source)
+                if v:
+                    out[mid] = v
+                    break
+    finally:
+        d.quit()
+    return out
 
 
 def match(orders, purchases):
