@@ -33,15 +33,23 @@ def test_every_candidate_path_reads_and_both_confirm_screens_write():
 
 def test_url_same_pid_only_when_unique(tmp_path):
     p = str(tmp_path / "u.json")
-    P.remember_url_verdicts([("A-1", "u1", "same", "x"), ("B-1", "u2", "same", "x"),
-                             ("C-1", "u2", "same", "y"), ("A-1", "u3", "diff", "x")], path=p)
+    u1, u2, u3 = ("https://jp.mercari.com/item/m%d" % i for i in (1, 2, 3))
+    P.remember_url_verdicts([("A-1", u1, "same", "x"), ("B-1", u2, "same", "x"),
+                             ("C-1", u2, "same", "y"), ("A-1", u3, "diff", "x")], path=p)
     d = P.load(p)
-    assert P.url_same_pid("u1", d) == "A-1"
-    assert P.url_same_pid("u2", d) == ""        # 割れている = 使わない
-    assert P.url_same_pid("u3", d) == ""
+    assert P.url_same_pid(u1, d) == "A-1"
+    assert P.url_same_pid(u2, d) == ""        # 割れている = 使わない
+    assert P.url_same_pid(u3, d) == ""
 
 
 def test_newcand_reads_and_writes():
     s = SRC("newcand_confirm.py")
     assert "_sp = _url_same(p[\"url\"])" in s
     assert '"same", "新規候補")' in s
+
+
+def test_fake_urls_are_not_recorded(tmp_path):
+    """試験の架空 URL (https://m/0) が本物の台帳に入っていた (2026-09-24)。ドメインの無い URL は入れない。"""
+    p = str(tmp_path / "u.json")
+    assert P.remember_url_verdicts([("A-1", "https://m/0", "same", "x"),
+                                    ("A-1", "https://jp.mercari.com/item/m1", "same", "x")], path=p) == 1

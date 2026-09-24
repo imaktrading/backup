@@ -164,6 +164,12 @@ def norm_url(u):
     return str(u or "").split("?")[0].split("#")[0].strip().rstrip("/")
 
 
+def _is_real_url(u):
+    from urllib.parse import urlparse
+    host = urlparse(u or "").hostname or ""
+    return "." in host
+
+
 def remember_url_verdicts(items, path=URL_PATH, now=None):
     """[(card_pid, url, 'same'|'diff', 画面名)] を覚える。覚えた件数を返す。後から来た判断で上書き。"""
     data, n = load(path), 0
@@ -171,7 +177,8 @@ def remember_url_verdicts(items, path=URL_PATH, now=None):
     for pid, url, verdict, screen in items:
         pid = str(pid or "").split(":")[-1].strip()
         u = norm_url(url)
-        if not (pid and u and verdict in ("same", "diff")):
+        # 本物の仕入元 URL だけ (試験の架空 URL 'https://m/0' 等を本物の台帳に入れない)
+        if not (pid and _is_real_url(u) and verdict in ("same", "diff")):
             continue
         data.setdefault(u, {})[pid] = {"v": verdict, "at": at, "screen": screen}
         n += 1
