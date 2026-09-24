@@ -1911,7 +1911,8 @@ def confirm_survivors(t, vals, cache, ctx, today, *, ref_of, art_of, stats):
     _known = [_cell(_rv0, A)] + [_cell(_rv0, AUX0 + k) for k in range(AUXN)]
     _pre_ex = [u for u in _known if u] + list(ctx["ng_by_iid"].get(iid) or ())
     cands = gate._build_visual_candidates(mr, c, card_no=cn, category=_cat, exclude=_pre_ex,
-                                          skipped=(ctx.get("skipped_by") or {}).get(iid))
+                                          skipped=(ctx.get("skipped_by") or {}).get(iid),
+                                          card_pid=mp.split_key(t.get("key"))[1])
     # 自分が使用中で除いた本数は今までどおり数える (件数の内訳表示用)
     _kn = {_norm_url(u) for u in _known if u}
     _n_known = sum(1 for _c in gate._build_visual_candidates(mr, c, card_no=cn, category=_cat)
@@ -2285,10 +2286,18 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             _have |= {_norm_url(_cell(vals[t["row"] - 1], AUX0 + k))
                       for k in range(AUXN) if t.get("row") and 0 < t["row"] <= len(vals)}
             _have |= {_norm_url(u) for u in (ctx.get("ng_by_iid") or {}).get(iid, [])}
+            try:
+                import psa_label_learned as _PLLp
+                _uvp = _PLLp.load(_PLLp.URL_PATH)
+                _pidp = mp.split_key(t.get("key"))[1]
+            except Exception:                                  # noqa: BLE001
+                _PLLp, _uvp, _pidp = None, {}, ""
             for _p in _pend:
                 if _norm_url(_p["url"]) in _have:
                     continue
                 _have.add(_norm_url(_p["url"]))
+                if _PLLp and _pidp and _PLLp.url_verdict(_pidp, _p["url"], _uvp) == "diff":
+                    continue                            # どこかの画面で「違う」と決めた仕入元
                 cands = list(cands) + [{"url": _p["url"], "site": _p.get("site") or "",
                                         "channel": _p.get("channel") or "",
                                         "image": _p.get("image") or "",
@@ -2598,6 +2607,24 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
                   f"(この出品にこのURLは次回から出さない・復活は同タブ行削除)")
         except Exception as e:
             print(f"  ⚠ {NG_CAND_TAB} 記録skip ({type(e).__name__}: {e})")
+
+    # ★2026-09-24: 目視の「同じ / 違う」を **カード単位** でも残す (どの画面でも効かせる)。
+    #   上の NG タブは「この eBay 出品の候補として違う」で、同じカードの別の出品や再仕入れには効かない
+    try:
+        import psa_label_learned as _PLL
+        _uv = []
+        for _i, _urls in (confirmed or {}).items():
+            if _i < len(item_targets):
+                _pid = mp.split_key(item_targets[_i].get("key"))[1]
+                _uv += [(_pid, _u, "same", "補URL③") for _u in (_urls or [])]
+        for d in (res.get("diffs") or []):
+            _i = d.get("idx")
+            if _i is not None and _i < len(item_targets) and d.get("url"):
+                _uv.append((mp.split_key(item_targets[_i].get("key"))[1], d["url"], "diff", "補URL③"))
+        if _uv:
+            print(f"  📘 目視の同じ/違うをカード単位で記録: {_PLL.remember_url_verdicts(_uv)}件")
+    except Exception as _e_uv:                                  # noqa: BLE001
+        print(f"  ⚠ カード単位の記録skip ({type(_e_uv).__name__}: {_e_uv})")
 
     # --- 候補単位の「見送り」も台帳へ (2026-09-19) ---
     #   ★ここが無いと、出品を確定した時に **チェックを外しただけの候補**は記録が残らず、

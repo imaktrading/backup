@@ -151,3 +151,37 @@ def expected_pid_for_cert(cert, path=CERT_PATH):
     """人が決めたカードの product_id (カテゴリ抜き)。無ければ ""。"""
     e = load(path).get(str(cert or "").strip()) or {}
     return str(e.get("key") or "").split(":")[-1]
+
+
+# ★2026-09-24: 仕入元の出品 (URL) が「カード B と同じ/違う」を、画面をまたいで使う。
+#   今は「違う」が **その eBay 出品の候補** としてしか残らず、同じカードの別の出品や
+#   再仕入れの画面にまた出ていた (ユーザー「A が目視で B と確定したら、どの処理でも B として扱う」)。
+#   ラベル (鑑定番号) が分からない仕入元の候補は、この URL 単位で覚える。
+URL_PATH = r"C:/dev/iMak_data/hq/url_card_verdicts.json"
+
+
+def norm_url(u):
+    return str(u or "").split("?")[0].split("#")[0].strip().rstrip("/")
+
+
+def remember_url_verdicts(items, path=URL_PATH, now=None):
+    """[(card_pid, url, 'same'|'diff', 画面名)] を覚える。覚えた件数を返す。後から来た判断で上書き。"""
+    data, n = load(path), 0
+    at = now or datetime.now().isoformat(timespec="seconds")
+    for pid, url, verdict, screen in items:
+        pid = str(pid or "").split(":")[-1].strip()
+        u = norm_url(url)
+        if not (pid and u and verdict in ("same", "diff")):
+            continue
+        data.setdefault(u, {})[pid] = {"v": verdict, "at": at, "screen": screen}
+        n += 1
+    if n:
+        save(data, path)
+    return n
+
+
+def url_verdict(card_pid, url, data=None):
+    """その仕入元 URL が、カード card_pid に対して 'same' / 'diff' / '' (未判断)。"""
+    d = load(URL_PATH) if data is None else data
+    e = (d.get(norm_url(url)) or {}).get(str(card_pid or "").split(":")[-1].strip()) or {}
+    return e.get("v") or ""

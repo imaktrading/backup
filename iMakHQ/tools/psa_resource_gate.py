@@ -154,7 +154,7 @@ def key_from_verified_cert(cert, verified):
 
 
 def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, category="",
-                             exclude=(), skipped=None):
+                             exclude=(), skipped=None, card_pid=""):
     """視覚確証に出す仕入候補リストを作る(純関数)。
 
     mercari は最安1件でなく **all_cands(同番号の全変種)** を複数並べ、ユーザーが現物と一致する
@@ -319,6 +319,15 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
         if c.get("url") in _soon:
             c["sold_restockable"] = True
     out.sort(key=lambda c: 1 if c.get("sold_restockable") else 0)
+    # ★2026-09-24: どの画面でも、このカードに対して「違う」と目視で決めた仕入元は出さない
+    #   (psa_label_learned.url_verdict。ユーザー「A が B と確定したら、どの処理でも B として扱う」)
+    if card_pid:
+        try:
+            import psa_label_learned as _PLL
+            _uv = _PLL.load(_PLL.URL_PATH)
+            out = [x for x in out if _PLL.url_verdict(card_pid, x.get("url"), _uv) != "diff"]
+        except Exception:                                      # noqa: BLE001 読めなければ従来どおり
+            pass
     return out
 
 
@@ -1138,7 +1147,7 @@ def main():
             go += 1
             if _iid:
                 wait_resourceable.add(_iid)
-            _cands = _build_visual_candidates(mr, c)
+            _cands = _build_visual_candidates(mr, c, card_pid=mp.split_key(r.get("key"))[1])
             try:
                 _cur = float(r.get("ebay_price")) if r.get("ebay_price") else None
             except (TypeError, ValueError):
@@ -1767,6 +1776,22 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
             print(f"  📝 {REVIEW_SKIP_TAB}: +{len(new_skip)}件 記録(次回は視覚確証に出さない・再検討は同タブ行削除で復活)")
     except Exception as e:
         print(f"  ⚠ {REVIEW_SKIP_TAB} 記録skip ({type(e).__name__}: {e})")
+    # ★2026-09-24: 目視の「同じ / 違う」をカード単位でも残す (補URL③ 等の別画面でも効かせる)
+    try:
+        import psa_label_learned as _PLL
+        _uv = []
+        for _i, _urls in (sel or {}).items():
+            if isinstance(_i, int) and _i < len(restock_cands):
+                _pid = mp.split_key(restock_cands[_i].get("key"))[1]
+                _uv += [(_pid, _u, "same", "再仕入れ①") for _u in (_urls or [])]
+        for d in (res.get("diffs") or []):
+            _i = d.get("idx")
+            if isinstance(_i, int) and _i < len(restock_cands) and d.get("url"):
+                _uv.append((mp.split_key(restock_cands[_i].get("key"))[1], d["url"], "diff", "再仕入れ①"))
+        if _uv:
+            print(f"  📘 目視の同じ/違うをカード単位で記録: {_PLL.remember_url_verdicts(_uv)}件")
+    except Exception as _e_uv:                                  # noqa: BLE001
+        print(f"  ⚠ カード単位の記録skip ({type(_e_uv).__name__}: {_e_uv})")
     # ★2026-09-06: 「PSA10でない」= グレード対象外。「違う(精度事故)」に混ぜず、
     #   補URL候補NG と 新規候補NG の両方に落とす (補URLにも 🌱新規出品の種にも二度と出ない)。
     _np = []
