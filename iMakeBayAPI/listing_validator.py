@@ -121,8 +121,10 @@ def validate_row(title, specs, model, category, condition_id, price, pic_url, co
 
     # ===== PSA データとの整合性チェック (TCGリスティング限定) =====
     if psa_brand or psa_card_number:
-        # Item Specifics の "Set" は catalog の set_name_official (= canonical) がそのまま入る。
-        # PSA brand がセットコードを持たない命名の時の突合材料として渡す (2026-08-09)。
+        # Item Specifics の "Set" を、PSA brand がセットコードを持たない命名の時の突合材料として渡す
+        # (2026-08-09)。★2026-09-24 訂正: 中身は set_name_official ではなく **set_name_ebay**
+        # (例 'Promo Cards')。公式のセット名とは突合できないので、封入セットは
+        # _PROMO_BRAND_KEYWORDS 側で救う (Act 提案①)。
         psa_errors = validate_title_against_psa(
             title, psa_brand, psa_card_number,
             catalog_set_name=(specs or {}).get("Set"),
@@ -439,6 +441,9 @@ _PROMO_BRAND_KEYWORDS = [
     "WEEKLY SHONEN JUMP",            # 雑誌付録
     "ONE PIECE CARD THE BEST",       # 2026-05-27 追加: ST16-001 Uta 等の Catalog 補完 経路 (= PCC 再録元)
     "STORAGE BOX SET",               # 2026-05-27 追加: 同上
+    # 2026-09-24 追加 (Act 提案): BASE SHOP リミテッドカードコレクション vol.1 等。元の弾番号のまま
+    #   再録される封入セット。無いと OP08-001 チョッパー (cert154173706) が毎回セルフチェックで落ちていた
+    "LIMITED CARD COLLECTION",
 ]
 
 # 2026-04-25 ザル判定修正: ケース1 で許容するのは「既知のプロモ封入セットコード」のみ。

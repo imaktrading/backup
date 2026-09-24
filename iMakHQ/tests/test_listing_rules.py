@@ -329,3 +329,11 @@ if __name__ == "__main__":
     else:
         print(f"❌ {failed} test(s) failed.")
         sys.exit(1)
+
+
+def test_limited_card_collection_reprint_passes_20260924():
+    """BASE SHOP リミテッドカードコレクション封入の再録 (元の弾番号のまま) を落とさない (Act 提案①)。"""
+    import listing_validator as _V
+    t = "PSA 10 One Piece Japanese Tony Tony Chopper #OP08-001 Promo 2025"
+    assert _V.validate_title_against_psa(
+        t, "ONE PIECE JAPANESE LIMITED CARD COLLECTION VOL.1", "001", "Promo Cards") == []
