@@ -299,8 +299,18 @@ def _load_counts_cache():
         pass
 
 
-def refresh_counts():
-    """counts.py を別プロセスで走らせて保存 (同じタブを何度も読まない SHEET_READ_MEMO=1)。"""
+def refresh_counts(wait=False):
+    """counts.py を別プロセスで走らせて保存 (同じタブを何度も読まない SHEET_READ_MEMO=1)。
+
+    wait=True: 数え直しが既に動いていたら、それが終わるのを待ってから **改めて** 数える。
+      ★2026-09-24: 押した後の数え直しが、走行の途中で始まっていた定期の数え直し
+      (書き込み前の数字) とぶつかると何もせずに戻り、古い数字で「押しても件数が
+      減りませんでした (139件 → 139件)」と出ていた (実際は 123件に減っていた)。
+    """
+    if wait:
+        _t0 = time.time()
+        while STATE["counting"] and time.time() - _t0 < 300:
+            time.sleep(1)
     with _LOCK:
         if STATE["counting"]:
             return
@@ -317,6 +327,7 @@ def refresh_counts():
             raise RuntimeError(((r.stderr or "").strip().splitlines() or ["出力なし"])[-1][:120])
         at = datetime.datetime.now().isoformat(timespec="seconds")
         STATE["counts"], STATE["counts_at"], STATE["counts_error"] = d, at, ""
+        STATE["counts_fresh"] = time.time()
         os.makedirs(os.path.dirname(COUNTS_CACHE), exist_ok=True)
         with open(COUNTS_CACHE, "w", encoding="utf-8") as f:
             json.dump({"at": at, "d": d}, f, ensure_ascii=False)
@@ -971,10 +982,12 @@ def _run_worker(script, cmd=None):
         STATE["proc"] = None
         stopped = STATE["stopping"]
         STATE["stopping"] = False
-    refresh_counts()
+    _t_done = time.time()
+    refresh_counts(wait=True)
     # ★押したのに件数が減らなかったら、その場で言う (旧パネルと同じ判定を使う)。
     #   失敗した走行・止めた走行は何もしていないので突き合わせない。
-    if rc in (0, None) and not stopped:
+    #   ★2026-09-24: 走行が終わった後に数え直せていない時も突き合わせない (古い数字で誤報になる)
+    if rc in (0, None) and not stopped and STATE.get("counts_fresh", 0) >= _t_done:
         badge = script.get("badge")
         after = count_of(badge)
         try:

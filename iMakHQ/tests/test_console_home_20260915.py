@@ -292,7 +292,8 @@ def test_console_watches_for_counts_that_do_not_move():
     assert "before = count_of(script.get(\"badge\"))" in SERVER
     assert "cp.badge_did_not_move(before, after)" in SERVER
     assert "cp._record_badge_drift(badge, label, before, after)" in SERVER
-    assert "if rc in (0, None) and not stopped:" in SERVER      # 失敗・停止は突き合わせない
+    # 失敗・停止は突き合わせない。★2026-09-24: 走行後に数え直せていない時も突き合わせない
+    assert "if rc in (0, None) and not stopped and STATE.get(\"counts_fresh\", 0) >= _t_done:" in SERVER
 
 
 def test_sold_restock_count_uses_the_same_orders_as_the_button():
