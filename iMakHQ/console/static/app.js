@@ -40,6 +40,7 @@
     // ★2026-09-19 ユーザー「出品くんコンソールにオファーがないね」。
     //   旧パネルでは上段の青ボタンで、この画面のどこにも出ていなかった。
     offer: ["オファー対応", "ミラーに広告・オファー"],
+    order: ["注文の取り込み"],
     shelf: ["取下再出品", "再仕入れ一覧"]
   };
   var STATE_LABEL = { todo: "要対応", night: "夜間で自動", hold: "止めている", done: "残りなし", error: "数えられない", unknown: "未集計" };
@@ -168,6 +169,12 @@
     $("offer-line").innerHTML = "オファー — " + ot;
     $("offerbar").className = "watch offer" + (oj && oj.n ? " on" : "");
     $("offer-rows").innerHTML = rowsFor(ROWS.offer);
+    // ★2026-09-24 ユーザー「出品くんにボタンを作って、押したら取り込むでいい。夜間自動は要らない」
+    var dj = job("order_sync");
+    $("order-line").innerHTML = "仕入れ待ち — " + (dj && dj.n != null ? (dj.n ? "<b>" + num(dj) + "</b>件" : "なし") : "未取り込み") +
+      (dj && dj.note ? " <small>(" + esc(dj.note) + ")</small>" : "");
+    $("orderbar").className = "watch offer" + (dj && dj.n ? " on" : "");
+    $("order-rows").innerHTML = rowsFor(ROWS.order);
     $("fix-rows").innerHTML = rowsFor(ROWS.fix);
 
     var todo = h.todo + r.todo + todoOf(sl).length;

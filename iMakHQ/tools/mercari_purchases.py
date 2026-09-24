@@ -59,6 +59,32 @@ def fetch_purchases():
         d.quit()
 
 
+def login():
+    """ログインが切れた時に人が1回ログインする窓を開く (I/O)。購入履歴が出たら閉じる (最大15分)。
+
+        python mercari_purchases.py --login
+    """
+    import undetected_chromedriver as uc
+    from mercari_psa_resource import _chrome_major, _quiet_chromedriver
+    _quiet_chromedriver()
+    o = uc.ChromeOptions()
+    for a in (f"--user-data-dir={PROFILE}", "--lang=ja-JP", "--window-size=1280,1400"):
+        o.add_argument(a)
+    maj = _chrome_major()
+    d = uc.Chrome(options=o, version_main=maj) if maj else uc.Chrome(options=o)
+    try:
+        d.get(URL)
+        for _ in range(90):
+            time.sleep(10)
+            if "/mypage/purchases" in d.current_url and "/transaction/" in d.page_source:
+                print("ログインできました")
+                return True
+        print("15分でログインが終わりませんでした")
+        return False
+    finally:
+        d.quit()
+
+
 def match(orders, purchases):
     """注文の行と購入を結ぶ (純関数)。
 
@@ -82,3 +108,11 @@ def match(orders, purchases):
 def mercari_id(url):
     m = re.search(r"/item/(m\d+)", url or "")
     return m.group(1) if m else ""
+
+
+if __name__ == "__main__":
+    import sys
+    if "--login" in sys.argv:
+        sys.exit(0 if login() else 1)
+    for p in fetch_purchases():
+        print(p["at"], p["url"], p["title"][:40])

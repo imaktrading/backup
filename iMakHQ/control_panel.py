@@ -1468,6 +1468,20 @@ SCRIPTS = [
         "skip_postprocess": True,             # 読取専用。CSV の後処理を走らせない
     },
     {
+        # ★2026-09-24 ユーザー「オーダーに対して仕入が出来ているかを一覧で。仕入漏れを防ぐために」
+        #   「出品くんにボタンを作ってもらって、押したら取り込むでいいよ。夜間自動は要らない」。
+        #   eBay の注文を 【NEW】販売実績 に足し、手数料・収益・追跡番号の空欄を埋め、
+        #   メルカリの購入履歴から買った先を結ぶ。件数 = 仕入れ待ち (チェック無し × 未発送)。
+        "category": None, "type": "utility",
+        "label": "📦 注文の取り込み (仕入れ待ち)",
+        "badge": "order_sync",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "order_purchase_sync.py", "--write"],
+        "params": [],
+        "tip": "eBay の注文を販売実績シートに取り込み、仕入れ待ち (チェック無しで未発送) を数える",
+        "skip_postprocess": True,
+    },
+    {
         # ★2026-09-19: 同上。UK/AU/CA のミラーに 広告10% と ベストオファーを付ける
         #   (付いていない物だけ。押したら実行する = 2026-09-11 ユーザー確定)。
         "category": None, "type": "utility",
@@ -4879,7 +4893,7 @@ class ListingPanel:
                        "sold_restock": sr_txt,
                        "psa_gate": pg_txt, "restock_build": rb_txt, "restock_wb": rw_txt,
                        "hoju_status": hs_txt, "kuji_supply": kv_txt, "kuji_refresh": kr_txt,
-                       "offer_calc": of_txt}
+                       "offer_calc": of_txt, "order_sync": self._order_badge()[0]}
             # ★青の意味 = **押さないと減らない残件がある** (2026-09-03 ユーザー確定)。
             #   > 押さないと減らないのに黒文字だと、無意味
             #   > 自動で消化されるのは、黒でいいけど
@@ -4925,7 +4939,8 @@ class ListingPanel:
                         "restock_build": bool(rb.get("actionable")),
                         "restock_wb": bool(rw.get("actionable")),
                         "kuji_supply": bool(kv.get("can")),
-                        "kuji_refresh": bool(kr.get("can"))}
+                        "kuji_refresh": bool(kr.get("can")),
+                        "order_sync": self._order_badge()[1]}
             # 📊 補URL件数感は **見るだけ** なので act_kind に入れない (色を変えない)
         except Exception as e:                                    # noqa: BLE001
             # 数えられない時は**黙って0と出さない**。分からないと書く。
@@ -4947,6 +4962,20 @@ class ListingPanel:
         else:
             self._hoju_badge_cache(by_kind)
         self.paint_hoju_badge(by_kind, act_kind)
+
+    def _order_badge(self):
+        """(件数の文字, 青にするか)。仕入れ待ち = 販売実績で チェック無し × 未発送 (2026-09-24)。
+
+        押した時に取り込んだ時点の数 (order_purchase_sync.py が書く)。夜間の自動取り込みは無い。
+        """
+        try:
+            with open(r"C:/dev/iMak_data/hq/order_purchase_status.json", encoding="utf-8") as f:
+                od = json.load(f)
+        except Exception:                                         # noqa: BLE001
+            od = {}
+        if od.get("waiting"):
+            return self.todo_line("order_sync", od["waiting"], "販売実績シートで仕入れたらチェック"), True
+        return ("\n※仕入れ待ちはありません" if od else "\n※まだ取り込んでいません"), False
 
     def append_log(self, text):
         # tag判定

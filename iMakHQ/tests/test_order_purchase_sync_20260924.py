@@ -46,11 +46,30 @@ def test_cancelled_refunded_unpaid_and_old_orders_are_not_added():
     assert O.new_rows([_order(created="2026-08-20T01:00:00.000Z")], set(), 1) == []
 
 
-def test_non_usd_price_is_converted_with_payout_rate():
-    o = _order(cost={"value": "60.0", "currency": "GBP"},
-               due={"value": "59.81", "currency": "USD", "convertedFromValue": "45.56",
-                    "convertedFromCurrency": "GBP"})
-    assert O.price_usd(o, o["lineItems"][0]) == round(60 * 59.81 / 45.56, 2)
+def test_money_cells_match_hand_entered_rows():
+    """手で入れていた NO.136 (英国) / NO.139 (アイスランド) と同じ値になる (2026-09-24 実データ)。"""
+    uk = _order(cost={"value": "128.25", "currency": "GBP"})
+    uk_fin = [{"transactionType": "NON_SALE_CHARGE", "feeType": "AD_FEE", "bookingEntry": "DEBIT",
+               "amount": {"value": "18.97", "currency": "USD"}},
+              {"transactionType": "SALE", "bookingEntry": "CREDIT",
+               "amount": {"value": "140.4", "currency": "USD", "exchangeRate": "1.31869"},
+               "totalFeeAmount": {"value": "21.78", "currency": "GBP"},
+               "orderLineItems": [{"feeBasisAmount": {"value": "153.9", "currency": "GBP"}}]}]
+    c = O.money_cells(uk, uk_fin, "LX330207015JP")
+    assert c[O.C_PRICE] == 128.25 and c[O.C_TAX] == 25.65 and c[O.C_FEE] == -28.72
+    assert c[O.C_AD] == -18.97 and c[O.C_NET] == 121.43 and c[O.C_TRACK] == "LX330207015JP"
+    assert O.C_SHIP not in c
+    iceland = _order(cost={"value": "294.98", "currency": "USD"})
+    fin = [{"transactionType": "NON_SALE_CHARGE", "feeType": "AD_FEE", "bookingEntry": "DEBIT",
+            "amount": {"value": "32.45", "currency": "USD"}},
+           {"transactionType": "SALE", "amount": {"value": "250.09", "currency": "USD"},
+            "totalFeeAmount": {"value": "44.89", "currency": "USD"},
+            "orderLineItems": [{"feeBasisAmount": {"value": "294.98", "currency": "USD"}}]}]
+    c = O.money_cells(iceland, fin)
+    assert c[O.C_FEE] == -44.89 and c[O.C_AD] == -32.45 and c[O.C_NET] == 217.64
+    assert O.C_TAX not in c and O.C_TRACK not in c
+    # 入金明細がまだ無い注文は 商品価格だけ
+    assert set(O.money_cells(iceland, [])) == {O.C_PRICE}
 
 
 def test_waiting_is_unchecked_and_unshipped_only():
@@ -71,15 +90,15 @@ def test_category_names_match_sheet():
     assert O.category_of("something else") == ""
 
 
-def test_console_notice():
-    import datetime
+def test_console_button_count():
+    """押したら取り込む (夜間自動なし)。件数 = 最後に取り込んだ時点の仕入れ待ち。"""
     sys.path.insert(0, os.path.join(HQ, "console"))
     import server
-    now = datetime.datetime(2026, 9, 24, 12, 0)
-    st = {"at": "2026-09-24T11:30:00", "waiting": 6, "earliest_ship_by": "2026/10/02"}
-    assert "仕入れ待ち 6件" in server.order_notice(st, now) and "10/02" in server.order_notice(st, now)
-    assert server.order_notice(dict(st, waiting=0), now) == ""
-    assert "止まっています" in server.order_notice(dict(st, at="2026-09-24T07:00:00"), now)
+    assert server.order_job_info({"at": "2026-09-24T15:00:00", "waiting": 2})["n"] == 2
+    assert server.order_job_info({"at": "2026-09-24T15:00:00", "waiting": 2})["state"] == "todo"
+    assert server.order_job_info({"at": "2026-09-24T15:00:00", "waiting": 0})["state"] == "done"
+    assert server.order_job_info(None)["n"] is None
+    assert server.group_of("📦 注文の取り込み (仕入れ待ち)") == "offer"      # TOP の枠に出る
 
 
 def test_parse_mercari_purchases():

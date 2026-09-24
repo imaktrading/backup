@@ -49,6 +49,7 @@ JST = dt.timezone(dt.timedelta(hours=9))
 
 # 0 始まりの列番号
 C_NO, C_ITEM, C_TITLE, C_ORDER, C_DATE, C_COUNTRY, C_PRICE = 0, 1, 2, 3, 4, 5, 6
+C_SHIP, C_TAX, C_FEE, C_AD, C_NET = 7, 8, 9, 10, 11
 C_TRACK, C_CAT = 13, 17
 C_DONE, C_DONE_AT, C_URL, C_SHIPBY, C_STATE = 21, 22, 23, 24, 25     # V W X Y Z
 HEAD = ["仕入済", "仕入日", "買った先URL", "発送期限", "注文の状態"]
@@ -99,22 +100,71 @@ def _jst_day(iso):
     return d.astimezone(JST).date()
 
 
-def price_usd(order, li):
-    """その行の商品価格 (USD)。USD 以外は 支払額の換算率で直す。出せなければ ''。"""
-    cost = li.get("lineItemCost") or {}
+def item_price(li):
+    """商品価格 = **注文の通貨のまま** (英国はポンド)。手で入れていた行と同じ (NO.135/136)。"""
     try:
-        v = float(cost.get("value"))
+        return round(float((li.get("lineItemCost") or {}).get("value")), 2)
     except (TypeError, ValueError):
         return ""
-    if (cost.get("currency") or "USD") == "USD":
-        return round(v, 2)
-    due = (order.get("paymentSummary") or {}).get("totalDueSeller") or {}
+
+
+def _usd(amount, rate=None):
+    """eBay の金額 → ドル。ドル以外は rate (SALE の exchangeRate) で直す。直せなければ None。"""
     try:
-        if due.get("currency") == "USD" and due.get("convertedFromCurrency") == cost.get("currency"):
-            return round(v * float(due["value"]) / float(due["convertedFromValue"]), 2)
-    except (TypeError, ValueError, ZeroDivisionError, KeyError):
-        pass
-    return ""
+        v = float((amount or {}).get("value"))
+    except (TypeError, ValueError):
+        return None
+    if (amount.get("currency") or "USD") == "USD":
+        return v
+    return v * float(rate) if rate else None
+
+
+def money_cells(order, fin, tracking=""):
+    """eBay の注文 + 入金明細 → 表の金額・追跡番号の列 {列: 値} (純関数)。
+
+    手で入れていた行と同じ書き方 (2026-09-24 に NO.136/137/139 と突き合わせて確かめた):
+      商品価格・送料・売上税 = 注文の通貨 / 取引手数料・広告料 = ドルのマイナス /
+      収益 = 入金明細の SALE (手数料を引いた額) − 広告料。
+    取れない項目は入れない (空のまま = 手で入れる)。
+    """
+    out = {}
+    lis = order.get("lineItems") or []
+    if not lis:
+        return out
+    li = lis[0]
+    price = item_price(li)
+    if price != "":
+        out[C_PRICE] = price
+    ps = order.get("pricingSummary") or {}
+    try:
+        ship = float((ps.get("deliveryCost") or {}).get("value") or 0)
+    except ValueError:
+        ship = 0.0
+    if ship > 0:
+        out[C_SHIP] = round(ship, 2)
+    sale = next((t for t in fin or [] if t.get("transactionType") == "SALE"), None)
+    ad = sum(float((t.get("amount") or {}).get("value") or 0) for t in fin or []
+             if t.get("feeType") == "AD_FEE" and t.get("bookingEntry") == "DEBIT")
+    if sale:
+        rate = (sale.get("amount") or {}).get("exchangeRate")
+        base = ((sale.get("orderLineItems") or [{}])[0].get("feeBasisAmount") or {}).get("value")
+        try:
+            tax = round(float(base) - (price or 0) - ship, 2) if base and price != "" else 0
+        except ValueError:
+            tax = 0
+        if tax > 0:
+            out[C_TAX] = tax
+        fee = _usd(sale.get("totalFeeAmount"), rate)
+        if fee is not None:
+            out[C_FEE] = -round(fee, 2)
+        net = _usd(sale.get("amount"))
+        if net is not None:
+            out[C_NET] = round(net - ad, 2)
+    if ad:
+        out[C_AD] = -round(ad, 2)
+    if tracking:
+        out[C_TRACK] = tracking
+    return out
 
 
 def order_state(order):
@@ -159,7 +209,7 @@ def new_rows(orders, existing, next_no, start=START_DATE):
             iid, title = str(li.get("legacyItemId") or ""), li.get("title") or ""
             r = [""] * (C_STATE + 1)
             r[C_NO], r[C_ITEM], r[C_TITLE], r[C_ORDER] = next_no, iid, title, oid
-            r[C_DATE], r[C_COUNTRY], r[C_PRICE] = day.strftime("%Y/%m/%d"), country_of(o), price_usd(o, li)
+            r[C_DATE], r[C_COUNTRY], r[C_PRICE] = day.strftime("%Y/%m/%d"), country_of(o), item_price(li)
             r[C_CAT] = category_of(title)
             r[C_DONE] = order_state(o) == "発送済"             # 送ってある = 仕入れ済み
             r[C_SHIPBY] = sb.strftime("%Y/%m/%d") if sb else ""
@@ -202,6 +252,62 @@ def fetch_orders(days=DAYS):
         out += d.get("orders") or []
         url = d.get("next")
     return out
+
+
+def _headers():
+    import ads_add_new_listings as A
+    return {"Authorization": f"Bearer {A._token()}", "Accept": "application/json"}
+
+
+def fetch_finance(order_id, h):
+    """その注文の入金明細 (SALE / 広告料)。読めなければ []。"""
+    import requests
+    try:
+        r = requests.get("https://apiz.ebay.com/sell/finances/v1/transaction", headers=h,
+                         params={"filter": "orderId:{%s}" % order_id}, timeout=60)
+        return r.json().get("transactions") or [] if r.ok else []
+    except Exception:                                          # noqa: BLE001
+        return []
+
+
+def fetch_tracking(order, h):
+    """発送済みの注文の追跡番号 (複数なら空白区切り)。無ければ ''。"""
+    import requests
+    nums = []
+    for href in order.get("fulfillmentHrefs") or []:
+        try:
+            f = requests.get(href, headers=h, timeout=60)
+            if f.ok and f.json().get("shipmentTrackingNumber"):
+                nums.append(f.json()["shipmentTrackingNumber"])
+        except Exception:                                      # noqa: BLE001
+            pass
+    return " ".join(dict.fromkeys(nums))
+
+
+def fill_money(ws, by_id, rows):
+    """表の空欄 (商品価格〜収益・追跡番号) を eBay から埋める (I/O)。手で入れた値は上書きしない。書いたセル数。"""
+    import gspread.utils as GU
+    h, ups = None, []
+    cols = (C_PRICE, C_SHIP, C_TAX, C_FEE, C_AD, C_NET, C_TRACK)
+    for n, r in enumerate(rows[1:], 2):
+        r = r + [""] * (C_STATE + 1 - len(r))
+        o = by_id.get(norm_order(r[C_ORDER]))
+        if not o or order_state(o) not in ("未発送", "発送済"):
+            continue
+        need_fin = not (r[C_FEE].strip() and r[C_NET].strip())
+        need_track = not r[C_TRACK].strip() and order_state(o) == "発送済"
+        if not (need_fin or need_track):
+            continue
+        h = h or _headers()
+        fin = fetch_finance(norm_order(r[C_ORDER]), h) if need_fin else []
+        tr = fetch_tracking(o, h) if need_track else ""
+        for c, v in money_cells(o, fin, tr).items():
+            if c in cols and not r[c].strip():
+                ups.append({"range": GU.rowcol_to_a1(n, c + 1), "values": [[v]]})
+    if ups:
+        ws.batch_update(ups, value_input_option="USER_ENTERED")
+    print(f"  eBay から埋めた空欄 {len(ups)}セル (手数料・広告料・収益・追跡番号など)")
+    return len(ups)
 
 
 def _ws():
@@ -261,7 +367,8 @@ def link_purchases(ws, by_id, today_rows):
     try:
         buys = MP.fetch_purchases()
     except Exception as e:                                     # noqa: BLE001
-        print(f"  ⚠ メルカリの購入履歴を読めませんでした: {e}")
+        print(f"  ⚠ メルカリの購入履歴を読めませんでした: {str(e)[:60]}")
+        print("    → ログインし直す: python iMakHQ/tools/mercari_purchases.py --login (窓でログインしたら自動で閉じます)")
         return 0
     orders = []
     for n, r, o in targets:
@@ -383,6 +490,7 @@ def main(argv):
         ws.batch_update(updates, value_input_option="USER_ENTERED")
     last = start + len(add) - 1
     _format(ws, last)
+    fill_money(ws, by_id, ws.get_all_values())
     link_purchases(ws, by_id, ws.get_all_values())
     st = _write_status(ws.get_all_values())
     print(f"  書きました: 足した {len(add)}行 / 仕入れ待ち {st['waiting']}件"
