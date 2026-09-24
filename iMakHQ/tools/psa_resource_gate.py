@@ -1697,7 +1697,8 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
         items.append({"idx": n, "title": rc["title"], "card_no": rc["card_no"],
                       "ebay_url": rc["ebay_url"], "ref_image": ref,
                       "candidates": rc["candidates"], "v8": v8, "multi_variant": _mv,
-                      "cost_now": _cn, "price_now": _pn})
+                      "cost_now": _cn, "price_now": _pn,
+                      "catalog": prc.catalog_view(rc.get("key"), rc.get("title") or "")})
     if _skipped_done:
         print(f"  ⏭ 既にRESTOCK確定済 {_skipped_done}件は視覚確証スキップ(再作業防止)")
     if _skipped_review:

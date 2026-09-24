@@ -2337,7 +2337,8 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         items.append({"idx": idx, "title": (t.get("title") or "")[:90], "card_no": cn,
                       "ebay_url": _ebay_itm_url(iid), "ref_image": ref, "candidates": cands,
                       "multi_variant": _mv, "cost_now": _cost_now, "price_now": _price_now,
-                      "siblings": _sib, "psa_label": _lab})
+                      "siblings": _sib, "psa_label": _lab,
+                      "catalog": prc.catalog_view(t.get("key"), t.get("title") or "")})
         item_targets.append(t)
 
     no_cache, no_cand = stats["no_cache"], stats["no_cand"]

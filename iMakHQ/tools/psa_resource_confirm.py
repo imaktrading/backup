@@ -120,6 +120,25 @@ def same_card_by_label(a, b):
     return all(str(a[k]).strip() == str(b[k]).strip() for k in keys)
 
 
+def catalog_view(key, title=""):
+    """出品の KEY → 画面に出す「A = どのカードとして探しているか」(カタログの名前・番号・セット・画像)。
+
+    ★2026-09-24 ユーザー「A の特定は合っているの？ それが分からない。A を表示したら？ A が間違っているのも分かるし」。
+      候補を探す時は KEY からカタログを引いて検索語を作る (build_card_query)。その同じ値を出す。
+      KEY が無い / 引けない時は {} (画面に出さない)。
+    """
+    if not key:
+        return {}
+    try:
+        import mercari_psa_resource as _mp
+        q = _mp.build_card_query(title or "", "", key) or {}
+    except Exception:                                          # noqa: BLE001
+        return {}
+    hint = q.get("hint") or []
+    return {"key": key, "name": q.get("name_jp") or "", "card_no": q.get("card_no") or "",
+            "set": (hint[0] if hint else "") or "", "image": q.get("image") or ""}
+
+
 def psa_label_facts(cert, card_no=""):
     """cert → 目視照合に使う {number, variety, brand} (揺れないものだけ)。
 
@@ -1042,6 +1061,19 @@ def build_restock_html(items):
                          " — 候補間の差が出ないので判断材料になりません。"
                          "<b>絵柄の一致度</b>と現物の写真で判断してください。</div>"
                          ) if _same_val is not None else ""
+        # ★2026-09-24: A (出品のカードとして探しているカタログのカード) を出す。無い呼出は非表示
+        _cat = it.get("catalog") or {}
+        cat_html = ""
+        if _cat.get("key"):
+            _img = (f"<img src='{_proxied(_cat['image'])}' style='height:84px;vertical-align:middle;margin-right:8px'>"
+                    if _cat.get("image") else "")
+            cat_html = ("<div style='background:#f5f0e0;color:#333;padding:4px 8px;border-radius:4px;"
+                        "margin:3px 0;font-size:13px;display:flex;align-items:center'>" + _img +
+                        "<span>🅰 <b>このカードとして探しています</b> (カタログ): <b>" +
+                        _html.escape(_s(_cat.get("name"))) + "</b> / " + _html.escape(_s(_cat.get("card_no"))) +
+                        " / " + _html.escape(_s(_cat.get("set"))) +
+                        "<br><small>現物 (①) と違えば、候補ではなく <b>A (出品の KEY) が間違い</b>です。KEY: " +
+                        _html.escape(_s(_cat.get("key"))) + "</small></span></div>")
         cost_html = ""
         if _cn:
             _extra = f" / 現在価格 ¥{_html.escape(_pn)}" if _pn else ""
@@ -1052,7 +1084,7 @@ def build_restock_html(items):
             f"<div class='card' id='c{idx}' data-idx='{idx}' data-ref=\"{_proxied(ref)}\">"
             f"<div class='cnt' id='cnt{idx}'>RESTOCK ✓(買う候補のみ残す)</div>"
             f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>"
-            f"{idf_html}{vuni_html}{mv_html}{sib_html}{cost_html}"
+            f"{cat_html}{idf_html}{vuni_html}{mv_html}{sib_html}{cost_html}"
             # ★2026-07-28: タイトル/eBayリンクは候補リストの**上**に置く(候補が縦に長いと
             # 下端がスクロールしないと見えず、何のカードを見ているか分からなくなるため)。
             f"<div class='t'>{_html.escape(_s(it.get('title')))}</div>{v8_html}"
