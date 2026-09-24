@@ -163,3 +163,19 @@ def test_mercari_item_price_parse():
            '<span>68,888</span></div><p>(税込) 送料込み</p>')
     assert MP.parse_item_price(src) == 68888
     assert MP.parse_item_price("<div>売り切れ</div>") is None
+
+
+def test_uniqlo_order_detail_parse():
+    """受け取り前のオンライン注文は「商品一覧」に出ない。注文詳細から読む (2026-09-25 アーニャ UT の実例)。"""
+    import datetime as d
+    import uniqlo_purchases as UQ
+    text = "\n".join(["注文番号: 0120050002609240834-2256034", "注文日", "2026/9/24", "注文状況: 出荷準備中",
+                      "注文内容", "マンガUT 集英社創業100周年 SPY×FAMILY", "商品番号: 489653", "カラー: 00 WHITE",
+                      "サイズ: MEN XXL", "¥1,990", "数量: 1", "小計: ¥1,990"])
+    ps = UQ.parse_order_detail(text, "https://www.uniqlo.com/jp/ja/member/orders/online-store/0120")
+    assert len(ps) == 1
+    p = ps[0]
+    assert (p["pid"], p["color"], p["size"], p["day"], p["price"]) == ("489653", "00", "MEN XXL", d.date(2026, 9, 24), 1990)
+    assert p["url"].endswith("/0120")
+    keys = UQ.official_keys(["https://www.uniqlo.com/jp/ja/products/E489653-000/00?colorDisplayCode=00&sizeDisplayCode=004"])
+    assert UQ.match([(152, d.date(2026, 9, 24), keys, UQ.size_key("US XL(JP XXL)"))], ps)[152]["price"] == 1990

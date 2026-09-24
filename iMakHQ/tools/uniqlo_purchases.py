@@ -54,6 +54,40 @@ def parse_purchases(text):
     return out
 
 
+ONLINE_URL = "https://www.uniqlo.com/jp/ja/member/orders/online-store"
+ONLINE_DAYS = 21          # この日数以内のオンライン注文だけ詳細を開く
+
+
+def parse_order_detail(text, url=""):
+    """オンライン注文の「注文詳細」の画面の文字 → 購入の list (純関数)。
+
+    ★2026-09-24: 「商品一覧」は受け取り (お届け) が済むまで出ない (9/24 のアーニャ UT が
+      商品準備中で出ず、結べなかった)。注文詳細には 商品番号・色・サイズ・金額 が載っている。
+    """
+    lines = [x.strip() for x in (text or "").splitlines()]
+    day = None
+    for i, x in enumerate(lines):
+        if x == "注文日" and i + 1 < len(lines):
+            m = re.search(r"(\d{4})/(\d{1,2})/(\d{1,2})", lines[i + 1])
+            day = dt.date(*map(int, m.groups())) if m else None
+            break
+    out = []
+    for p in parse_purchases(text):
+        p["day"], p["place"], p["url"] = day, "オンラインストア", url
+        out.append(p)
+    # 金額: 各商品の サイズ の後の「¥1,990」(数量の前)
+    k = 0
+    for i, x in enumerate(lines):
+        if x.startswith("商品番号") and k < len(out):
+            for y in lines[i + 1:i + 6]:
+                m = re.fullmatch(r"[¥￥]\s*([\d,]+)", y)
+                if m:
+                    out[k]["price"] = int(m.group(1).replace(",", ""))
+                    break
+            k += 1
+    return out
+
+
 def size_key(s):
     """'MEN XXL' / 'US XL(JP XXL)' / 'KIDS 140(10-11歳)' → 比べる形 ('XXL' / '140')。"""
     s = (s or "").upper()
@@ -142,9 +176,41 @@ def fetch_purchases():
             last = n
         if "/member/orders" not in d.current_url:
             raise RuntimeError("ユニクロのログインが切れています")
-        return parse_purchases(text)
+        out = parse_purchases(text)
+        try:
+            online = _online_recent(d)                         # 受け取り前の注文も (詳細から)
+            # 受け取り後は「商品一覧」にも同じ物が出る。二重に数えない (同じ購入を2つの注文に結ばない)
+            seen = {(p["pid"], p["color"], p["size"], p["day"]) for p in online}
+            out = online + [p for p in out if not (p.get("place") == "オンラインストア"
+                                                    and (p["pid"], p["color"], p["size"], p["day"]) in seen)]
+        except Exception as e:                                 # noqa: BLE001
+            print(f"  ⚠ ユニクロのオンライン注文を読めませんでした: {str(e)[:60]}")
+        return out
     finally:
         d.quit()
+
+
+def _online_recent(d, days=ONLINE_DAYS):
+    """直近のオンライン注文を1件ずつ開いて読む (I/O)。"""
+    d.get(ONLINE_URL)
+    time.sleep(10)
+    text = d.find_element("tag name", "body").text
+    dates = [dt.date(*map(int, m.groups()))
+             for m in re.finditer(r"注文日[:：]\s*(\d{4})/(\d{1,2})/(\d{1,2})", text)]
+    cutoff = dt.date.today() - dt.timedelta(days=days)
+    out = []
+    for i, day in enumerate(dates):
+        if day < cutoff:
+            break                                              # 新しい順に並んでいる
+        d.get(ONLINE_URL)
+        time.sleep(8)
+        btns = d.find_elements("xpath", '//*[normalize-space(text())="注文詳細"]')
+        if i >= len(btns):
+            break
+        d.execute_script("arguments[0].click()", btns[i])
+        time.sleep(8)
+        out += parse_order_detail(d.find_element("tag name", "body").text, d.current_url)
+    return out
 
 
 def login():

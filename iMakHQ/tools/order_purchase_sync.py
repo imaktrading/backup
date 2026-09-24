@@ -374,7 +374,8 @@ def link_purchases(ws, by_id, today_rows):
     ユニクロの出品 → ユニクロ公式の購入履歴 / それ以外 → メルカリの購入履歴。
     """
     import gspread.utils as GU
-    targets = [(n, r, o) for n, r, o in link_targets(today_rows, by_id) if not is_checked(r[C_DONE])]
+    # 手でチェック済みでも、買った先が空なら 買った先・仕入原価 は埋める (チェックと仕入日は触らない)
+    targets = link_targets(today_rows, by_id)
     if not targets:
         return 0
     hits = {}                                          # 行番号 → (日付, X に入れる値, 表示)
@@ -385,9 +386,15 @@ def link_purchases(ws, by_id, today_rows):
     if uq:
         hits.update(_link_uniqlo(uq))
     ups = []
-    for n, (day, url, note) in hits.items():
-        ups.append({"range": GU.rowcol_to_a1(n, C_DONE + 1), "values": [[True]]})
-        ups.append({"range": GU.rowcol_to_a1(n, C_DONE_AT + 1), "values": [[day.strftime("%Y/%m/%d")]]})
+    for n, (day, url, note, *rest) in hits.items():
+        price = rest[0] if rest else None
+        if price and not (today_rows[n - 1][C_COST].strip() if len(today_rows[n - 1]) > C_COST else ""):
+            ups.append({"range": GU.rowcol_to_a1(n, C_COST + 1), "values": [[price]]})   # 仕入原価 (ユニクロの注文詳細)
+        _r = today_rows[n - 1] + [""] * (C_STATE + 1)
+        if not is_checked(_r[C_DONE]):
+            ups.append({"range": GU.rowcol_to_a1(n, C_DONE + 1), "values": [[True]]})
+        if not _r[C_DONE_AT].strip() or not is_checked(_r[C_DONE]):
+            ups.append({"range": GU.rowcol_to_a1(n, C_DONE_AT + 1), "values": [[day.strftime("%Y/%m/%d")]]})
         ups.append({"range": GU.rowcol_to_a1(n, C_URL + 1), "values": [[url]]})
         print(f"  買った先: {n}行目 ← {url} ({note})")
     if ups:
@@ -467,7 +474,8 @@ def _link_uniqlo(targets):
             orders.append((n, day, keys, UQ.size_key(order_size(o))))
     hit = UQ.match(orders, buys)
     print(f"  ユニクロ購入履歴 {len(buys)}件 / 結べた注文 {len(hit)}件 (在庫監視シートに仕入元がある注文 {len(orders)}件)")
-    return {n: (p["day"], UQ.URL, "%s %s %s %s" % (p["day"], p["place"], p["size"], p["name"][:20]))
+    return {n: (p["day"], p.get("url") or UQ.URL, "%s %s %s %s" % (p["day"], p["place"], p["size"], p["name"][:20]),
+                p.get("price"))
             for n, p in hit.items()}
 
 
