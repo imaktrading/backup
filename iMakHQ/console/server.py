@@ -364,6 +364,31 @@ def backup_notice(st, now=None):
         return "バックアップ: %d時間 更新されていません (最後 %s)" % (hours, at.strftime("%m/%d %H:%M"))
     return ""
 
+ORDER_STATUS = r"C:/dev/iMak_data/hq/order_purchase_status.json"
+ORDER_STALE_H = 3
+
+
+def order_notice(st, now=None):
+    """注文 → 仕入れ (tools/order_purchase_sync.py) の結果 → 知らせ1行 / 無ければ "" (純関数)。
+
+    ★2026-09-24 ユーザー「仕入漏れを防ぐために」。仕入れ待ち (販売実績で チェック無し かつ 未発送) を出す。
+      取り込みが止まっていると 0件 に見えてしまうので、古い時はそれを出す。
+    """
+    now = now or datetime.datetime.now()
+    if not st:
+        return ""
+    try:
+        at = datetime.datetime.fromisoformat(st.get("at") or "")
+    except ValueError:
+        return "仕入れ待ち: 結果の時刻が読めません"
+    if (now - at).total_seconds() / 3600 > ORDER_STALE_H:
+        return "仕入れ待ち: 注文の取り込みが %s から止まっています" % at.strftime("%m/%d %H:%M")
+    n = int(st.get("waiting") or 0)
+    if not n:
+        return ""
+    sb = (st.get("earliest_ship_by") or "")[5:]
+    return "仕入れ待ち %d件 — 販売実績シートで仕入れたらチェック%s" % (n, (" (発送期限いちばん早い %s)" % sb) if sb else "")
+
 
 def _home_worker():
     cp = _cp()
@@ -395,6 +420,13 @@ def _home_worker():
     except Exception:                                          # noqa: BLE001
         _bk = None
     _bn = backup_notice(_bk)
+    try:
+        with open(ORDER_STATUS, encoding="utf-8") as f:
+            _on = order_notice(json.load(f))
+    except Exception:                                          # noqa: BLE001
+        _on = ""
+    if _on:
+        home["errors"].append(_on)
     if _bn:
         home["errors"].append(_bn)
     try:
