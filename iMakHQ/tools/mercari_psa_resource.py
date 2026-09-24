@@ -813,6 +813,10 @@ def loose_search_kw(c):
 _FOREIGN_WORDS = ("英語版", "海外版", "英語", "中国語", "韓国語", "繁体", "簡体", "ENGLISH")
 _PRINT_NO_RE = re.compile(r"(?<!\d)(\d{1,3})\s*/\s*([A-Za-z0-9-]{1,6})")
 _HASH_NO_RE = re.compile(r"#\s*(\d{1,3})(?!\d)")            # 「RAICHU #009」の形
+# ワンピース等の型番 「OP11-021」「ST01-005」「EB02-017」「P-006」の形 (2026-09-24 ジンベエ OP11-021 に ST01-005 が出た)
+_SETCODE_NO_RE = re.compile(r"(?<![A-Z0-9])([A-Z]{1,4}\d{0,3})\s*-\s*(\d{3})(?!\d)")
+# 対象がこの種類でないのに、出品名にこれがあれば **別の種類のカード** (ジンベエ L に ジンベエのドン!!カード)
+_OTHER_KIND_WORDS = ("ドン!!カード", "ドンカード", "DON!!カード", "DONカード")
 # 名前の直後に付くと **別のカード** になる語 (カビゴン ≠ カビゴンGX / ライチュウ ≠ ライチュウV)
 _NAME_SUFFIXES = ("VMAX", "VSTAR", "GX", "EX", "V", "BREAK", "&", "＆", "☆", "◇")
 # 名前の直前に付くと別のカード (リージョンフォーム)
@@ -860,6 +864,16 @@ def loose_title_ok(title, card_no="", rarity="", name_jp=""):
     if want:
         for m in list(_PRINT_NO_RE.finditer(t)) + list(_HASH_NO_RE.finditer(t)):
             if int(m.group(1)) != int(want[-1]):
+                return False
+    # ★2026-09-24: 型番が書いてあり、対象の型番と違う (OP11-021 の対象に {ST01-005})
+    mine = _SETCODE_NO_RE.search(unicodedata.normalize("NFKC", card_no or "").upper())
+    if mine:
+        for m in _SETCODE_NO_RE.finditer(tu):
+            if (m.group(1), m.group(2)) != (mine.group(1), mine.group(2)):
+                return False
+        # 対象がドン!!カードでないのに、出品名がドン!!カード
+        if not any(w.upper() in unicodedata.normalize("NFKC", name_jp or "").upper() for w in _OTHER_KIND_WORDS):
+            if any(unicodedata.normalize("NFKC", w).upper() in tu for w in _OTHER_KIND_WORDS):
                 return False
     # ★2026-09-24: 名前に GX/V/ex 等やリージョン名が付いた別のカード (カビゴン ≠ カビゴンGX)
     if name_jp and _name_is_other_card(t, name_jp):
