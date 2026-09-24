@@ -135,7 +135,8 @@ def test_title_blank_set_skipped():
              "game_ebay": "Pokémon TCG", "card_number_text": "020/019", "_language": "ja"}
     t = build_title_from_fields(map_specs_to_fields(specs, "2025"))
     assert "  " not in t                       # 二重スペース無し
-    assert t == "PSA 10 Pokemon Japanese #020/019 Marnie's Morpeko 2025"
+    # 2026-09-20: 余った枠は Gem Mint で埋める (ユーザー指示) ので末尾に付く
+    assert t == "PSA 10 Pokemon Japanese #020/019 Marnie's Morpeko 2025 Gem Mint"
 
 
 # --- verify→build: forced_card_id で指定カードから決定論生成 ---
