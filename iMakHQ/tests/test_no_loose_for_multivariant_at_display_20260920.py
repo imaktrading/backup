@@ -30,9 +30,16 @@ def test_多変種なら番号未確認の候補を出さない():
     assert _urls(card_no="EB02-003", category="one_piece_tcg") == []
 
 
-def test_単一変種なら今までどおり出す():
-    """絵柄が1つなら番号一致=正なので、救済枠は今までどおり出す。
-    (SV8A-093 は catalog で1変種。実測 2026-09-20 に cache から拾った実例)"""
+def test_単一変種でも同じ名前が他の番号にあれば出さない():
+    """★2026-09-24 ユーザー「候補が1件もなかった。目視に出すべきじゃない」。
+    SV8A-093 は1変種だが、同じ名前が別の番号にもある。
+    番号の無い出品名ではどの版か決められないので出さない。"""
+    assert _urls(card_no="SV8A-093", category="pokemon_tcg") == []
+
+
+def test_単一変種で名前も1種類なら出す(monkeypatch):
+    import mercari_psa_resource as mp
+    monkeypatch.setattr(mp, "catalog_name_kinds", lambda *a, **k: 1)
     assert len(_urls(card_no="SV8A-093", category="pokemon_tcg")) == 1
 
 

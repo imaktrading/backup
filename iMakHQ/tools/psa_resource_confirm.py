@@ -1065,15 +1065,18 @@ def build_restock_html(items):
         _cat = it.get("catalog") or {}
         cat_html = ""
         if _cat.get("key"):
-            _img = (f"<img src='{_proxied(_cat['image'])}' style='height:84px;vertical-align:middle;margin-right:8px'>"
-                    if _cat.get("image") else "")
             cat_html = ("<div style='background:#f5f0e0;color:#333;padding:4px 8px;border-radius:4px;"
-                        "margin:3px 0;font-size:13px;display:flex;align-items:center'>" + _img +
+                        "margin:3px 0;font-size:13px'>" +
                         "<span>🅰 <b>このカードとして探しています</b> (カタログ): <b>" +
                         _html.escape(_s(_cat.get("name"))) + "</b> / " + _html.escape(_s(_cat.get("card_no"))) +
                         " / " + _html.escape(_s(_cat.get("set"))) +
                         "<br><small>現物 (①) と違えば、候補ではなく <b>A (出品の KEY) が間違い</b>です。KEY: " +
                         _html.escape(_s(_cat.get("key"))) + "</small></span></div>")
+        acat_col = ""
+        if _cat.get("key"):
+            _ai = (f"<img src='{_proxied(_cat['image'])}' loading='lazy' onerror='imgFail(this,1)'>"
+                   if _cat.get("image") else "<div class='cph'>カタログに画像なし</div>")
+            acat_col = ("<div class='col psa'><div class='cap'>🅰 探しているカード(カタログ)</div>" + _ai + "</div>")
         cost_html = ""
         if _cn:
             _extra = f" / 現在価格 ¥{_html.escape(_pn)}" if _pn else ""
@@ -1089,7 +1092,9 @@ def build_restock_html(items):
             # 下端がスクロールしないと見えず、何のカードを見ているか分からなくなるため)。
             f"<div class='t'>{_html.escape(_s(it.get('title')))}</div>{v8_html}"
             f"<a href='{_html.escape(_s(it.get('ebay_url')))}' target='_blank'>元eBay出品</a>"
-            f"<div class='pair'><div class='col psa'><div class='cap'>① 現物(出品)</div>{ref_tag}</div>"
+            # ★2026-09-24 ユーザー「探しているカードの位置が悪い。現物の左側に現物と同じ大きさで並べたら？
+            #   カタログ・現物・候補」
+            f"<div class='pair'>{acat_col}<div class='col psa'><div class='cap'>① 現物(出品)</div>{ref_tag}</div>"
             f"{sup_col}"
             f"<div class='col cat'><div class='cap'>仕入候補(チェック=買う / 外す=仕入見送り)</div>"
             f"<div class='cands' onscroll='candPos(this)'>{''.join(cand_html)}</div>"

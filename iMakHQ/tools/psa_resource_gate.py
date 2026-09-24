@@ -278,7 +278,10 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
             _loose_rarity = _loose_name = ""
     try:
         import mercari_psa_resource as _mpl2
-        _loose_ok = lambda t: (_mpl2.is_psa10(t[2] if len(t) > 2 else "")      # noqa: E731
+        # ★2026-09-24: 同じ名前のカードがカタログに複数の番号である時は、番号の無い候補を出さない
+        #   (どの版か決められない。ジンベエ/ミュウツーEX/ヒビキのホウオウex で3件続けて全部別の版だった)
+        _name_unique = (not _loose_name) or _mpl2.catalog_name_kinds(_loose_name, category or "") == 1
+        _loose_ok = lambda t: (_name_unique and _mpl2.is_psa10(t[2] if len(t) > 2 else "")      # noqa: E731
                                and _mpl2.loose_title_ok(t[2] if len(t) > 2 else "", card_no or "",
                                                         _loose_rarity, _loose_name))
     except Exception:                                          # noqa: BLE001

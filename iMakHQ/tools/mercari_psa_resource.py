@@ -285,6 +285,37 @@ def card_meta_for_key(key, _cache={}, _db=r"C:/dev/iMak_data/catalog/products.sq
     return out
 
 
+_NAME_KINDS = {}
+
+
+def catalog_name_kinds(name_jp, category="", _db=r"C:/dev/iMak_data/catalog/products.sqlite"):
+    """その名前のカードが、カタログ (同じ作品) に **何種類の番号** であるか。引けなければ 0 (純関数+DB読み・1走行で覚える)。
+
+    ★2026-09-24 ユーザー「候補が1件もなかった。目視に出すべきじゃないし、無駄な作業」。
+      番号が書かれていない候補は名前で拾うが、同じ名前が複数の番号にある (ジンベエ / ミュウツーEX /
+      ヒビキのホウオウex) と、どの版か機械で決められず、実際3件続けて全部別の版だった。
+      パラレル (_p / _p1) は同じ番号なので1種類に数える。
+    """
+    key = (unicodedata.normalize("NFKC", name_jp or "").strip(), (category or "").strip())
+    if not key[0]:
+        return 0
+    if key in _NAME_KINDS:
+        return _NAME_KINDS[key]
+    import sqlite3
+    try:
+        con = sqlite3.connect(_db)
+        try:
+            sql = "SELECT product_id FROM products WHERE name_jp=?" + (" AND category=?" if key[1] else "")
+            rows = con.execute(sql, key if key[1] else key[:1]).fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return 0
+    nos = {re.sub(r"_.*$", "", (r[0] or "")).upper() for r in rows if r[0]}
+    _NAME_KINDS[key] = len(nos)
+    return len(nos)
+
+
 def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products.sqlite",
                                 limit=12, title_hint="", category=""):
     """card番号 → その番号の catalog 変種候補 [{product_id,name_jp,set,image}]。
