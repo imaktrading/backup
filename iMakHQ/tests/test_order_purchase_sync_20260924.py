@@ -134,3 +134,23 @@ def test_shipped_orders_are_not_linked_to_purchases():
     by_id = {k: {"orderId": k} for k in "ABC"}
     rows = [[], row("A", "発送済"), row("B", "未発送"), row("C", "未発送", "https://jp.mercari.com/item/m1")]
     assert [n for n, _r, _o in O.link_targets(rows, by_id)] == [3]
+
+
+def test_uniqlo_purchase_parse_and_match():
+    """ユニクロ公式の購入履歴 → 在庫監視シートの 商品番号+色 と eBay のサイズ (JP) で結ぶ。"""
+    import datetime as d
+    import uniqlo_purchases as UQ
+    text = "\n".join(["ポケモン UT", "商品番号: 486159", "カラー: 00 WHITE", "サイズ: MEN XXL",
+                      "購入日: 2026/9/25", "購入場所: オンラインストア", "レビューを書く",
+                      "ポケモン UT", "商品番号: 486159", "カラー: 00 WHITE", "サイズ: MEN XL",
+                      "購入日: 2026/9/25", "購入場所: ユニクロ なんばマルイ店"])
+    ps = UQ.parse_purchases(text)
+    assert [(p["pid"], p["color"], p["size"], p["day"]) for p in ps] == [
+        ("486159", "00", "MEN XXL", d.date(2026, 9, 25)), ("486159", "00", "MEN XL", d.date(2026, 9, 25))]
+    keys = UQ.official_keys(["https://www.uniqlo.com/jp/ja/products/E486159-000/00?colorDisplayCode=00&sizeDisplayCode=004"])
+    assert keys == {("486159", "00")}
+    assert UQ.size_key("US XL(JP XXL)") == "XXL" and UQ.size_key("MEN XXL") == "XXL"
+    hit = UQ.match([(9, d.date(2026, 9, 24), keys, "XXL")], ps)
+    assert hit[9]["size"] == "MEN XXL"                      # サイズ違い (XL) は結ばない
+    assert UQ.match([(9, d.date(2026, 9, 24), {("486159", "01")}, "XXL")], ps) == {}   # 色違い
+    assert UQ.match([(9, d.date(2026, 9, 26), keys, "XXL")], ps) == {}                 # 注文より前の購入

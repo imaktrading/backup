@@ -354,22 +354,58 @@ def link_targets(rows, by_id):
     return out
 
 
+def order_size(order):
+    """eBay 注文のサイズ (変種の Size / Sizes)。無ければ ''。"""
+    for li in order.get("lineItems") or []:
+        for a in li.get("variationAspects") or []:
+            if "size" in (a.get("name") or "").lower():
+                return a.get("value") or ""
+    return ""
+
+
+def is_uniqlo_order(order):
+    return any("UNIQLO" in (li.get("title") or "").upper() for li in order.get("lineItems") or [])
+
+
 def link_purchases(ws, by_id, today_rows):
-    """買った先を結ぶ (I/O)。書いたセル数を返す。仕入れ待ちが無い時はメルカリを読まない。"""
+    """買った先を結ぶ (I/O)。書いたセル数を返す。
+
+    仕入れ待ち (チェック無し × 未発送) の注文がある時だけ、その注文に関係する購入履歴を読む:
+    ユニクロの出品 → ユニクロ公式の購入履歴 / それ以外 → メルカリの購入履歴。
+    """
     import gspread.utils as GU
-    import mercari_purchases as MP
-    targets = link_targets(today_rows, by_id)
-    if not any(r[C_STATE] == "未発送" and not is_checked(r[C_DONE]) for _n, r, _o in targets):
+    targets = [(n, r, o) for n, r, o in link_targets(today_rows, by_id) if not is_checked(r[C_DONE])]
+    if not targets:
         return 0
+    hits = {}                                          # 行番号 → (日付, X に入れる値, 表示)
+    uq = [(n, r, o) for n, r, o in targets if is_uniqlo_order(o)]
+    mc = [(n, r, o) for n, r, o in targets if not is_uniqlo_order(o)]
+    if mc:
+        hits.update(_link_mercari(mc))
+    if uq:
+        hits.update(_link_uniqlo(uq))
+    ups = []
+    for n, (day, url, note) in hits.items():
+        ups.append({"range": GU.rowcol_to_a1(n, C_DONE + 1), "values": [[True]]})
+        ups.append({"range": GU.rowcol_to_a1(n, C_DONE_AT + 1), "values": [[day.strftime("%Y/%m/%d")]]})
+        ups.append({"range": GU.rowcol_to_a1(n, C_URL + 1), "values": [[url]]})
+        print(f"  買った先: {n}行目 ← {url} ({note})")
+    if ups:
+        ws.batch_update(ups, value_input_option="USER_ENTERED")
+    return len(ups)
+
+
+def _link_mercari(targets):
+    import mercari_purchases as MP
     cand = _candidate_lookup()
     if cand is None:
-        return 0
+        return {}
     try:
         buys = MP.fetch_purchases()
     except Exception as e:                                     # noqa: BLE001
         print(f"  ⚠ メルカリの購入履歴を読めませんでした: {str(e)[:60]}")
         print("    → ログインし直す: python iMakHQ/tools/mercari_purchases.py --login (窓でログインしたら自動で閉じます)")
-        return 0
+        return {}
     orders = []
     for n, r, o in targets:
         ids = set()
@@ -379,16 +415,32 @@ def link_purchases(ws, by_id, today_rows):
         if ids and day:
             orders.append((n, day, ids))
     hit = MP.match(orders, buys)
-    ups = []
-    for n, p in hit.items():
-        ups.append({"range": GU.rowcol_to_a1(n, C_DONE + 1), "values": [[True]]})
-        ups.append({"range": GU.rowcol_to_a1(n, C_DONE_AT + 1), "values": [[p["at"].strftime("%Y/%m/%d")]]})
-        ups.append({"range": GU.rowcol_to_a1(n, C_URL + 1), "values": [[p["url"]]]})
-        print(f"  買った先: {n}行目 ← {p['url']} ({p['at']:%m/%d %H:%M} {p['title'][:30]})")
-    if ups:
-        ws.batch_update(ups, value_input_option="USER_ENTERED")
     print(f"  メルカリ購入履歴 {len(buys)}件 / 結べた注文 {len(hit)}件")
-    return len(ups)
+    return {n: (p["at"].date(), p["url"], "%s %s" % (p["at"].strftime("%m/%d %H:%M"), p["title"][:30]))
+            for n, p in hit.items()}
+
+
+def _link_uniqlo(targets):
+    import uniqlo_purchases as UQ
+    try:
+        mon = UQ.monitor_urls()
+        buys = UQ.fetch_purchases()
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ ユニクロの購入履歴を読めませんでした: {str(e)[:60]}")
+        print("    → ログインし直す: python iMakHQ/tools/uniqlo_purchases.py --login (窓でログインしたら自動で閉じます)")
+        return {}
+    orders = []
+    for n, r, o in targets:
+        keys = set()
+        for li in o.get("lineItems") or []:
+            keys |= UQ.official_keys(mon.get(str(li.get("legacyItemId") or ""), []))
+        day = _jst_day(o.get("creationDate"))
+        if keys and day:
+            orders.append((n, day, keys, UQ.size_key(order_size(o))))
+    hit = UQ.match(orders, buys)
+    print(f"  ユニクロ購入履歴 {len(buys)}件 / 結べた注文 {len(hit)}件 (在庫監視シートに仕入元がある注文 {len(orders)}件)")
+    return {n: (p["day"], UQ.URL, "%s %s %s %s" % (p["day"], p["place"], p["size"], p["name"][:20]))
+            for n, p in hit.items()}
 
 
 def _format(ws, last_row):
