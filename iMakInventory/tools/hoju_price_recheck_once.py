@@ -37,7 +37,8 @@ def _next_task_start() -> datetime | None:
     """監視くんのタスク (iMakInventory_*) で一番近い次回起動."""
     try:
         out = subprocess.run(["schtasks", "/query", "/fo", "csv", "/nh"],
-                             capture_output=True, text=True, encoding="cp932").stdout
+                             capture_output=True, text=True, encoding="cp932",
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
     except Exception:
         return datetime.now()   # 分からない時は「すぐ始まる」扱い = 待つ
     best = None

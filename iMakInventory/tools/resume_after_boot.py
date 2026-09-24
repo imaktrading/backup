@@ -23,6 +23,13 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from proc_alive import pid_alive as _pid_alive  # noqa: E402
+
+# pythonw から console プログラムを呼ぶ時は必ず窓を出さない (出すと作業中の画面の前面を奪う)
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DECISION_LOG_DIR = ROOT / "decision_log"
 LOG_FILE = ROOT / "logs" / "resume_after_boot.log"
 
@@ -51,9 +58,9 @@ def log(msg: str) -> None:
 
 
 def pid_alive(pid: int) -> bool:
-    out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"],
-                         capture_output=True, text=True, encoding="cp932", errors="replace").stdout
-    return f'"{pid}"' in out
+    """tasklist を使わない (2026-09-24: 1分おきに窓が開いて前面を奪っていた)。判定不能は生きている扱い."""
+    alive = _pid_alive(pid)
+    return True if alive is None else alive
 
 
 def last_boot_time() -> datetime | None:
@@ -138,7 +145,7 @@ def interrupted(label: str, lock_name: str) -> str | None:
 
 def run_task(name: str) -> bool:
     r = subprocess.run(["schtasks", "/run", "/tn", name], capture_output=True,
-                       text=True, encoding="cp932", errors="replace")
+                       text=True, encoding="cp932", errors="replace", creationflags=_NO_WINDOW)
     log(f"  schtasks /run {name} → exit={r.returncode} {(r.stdout or r.stderr).strip()[:120]}")
     return r.returncode == 0
 

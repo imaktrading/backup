@@ -292,17 +292,11 @@ def _lock_pid_alive(content: str) -> Optional[bool]:
         return False
     # ★ Windows では os.kill(pid,0) は TerminateProcess を呼び「プロセスを終了」してしまう危険がある
     #   (生存チェックにならない)。tasklist で該当 pid の存在を安全に確認する (ctypes handle の落とし穴回避)。
+    #   ★ 2026-09-24: tasklist は pythonw から呼ぶと端末の窓が一瞬開いて前面を奪うので、
+    #   Windows API で直接見る (proc_alive.pid_alive、窓は出ない)。
     if sys.platform == "win32":
-        try:
-            import subprocess  # noqa: PLC0415
-            out = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                capture_output=True, text=True, timeout=10,
-            )
-            # 一致すれば pid を含む行が出る。無一致は "実行されていません/No tasks" のみ (pid を含まない)。
-            return str(pid) in (out.stdout or "")
-        except Exception:
-            return None
+        from proc_alive import pid_alive  # noqa: PLC0415
+        return pid_alive(pid)
     # POSIX: signal 0 は安全な存在確認 (終了させない)
     try:
         os.kill(pid, 0)

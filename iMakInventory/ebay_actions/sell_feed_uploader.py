@@ -123,7 +123,8 @@ def _kill_orphan_driver_processes() -> int:
     )
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, text=True, timeout=30,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         procs = json.loads((r.stdout or "").strip() or "[]")
     except Exception:
         return 0
@@ -139,7 +140,7 @@ def _kill_orphan_driver_processes() -> int:
         subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
                         "Stop-Process -Id " + ",".join(str(i) for i in orphans) +
                         " -Force -ErrorAction SilentlyContinue"],
-                       capture_output=True, timeout=30)
+                       capture_output=True, timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except Exception:
         return 0
     return len(orphans)
@@ -150,7 +151,8 @@ def _alive_pids() -> set:
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
                             "Get-Process | Select-Object -ExpandProperty Id"],
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, text=True, timeout=30,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         return {int(x) for x in (r.stdout or "").split() if x.strip().isdigit()}
     except Exception:
         return set()

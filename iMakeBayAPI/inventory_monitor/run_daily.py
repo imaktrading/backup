@@ -388,7 +388,8 @@ def main():
         try:
             res = subprocess.run(cmd, cwd=str(SCRIPT_DIR), env=env,
                                  capture_output=True, text=True, encoding="utf-8",
-                                 errors="replace", check=False)
+                                 errors="replace", check=False,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             ok = res.returncode == 0
             outputs[name] = (res.stdout or "") + "\n" + (res.stderr or "")
             _log(f"<<< step {name}: rc={res.returncode} ({'OK' if ok else 'NG'})")
@@ -433,7 +434,8 @@ def main():
         try:
             res = subprocess.run(cmd, cwd=str(SCRIPT_DIR), env=env,
                                  capture_output=True, text=True, encoding="utf-8",
-                                 errors="replace", check=False)
+                                 errors="replace", check=False,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             ok = res.returncode == 0
             outputs[name] = (res.stdout or "") + "\n" + (res.stderr or "")
             _log(f"<<< step {name}: rc={res.returncode} ({'OK' if ok else 'NG'})")

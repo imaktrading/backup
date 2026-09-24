@@ -26,7 +26,6 @@ from __future__ import annotations
 import os
 import re
 import socket
-import subprocess
 import sys
 import time
 from contextlib import contextmanager
@@ -59,13 +58,16 @@ def _pid_alive(pid: int) -> bool:
             return False
         except Exception:
             return True
+    # ★ os.kill(pid, 0) は Windows では「終了させて」しまうので使わない。
+    # ★ 2026-09-24: tasklist も使わない (pythonw から呼ぶと端末の窓が一瞬開いて前面を奪う)。
     try:
-        # ★ os.kill(pid, 0) は Windows では「終了させて」しまうので使わない
-        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                             capture_output=True, text=True, timeout=10)
-        return str(pid) in (out.stdout or "")
+        if str(SCRIPT_DIR) not in sys.path:
+            sys.path.insert(0, str(SCRIPT_DIR))
+        from proc_alive import pid_alive  # noqa: PLC0415
+        alive = pid_alive(pid)
     except Exception:
         return True
+    return True if alive is None else alive
 
 
 def _steal_if_dead(path: Path) -> None:
