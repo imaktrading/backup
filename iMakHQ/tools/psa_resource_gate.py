@@ -276,12 +276,28 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
             _loose_name = ((_vs[0].get("name_jp") if _vs else "") or "")
         except Exception:                                      # noqa: BLE001
             _loose_rarity = _loose_name = ""
+    _desc_v = lambda t: ""                                     # noqa: E731  (下で読めた時だけ差し替え)
     try:
         import mercari_psa_resource as _mpl2
         # ★2026-09-24: 同じ名前のカードがカタログに複数の番号である時は、番号の無い候補を出さない
         #   (どの版か決められない。ジンベエ/ミュウツーEX/ヒビキのホウオウex で3件続けて全部別の版だった)
         _name_unique = (not _loose_name) or _mpl2.catalog_name_kinds(_loose_name, category or "") == 1
-        _loose_ok = lambda t: (_name_unique and _mpl2.is_psa10(t[2] if len(t) > 2 else "")      # noqa: E731
+        # ★2026-09-24 ユーザー「商品説明に書いている場合もある」: 夜に読んだ説明の番号 (mercari_desc_numbers)。
+        #   同じ番号 → 名前が複数あっても出す (説明に番号あり) / 別の番号しか無い → 外す
+        try:
+            import mercari_desc_numbers as _MDN
+            _desc = _MDN.load()
+        except Exception:                                      # noqa: BLE001
+            _MDN, _desc = None, {}
+
+        def _desc_v(t):
+            if not (_MDN and card_no and len(t) > 1):
+                return ""
+            return _MDN.verdict(_desc.get(_MDN.norm_url(t[1])), card_no)
+
+        _loose_ok = lambda t: (_desc_v(t) != "other"                              # noqa: E731
+                               and (_name_unique or _desc_v(t) == "same")
+                               and _mpl2.is_psa10(t[2] if len(t) > 2 else "")
                                and _mpl2.loose_title_ok(t[2] if len(t) > 2 else "", card_no or "",
                                                         _loose_rarity, _loose_name))
     except Exception:                                          # noqa: BLE001
@@ -297,9 +313,11 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
         if (url and url not in seen and url not in _ng_urls and _ok(_p)
                 and not _is_lot(t[2] if len(t) > 2 else "")):
             seen.add(url)
+            _dsame = _desc_v(t) == "same"
             out.append({"channel": "mercari", "url": url, "price": _p,
                         "name": (t[2] if len(t) > 2 else ""),
-                        "variant_ok": False, "number_ok": False})
+                        "variant_ok": False, "number_ok": True if _dsame else False,
+                        "desc_no": _dsame})
     # ★最後の逃げ道も同じ門を通す (2026-09-04)。ここを抜いていたため、上の枠で
     #   全部落ちて out が空になった時に、**落としたはずの URL が入り直していた**
     #   (ユーザー報告「補URL③に AUC がまだ出てる」の実体)。

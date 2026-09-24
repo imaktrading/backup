@@ -931,6 +931,9 @@ def build_restock_html(items):
             #   変種バッジより強い警告として、こちらを優先表示する。
             if cd.get("number_ok") is False:
                 _v_html = "<span class='nng'>🔴番号未確認 — 別カードの可能性あり</span>"
+            elif cd.get("desc_no"):
+                # ★2026-09-24: タイトルに番号は無いが、商品説明に同じ番号が書いてある (mercari_desc_numbers)
+                _v_html = "<span class='vok'>📝商品説明に同じ番号あり</span>" + _v_html
             # ★2026-08-02: 絵柄の事前判定 (psa_art_match)。明らかに別の物は表示前に省いてあるので、
             #   ここに出るのは same か unsure。unsure は「自信が無い=目視で落とす」ことを明示する。
             #   art を持たない呼出(旧cache / APIキー無し)はバッジ非表示 = 後方互換。

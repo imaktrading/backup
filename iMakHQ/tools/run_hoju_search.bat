@@ -122,6 +122,16 @@ python -u psa_hoju_fill.py search-restock --limit=0 >> "%LOG%" 2>&1
 python -u night_step.py hoju psa_hoju_fill.search-restock.--limit=0 --done %errorlevel% >> "%LOG%" 2>&1
 :skip5
 
+REM --- 3a) read the descriptions of mercari candidates whose title has no card number
+REM         2026-09-24 user: "some sellers write the number in the description".
+REM         Same-name cards with several numbers hide number-less candidates; a number found
+REM         in the description shows (same) or drops (other) them. Login-free pages only.
+echo [desc-numbers] %date% %time% >> "%LOG%"
+python -u night_step.py hoju mercari_desc_numbers --check >> "%LOG%" 2>&1 || goto :skip5a
+python -u mercari_desc_numbers.py --limit=200 >> "%LOG%" 2>&1
+python -u night_step.py hoju mercari_desc_numbers --done %errorlevel% >> "%LOG%" 2>&1
+:skip5a
+
 REM --- 3b) PSA restock: re-check whether supply came back, for listings whose variant
 REM         was already confirmed by eye, and update the waiting ledger.
 REM         2026-09-05: the ledger only moved when the daytime button was pressed, so a
