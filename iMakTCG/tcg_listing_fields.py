@@ -226,6 +226,27 @@ def _psa_year(cert: str):
         return ""
 
 
+def learned_card_id(cert, category):
+    """人が目視で決めた「PSA ラベル → カード」があればその product_id。無い/割れていれば ""。"""
+    p = os.path.join(PSA_CACHE_DIR, f"{cert}.json")
+    if not (category and os.path.exists(p)):
+        return ""
+    try:
+        meta = json.load(open(p, encoding="utf-8"))
+        _hq = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                            "..", "iMakHQ", "tools"))
+        if _hq not in sys.path:
+            sys.path.insert(0, _hq)
+        import psa_label_learned as _PLL
+        pid = _PLL.learned_pid(_PLL.load(), _PLL.key_for_psa(category, meta)) or ""
+    except Exception:                                          # noqa: BLE001 読めなければ従来どおり
+        return ""
+    if pid and _catalog_specs(pid, category) is not None:
+        print(f"    📘 目視で決めたカードを使う (PSA ラベル → {pid})")
+        return pid
+    return ""
+
+
 def build_listing_fields(cert: str, game_hint: str = "", forced_card_id: str = ""):
     """cert → eBay Item Specifics dict (catalog 決定論コピー・未知は空欄)。
 
@@ -273,7 +294,13 @@ def build_listing_fields(cert: str, game_hint: str = "", forced_card_id: str = "
     if not franchise:
         return {}, "franchise 判定不能"
 
-    card_id, err = _resolve_card_id(cert, franchise)
+    # ★2026-09-24 ユーザー「A (PSA ラベル) が目視で B と確定したら、どの処理で出てきても B として扱う」:
+    #   人が目視で決めた「PSA ラベル → カード」を先に引く (割れていれば使わない = 従来の引き方)。
+    #   人が見ない経路 (🤖自動 / 再仕入れの CSV) でも、一度決めた版を使う。
+    card_id = learned_card_id(cert, franchise)
+    err = None
+    if not card_id:
+        card_id, err = _resolve_card_id(cert, franchise)
     if err:
         return {}, f"catalog 解決不能 ({err})"
     specs = _catalog_specs(card_id, franchise)

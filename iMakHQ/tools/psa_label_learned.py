@@ -64,16 +64,25 @@ def learned_pid(data, key):
 
 
 def record_chosen(results, targets_by_cert, path=PATH):
-    """目視の回答から CHOSEN を覚える。覚えた件数を返す。"""
+    """目視の回答から、人が確かめたカードを覚える。覚えた件数を返す。
+
+    CHOSEN (選び直した) と OK (期待値のとおり) の両方。
+    ★2026-09-24 ユーザー「A (PSA ラベル) が目視で B と確定したら、どの処理で出てきても B として扱う」:
+      OK も書くのは、確認の実績を貯めて「同じラベルで答えが割れていない」ことを確かめるため。
+      割れたら learned_pid が None を返し、目視に戻る。
+    """
     data, n = load(path), 0
     for r in results:
-        if r.get("choice") != "CHOSEN" or not r.get("selected_pid"):
+        ch = r.get("choice")
+        pid = r.get("selected_pid") if ch == "CHOSEN" else (r.get("expected") if ch == "OK" else None)
+        pid = str(pid or "").split(":")[-1].strip()
+        if not pid:
             continue
         t = targets_by_cert.get(str(r.get("cert"))) or {}
         if not t.get("brand"):
             continue
         key = label_key(t.get("category"), t.get("brand"), t.get("card_number"), t.get("subject"))
-        remember(data, key, r["selected_pid"], cert=str(r.get("cert")))
+        remember(data, key, pid, cert=str(r.get("cert")))
         n += 1
     if n:
         save(data, path)

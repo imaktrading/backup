@@ -19,10 +19,13 @@ def test_chosen_is_remembered_by_label_not_cert(tmp_path):
     assert L.learned_pid(L.load(p), key) == "XY9-B-019"
 
 
-def test_ok_and_none_are_not_learned(tmp_path):
+def test_ok_is_learned_but_none_is_not(tmp_path):
     p = str(tmp_path / "l.json")
-    assert L.record_chosen([{"cert": "111", "choice": "OK", "expected": "X"},
-                            {"cert": "111", "choice": "NONE"}], T, path=p) == 0
+    # ★2026-09-24: OK (期待値のとおり) も覚える。NONE/NG は覚えない
+    assert L.record_chosen([{"cert": "111", "choice": "OK", "expected": "pokemon_tcg:X"},
+                            {"cert": "111", "choice": "NONE"}], T, path=p) == 1
+    k = L.label_key(T["111"]["category"], T["111"]["brand"], T["111"]["card_number"], T["111"]["subject"])
+    assert L.learned_pid(L.load(p), k) == "X"
 
 
 def test_split_picks_are_not_used():
@@ -53,3 +56,11 @@ def test_wired_into_resource_gate():
     src = open(os.path.join(HERE, "..", "tools", "psa_resource_gate.py"), encoding="utf-8").read()
     assert "import psa_label_learned as _PLL" in src
     assert "_PLL.record_picks(learn)" in src and '"resolved_key": rk,' in src
+
+
+def test_auto_path_uses_learned_label_first():
+    """人が見ない経路 (🤖自動 / 再仕入れ CSV) でも、目視で決めた「ラベル → カード」を先に引く (2026-09-24)。"""
+    src = open(os.path.join(HERE, "..", "..", "iMakTCG", "tcg_listing_fields.py"), encoding="utf-8").read()
+    i = src.index("card_id = learned_card_id(cert, franchise)")
+    assert i < src.index("card_id, err = _resolve_card_id(cert, franchise)")
+    assert "_PLL.learned_pid(_PLL.load(), _PLL.key_for_psa(category, meta))" in src
