@@ -357,10 +357,13 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
 .card.off{opacity:.55;background:#fff4f4}
 .rsn{display:none;margin:4px 0;font-size:12px;width:100%}
 .card.off .rsn{display:block}
-.pair{display:flex;gap:6px;margin:4px 0}
+.pair{display:flex;gap:4px;margin:4px 0}
 .col{flex:1;min-width:0}
 .col .cap{font-size:11px;color:#666;text-align:center}
 .col.psa .cap{color:#06c;font-weight:bold}
+/* ★2026-09-25 ユーザー「Aと現物の間をもう少し詰めたら？」: 画像の列 (🅰・①・②) は画像の幅ぴったりにし、
+   余った幅は候補の欄へ回す (以前は4列で均等に割り、画像が列の真ん中に浮いて間が空いていた) */
+.col.psa{flex:0 0 302px}
 .col.cat .cap{color:#2a7;font-weight:bold}
 /* ★候補を現物より **小さくしない** こと (2026-07-28 ユーザー指示)。小さいと
    ★の有無・パラレル・番号が見分けられず、目視の精度がサイズで頭打ちになる。
