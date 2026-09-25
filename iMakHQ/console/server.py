@@ -318,7 +318,7 @@ def refresh_counts(wait=False):
     try:
         r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(HERE, "counts.py")],
                            capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           timeout=240, cwd=TOOLS,
+                           timeout=480, cwd=TOOLS,   # 2026-09-25: 240 だと打ち切られ続けた (実測 185秒+上限待ち65秒)
                            env=dict(os.environ, PYTHONIOENCODING="utf-8", SHEET_READ_MEMO="1"),
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         out = (r.stdout or "").strip().splitlines()

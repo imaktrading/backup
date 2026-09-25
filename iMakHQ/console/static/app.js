@@ -341,6 +341,13 @@
     jobList.forEach(function (j) { jobs[j.kind] = j; });
     var at = d.counts_at ? d.counts_at.replace("T", " ").slice(5, 16) : "まだ数えていません";
     $("shop-at").textContent = (d.counting ? "数え直し中… " : "") + at + " の件数" + (d.counts_error ? " (失敗)" : "");
+    // ★2026-09-25: 数え直しが240秒で打ち切られ、昨日の件数 (入れ替え 11件・実際は 0件) が出たままだった。
+    //   上の小さな「(失敗)」では気づけないので、失敗した時と 3時間より古い時は赤い知らせを出す。
+    var ageH = d.counts_at ? (Date.now() - new Date(d.counts_at).getTime()) / 3600000 : 0;
+    var cw = "";
+    if (!d.counting && d.counts_error) cw = "件数を数え直せませんでした (" + esc(String(d.counts_error).slice(0, 80)) + ")。表示は " + at + " の古い件数です";
+    else if (!d.counting && ageH > 3) cw = "表示の件数は " + at + " のものです (" + Math.floor(ageH) + "時間前)。「残件を数え直す」を押してください";
+    $("counts-alert").innerHTML = cw ? '<div class="alert crit" role="status"><b>件数が古い</b><span>' + cw + "</span></div>" : "";
     $("btn-refresh").disabled = !!d.counting;
     $("btn-refresh").textContent = d.counting ? "数え直し中…" : "残件を数え直す";
     if (!jobList.length) return;

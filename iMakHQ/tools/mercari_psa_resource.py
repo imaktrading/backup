@@ -316,8 +316,30 @@ def catalog_name_kinds(name_jp, category="", _db=r"C:/dev/iMak_data/catalog/prod
     return len(nos)
 
 
+_VARIANTS_CACHE = {}
+_VARIANTS_TTL = 600          # 秒。長く動く画面でも、カタログの追加が10分で見えるように
+
+
 def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products.sqlite",
                                 limit=12, title_hint="", category=""):
+    """_catalog_variants_for_cardno の結果を覚えて使い回す (同じ番号を何度も引かない)。
+
+    ★2026-09-25: 補URL の件数の数え直しで 962回 引き直し (1回 0.12秒・計117秒)、コンソールの
+      数え直しが 240秒の制限を超えて昨日から更新されず、「入れ替え 11件」が出たまま実際は 0件だった。
+      戻り値は呼び出し側が書き換えても覚えた値が変わらないよう、写しを返す。
+    """
+    import time as _t
+    key = (card_no, _db, limit, title_hint, category)
+    hit = _VARIANTS_CACHE.get(key)
+    if hit and _t.time() - hit[0] < _VARIANTS_TTL:
+        return [dict(x) for x in hit[1]]
+    res = _catalog_variants_for_cardno(card_no, _db, limit, title_hint, category)
+    _VARIANTS_CACHE[key] = (_t.time(), [dict(x) for x in res])
+    return res
+
+
+def _catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products.sqlite",
+                                 limit=12, title_hint="", category=""):
     """card番号 → その番号の catalog 変種候補 [{product_id,name_jp,set,image}]。
 
     KEY未解決の行で「正しい変種をユーザーが選ぶ」ための候補(確認ゲート②)。完全一致を先頭、
