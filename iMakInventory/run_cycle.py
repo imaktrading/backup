@@ -535,14 +535,14 @@ def _check_cycle_staleness(test_mode: bool = False, own_cycle: Optional[dict] = 
 # Toast notification (Windows)
 # ============================================================================
 def _notify_toast(title: str, body: str):
-    """Windows toast 通知 (win10toast 未インストール時は黙って skip)."""
+    """Windows toast 通知 (win10toast 未インストール時は黙って skip).
+
+    ★ 2026-09-25: 巡回のプロセス内 (threaded) で出すと、閉じる時の WPARAM TypeError で
+      「巡回が落ちました」の偽記録が残り、ヒープ破損で落ちた例もある → 別プロセスで出す (toast_safe)。
+    """
     try:
-        from win10toast import ToastNotifier  # noqa: PLC0415
-    except ImportError:
-        return
-    try:
-        toaster = ToastNotifier()
-        toaster.show_toast(title, body, duration=10, threaded=True)
+        from toast_safe import show_toast  # noqa: PLC0415
+        show_toast(title, body, duration=10)
     except Exception:
         pass
 

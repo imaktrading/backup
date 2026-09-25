@@ -16,7 +16,8 @@ if str(ROOT) not in sys.path:
 
 # 予約タスクから動くコード (control_panel は人が開く GUI なので対象外)
 SCHEDULED = [
-    ROOT / "run_cycle.py", ROOT / "monitor_listings.py", ROOT / "ledger_lock.py",
+    ROOT / "run_cycle.py", ROOT / "monitor_listings.py", ROOT / "ledger_lock.py", ROOT / "toast_safe.py",
+    ROOT / "upload_health.py", ROOT / "reverse_audit.py",
     ROOT / "tools" / "resume_after_boot.py", ROOT / "tools" / "drain_pending_takedowns.py",
     ROOT / "ebay_actions" / "sell_feed_uploader.py",
     ROOT.parent / "iMakeBayAPI" / "inventory_monitor" / "run_daily.py",
@@ -57,3 +58,26 @@ def test_pid_alive_without_subprocess():
     child.wait()
     assert pid_alive(child.pid) is False          # 終了済み (handle は残っている) → 死んでいる
     assert pid_alive(0) is False and pid_alive(-1) is False
+
+
+def test_toast_runs_in_separate_process_and_does_not_wait(monkeypatch):
+    """通知は子プロセスで出し、巡回は待たない (win10toast の後始末で巡回が落ちないように)."""
+    import subprocess
+    import toast_safe
+    calls = []
+
+    class _P:
+        def __init__(self, args, **kw):
+            calls.append((args, kw))
+
+    monkeypatch.setattr(subprocess, "Popen", _P)
+    assert toast_safe.show_toast("t", "b", duration=3) is True
+    args, kw = calls[0]
+    assert "win10toast" in args[2] and args[3:] == ["t", "b", "3"]
+    assert kw.get("creationflags") == getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def test_no_in_process_win10toast_in_scheduled_code():
+    for p in SCHEDULED:
+        if p.exists() and p.name != "toast_safe.py":
+            assert "from win10toast" not in p.read_text(encoding="utf-8"), p.name

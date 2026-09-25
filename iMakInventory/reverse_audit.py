@@ -540,8 +540,8 @@ def _load_acknowledged() -> dict:
 def _toast(title: str, body: str) -> None:
     """Windows toast (win10toast 不在 / 失敗時は黙って skip)."""
     try:
-        from win10toast import ToastNotifier  # noqa: PLC0415
-        ToastNotifier().show_toast(title, body[:200], duration=15, threaded=True)
+        from toast_safe import show_toast  # noqa: PLC0415  (2026-09-25: 別プロセスで出す)
+        show_toast(title, body[:200], duration=15)
     except Exception:
         pass
 

@@ -173,8 +173,8 @@ def _critical_alert_message(error: str, csv_path: str, csv_lines: int,
 def _toast(title: str, body: str) -> None:
     """Windows toast (10 秒表示)."""
     try:
-        from win10toast import ToastNotifier  # noqa: PLC0415
-        ToastNotifier().show_toast(title, body, duration=10, threaded=True)
+        from toast_safe import show_toast  # noqa: PLC0415  (2026-09-25: 別プロセスで出す)
+        show_toast(title, body, duration=10)
     except Exception:
         pass
 
