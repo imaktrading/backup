@@ -350,7 +350,9 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
 .go{background:#2a7;color:#fff;border:none;border-radius:4px;font-weight:bold;padding:8px 20px}
 .grid{display:flex;flex-wrap:wrap;gap:10px;padding:12px}
 /* ★2026-08-22 ユーザー要望「価格とか評価とかが見づらいから、横に枠を広げて。今の横幅の1.5倍くらい」。900 → 1350px。列が3つ (現物 / 今の仕入元 / 候補) に増えたぶん、候補のテキストが潰れていた。 */
-.card{width:1350px;border:1px solid #ccc;border-radius:6px;background:#fff;padding:8px}
+/* ★2026-09-25: 🅰カタログ列を足して 画像4枚(各300)+説明 になり、1350 では候補欄のボタンが見切れた
+   (ユーザー「違う…とかが見切れている」)。画面は 1920×125% = 1536 なので 1500 まで広げる */
+.card{width:1500px;border:1px solid #ccc;border-radius:6px;background:#fff;padding:8px}
 .card.noimg{border-color:#c33;border-width:2px}
 .card.off{opacity:.55;background:#fff4f4}
 .rsn{display:none;margin:4px 0;font-size:12px;width:100%}
@@ -400,8 +402,8 @@ body::-webkit-scrollbar{display:none}
 .cand img{width:300px;height:405px;object-fit:contain;border:1px solid #eee;margin:0;background:#fafafa}
 .cand .cph{width:300px;height:405px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999;border:1px dashed #ccc}
 .cand:has(input:checked){border-color:#2a7;background:#eafaf1}
-.clbl{flex:1;min-width:220px;font-size:13px;word-break:break-word;line-height:1.45}
-.rsn{display:none;margin-top:3px;font-size:10px;color:#888;align-items:center;gap:3px}
+.clbl{flex:1;min-width:200px;font-size:13px;word-break:break-word;line-height:1.45}
+.rsn{display:none;margin-top:3px;font-size:10px;color:#888;align-items:center;gap:3px;flex-wrap:wrap}
 .cand:has(.ck:not(:checked)) .rsn{display:inline-flex}
 /* ★2026-09-05: 事前ゲート(①現物 vs ②catalog候補)の理由 select は `.cand` の中ではなく
    `.card` の直下にある。上の行は候補ピッカー用なので、こちらは **一度も表示されていなかった**。

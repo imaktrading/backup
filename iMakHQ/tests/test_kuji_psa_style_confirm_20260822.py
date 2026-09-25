@@ -157,7 +157,10 @@ class TestCostAndWidth:
         css = _io.open(os.path.join(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))), "tools", "psa_resource_confirm.py"),
             encoding="utf-8").read()
-        assert ".card{width:1350px" in css, "1.5倍に広げていない"
+        # 2026-09-25: 🅰カタログ列を足して 1500 に広げた (1350 だと候補欄のボタンが見切れた)
+        import re as _re
+        w = int(_re.search(r"\.card\{width:(\d+)px", css).group(1))
+        assert w >= 1350, "1.5倍に広げていない"
         assert ".card{width:900px" not in css
 
 
