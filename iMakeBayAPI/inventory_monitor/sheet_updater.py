@@ -90,6 +90,10 @@ _TRANSIENT_NET_KEYWORDS = (
     "[500]", "[502]", "[503]", "[504]", "[429]",
     "The service is currently unavailable", "Internal error encountered",
     "backendError", "rateLimitExceeded", "Quota exceeded",
+    # ★ 2026-09-25: Google が JSON でなく HTML のエラーページを返すと gspread は "[-1]" になり
+    #   上の "[502]" に当たらない (19:00 cycle の SKU 書込が 1回の 502 で monitor NG になった)
+    "Error 500 (Server Error)", "Error 502 (Server Error)", "Error 503 (Server Error)",
+    "Error 504 (Server Error)", "Please try again in 30 seconds",
 )
 # retry の backoff 秒 (= 0,5,15,30 → 計 ~50s。 数秒の DNS blip を救済、 長時間障害は諦めて raise)
 _OPEN_SHEET_BACKOFFS = (0, 5, 15, 30)
@@ -98,6 +102,24 @@ _OPEN_SHEET_BACKOFFS = (0, 5, 15, 30)
 def _is_transient_net_error(exc: Exception) -> bool:
     msg = f"{type(exc).__name__}: {exc}"
     return any(k in msg for k in _TRANSIENT_NET_KEYWORDS)
+
+
+def _write_with_retry(fn, label: str):
+    """シート書込を一時障害 (Google 5xx / 通信) の時だけ backoff して繰り返す (2026-09-25).
+
+    書込は「同じセルに同じ値」なので繰り返しても結果は同じ。一時障害以外 (権限等) は即 raise。
+    """
+    import time as _time  # noqa: PLC0415
+    for attempt, backoff in enumerate(_OPEN_SHEET_BACKOFFS, start=1):
+        if backoff:
+            _time.sleep(backoff)
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            if not _is_transient_net_error(e) or attempt >= len(_OPEN_SHEET_BACKOFFS):
+                raise
+            print(f"[{label}] 一時障害 (attempt {attempt}/{len(_OPEN_SHEET_BACKOFFS)}): "
+                  f"{type(e).__name__} → 待って再送", flush=True)
 
 
 def open_sheet():
@@ -321,7 +343,7 @@ def write_sku_err_flags(sh, flag_updates: list) -> int:
         {"range": f"{col_letter}{u['row_index']}", "values": [[u.get("err_flag", "")]]}
         for u in flag_updates
     ]
-    ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
+    _write_with_retry(lambda: ws.batch_update(cell_updates, value_input_option="USER_ENTERED"), "batch_update")
     return len(cell_updates)
 
 
@@ -377,7 +399,7 @@ def write_phase4_status(sh, status_updates: list) -> int:
             ]],
         })
     if cell_updates:
-        sku_ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
+        _write_with_retry(lambda: sku_ws.batch_update(cell_updates, value_input_option="USER_ENTERED"), "sku batch_update")
     return len(cell_updates)
 
 
@@ -499,7 +521,7 @@ def update_sku_rows(sh, updates: list) -> dict:
             "values": [[u_value]],
         })
 
-    sku_ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
+    _write_with_retry(lambda: sku_ws.batch_update(cell_updates, value_input_option="USER_ENTERED"), "sku batch_update")
 
     return {"updated": updated_count, "appended": appended_count}
 
