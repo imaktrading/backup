@@ -66,9 +66,14 @@ def test_target_files_discovered():
 
 
 @pytest.mark.parametrize("py_file", _PY_FILES, ids=lambda p: str(p.relative_to(_REPO_ROOT)))
-def test_module_compiles(py_file):
-    """各 .py が SyntaxError 無く compile できること."""
+def test_module_compiles(py_file, tmp_path):
+    """各 .py が SyntaxError 無く compile できること.
+
+    ★ 2026-09-25: 出力 (.pyc) は共有の __pycache__ ではなく tmp に書く。HIGH と LOW が同時に
+      起動すると両方の precheck が同じ .pyc を書き換え、Windows の rename が PermissionError
+      (WinError 5) で落ちて巡回ごと abort していた (14:48 HIGH / 14:49 LOW、構文は正常)。
+    """
     try:
-        py_compile.compile(str(py_file), doraise=True)
+        py_compile.compile(str(py_file), cfile=str(tmp_path / (py_file.stem + ".pyc")), doraise=True)
     except py_compile.PyCompileError as e:
         pytest.fail(f"構文エラー: {py_file}\n{e}")
