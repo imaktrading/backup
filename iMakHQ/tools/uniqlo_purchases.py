@@ -154,9 +154,11 @@ def _driver(headless=True):
     o = uc.ChromeOptions()
     for a in (f"--user-data-dir={PROFILE}", "--lang=ja-JP", "--window-size=1280,1400"):
         o.add_argument(a)
+    maj = _chrome_major()
     if headless:
         o.add_argument("--headless=new")
-    maj = _chrome_major()
+        from mercari_purchases import normal_ua             # 窓なしでも普通の Chrome と同じ名乗り (ログイン切れ防止)
+        o.add_argument("--user-agent=" + normal_ua(maj))
     return uc.Chrome(options=o, version_main=maj) if maj else uc.Chrome(options=o)
 
 

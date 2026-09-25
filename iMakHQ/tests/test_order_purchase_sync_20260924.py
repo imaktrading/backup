@@ -201,3 +201,10 @@ def test_two_identical_uniqlo_purchases_get_different_keys():
     import datetime as d
     b = [{"day": d.date(2026, 9, 24), "pid": "489653", "color": "00", "size": "MEN XXL", "place": "店"}] * 2
     assert O.purchase_keys(b, "uniqlo")[0] != O.purchase_keys(b, "uniqlo")[1]
+
+
+def test_headless_uses_normal_chrome_name():
+    """ログインが1日で切れた (3回)。窓なしが HeadlessChrome と名乗り、別の端末に見えていた。"""
+    import mercari_purchases as MP
+    ua = MP.normal_ua(154)
+    assert "Headless" not in ua and "Chrome/154.0.0.0" in ua

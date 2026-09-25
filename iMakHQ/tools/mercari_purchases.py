@@ -42,15 +42,27 @@ def parse_purchases(src):
     return out
 
 
+def normal_ua(major):
+    """窓なしでも普通の Chrome と同じ名乗り (純関数)。
+
+    ★2026-09-25 ユーザー「これで3回目やで」(ログインが1日ほどで切れる)。窓なしの Chrome は
+      'HeadlessChrome/154' と名乗る。ログインは普通の Chrome でしたので、メルカリからは別の端末に見え、
+      本人確認のやり直し (signin?acr_values=...) を求められていた。
+    """
+    return ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/%s.0.0.0 Safari/537.36" % (major or 154))
+
+
 def fetch_purchases():
     """ログイン済みの専用 Chrome (窓なし) で読む (I/O)。ログインが切れていたら例外。"""
     import undetected_chromedriver as uc
     from mercari_psa_resource import _chrome_major, _quiet_chromedriver
     _quiet_chromedriver()
     o = uc.ChromeOptions()
-    for a in (f"--user-data-dir={PROFILE}", "--headless=new", "--lang=ja-JP", "--window-size=1280,1400"):
-        o.add_argument(a)
     maj = _chrome_major()
+    for a in (f"--user-data-dir={PROFILE}", "--headless=new", "--lang=ja-JP", "--window-size=1280,1400",
+              "--user-agent=" + normal_ua(maj)):
+        o.add_argument(a)
     d = uc.Chrome(options=o, version_main=maj) if maj else uc.Chrome(options=o)
     try:
         d.get(URL)
