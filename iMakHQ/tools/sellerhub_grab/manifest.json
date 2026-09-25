@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Seller Hub レポート取り",
+  "version": "1.0",
+  "description": "Seller Hub のファネル用レポート4つを、ボタン1回でまとめて落とす (完成済みの物を押すだけ)",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.ebay.com/sh/reports/downloads*",
+        "https://www.ebay.com/sh/performance*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

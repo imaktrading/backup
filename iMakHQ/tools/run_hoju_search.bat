@@ -248,6 +248,10 @@ REM --- 6c) refresh the funnel and the analyses that read it. These only read
 REM          reports and write spreadsheet tabs, so they are safe unattended.
 REM          2026-09-03: doing this at night means the morning buttons (shelf /
 REM          cull / restock counts) already have fresh numbers to work from.
+REM 2026-09-26: reports downloaded by the browser extension (tools\sellerhub_grab)
+REM   land in the Downloads folder. Move them to the reports folder first.
+echo [sellerhub-collect] %date% %time% >> "%LOG%"
+python -u seller_hub_collect.py >> "%LOG%" 2>&1
 echo [funnel] %date% %time% >> "%LOG%"
 python -u night_step.py hoju listing_funnel --check >> "%LOG%" 2>&1 || goto :skip16
 python -u listing_funnel.py >> "%LOG%" 2>&1
