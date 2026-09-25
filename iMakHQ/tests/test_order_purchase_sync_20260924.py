@@ -179,3 +179,25 @@ def test_uniqlo_order_detail_parse():
     assert p["url"].endswith("/0120")
     keys = UQ.official_keys(["https://www.uniqlo.com/jp/ja/products/E489653-000/00?colorDisplayCode=00&sizeDisplayCode=004"])
     assert UQ.match([(152, d.date(2026, 9, 24), keys, UQ.size_key("US XL(JP XXL)"))], ps)[152]["price"] == 1990
+
+
+def test_purchase_already_linked_to_other_order_is_not_reused():
+    """ユーザー「仕入れてないのに、仕入済となるのが一番きつい」(2026-09-25)。
+    9/24 のヤドンの購入は 16-15191 に結んだ。同じヤドンがもう1枚売れても、その購入を新しい注文に結ばない。"""
+    import datetime as d
+    import mercari_purchases as MP
+    buys = [{"id": "m83909619297", "at": d.datetime(2026, 9, 24, 9, 24)}]
+    keys = O.purchase_keys(buys, "mercari")
+    assert keys == ["mercari:m83909619297#1"]
+    linked = {"mercari:m83909619297#1": "16-15191-59943"}
+    free = O.unused_purchases(buys, keys, linked, {160: "99-99999-99999"})
+    assert free == []
+    assert MP.match([(160, d.date(2026, 9, 24), {"m83909619297"})], [p for p, _k in free]) == {}
+    # 結んだ相手の注文そのもの (やり直し) なら使える
+    assert len(O.unused_purchases(buys, keys, linked, {150: "16-15191-59943"})) == 1
+
+
+def test_two_identical_uniqlo_purchases_get_different_keys():
+    import datetime as d
+    b = [{"day": d.date(2026, 9, 24), "pid": "489653", "color": "00", "size": "MEN XXL", "place": "店"}] * 2
+    assert O.purchase_keys(b, "uniqlo")[0] != O.purchase_keys(b, "uniqlo")[1]

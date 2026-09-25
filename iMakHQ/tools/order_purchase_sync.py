@@ -367,6 +367,52 @@ def is_uniqlo_order(order):
     return any("UNIQLO" in (li.get("title") or "").upper() for li in order.get("lineItems") or [])
 
 
+LINKED = r"C:/dev/iMak_data/hq/order_purchase_linked.json"   # 購入 → 結んだ注文番号
+
+
+def purchase_keys(buys, kind):
+    """購入ごとの見分けの鍵 (純関数)。同じ日に同じ物を2点買った時は #1 #2 で分ける。"""
+    out, seen = [], {}
+    for p in buys:
+        if kind == "mercari":
+            base = "mercari:" + str(p.get("id") or "")
+        else:
+            base = "uniqlo:%s|%s|%s|%s|%s" % (p.get("day"), p.get("pid"), p.get("color"), p.get("size"),
+                                              p.get("url") or p.get("place") or "")
+        seen[base] = seen.get(base, 0) + 1
+        out.append(base + "#%d" % seen[base])
+    return out
+
+
+def unused_purchases(buys, keys, linked, rows_order):
+    """ほかの注文にもう結んだ購入を除く (純関数)。
+
+    ★2026-09-25 ユーザー「仕入れてないのに、仕入済となるのが一番きつい」。
+      1回の走行の中でしか「使った」を覚えていなかったので、同じカードがもう1枚売れると、
+      前の注文のために買った購入が新しい注文にも結ばれて仕入済になり得た。
+    linked    : {鍵: 注文番号} (前の走行までに結んだ分)
+    rows_order: {行番号: 注文番号} (今回の対象)
+    返り値    : [(購入, 鍵)] 前に結んだ相手が今回の対象の注文そのものなら残す (やり直し)
+    """
+    mine = set(rows_order.values())
+    return [(p, k) for p, k in zip(buys, keys) if not linked.get(k) or linked.get(k) in mine]
+
+
+def _load_linked():
+    try:
+        with open(LINKED, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_linked(d):
+    tmp = LINKED + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, LINKED)
+
+
 def link_purchases(ws, by_id, today_rows):
     """買った先を結ぶ (I/O)。書いたセル数を返す。
 
@@ -378,16 +424,23 @@ def link_purchases(ws, by_id, today_rows):
     targets = link_targets(today_rows, by_id)
     if not targets:
         return 0
-    hits = {}                                          # 行番号 → (日付, X に入れる値, 表示)
+    hits = {}                                          # 行番号 → (日付, X に入れる値, 表示, 仕入値, 鍵)
+    linked = _load_linked()
+    # 表の X にもう入っているメルカリの購入も「使用済み」(台帳ができる前に結んだ分)
+    for n, r in enumerate(today_rows[1:], 2):
+        r = r + [""] * (C_STATE + 1 - len(r))
+        m = re.search(r"jp\.mercari\.com/transaction/(m\d+)", r[C_URL])
+        if m:
+            linked.setdefault("mercari:%s#1" % m.group(1), norm_order(r[C_ORDER]))
     uq = [(n, r, o) for n, r, o in targets if is_uniqlo_order(o)]
     mc = [(n, r, o) for n, r, o in targets if not is_uniqlo_order(o)]
     if mc:
-        hits.update(_link_mercari(mc))
+        hits.update(_link_mercari(mc, linked))
     if uq:
-        hits.update(_link_uniqlo(uq))
+        hits.update(_link_uniqlo(uq, linked))
     ups = []
-    for n, (day, url, note, *rest) in hits.items():
-        price = rest[0] if rest else None
+    for n, (day, url, note, price, key) in hits.items():
+        linked[key] = norm_order(today_rows[n - 1][C_ORDER])
         if price and not (today_rows[n - 1][C_COST].strip() if len(today_rows[n - 1]) > C_COST else ""):
             ups.append({"range": GU.rowcol_to_a1(n, C_COST + 1), "values": [[price]]})   # 仕入原価 (ユニクロの注文詳細)
         _r = today_rows[n - 1] + [""] * (C_STATE + 1)
@@ -399,6 +452,7 @@ def link_purchases(ws, by_id, today_rows):
         print(f"  買った先: {n}行目 ← {url} ({note})")
     if ups:
         ws.batch_update(ups, value_input_option="USER_ENTERED")
+        _save_linked(linked)
     return len(ups)
 
 
@@ -430,7 +484,7 @@ def fill_mercari_cost(ws, rows):
     return len(ups)
 
 
-def _link_mercari(targets):
+def _link_mercari(targets, linked):
     import mercari_purchases as MP
     cand = _candidate_lookup()
     if cand is None:
@@ -449,13 +503,17 @@ def _link_mercari(targets):
         day = _jst_day(o.get("creationDate"))
         if ids and day:
             orders.append((n, day, ids))
-    hit = MP.match(orders, buys)
-    print(f"  メルカリ購入履歴 {len(buys)}件 / 結べた注文 {len(hit)}件")
-    return {n: (p["at"].date(), p["url"], "%s %s" % (p["at"].strftime("%m/%d %H:%M"), p["title"][:30]))
+    free = unused_purchases(buys, purchase_keys(buys, "mercari"), linked,
+                            {n: norm_order(r[C_ORDER]) for n, r, _o in targets})
+    key_of = {id(p): k for p, k in free}
+    hit = MP.match(orders, [p for p, _k in free])
+    print(f"  メルカリ購入履歴 {len(buys)}件 (ほかの注文に結び済み {len(buys) - len(free)}件) / 結べた注文 {len(hit)}件")
+    return {n: (p["at"].date(), p["url"], "%s %s" % (p["at"].strftime("%m/%d %H:%M"), p["title"][:30]),
+                None, key_of[id(p)])
             for n, p in hit.items()}
 
 
-def _link_uniqlo(targets):
+def _link_uniqlo(targets, linked):
     import uniqlo_purchases as UQ
     try:
         mon = UQ.monitor_urls()
@@ -472,10 +530,14 @@ def _link_uniqlo(targets):
         day = _jst_day(o.get("creationDate"))
         if keys and day:
             orders.append((n, day, keys, UQ.size_key(order_size(o))))
-    hit = UQ.match(orders, buys)
-    print(f"  ユニクロ購入履歴 {len(buys)}件 / 結べた注文 {len(hit)}件 (在庫監視シートに仕入元がある注文 {len(orders)}件)")
+    free = unused_purchases(buys, purchase_keys(buys, "uniqlo"), linked,
+                            {n: norm_order(r[C_ORDER]) for n, r, _o in targets})
+    key_of = {id(p): k for p, k in free}
+    hit = UQ.match(orders, [p for p, _k in free])
+    print(f"  ユニクロ購入履歴 {len(buys)}件 (ほかの注文に結び済み {len(buys) - len(free)}件) / 結べた注文 {len(hit)}件"
+          f" (在庫監視シートに仕入元がある注文 {len(orders)}件)")
     return {n: (p["day"], p.get("url") or UQ.URL, "%s %s %s %s" % (p["day"], p["place"], p["size"], p["name"][:20]),
-                p.get("price"))
+                p.get("price"), key_of[id(p)])
             for n, p in hit.items()}
 
 
