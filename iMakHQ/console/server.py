@@ -299,7 +299,30 @@ def _load_counts_cache():
         pass
 
 
-def refresh_counts(wait=False):
+def count_keys_for(badge):
+    """押したボタン → 数え直す項目 (純関数)。分からないボタンは None (= 全部数え直す)。
+
+    ★2026-09-25 ユーザー「数えなおし時間かかるよね」→「短縮できることはやろう」。全部だと約3分。
+      押した後は、そのボタンが減らす項目だけ数え直す。
+    """
+    b = badge or ""
+    if b.startswith("hoju_"):
+        return ["hoju"]
+    if b == "ut_identify":
+        return ["ut_identify"]
+    if b.startswith("ut_"):
+        return ["ut"]
+    if b.startswith("kuji_"):
+        return ["kuji"]
+    table = {"newcand": ["newcand"], "newcand_high": ["newcand_high"], "cull_end": ["cull"],
+             "shelf_evict": ["shelf"], "shelf_evict_label": ["shelf"], "sold_restock": ["restock"],
+             "psa_gate": ["psa_gate", "restock_build", "restock_wb"],
+             "restock_build": ["restock_build", "restock_wb"], "restock_wb": ["restock_wb"],
+             "offer_calc": ["offer"], "order_sync": []}
+    return table.get(b)
+
+
+def refresh_counts(wait=False, keys=None):
     """counts.py を別プロセスで走らせて保存 (同じタブを何度も読まない SHEET_READ_MEMO=1)。
 
     wait=True: 数え直しが既に動いていたら、それが終わるのを待ってから **改めて** 数える。
@@ -316,7 +339,7 @@ def refresh_counts(wait=False):
             return
         STATE["counting"] = True
     try:
-        r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(HERE, "counts.py")],
+        r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(HERE, "counts.py")] + list(keys or []),
                            capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=480, cwd=TOOLS,   # 2026-09-25: 240 だと打ち切られ続けた (実測 185秒+上限待ち65秒)
                            env=dict(os.environ, PYTHONIOENCODING="utf-8", SHEET_READ_MEMO="1"),
@@ -326,6 +349,10 @@ def refresh_counts(wait=False):
         if not isinstance(d, dict):
             raise RuntimeError(((r.stderr or "").strip().splitlines() or ["出力なし"])[-1][:120])
         at = datetime.datetime.now().isoformat(timespec="seconds")
+        if keys:                                     # 一部だけ数え直した → 前の数字に上書きで混ぜる
+            merged = dict(STATE["counts"] or {})
+            merged.update(d)
+            d, at = merged, (STATE["counts_at"] or at)   # 「何時の件数か」は全部数えた時刻のまま
         STATE["counts"], STATE["counts_at"], STATE["counts_error"] = d, at, ""
         STATE["counts_fresh"] = time.time()
         os.makedirs(os.path.dirname(COUNTS_CACHE), exist_ok=True)
@@ -1004,7 +1031,9 @@ def _run_worker(script, cmd=None):
         stopped = STATE["stopping"]
         STATE["stopping"] = False
     _t_done = time.time()
-    refresh_counts(wait=True)
+    _keys = count_keys_for(script.get("badge"))
+    if _keys != []:                                   # [] = 数える項目が無いボタン (注文の取り込み)
+        refresh_counts(wait=True, keys=_keys)
     # ★押したのに件数が減らなかったら、その場で言う (旧パネルと同じ判定を使う)。
     #   失敗した走行・止めた走行は何もしていないので突き合わせない。
     #   ★2026-09-24: 走行が終わった後に数え直せていない時も突き合わせない (古い数字で誤報になる)

@@ -338,6 +338,69 @@ def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products
     return res
 
 
+_CAT_INDEX = {}
+
+
+def _catalog_index(_db):
+    """カタログの番号の目次 (10分覚える)。作れなければ None (呼び出し側は従来の SQL で引く)。
+
+    pids: [(大文字の product_id, rowid, category)] を並べたもの (前方一致を二分探索で引く)
+    cnt : card_number_text → [(rowid, category)]
+    """
+    import bisect  # noqa: F401  (_index_lookup が使う)
+    import sqlite3
+    import time as _t
+    hit = _CAT_INDEX.get(_db)
+    if hit and _t.time() - hit["t"] < _VARIANTS_TTL:
+        return hit
+    try:
+        con = sqlite3.connect(_db)
+        try:
+            rows = con.execute("SELECT rowid, product_id, category, "
+                               "json_extract(specs,'$.card_number_text') FROM products").fetchall()
+        finally:
+            con.close()
+    except Exception:                                          # noqa: BLE001
+        return None
+    pids = sorted(((pid or "").upper(), rid, cat or "") for rid, pid, cat, _c in rows if pid)
+    cnt = {}
+    for rid, _pid, cat, c in rows:
+        if c:
+            cnt.setdefault(str(c).strip(), []).append((rid, cat or ""))
+    idx = {"t": _t.time(), "pids": pids, "keys": [p[0] for p in pids], "cnt": cnt}
+    _CAT_INDEX[_db] = idx
+    return idx
+
+
+def _index_lookup(idx, card_no, category=""):
+    """SQL の `product_id = ? OR product_id LIKE '?_%'` (大文字小文字を区別しない) と同じ行の rowid (純関数)。"""
+    import bisect
+    k = (card_no or "").upper()
+    if not k:
+        return []
+    out = []
+    i = bisect.bisect_left(idx["keys"], k)
+    while i < len(idx["keys"]) and idx["keys"][i].startswith(k):
+        pid, rid, cat = idx["pids"][i]
+        # LIKE '<card>_%' = 後ろに1文字以上。完全一致も含める
+        if (pid == k or len(pid) > len(k)) and (not category or cat == category):
+            out.append(rid)
+        i += 1
+    # LIKE の '%' '_' を含む番号は無い前提 (実測: product_id に % は無い)
+    return out
+
+
+def _rows_by_rowid(con, cols, ids):
+    if not ids:
+        return []
+    out = []
+    for i in range(0, len(ids), 500):
+        part = ids[i:i + 500]
+        out += con.execute(f"SELECT {cols} FROM products WHERE rowid IN ({','.join('?' * len(part))})",
+                           part).fetchall()
+    return out
+
+
 def _catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products.sqlite",
                                  limit=12, title_hint="", category=""):
     """card番号 → その番号の catalog 変種候補 [{product_id,name_jp,set,image}]。
@@ -368,21 +431,33 @@ def _catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/product
         _cat_sql, _cat_arg = (" AND category=?", ((category or "").strip(),))
     try:
         con = sqlite3.connect(_db)
-        rows = con.execute(
-            f"SELECT {_cols} FROM products "
-            "WHERE (product_id=? COLLATE NOCASE OR product_id LIKE ? COLLATE NOCASE)" + _cat_sql,
-            (card_no, card_no + "_%") + _cat_arg).fetchall()
+        # ★2026-09-25: 番号の目次を1回だけ作って引く (下の SQL は COLLATE NOCASE で目次が効かず、
+        #   1回 0.12秒かけて10万件を端から見ていた)。目次が作れない時は従来の SQL に戻る。
+        idx = _catalog_index(_db)
+        if idx is not None:
+            ids = _index_lookup(idx, card_no, (category or "").strip())
+            rows = _rows_by_rowid(con, _cols, ids)
+            if not rows and _re.fullmatch(r"\d{1,3}/[A-Za-z0-9\-]{1,5}", card_no.strip()):
+                rows = _rows_by_rowid(con, _cols, [i for i, c in idx["cnt"].get(card_no.strip(), [])
+                                                   if not (category or "").strip() or c == category.strip()])
+            con.close()
+        else:
+            rows = con.execute(
+                f"SELECT {_cols} FROM products "
+                "WHERE (product_id=? COLLATE NOCASE OR product_id LIKE ? COLLATE NOCASE)" + _cat_sql,
+                (card_no, card_no + "_%") + _cat_arg).fetchall()
         # フォールバック: product_id 不一致 かつ コレクター番号形式 → card_number_text で再検索
         # ★2026-09-01: promo は `182/XY-P` `196/SV-P` の様に **ハイフンを含む**。
         #   `[A-Za-z0-9]{1,4}` では弾かれ、catalog に在るのに候補0件だった
         #   (実測 XYP-182 プテラEX / SV-P-196 イーブイ は card_number_text に
         #    タイトルと同じ書式でそのまま入っている)。
-        if not rows and _re.fullmatch(r"\d{1,3}/[A-Za-z0-9\-]{1,5}", card_no.strip()):
+        if idx is None and not rows and _re.fullmatch(r"\d{1,3}/[A-Za-z0-9\-]{1,5}", card_no.strip()):
             rows = con.execute(
                 f"SELECT {_cols} FROM products "
                 "WHERE json_extract(specs,'$.card_number_text')=?" + _cat_sql,
                 (card_no.strip(),) + _cat_arg).fetchall()
-        con.close()
+        if idx is None:
+            con.close()
     except Exception:
         return []
     _hint = (title_hint or "").lower()

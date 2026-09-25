@@ -56,6 +56,10 @@ def main():
         "restock_build": lambda: __import__("psa_restock_build").count_workload(restock_rows()),
         "restock_wb": lambda: __import__("psa_restock_writeback").count_workload(restock_rows()),
     }
+    # ★2026-09-25: 引数で数える項目を絞れる (押したボタンの分だけ数え直す)。無ければ全部
+    want = [k for k in sys.argv[1:] if k in fns]
+    if want:
+        fns = {k: fns[k] for k in want}
     d = {}
 
     def grab(key):

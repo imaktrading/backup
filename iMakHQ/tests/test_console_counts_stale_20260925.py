@@ -40,3 +40,31 @@ def test_catalog_variants_are_memoized():
     finally:
         mp._catalog_variants_for_cardno = orig
         mp._VARIANTS_CACHE.clear()
+
+
+def test_every_badge_recounts_only_its_part():
+    """押した後は、そのボタンの項目だけ数え直す (全部だと約3分)。ユーザー「短縮できることはやろう」。"""
+    import sys
+    sys.path.insert(0, os.path.join(HQ, "console"))
+    sys.path.insert(0, HQ)
+    import server
+    import control_panel as cp
+    for s in cp.SCRIPTS:
+        b = s.get("badge")
+        if b:
+            assert server.count_keys_for(b) is not None, b      # 全ボタンに割り当てがある
+    assert server.count_keys_for("hoju_swap") == ["hoju"]
+    assert server.count_keys_for(None) is None                   # バッジの無いボタンは全部数え直す
+
+
+def test_catalog_index_matches_sql():
+    """番号の目次で引いても、SQL (大文字小文字を区別しない完全一致 or 前方一致) と同じ行になる。"""
+    import sys
+    sys.path.insert(0, os.path.join(HQ, "tools"))
+    import mercari_psa_resource as mp
+    idx = {"pids": sorted([("OP11-021", 1, "op"), ("OP11-021_P", 2, "op"), ("OP11-0219", 3, "op"),
+                           ("OP11-02", 4, "op"), ("ST01-005", 5, "op")])}
+    idx["keys"] = [p[0] for p in idx["pids"]]
+    # LIKE 'OP11-021_%' は後ろに1文字以上 (SQL の _ は任意の1文字なので OP11-0219 も入る = 従来どおり)
+    assert sorted(mp._index_lookup(idx, "op11-021")) == [1, 2, 3]
+    assert mp._index_lookup(idx, "OP11-021", "other") == []
