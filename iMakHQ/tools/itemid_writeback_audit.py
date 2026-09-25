@@ -295,20 +295,29 @@ def main() -> int:
     from google.oauth2.service_account import Credentials
     import sheet_io as S
 
+    # ★2026-09-26: 一覧が取れなくても **出品した直後の分だけは書く**。番号は出品の応答で
+    #   手元にあり、API を使わない。以前はここで丸ごと中断していたため、書き戻しが漏れた行が
+    #   翌日「未出品」として選び直され、同じ仕入元で二重出品した (9/22→9/23 の10件)。
+    fetch_failed = None
     try:
         live = _fetch_live(use_cache=not args.no_cache)
     except IncompleteFetch as e:
-        print(f"★中断: {e}")
-        print("  取得が不完全なので判定しない。**0件=正常ではない**。時間をおいて再実行すること")
-        return 2
+        fetch_failed = e
+        live = {}
     # ★出品した直後の分は live 一覧 (2時間キャッシュ) に載っていない。応答から足す。
     fresh = {k: v for k, v in _load_just_listed(CSV_DIR).items() if k not in live}
+    if fetch_failed is not None:
+        print(f"★一覧の取得が不完全: {fetch_failed}")
+        if not fresh:
+            print("  取得が不完全なので判定しない。**0件=正常ではない**。時間をおいて再実行すること")
+            return 2
+        print(f"  → 出品直後の {len(fresh)} 件だけ書く (それ以外の漏れは次回の完全な取得で見る)")
     if fresh:
         live.update(fresh)
         print(f"出品直後の itemID を応答から追加: {len(fresh)} 件 (API 消費ゼロ)")
     by_cert, by_supply = build_live_index(live)
     print(f"索引: cert {len(by_cert)} + 仕入元 {len(by_supply)}")
-    if not by_cert:
+    if not by_cert and fetch_failed is None:
         print("★中断: cert 索引が空 (PSA10-<cert> の SKU が1件も無い)。"
               "取得内容が想定と違うので判定しない")
         return 2
@@ -343,6 +352,8 @@ def main() -> int:
     print(f"\n合計 {total} 件 (うち販売可能 {sellable} 件 = 取下げ不能だった行)")
     if total and not args.apply:
         print("→ 書き込むには --apply")
+    if fetch_failed is not None:
+        return 2          # 直後の分は書けたが、それ以外の漏れは見ていない = 正常と言わない
     return writeback_exit_code(total, args.apply)
 
 

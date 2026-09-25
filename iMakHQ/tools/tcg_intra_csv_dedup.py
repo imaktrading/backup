@@ -31,8 +31,36 @@ def _title_key(row, header):
     return (row[i].strip().lower() if 0 <= i < len(row) else "")
 
 
-def dup_row_indices(body, header):
+CSV_CERT = "CDA:Certification Number - (ID: 27503)"
+
+
+def _pid_of(row, header, pid_by_cert):
+    """生成器が確定した canonical product_id (sidecar の by_cert)。無ければ ''。純関数。"""
+    if not pid_by_cert or CSV_CERT not in header:
+        return ""
+    i = header.index(CSV_CERT)
+    cert = row[i].strip() if i < len(row) else ""
+    return pid_by_cert.get(cert, "") if cert else ""
+
+
+def load_pid_by_cert(csv_path):
+    """`<csv名>.canonical.json` の by_cert を読む (I/O・無ければ空)。"""
+    import json
+    side = os.path.splitext(csv_path)[0] + ".canonical.json"
+    try:
+        with open(side, encoding="utf-8") as f:
+            return json.load(f).get("by_cert") or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def dup_row_indices(body, header, pid_by_cert=None):
     """同一 design key の 2件目以降の body index(0-based)を返す。純関数。
+
+    ★2026-09-26: **生成器が確定した product_id があればそれで同定する** (最優先)。
+      (Game, Set, 番号) だと、クラシックの フシギダネ デッキ (CLF-001) と カメックス デッキ
+      (CLK-001) が同じ「Pokemon Card Game Classic / 001/032」になり、別カードを間引いて
+      正しい出品を1件失った (2026-09-23 cert 158998557)。PID が無い行だけ従来の key に落とす。
 
     design key = (game, set, card_number)。構成要素に空がある行(catalog gap で C:Set 空等)は
     **完全一致タイトルにフォールバック**して同定する。card number 自体に set コードが含まれ、
@@ -43,7 +71,8 @@ def dup_row_indices(body, header):
     """
     seen, drop = set(), set()
     for i, row in enumerate(body):
-        key = _design_key(row, header)
+        pid = _pid_of(row, header, pid_by_cert)
+        key = ("__pid__", pid) if pid else _design_key(row, header)
         if "" in key:
             t = _title_key(row, header)
             if not t:
@@ -63,7 +92,7 @@ def dedup_csv(csv_path, execute=False):
     if len(rows) < 2:
         return {"total": 0, "removed": 0, "executed": execute}
     header, body = rows[0], rows[1:]
-    drop = dup_row_indices(body, header)
+    drop = dup_row_indices(body, header, load_pid_by_cert(csv_path))
     ti = header.index("*Title") if "*Title" in header else 0
 
     print(f"CSV内 同design重複(同じカードの2枚目以降): {len(drop)} 件")

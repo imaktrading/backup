@@ -321,6 +321,32 @@ def same_cert_already_live(csv_rows, header, listed_cert_set):
     return out
 
 
+# 仕入元1点を指す SKU の形 (メルカリ m番号 / ASIN / スニダン出品ID / PSA10-<cert>)。
+# 「UNIQLO official website」のように複数出品で共有する SKU は当たらない形にしてある。
+_ONE_ITEM_SKU_RE = re.compile(r"^(m\d{8,}|[A-Z0-9]{10}|\d{6,10}|PSA10-\d{6,10})$")
+
+
+def same_sku_already_live(csv_rows, header, live_skus):
+    """CSV 行のうち **同じ SKU (= 同じ仕入元1点) が既に出品中** のものを返す (純関数)。
+
+    ★2026-09-26 実害: 9/22 に出した10件の itemID がシートに書き戻されず、9/23 に
+      同じメルカリ出品を仕入元として **もう一度出品**した (古い方は監視くんの外 = 売切でも
+      買える状態で残り、2件は実際に仕入元が売切れていた)。
+      同一cert の判定は live SKU が `PSA10-<cert>` の出品しか拾えず、今の PSA 出品は
+      SKU = メルカリ番号なので **cert 側からは見えなかった**。SKU そのものを突き合わせる。
+    """
+    hi = {n: i for i, n in enumerate(header)}
+    li, ti = hi.get(CSV_LABEL), hi.get(CSV_TITLE)
+    live = {(s or "").strip() for s in (live_skus or ())}
+    out = []
+    for n, r in enumerate(csv_rows):
+        lb = (r[li] or "").strip() if li is not None and li < len(r) else ""
+        if lb and _ONE_ITEM_SKU_RE.match(lb) and lb in live:
+            out.append({"row": n, "label": lb,
+                        "title": (r[ti] or "").strip() if ti is not None and ti < len(r) else ""})
+    return out
+
+
 _SETCODE_RE = re.compile(r"[\[【]\s*([A-Za-z0-9\-]+)\s*[\]】]")
 
 
@@ -809,6 +835,25 @@ def pre_upload(csv_path, use_cache_only=True):
         if not rows:
             print("  (同一cert 除外の結果 CSV が空になりました)")
             return {"rows": 0, "dups": 0, "same_cert": len(severe)}
+
+    # ---- 🔴 同じ SKU (= 同じ仕入元1点) が既に出品中 → 物理除外 (2026-09-26) ----
+    #   シートの itemID 書き戻しに頼らない。eBay 側の SKU だけで判定する。
+    same_sku = same_sku_already_live(rows, header, (skus or {}).values())
+    if same_sku:
+        print(f"■ 🔴 dup_guard: **同じ仕入元の SKU が既に出品中** {len(same_sku)}件 → CSV から物理除外します")
+        for s in same_sku:
+            print(f"    🚫 {s['label']:18} {s['title'][:60]}")
+        print("       (シートに itemID が無くても eBay には出ている = 二重出品になる)")
+        drop = {s["row"] for s in same_sku}
+        kept = [r for i, r in enumerate(rows) if i not in drop]
+        _strip_rows(csv_path, header, kept)
+        _ledger("pre_upload_stripped_same_sku",
+                {"csv": os.path.basename(csv_path),
+                 "same_sku": [{k: s[k] for k in ("label", "title")} for s in same_sku]})
+        rows = kept
+        if not rows:
+            print("  (同じSKU 除外の結果 CSV が空になりました)")
+            return {"rows": 0, "dups": 0, "same_sku": len(same_sku)}
 
     # ★仕入元URLが既に出品中の行に取られていないか (2026-08-23)。
     #   1つのメルカリ出品に複数枚入っている / 連番でまとめ売りされている時、

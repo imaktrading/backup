@@ -122,6 +122,16 @@ def check_set_code(con):
 
 # 人が「未検証」と自分で書いた印。これが残っている限り、その行は①の正の根拠にできない。
 UNVERIFIED_MARKERS = ("REVIEW", "要確認", "推定", "仮")
+# 印と見なすのは「note の先頭」か「括弧で囲んだ形」([要確認] / 【仮】 / (REVIEW)) だけ。
+# ★2026-09-26: 部分一致だと「変幻の仮面」の仮 や「(REVIEW のまま残っていた)」という経緯文を
+#   印と誤読し、eBay master 確認済みの3行を毎週「未検証」と出していた (catalog 依頼 09-23)。
+_M = "|".join(UNVERIFIED_MARKERS)
+UNVERIFIED_RE = re.compile(
+    rf"^\s*(?:{_M})(?=[\s:：)）\]】]|$)|[\[【(（]\s*(?:{_M})\s*[\]】)）]")
+
+
+def is_unverified_note(note):
+    return bool(UNVERIFIED_RE.search(note or ""))
 
 # 同じ eBay 値に潰れていても**正しい**組 (JA/EN 表記ゆれ・hyphen 変異体など、実体が同一)。
 # ここに入れる時は「実体が同一である根拠」をコメントで残すこと。安易に足すと検査が死ぬ。
@@ -137,13 +147,12 @@ COLLISION_ALLOW = {
 def check_unverified_filtermap(con):
     """`note` に未検証の印が残っている変換表の行 (= ①の正の根拠にできない行)。"""
     out = {}
-    like = " OR ".join(["note LIKE ?"] * len(UNVERIFIED_MARKERS))
-    args = [f"%{m}%" for m in UNVERIFIED_MARKERS]
     rows = con.execute(
-        f"SELECT category, field, source_value, ebay_value, note FROM ebay_filter_map "
-        f"WHERE {like} ORDER BY category, field, source_value", args).fetchall()
+        "SELECT category, field, source_value, ebay_value, note FROM ebay_filter_map "
+        "ORDER BY category, field, source_value").fetchall()
     for cat, field, src, ev, note in rows:
-        out.setdefault(cat, []).append((field, src, ev, (note or "")[:60]))
+        if is_unverified_note(note):
+            out.setdefault(cat, []).append((field, src, ev, (note or "")[:60]))
     return out
 
 

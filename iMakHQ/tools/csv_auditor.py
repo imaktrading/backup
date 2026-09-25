@@ -729,6 +729,23 @@ def title_format_checks(headers, row, project):
     return []
 
 
+CARD_NUMBER_EMPTY_MSG = "カード番号が空 → タイトルに # を入れられない (カタログ要確認)"
+
+
+def is_catalog_side_title_msg(headers, row, msg):
+    """「# が無い」の原因がカタログ側 (C:Card Number が空) か。純関数。
+
+    ★2026-09-26: タイトルの # は C:Card Number から作るので、番号が空なら # も付かない。
+      これをプログラム依頼に積むと、直す先 (カタログ) に依頼が飛ばない
+      (OP11-067_p3: カタログに card_number_text が無い promo 50件)。
+      番号が在るのに # が無い時だけが本当の生成バグ。
+    """
+    if "必須語 '#'" not in msg:
+        return False
+    i = {h: n for n, h in enumerate(headers)}.get("C:Card Number")
+    return not (str(row[i]).strip() if i is not None and i < len(row) else "")
+
+
 # タイトル SEO 監査 (iMakKeywords PDF 参照):
 # 生成は PDF 上位検索語でタイトルを最適化する建前 → 監査でも「PDF上位語を活かせてるか」を見る。
 # PDF は pdftotext で .txt 化済 (C:/dev/iMak_data/keywords/)。csv_auditor は別 python 実行のため
@@ -1144,7 +1161,10 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
         for cmsg in title_spec_consistency(headers, row, _tproj):
             program_items.append((sku, cmsg))
         for fmsg in title_format_checks(headers, row, _tproj):
-            program_items.append((sku, fmsg))
+            if is_catalog_side_title_msg(headers, row, fmsg):
+                catalog_items.append((sku, CARD_NUMBER_EMPTY_MSG))
+            else:
+                program_items.append((sku, fmsg))
         if should_exclude(eff):
             exclude_idx.append(i)
 
