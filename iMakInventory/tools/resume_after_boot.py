@@ -8,6 +8,9 @@
    「止まった」= 途中経過の記録 (checkpoint) が残っている、または lock の持ち主が死んでいて
    その後に巡回の終了記録が無い。続きからの再開そのものは巡回側 (monitor_listings) が行う。
 3. 何もすることが無ければ何もしない (普通のログオンでも起動するため)
+4. `--periodic` (タスク iMakInventory_ResumeCrashed、5分おき): PC は落ちずに巡回のプロセスだけが
+   落ちた時 (9/24〜25 にメモリ破損で4回) に、次の予約 (最大6時間後) を待たずに続きから走らせる。
+   同じ止まり方を3回走らせ直しても落ちるなら、自動ではやめてデスクトップに ALERT を置く
 
 起動は既存の予約タスクを /run で叩く (引数・Chrome の置き場・lock を予約と完全に同じにするため)。
 """
@@ -185,17 +188,74 @@ def wait_others_idle() -> None:
     log("  [!] 5時間待っても他の巡回が終わらない → そのまま始める")
 
 
-def main() -> int:
-    log("=== 起動後の再開チェック ===")
+RETRY_STATE = DECISION_LOG_DIR / "resume_retry_state.json"
+MAX_RETRY = 3        # 同じ止まり方 (同じ途中経過) を続けて走らせ直す上限 — 毎回落ちるなら人が見る
+
+
+def _interrupt_key(label: str, lock_name: str) -> str:
+    """止まった1回を識別する: 途中経過の開始時刻 (無ければ lock の時刻)."""
+    p = DECISION_LOG_DIR / f"checkpoint_{label}.jsonl"
+    try:
+        with open(p, encoding="utf-8") as f:
+            started = json.loads(f.readline()).get("started")
+        if started:
+            return f"ckpt:{started}"
+    except (OSError, ValueError, AttributeError):
+        pass
+    _, ts = read_lock(DECISION_LOG_DIR / lock_name)
+    return f"lock:{ts.isoformat() if ts else '?'}"
+
+
+def _load_retry() -> dict:
+    try:
+        d = json.loads(RETRY_STATE.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _alert_gave_up(label: str, key: str, tries: int) -> None:
+    """3回走らせ直しても落ちる = 自動では直らない。人が見るための告知 (1回だけ)."""
+    try:
+        desk = Path.home() / "OneDrive" / "デスクトップ"
+        (desk / f"ALERT_iMakInventory_cycle_keeps_crashing_{label}_{datetime.now():%Y-%m-%d_%H}.txt").write_text(
+            f"{label} の巡回が {tries} 回 続けて途中で落ちたので、自動の再開をやめました ({key})。\n"
+            f"次の予約の巡回までこの巡回は止まったままです。\n"
+            f"見る所: iMakInventory/logs/cycle_crash.log と logs/resume_after_boot.log\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def main(periodic: bool = False) -> int:
+    """periodic=False: ログオン時 (PC が落ちた後)。periodic=True: 5分おき (巡回のプロセスだけが落ちた時)."""
+    todo = [(lab, lk, task, why) for lab, lk, task in CYCLES if (why := interrupted(lab, lk))]
+    if periodic and not todo:
+        return 0         # 5分おきの見回りで何も無ければ、ログも残さない
+    log("=== 巡回が落ちていないかの見回り ===" if periodic else "=== 起動後の再開チェック ===")
     log("取下げの送り残しを先に1回回す")
     run_task(DRAIN_TASK)
 
-    todo = [(lab, lk, task, why) for lab, lk, task in CYCLES if (why := interrupted(lab, lk))]
     if not todo:
         log("止まった巡回なし → 終了")
         return 0
+    retry = _load_retry()
     for lab, lk, task, why in todo:
-        log(f"{lab}: 止まっている ({why}) → 続きから走らせる")
+        if periodic:
+            key = _interrupt_key(lab, lk)
+            ent = retry.get(lab) if isinstance(retry.get(lab), dict) else {}
+            tries = ent.get("tries", 0) if ent.get("key") == key else 0
+            if tries >= MAX_RETRY:
+                if not ent.get("alerted"):
+                    log(f"{lab}: {tries} 回走らせ直しても落ちた → 自動の再開をやめる (次の予約まで待つ)")
+                    _alert_gave_up(lab, key, tries)
+                    retry[lab] = {"key": key, "tries": tries, "alerted": True}
+                    RETRY_STATE.write_text(json.dumps(retry, ensure_ascii=False), encoding="utf-8")
+                continue
+            retry[lab] = {"key": key, "tries": tries + 1}
+            RETRY_STATE.write_text(json.dumps(retry, ensure_ascii=False), encoding="utf-8")
+            log(f"{lab}: 巡回のプロセスが落ちている ({why}) → 続きから走らせる ({tries + 1}/{MAX_RETRY} 回目)")
+        else:
+            log(f"{lab}: 止まっている ({why}) → 続きから走らせる")
         wait_others_idle()
         if not interrupted(lab, lk):
             log(f"  {lab}: 待っている間に予約の巡回が走った → 走らせない")
@@ -209,4 +269,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     os.chdir(ROOT)
-    sys.exit(main())
+    sys.exit(main(periodic="--periodic" in sys.argv[1:]))

@@ -125,3 +125,45 @@ def test_waits_while_another_cycle_runs(tmp_path, monkeypatch):
     monkeypatch.setattr(R, "LOG_FILE", tmp_path / "resume.log")
     R.wait_others_idle()
     assert not (tmp_path / ".cycle.lock").exists()
+
+
+def _periodic_env(tmp_path, monkeypatch):
+    _env(tmp_path, monkeypatch)
+    ran = []
+    monkeypatch.setattr(R, "run_task", lambda name: ran.append(name) or True)
+    monkeypatch.setattr(R, "wait_cycle", lambda *a, **k: None)
+    monkeypatch.setattr(R, "wait_others_idle", lambda: None)
+    monkeypatch.setattr(R, "LOG_FILE", tmp_path / "resume.log")
+    monkeypatch.setattr(R, "RETRY_STATE", tmp_path / "retry.json")
+    alerts = []
+    monkeypatch.setattr(R, "_alert_gave_up", lambda *a: alerts.append(a))
+    return ran, alerts
+
+
+def test_periodic_silent_when_nothing_to_do(tmp_path, monkeypatch):
+    ran, _ = _periodic_env(tmp_path, monkeypatch)
+    assert R.main(periodic=True) == 0
+    assert ran == [] and not (tmp_path / "resume.log").exists()   # 何も起動せず、ログも残さない
+
+
+def test_periodic_relaunches_crashed_cycle_then_gives_up_after_3(tmp_path, monkeypatch):
+    ran, alerts = _periodic_env(tmp_path, monkeypatch)
+    (tmp_path / "checkpoint_SHEET.jsonl").write_text('{"_checkpoint": 1, "started": "2026-09-25T13:31:31"}\n', encoding="utf-8")
+    for _ in range(3):
+        R.main(periodic=True)
+    assert ran.count("iMakInventory_Cycle") == 3
+    R.main(periodic=True)                                              # 4回目: 走らせない + 告知1回
+    R.main(periodic=True)
+    assert ran.count("iMakInventory_Cycle") == 3 and len(alerts) == 1
+
+
+def test_periodic_counts_per_interruption(tmp_path, monkeypatch):
+    """別の回の途中経過になったら数え直す."""
+    ran, _ = _periodic_env(tmp_path, monkeypatch)
+    ck = tmp_path / "checkpoint_SHEET.jsonl"
+    ck.write_text('{"_checkpoint": 1, "started": "2026-09-25T13:31:31"}\n', encoding="utf-8")
+    for _ in range(3):
+        R.main(periodic=True)
+    ck.write_text('{"_checkpoint": 1, "started": "2026-09-25T19:30:00"}\n', encoding="utf-8")
+    R.main(periodic=True)
+    assert ran.count("iMakInventory_Cycle") == 4
