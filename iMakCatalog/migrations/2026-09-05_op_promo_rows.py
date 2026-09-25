@@ -75,7 +75,10 @@ def parse_block(b: str) -> dict | None:
     m_attr = re.search(r'class="attribute">.*?alt="([^"]*)"', b, re.S)
     return {
         "product_id": mid.group(1),
-        "card_number": cells[0],
+        # ★キーは `card_number_text` (出品くん・テストが読むのはこちらが正)。
+        #   2026-06-21 に一度直した所と同じ穴で、9/5 のこの取り込みで 50件 再発した
+        #   (依頼 2026-09-25_promo_ingest_card_number_text_missing.md)。
+        "card_number_text": cells[0],
         "rarity": cells[1] if len(cells) > 1 else "",
         "card_type": cells[2] if len(cells) > 2 else "",
         "name": O._norm(H.unescape(m_name.group(1))),
@@ -111,7 +114,7 @@ def run(commit: bool) -> None:
                 continue
             specs = {k: v for k, v in c.items() if k in (
                 "rarity", "card_type", "cost", "life", "power", "counter", "color",
-                "feature", "card_text", "attribute", "card_number") and v}
+                "feature", "card_text", "attribute", "card_number_text") and v}
             api.upsert(
                 category="one_piece_tcg", product_id=c["product_id"],
                 name=c["name"], name_jp=c["name"],

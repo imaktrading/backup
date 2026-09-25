@@ -464,6 +464,12 @@ def _apply_ebay_fields(legacy: dict, record: dict, category: str) -> dict:
     # 旧 specs.Rarity → specs.rarity に変わったので legacy.rarity_en も小文字経由で復旧
     if not legacy.get("rarity_en"):
         legacy["rarity_en"] = specs.get("rarity") or ""
+    # ★`rarity_en` は生の記号 (SR / C / L) を入れる欄だが、**日本語が入る行がある**
+    #   (`SPカード` 等)。そのままだと毎走行「翻訳未対応」の警告が出る
+    #   (2026-09-26 依頼、OP02-120_p2 で再現)。日本語の時だけ eBay 値に置き換える。
+    #   記号 (ASCII) の行は従来どおり触らない (回帰テストが SR / C / L を固定している)。
+    if not str(legacy.get("rarity_en") or "").isascii():
+        legacy["rarity_en"] = specs.get("rarity_ebay") or legacy["rarity_en"]
     if not legacy.get("rarity"):
         legacy["rarity"] = specs.get("rarity") or ""
     if not legacy.get("color_en") and "color_en" in legacy:
