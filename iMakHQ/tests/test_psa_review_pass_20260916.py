@@ -24,9 +24,11 @@ NOW = datetime.datetime(2026, 9, 16, 12, 0, 0)
 
 def test_reasons_are_the_five_the_user_decided():
     keys = [k for k, _l, _d in R.PASS_REASONS]
-    assert keys == ["bundle", "seller", "gone", "price", "other"]
+    # 2026-09-25 ユーザー「見送り理由に海外版を入れておいて」→ foreign を追加
+    assert keys == ["bundle", "seller", "gone", "foreign", "price", "other"]
     days = {k: d for k, _l, d in R.PASS_REASONS}
     assert days["gone"] == 0            # 売り切れは永久 (監視くんの気づきにはラグがある)
+    assert days["foreign"] == 0         # 現物が海外版なのは変わらない = 永久
 
 
 def test_forever_reasons_never_come_back():
