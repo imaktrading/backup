@@ -102,18 +102,107 @@
 
   function startButton(label, fn) {
     const p = panel();
-    const t = document.createElement("div");
-    t.style.cssText = "font-weight:bold;margin-bottom:6px";
-    t.textContent = "Seller Hub レポート取り";
+    if (!p.firstChild) {
+      const t = document.createElement("div");
+      t.style.cssText = "font-weight:bold;margin-bottom:6px";
+      t.textContent = "Seller Hub レポート取り";
+      p.append(t);
+    }
     const b = document.createElement("button");
     b.textContent = label;
-    b.style.cssText = "background:#0654ba;color:#fff;border:0;border-radius:4px;padding:6px 12px;cursor:pointer";
-    b.onclick = async () => { b.disabled = true; await fn(); };
-    p.append(t, b);
+    b.style.cssText = "display:block;margin:4px 0;background:#0654ba;color:#fff;border:0;border-radius:4px;padding:6px 12px;cursor:pointer";
+    b.onclick = async () => { b.disabled = true; await fn(); b.disabled = false; };
+    p.append(b);
+  }
+
+  // ── 新しく作る (2026-09-26 追加) ─────────────────────────────
+  // 「Download report」の入力画面は Source / Type / Date range の3つの欄 (.se-field-card) で、
+  // 欄を押すと選択肢が出る。選択肢の作りは未確認なので **文字で探して押し、欄の表示が
+  // 狙いどおりになったか必ず確かめる**。違えば作らずに止める (間違った物を作らない)。
+  const visible = (el) => !!(el && (el.offsetParent || el.getClientRects().length));
+  const dialog = () => [...document.querySelectorAll(".se-dialog[role=dialog]")]
+    .find((d) => !d.hidden && d.getAttribute("aria-hidden") !== "true" && visible(d.querySelector(".lightbox-dialog__window")));
+  const cardValue = (cls) => txt((dialog() || document).querySelector(
+    `.${cls} .se-field-card__content-description`));
+
+  async function waitFor(fn, ms = 8000) {
+    for (let t = 0; t < ms; t += 250) { const v = fn(); if (v) return v; await sleep(250); }
+    return null;
+  }
+
+  function clickText(label) {
+    const d = dialog();
+    if (!d) return false;
+    const want = label.toLowerCase();
+    const hit = [...d.querySelectorAll("button,label,li,[role=radio],[role=option],[role=menuitem],span,div")]
+      .filter((el) => visible(el) && txt(el).toLowerCase() === want
+        && !el.closest(".se-field-card__content"));        // 欄に今出ている値は押さない
+    if (!hit.length) return false;
+    const el = hit[hit.length - 1];
+    (el.closest("button,label,li,[role=radio],[role=option],[role=menuitem]") || el).click();
+    return true;
+  }
+
+  async function choose(cls, label) {
+    if (cardValue(cls).toLowerCase() === label.toLowerCase()) return true;
+    const btn = (dialog() || document).querySelector(`.${cls} button.se-field-card__body`);
+    if (!btn) return false;
+    btn.click();
+    if (!(await waitFor(() => clickText(label), 5000))) return false;
+    // 選ぶと元の画面に戻る作りでなければ「戻る」を押す
+    if (!(await waitFor(() => cardValue(cls).toLowerCase() === label.toLowerCase(), 3000))) {
+      const back = [...(dialog() || document).querySelectorAll("button")]
+        .find((b) => visible(b) && /back|戻る|done|apply/i.test(b.getAttribute("aria-label") || txt(b)));
+      if (back) back.click();
+    }
+    return !!(await waitFor(() => cardValue(cls).toLowerCase() === label.toLowerCase(), 3000));
+  }
+
+  const MAKE = [
+    { source: "Listings", type: "All active listings", label: "出品中" },
+    { source: "Listings", type: "Inactive Listings", label: "売れ残り" },
+    { source: "Orders", type: "All orders", label: "注文", days90: true },
+    { source: "Advertising", type: "Listing", label: "広告", days90: true },
+  ];
+
+  async function makeOne(w) {
+    const open = [...document.querySelectorAll("button")].find((b) => txt(b) === "Download report");
+    if (!open) { log("❌ 「Download report」ボタンが見つかりません"); return false; }
+    open.click();
+    if (!(await waitFor(dialog))) { log(`❌ ${w.label}: 入力画面が開きません`); return false; }
+    const ok = (await choose("sourceSlider", w.source)) && (await choose("typeSlider", w.type));
+    // 期間: 注文と広告は90日 (広告は短いとファネルが止まる: PROMOTED_MIN_DAYS=85)
+    const range = cardValue("dateRangeSlider");
+    const rangeOk = !w.days90 || /90/.test(range) || (await choose("dateRangeSlider", "Last 90 Days"));
+    const got = `${cardValue("sourceSlider")} / ${cardValue("typeSlider")}` + (range ? ` / ${cardValue("dateRangeSlider")}` : "");
+    if (!ok || !rangeOk) {
+      log(`❌ ${w.label}: 選べませんでした (今の表示: ${got})。作らずに閉じます`);
+      const cancel = [...dialog().querySelectorAll("button")].find((b) => txt(b) === "Cancel");
+      if (cancel) cancel.click();
+      return false;
+    }
+    const dl = [...dialog().querySelectorAll(".lightbox-dialog__footer button")].find((b) => txt(b) === "Download");
+    dl.click();
+    log(`🛠 ${w.label}: 作成を頼みました (${got})`);
+    // 「Creating your report / In progress」が消えるまで待つ (最大5分)
+    await sleep(3000);
+    // (この文言は隠れた状態で常にページにあるので、見えているかで判定する)
+    const creating = () => [...document.querySelectorAll("h2,h3,p,div,span")]
+      .some((el) => visible(el) && txt(el) === "Creating your report");
+    await waitFor(() => !creating(), 300000);
+    await sleep(2000);
+    return true;
+  }
+
+  async function makeAll() {
+    let n = 0;
+    for (const w of MAKE) { if (await makeOne(w)) n++; await sleep(2000); }
+    log(`作成: ${n}/${MAKE.length} 本。一覧で Completed になったら「まとめて取る」を押してください`);
   }
 
   if (location.pathname.startsWith("/sh/reports/downloads")) {
-    startButton("ファネル用レポートをまとめて取る", async () => {
+    startButton("① 新しく作る (4本)", makeAll);
+    startButton("② ファネル用レポートをまとめて取る", async () => {
       if (await grabDownloads()) {
         sessionStorage.setItem(FLAG, "1");
         log("→ 品質レポートの画面へ移ります…");

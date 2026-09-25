@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Seller Hub レポート取り",
-  "version": "1.0",
-  "description": "Seller Hub のファネル用レポート4つを、ボタン1回でまとめて落とす (完成済みの物を押すだけ)",
+  "version": "1.1",
+  "description": "Seller Hub のファネル用レポート4つを、作成と取得をボタンで行う (いつものブラウザの中で押すだけ)",
   "content_scripts": [
     {
       "matches": [
