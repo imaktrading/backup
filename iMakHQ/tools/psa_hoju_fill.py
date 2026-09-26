@@ -2512,7 +2512,8 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     # ★2026-09-08: 画面に出した「目視待ち」は、採否が決まったので待ち行列から外す。
     #   外さないと毎回同じものが並び、押しても減らない画面になる
     #   (チェックを残した分は上で書込済、外した分は理由つきで台帳に記録済)。
-    if _shown_pending:
+    # ★2026-09-27: 書込を止めた時 (_guard_ok=False) は落とさない。落とすと「再実行で復帰」が嘘になる
+    if _shown_pending and _guard_ok:
         try:
             import aux_pending
             _n = aux_pending.consume(_shown_pending)
@@ -2553,7 +2554,10 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     not_confirmed = shown - set(confirmed.keys())
     # ★2026-09-20: 確認したのに1本も入らなかった行も「今は手が無い」として記録する。
     #   記録しないと件数が減らず、次回また同じ候補を見せることになる。
-    _no_effect = confirmed_but_nothing_written(confirmed, item_targets, vals, aux_writeback)
+    # ★2026-09-27: 書込を止めた時は「既に安い補URLが5本ある」と記録しない。
+    #   実害: 書込中止の13件 (補0本) が「5本ある」と記録され、次から画面に出なくなっていた
+    _no_effect = (confirmed_but_nothing_written(confirmed, item_targets, vals, aux_writeback)
+                  if _guard_ok else [])
     if not_confirmed or _no_effect:
         new_skip = []
         for idx, _lost in _no_effect:
