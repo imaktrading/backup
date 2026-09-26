@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Seller Hub レポート取り",
-  "version": "1.1",
+  "version": "1.2",
   "description": "Seller Hub のファネル用レポート4つを、作成と取得をボタンで行う (いつものブラウザの中で押すだけ)",
   "content_scripts": [
     {

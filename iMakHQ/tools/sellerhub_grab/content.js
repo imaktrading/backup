@@ -117,29 +117,32 @@
 
   // ── 新しく作る (2026-09-26 追加) ─────────────────────────────
   // 「Download report」の入力画面は Source / Type / Date range の3つの欄 (.se-field-card) で、
-  // 欄を押すと選択肢が出る。選択肢の作りは未確認なので **文字で探して押し、欄の表示が
+  // 欄を押すと選択肢の小窓が出る。選択肢は **文字で探して押し、欄の表示が
   // 狙いどおりになったか必ず確かめる**。違えば作らずに止める (間違った物を作らない)。
   const visible = (el) => !!(el && (el.offsetParent || el.getClientRects().length));
   const dialog = () => [...document.querySelectorAll(".se-dialog[role=dialog]")]
     .find((d) => !d.hidden && d.getAttribute("aria-hidden") !== "true" && visible(d.querySelector(".lightbox-dialog__window")));
-  const cardValue = (cls) => txt((dialog() || document).querySelector(
-    `.${cls} .se-field-card__content-description`));
+  const cardValue = (cls) => txt((dialog() || document.querySelector(".se-dialog") || document)
+    .querySelector(`.${cls} .se-field-card__content-description`));
 
   async function waitFor(fn, ms = 8000) {
     for (let t = 0; t < ms; t += 250) { const v = fn(); if (v) return v; await sleep(250); }
     return null;
   }
 
-  function clickText(label) {
-    const d = dialog();
-    if (!d) return false;
+  // 欄を押すと、入力画面の **外に** 選択肢の小窓 (.flyout-pane) が出る。中身はラジオボタンと
+  // label.field__label、上に「Done」(.btn-done-link)。(2026-09-26 保存した画面で確認)
+  const pane = () => [...document.querySelectorAll(".flyout-pane")]
+    .find((p) => !p.hidden && p.getAttribute("aria-hidden") !== "true" && visible(p.querySelector(".flyout-pane__window")));
+
+  function clickOption(label) {
+    const p = pane();
+    if (!p) return false;
     const want = label.toLowerCase();
-    const hit = [...d.querySelectorAll("button,label,li,[role=radio],[role=option],[role=menuitem],span,div")]
-      .filter((el) => visible(el) && txt(el).toLowerCase() === want
-        && !el.closest(".se-field-card__content"));        // 欄に今出ている値は押さない
-    if (!hit.length) return false;
-    const el = hit[hit.length - 1];
-    (el.closest("button,label,li,[role=radio],[role=option],[role=menuitem]") || el).click();
+    const lb = [...p.querySelectorAll("label.field__label, label")].find((l) => txt(l).toLowerCase() === want);
+    if (!lb) return false;
+    const input = lb.htmlFor ? document.getElementById(lb.htmlFor) : null;
+    (input || lb).click();
     return true;
   }
 
@@ -148,14 +151,19 @@
     const btn = (dialog() || document).querySelector(`.${cls} button.se-field-card__body`);
     if (!btn) return false;
     btn.click();
-    if (!(await waitFor(() => clickText(label), 5000))) return false;
-    // 選ぶと元の画面に戻る作りでなければ「戻る」を押す
-    if (!(await waitFor(() => cardValue(cls).toLowerCase() === label.toLowerCase(), 3000))) {
-      const back = [...(dialog() || document).querySelectorAll("button")]
-        .find((b) => visible(b) && /back|戻る|done|apply/i.test(b.getAttribute("aria-label") || txt(b)));
-      if (back) back.click();
+    if (!(await waitFor(pane, 5000))) return false;
+    if (!(await waitFor(() => clickOption(label), 5000))) {
+      const p = pane();
+      log(`   (選択肢: ${p ? [...p.querySelectorAll("label")].map(txt).join(" / ") : "なし"})`);
+      const done0 = p && p.querySelector(".btn-done-link");
+      if (done0) done0.click();
+      return false;
     }
-    return !!(await waitFor(() => cardValue(cls).toLowerCase() === label.toLowerCase(), 3000));
+    await sleep(500);
+    const p = pane();
+    const done = p && p.querySelector(".btn-done-link");
+    if (done) done.click();
+    return !!(await waitFor(() => cardValue(cls).toLowerCase() === label.toLowerCase(), 4000));
   }
 
   const MAKE = [
@@ -177,11 +185,13 @@
     const got = `${cardValue("sourceSlider")} / ${cardValue("typeSlider")}` + (range ? ` / ${cardValue("dateRangeSlider")}` : "");
     if (!ok || !rangeOk) {
       log(`❌ ${w.label}: 選べませんでした (今の表示: ${got})。作らずに閉じます`);
-      const cancel = [...dialog().querySelectorAll("button")].find((b) => txt(b) === "Cancel");
+      const cancel = [...(dialog() || document).querySelectorAll(".lightbox-dialog__footer button")].find((b) => txt(b) === "Cancel");
       if (cancel) cancel.click();
       return false;
     }
-    const dl = [...dialog().querySelectorAll(".lightbox-dialog__footer button")].find((b) => txt(b) === "Download");
+    const dl = [...(dialog() || document).querySelectorAll(".lightbox-dialog__footer button")]
+      .find((b) => txt(b) === "Download" && !b.disabled);
+    if (!dl) { log(`❌ ${w.label}: Download が押せる状態になりません (${got})`); return false; }
     dl.click();
     log(`🛠 ${w.label}: 作成を頼みました (${got})`);
     // 「Creating your report / In progress」が消えるまで待つ (最大5分)
