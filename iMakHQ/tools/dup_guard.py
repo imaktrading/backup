@@ -137,6 +137,24 @@ def shared_supply_urls(rows2d):
     return {u: sorted(v) for u, v in owner.items() if len(v) > 1}
 
 
+def live_supply_urls(rows2d):
+    """出品中の行が仕入元・補URL として持っている URL → {正規化URL: {itemID,…}} (純関数)。
+
+    ★2026-09-26: 抽出段 (psa_to_csv) でも同じ物を使う。入稿直前でしか見ていなかったため、
+      m60630556837 (820161951633 の補URL) が 9/24〜9/26 に毎回枠を1つ使ってから落ちていた。
+    """
+    owner = {}
+    for r in rows2d[1:]:
+        if not _is_active(r):
+            continue
+        iid = _cell(r, B)
+        for u in [_cell(r, A)] + [_cell(r, AUX0 + k) for k in range(AUXN)]:
+            n = norm_url(u)
+            if n:
+                owner.setdefault(n, set()).add(iid)
+    return owner
+
+
 def supply_url_taken_by_live(rows, header, rows2d):
     """CSV の各行の仕入元URLが **既に出品中の行に使われていないか** (純関数)。
 
@@ -149,15 +167,7 @@ def supply_url_taken_by_live(rows, header, rows2d):
     rows/header: これから入稿する CSV / rows2d: 商品管理シート (header 含む)。
     戻り: [{'row': CSV行index, 'label':…, 'cert':…, 'url':…, 'owner': [itemID,…]}]
     """
-    owner = {}
-    for r in rows2d[1:]:
-        if not _is_active(r):
-            continue
-        iid = _cell(r, B)
-        for u in [_cell(r, A)] + [_cell(r, AUX0 + k) for k in range(AUXN)]:
-            n = norm_url(u)
-            if n:
-                owner.setdefault(n, set()).add(iid)
+    owner = live_supply_urls(rows2d)
 
     # cert → その行の主URL (これから出す行は itemID が空なので owner には居ない)
     url_by_cert = {}

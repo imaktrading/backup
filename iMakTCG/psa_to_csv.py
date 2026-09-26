@@ -3005,6 +3005,18 @@ def load_targets_from_sheet_psa():
         _listed, _listed_cert, _KEY_COL = set(), set(), 34
         def _already_listed(cert, key, certs, keys):  # noqa: E306  (fallback: 従来どおり素通り)
             return ""
+    # ★2026-09-26: 出品中の行が仕入元・補URL として持っている URL は、この段で外す。
+    #   入稿直前の dup_guard でしか見ておらず、m60630556837 (820161951633 の補URL) が
+    #   9/24〜9/26 に毎回 scrape・目視・生成を済ませてから落ちていた (1走行1枠の丸損)。
+    #   判定は dup_guard と同じ関数 (入稿直前と同じ基準なので、出品は減らない)。
+    try:
+        import dup_guard as _dg_url
+        _taken_urls = _dg_url.live_supply_urls(all_values)
+        _norm_url = _dg_url.norm_url
+    except Exception as _e_tu:                                 # noqa: BLE001
+        print(f"  ⚠️ 仕入元URLの使用中チェック不可 (入稿直前のガードに任せる): {type(_e_tu).__name__}")
+        _taken_urls, _norm_url = {}, (lambda u: u)
+    _skipped_taken = []
 
     cert_numbers = []
     cost_map = {}
@@ -3045,6 +3057,9 @@ def load_targets_from_sheet_psa():
             continue
         if _dup:
             _skipped_listed += 1
+            continue
+        if _norm_url(url) in _taken_urls:
+            _skipped_taken.append(cert)
             continue
         # D 列 売り切れ '○' は drop-shipping 不可 (仕入れ確実でないため出品 NG)
         if sold:
@@ -3094,6 +3109,10 @@ def load_targets_from_sheet_psa():
     if _skipped_listed:
         print(f"  ⏭️ 既出品(同KEYが出品済)の2枚目を除外: {_skipped_listed}件 "
               f"(viewer毎回再表示の浪費防止。dedupと二重ではなく抽出段階で先に止める)")
+    if _skipped_taken:
+        print(f"  ⏭️ 仕入元URLが出品中の別の行に使われている → 除外 {len(_skipped_taken)}件 "
+              f"→ {_skipped_taken[:8]}{' …' if len(_skipped_taken) > 8 else ''}")
+        print(f"     (1つ買っても2つは埋められない。入稿直前でも同じ基準で落ちる物を先に外す)")
     return cert_numbers, cost_map, url_map, title_map
 
 
