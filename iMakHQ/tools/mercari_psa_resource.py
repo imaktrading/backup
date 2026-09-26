@@ -512,6 +512,27 @@ def search_name(name_jp):
     return "".join(unicodedata.normalize("NFKC", name_jp or "").split())
 
 
+def print_word_for_key(key, hint=None):
+    """KEY がワンピースのパラレル/SP の版なら、検索語に足す語 (純関数)。通常版・他の作品は ''。
+
+    ★2026-09-27 ユーザー「A を探しているのに B しか候補に出てこない」。
+      EB04-007_p1 (パラレル) の補URL を「PSA10 ロロノア・ゾロ EB04-007」で探していた。
+      メルカリでは通常版の方が多く、上位が全部通常版になる。KEY が版を知っているので写す。
+      - `_p1` 等 → 「パラレル」 / カタログの rarity が SP カードの版 → 「SP」
+      - `_dummy` (カタログの仮置き) は版が確かでないので足さない
+    """
+    if not key:
+        return ""
+    cat, pid = split_key(key)
+    if cat != "one_piece_tcg" or not pid or "dummy" in pid.lower():
+        return ""
+    if not re.search(r"_p\d*$", pid, re.I):
+        return ""
+    if any(str(h).strip().upper() in ("SP", "SPカード") for h in (hint or [])):   # rarity の値だけ見る
+        return "SP"
+    return "パラレル"
+
+
 def build_card_query(title, set_no, key=None):
     """1カード分の検索情報を作る → {kw, card_no, name_jp, key, image}。
 
@@ -539,6 +560,14 @@ def build_card_query(title, set_no, key=None):
     kw_no = market_no or card_no
     _snj = search_name(nj)
     kw = f"PSA10 {_snj} {kw_no}" if _snj else f"PSA10 {kw_no}"
+    _pw = print_word_for_key(key, hint)
+    if _pw:
+        kw = f"{kw} {_pw}"
+        # スニダン側 (snkrdunk_psa_resource._print_signal) も hint で版を見る。`_p1` の hint は
+        # rarity が通常版と同じ 'SR' なので「通常」と読まれ、通常版の card_id を掴んでいた
+        # (EB04-007_p1 → 「Roronoa Zoro SR」)。KEY が知っている版を hint にも足す。
+        if _pw == "パラレル" and "パラレル" not in (hint or []):
+            hint = list(hint or []) + ["パラレル"]
     return {"kw": kw, "card_no": card_no, "market_no": market_no, "name_jp": nj, "key": key or "",
             "image": image or "", "hint": hint, "multi_variant": mv}
 
