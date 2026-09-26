@@ -1251,10 +1251,43 @@ def open_window():
         webbrowser.open(url)
 
 
+# ★2026-09-26 ユーザー「出品くんコンソールを立ち上げたら1日1回してくれたらいい」。
+#   ファネルの材料 (Seller Hub レポート5本) は、いつものブラウザの拡張 (tools/sellerhub_grab) が
+#   作成 → 完成待ち → 取得まで進める。ここはその日まだなら Downloads を #shg-auto 付きで開くだけ。
+#   落ちた物は夜間バッチの seller_hub_collect.py が置き場へ移し、ファネルを作る。
+SELLERHUB_AUTO_URL = "https://www.ebay.com/sh/reports/downloads#shg-auto"
+SELLERHUB_STAMP = r"C:\dev\iMak_data\hq\sellerhub_grab_last.txt"
+
+
+def sellerhub_due(last, today):
+    """今日まだ開いていなければ True (純関数)。"""
+    return (last or "").strip() != today
+
+
+def sellerhub_daily():
+    today = datetime.date.today().isoformat()
+    try:
+        with open(SELLERHUB_STAMP, encoding="utf-8") as f:
+            last = f.read()
+    except OSError:
+        last = ""
+    if not sellerhub_due(last, today):
+        return
+    try:
+        with open(SELLERHUB_STAMP, "w", encoding="utf-8") as f:
+            f.write(today)
+        import webbrowser
+        webbrowser.open(SELLERHUB_AUTO_URL)
+        _log("📊 Seller Hub のレポート取りを開きました (1日1回・ブラウザの拡張が進めます)")
+    except Exception as e:                                     # noqa: BLE001
+        _log("⚠️ Seller Hub のレポート取りを開けませんでした: %s" % e)
+
+
 def main():
     if _port_in_use(PORT):                                     # もう動いている = 窓だけ開く
         if "--no-open" not in sys.argv:
             open_window()
+            sellerhub_daily()
         return
     _load_counts_cache()
     threading.Thread(target=get_home, daemon=True).start()
@@ -1263,6 +1296,7 @@ def main():
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     if "--no-open" not in sys.argv:
         threading.Timer(0.6, open_window).start()
+        threading.Timer(5.0, sellerhub_daily).start()
     srv.serve_forever()
 
 

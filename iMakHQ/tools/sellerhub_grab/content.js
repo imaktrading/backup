@@ -1,12 +1,14 @@
 // Seller Hub レポート取り — ファネルの材料4つをボタン1回で落とす (2026-09-26)。
 //
-// なぜ拡張か: ブラウザの自動操作は eBay に弾かれた (「Something went wrong on our end」)。
-//   いつものブラウザの中で、人が押したボタンの続きとして画面のボタンを押すだけにする。
-//   レポートを「作る」操作はしない。Seller Hub の Schedule で毎日作られた完成品を押すだけ。
+// なぜ拡張か: ブラウザの自動操作ツール (Selenium) は eBay に弾かれた (「Something went wrong on
+//   our end」)。いつものブラウザの拡張が画面のボタンを押す形にする。
 //
-// 流れ: Reports > Downloads で「まとめて取る」
-//   → 4種類 (出品中 / 売れ残り / 注文 / 広告) の一番新しい Completed の Download を押す
-//   → Performance に移って「Download listings quality report」を押す
+// 流れ (出品くん Console が起動時に1日1回、Downloads を #shg-auto 付きで開く。ボタンでも同じ):
+//   ① 4種類 (出品中 / 売れ残り / 注文 / 広告90日) を作る (20時間以内の完成品がある種類は作らない)
+//   → 1分ごとに開き直して、4種類とも完成するまで待つ (最大40分)
+//   ② 4種類の一番新しい Completed の Download を押す
+//   → Performance に移って「Download listings quality report」を押す → タブを閉じる
+// 経過は ダウンロード フォルダの sellerhub_grab_log.txt に残す (うまく行かなかった時に読む)。
 // 落ちた物は「ダウンロード」フォルダに入る。夜間バッチ (seller_hub_collect.py) が
 // C:\dev\iMak_data\seller_hub\reports\<日付>\ に移し、ファネルがそれを読む。
 (() => {
@@ -42,6 +44,7 @@
     const d = document.createElement("div");
     d.textContent = msg;
     p.appendChild(d);
+    try { chrome.runtime.sendMessage({ type: "log", msg }); } catch (e) { /* 拡張の再読み込み直後 */ }
   }
 
   // "Sep 13, 2026 at 11:01pm PDT" → Date (PDT/PST を UTC に直す)
@@ -64,6 +67,11 @@
       };
     });
   }
+
+  const FRESH_HOURS = 20;        // これより新しい完成品があれば、その晩は作り直さない
+  const ageH = (r) => (r && r.when ? (Date.now() - r.when.getTime()) / 3600e3 : 999);
+  const newest = (all, w, status) => all.find((x) => x.source === w.source
+    && x.type.toLowerCase() === w.type.toLowerCase() && (!status || x.status === status));
 
   async function grabDownloads() {
     const all = rows();
@@ -97,7 +105,7 @@
     if (!b) { log("❌ 品質レポートのボタンが見つかりません (画面が United States か確かめてください)"); return; }
     b.click();
     log("✅ 品質レポート: 押しました (出来上がるまで数十秒かかることがあります)");
-    log("🎉 5つとも完了。夜のバッチがファネルの置き場へ移します");
+    log("✅ 5つとも押しました。夜のバッチがファネルの置き場へ移します");
   }
 
   function startButton(label, fn) {
@@ -204,24 +212,92 @@
     return true;
   }
 
-  async function makeAll() {
-    let n = 0;
-    for (const w of MAKE) { if (await makeOne(w)) n++; await sleep(2000); }
-    log(`作成: ${n}/${MAKE.length} 本。一覧で Completed になったら「まとめて取る」を押してください`);
+  async function makeAll(onlyMissing) {
+    let n = 0, skip = 0;
+    for (const w of MAKE) {
+      // 作成中 / 20時間以内の完成品がある種類は作らない (夜中に何度も作り直さない)
+      const r = newest(rows(), w);
+      if (onlyMissing && r && ageH(r) < FRESH_HOURS && r.status !== "Failed") { skip++; continue; }
+      if (await makeOne(w)) n++;
+      await sleep(2000);
+    }
+    log(`作成: ${n}本を頼みました` + (skip ? ` (新しい物がある ${skip}本は作らず)` : ""));
+    return n;
+  }
+
+  // ── 自動 (出品くん Console が #shg-auto 付きで開く) ─────────────
+  const STAGE = "shg_auto_stage", T0 = "shg_auto_t0";
+  const MAX_WAIT_MIN = 40;
+
+  function allFresh() {
+    const all = rows();
+    return MAKE.every((w) => { const r = newest(all, w, "Completed"); return r && ageH(r) < FRESH_HOURS; });
+  }
+
+  function finish(ok) {
+    sessionStorage.removeItem(STAGE);
+    log(ok ? "🎉 自動: 完了" : "⚠️ 自動: 途中で止まりました (上の行を見てください)");
+    try { chrome.runtime.sendMessage({ type: "done", ok }); } catch (e) { /* noop */ }
+  }
+
+  async function autoDownloads() {
+    if (location.hash === "#shg-auto" && !sessionStorage.getItem(STAGE)) {
+      sessionStorage.setItem(STAGE, "make");
+      sessionStorage.setItem(T0, String(Date.now()));
+      try { chrome.runtime.sendMessage({ type: "start" }); } catch (e) { /* noop */ }
+      history.replaceState(null, "", location.pathname + location.search);
+    }
+    const stage = sessionStorage.getItem(STAGE);
+    if (!stage || stage === "lqr") return false;
+    panel();
+    for (let i = 0; i < 40 && !rows().length; i++) await sleep(500);   // 一覧が出るまで待つ
+    if (stage === "make") {
+      log("自動: レポートを作ります");
+      await makeAll(true);
+      sessionStorage.setItem(STAGE, "wait");
+    }
+    if (allFresh()) {
+      await grabDownloads();
+      sessionStorage.setItem(STAGE, "lqr");
+      await sleep(3000);
+      location.href = "https://www.ebay.com/sh/performance";
+      return true;
+    }
+    const waited = (Date.now() - Number(sessionStorage.getItem(T0) || Date.now())) / 60000;
+    if (waited > MAX_WAIT_MIN) {
+      const all = rows();
+      log("❌ " + MAX_WAIT_MIN + "分待っても完成しない: " + MAKE.filter((w) => {
+        const r = newest(all, w, "Completed"); return !(r && ageH(r) < FRESH_HOURS);
+      }).map((w) => w.label).join("・"));
+      finish(false);
+      return true;
+    }
+    log(`完成待ち (${Math.round(waited)}分経過)… 1分後に開き直します`);
+    await sleep(60000);
+    location.reload();
+    return true;
   }
 
   if (location.pathname.startsWith("/sh/reports/downloads")) {
-    startButton("① 新しく作る (4本)", makeAll);
-    startButton("② ファネル用レポートをまとめて取る", async () => {
-      if (await grabDownloads()) {
-        sessionStorage.setItem(FLAG, "1");
-        log("→ 品質レポートの画面へ移ります…");
-        await sleep(3000);
-        location.href = "https://www.ebay.com/sh/performance";
-      }
+    autoDownloads().then((running) => {
+      if (running) return;
+      startButton("① 新しく作る (4本)", () => makeAll(false));
+      startButton("② ファネル用レポートをまとめて取る", async () => {
+        if (await grabDownloads()) {
+          sessionStorage.setItem(FLAG, "1");
+          log("→ 品質レポートの画面へ移ります…");
+          await sleep(3000);
+          location.href = "https://www.ebay.com/sh/performance";
+        }
+      });
+      startButton("③ 自動 (作成→取得) を今すぐ", () => { location.hash = "shg-auto"; location.reload(); });
     });
   } else if (location.pathname.startsWith("/sh/performance")) {
-    if (sessionStorage.getItem(FLAG) === "1") {
+    if (sessionStorage.getItem(STAGE) === "lqr") {
+      panel();
+      log("自動 (続き): 品質レポート");
+      grabLqr().then(async () => { await sleep(30000); finish(true); });
+    } else if (sessionStorage.getItem(FLAG) === "1") {
       sessionStorage.removeItem(FLAG);
       panel();
       log("Seller Hub レポート取り (続き)");
