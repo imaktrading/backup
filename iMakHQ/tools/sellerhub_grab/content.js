@@ -178,7 +178,7 @@
     { source: "Listings", type: "All active listings", label: "出品中" },
     { source: "Listings", type: "Inactive Listings", label: "売れ残り" },
     { source: "Orders", type: "All orders", label: "注文", days90: true },
-    { source: "Advertising", type: "Listing", label: "広告", days90: true },
+    { source: "Advertising", strategy: "Promoted Listings - General", type: "Listing", label: "広告", days90: true },
   ];
 
   async function makeOne(w) {
@@ -186,7 +186,11 @@
     if (!open) { log("❌ 「Download report」ボタンが見つかりません"); return false; }
     open.click();
     if (!(await waitFor(dialog))) { log(`❌ ${w.label}: 入力画面が開きません`); return false; }
-    const ok = (await choose("sourceSlider", w.source)) && (await choose("typeSlider", w.type));
+    let ok = await choose("sourceSlider", w.source);
+    // ★広告は Source を変えた後に Campaign strategy / Type の欄が遅れて出る (表示が空のまま選ぼうとして止まった)
+    if (ok) await waitFor(() => cardValue("typeSlider"), 8000);
+    if (ok && w.strategy) ok = await choose("campaignTypeSlider", w.strategy);
+    if (ok) ok = await choose("typeSlider", w.type);
     // 期間: 注文と広告は90日 (広告は短いとファネルが止まる: PROMOTED_MIN_DAYS=85)
     const range = cardValue("dateRangeSlider");
     const rangeOk = !w.days90 || /90/.test(range) || (await choose("dateRangeSlider", "Last 90 Days"));
