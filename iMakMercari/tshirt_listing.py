@@ -1039,7 +1039,13 @@ def main():
 
     # 二重出品を避けて補URLに回した分を書く (出品より先に書く = CSV が落ちても仕入元は残る)
     if ut_aux_add:
-        n_aux = UCV.write_aux(ut_aux_add)
+        # ★2026-09-27: 走行の最初に読んだ時の「その行の出品」を渡す (ずれていたら書かない)。
+        #   まだ出品していない行 (この走行で出す分) は itemID が無いので 仕入元URL (A列) で確かめる
+        def _expect(row):
+            r = all_values[row - 1] if 0 < row <= len(all_values) else []
+            b = (r[1] if len(r) > 1 else "").strip()
+            return b if b else ("A", (r[0] if r else "").strip())
+        n_aux = UCV.write_aux(ut_aux_add, expect_iid={row: _expect(row) for row in ut_aux_add})
         print(f"\n♻ 出品中の商品に 補URL を追加: {n_aux}行")
 
     # CSV出力

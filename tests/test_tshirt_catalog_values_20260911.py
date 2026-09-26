@@ -338,7 +338,7 @@ class TestNoDuplicateListing:
         i = src.index("_live = ut_listed.get(_key)")
         body = src[i:i + 900]
         assert "UCV.merge_aux(" in body and "continue" in body
-        assert "UCV.write_aux(ut_aux_add)" in src
+        assert "UCV.write_aux(ut_aux_add, expect_iid=" in src
         assert "ut_run[_key]" in src, "同じ走行に同じ物が2つあっても1つだけにする"
 
 

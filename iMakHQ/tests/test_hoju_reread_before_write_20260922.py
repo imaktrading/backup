@@ -20,5 +20,5 @@ def test_moved_rows_are_skipped_not_written():
 
 
 def test_read_back_after_write():
-    i = SRC.index("written = write_aux_urls(aux_writeback)")
+    i = SRC.index("written = write_aux_urls(aux_writeback,")
     assert "_after = _read_high()" in SRC[i:i + 1200]

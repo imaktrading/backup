@@ -533,10 +533,21 @@ def write_restock(sheet_rows):
     if not sheet_rows:
         return 0
     ws = sheet_io._product_ws()
+    # ★2026-09-27: 行番号で A/B/D/M/I を書くので、目視の間に行がずれると **別の出品の行**を
+    #   書き換える。書く直前に「その行が今も同じ出品か」を確かめ、違う行は飛ばす。
+    #   比べるのは書く前の itemID ("was"。eBay で出し直すと b は新しい番号になるため)。
+    _was = {row: (d.get("was") or d.get("b") or "") for row, d in sheet_rows.items()}
+    _moved = sheet_io.rows_moved(_was, ws.get_all_values())
+    if _moved:
+        print(f"⚠️要対応 一番くじ: 行の出品が予定と違うので書かずに飛ばします: 行 {_moved[:10]}")
+        sheet_rows = {row: d for row, d in sheet_rows.items() if row not in _moved}
+        if not sheet_rows:
+            return 0
     ws.batch_update(build_restock_reqs(sheet_rows), value_input_option="RAW")
     aux = {row: d["aux"] for row, d in sheet_rows.items() if d.get("aux")}
     if aux:
-        sheet_io.write_aux_urls(aux)
+        # B を書いた後なので、行の itemID は b (出し直した時は新しい番号) になっている
+        sheet_io.write_aux_urls(aux, expect_iid={row: sheet_rows[row].get("b") for row in aux})
     return len(sheet_rows)
 
 
@@ -1376,8 +1387,8 @@ def _write_supplies_live(sheet_rows):
     if not plan:
         print("  追加する補URLがありませんでした (既に満杯 / 全部 他出品が使用中)")
         return
-    sheet_io.write_aux_urls(plan)
-    print("  ✏️ 補URL: %d行 / 追加 %d本 (既存保持・空き枠のみ)" % (len(plan), n_add))
+    n = sheet_io.write_aux_urls(plan, expect_iid={r: sheet_rows[r].get("b") for r in plan})
+    print("  ✏️ 補URL: %d行 / 追加 %d本 (既存保持・空き枠のみ)" % (n, n_add))
 
 
 def pass_expand(cand_n, dry=False):
@@ -1631,7 +1642,7 @@ def _apply_restock(confirmed):
                 new_id = item_id
                 print(f"  ❌ row{row} eBay在庫補充 最終失敗: {e}(スプシは書く)")
         print(f"  📦 row{row}: {action}  itemID={new_id}")
-        sheet_rows[row] = {"a": d.get("a", ""), "b": new_id, "aux": d.get("aux", []),
+        sheet_rows[row] = {"a": d.get("a", ""), "b": new_id, "was": item_id, "aux": d.get("aux", []),
                            "cost": d.get("cost", 0),   # 新supply実価格→N列(V8 SSOT)
                            "kuji": d.get("kuji", "")}  # 公式くじURL→I列(refresh用)
     n = _retry(lambda: write_restock(sheet_rows), what="スプシ書込")

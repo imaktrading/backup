@@ -2536,7 +2536,9 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     elif aux_writeback:
         try:
             from sheet_io import write_aux_urls
-            written = write_aux_urls(aux_writeback)
+            written = write_aux_urls(aux_writeback,
+                                     expect_iid={t["row"]: t["itemID"] for t in item_targets
+                                                 if t.get("row") in aux_writeback})
             print(f"🔗 補URL(AC-AG) 書込: {written}行 / 追加URL {added_total}本 "
                   f"/ 入替 {len(replaced)}本 (安い順に最大{AUXN}本)")
             # 書いた後に読み返して、入ったことを確かめる (入っていなければ要対応と言う)
@@ -2836,7 +2838,8 @@ def run_newcand_aux(dry_run=False):
         print(f"🔗 書込は行いません (ユーザー指示)。目視待ちに {n_q}本 積みました "
               f"(python aux_pending.py で確認)")
         return 0
-    n = write_aux_urls(wb)
+    n = write_aux_urls(wb, expect_iid={row: _cell(vals[row - 1], B)
+                                       for row in wb if 0 < row <= len(vals)})
     print(f"🔗 補URL(AC-AG) 書込: {n}行 (安い順に最大{AUXN}本)")
 
     # 使えた URL に転記済の印。次回もう出さない (人が同じ行を何度も見ない)。

@@ -729,7 +729,8 @@ def audit(refresh_titles=True):
                 print(f"       row{row}(itemID={v['itemid']}) ← {u[:58]} (主は {v['owner'][u]})")
         try:
             import sheet_io as _si
-            _si.write_aux_urls({row: v["keep"] for row, v in _cleanup.items()})
+            _si.write_aux_urls({row: v["keep"] for row, v in _cleanup.items()},
+                               expect_iid={row: v["itemid"] for row, v in _cleanup.items()})
             print(f"    ✅ 是正 完了 ({len(_cleanup)}行の補URLを書き換え)")
         except Exception as _e:      # noqa: BLE001
             print(f"    ⚠️要対応 是正の書込に失敗 (検出のみ): {type(_e).__name__}: {_e}")

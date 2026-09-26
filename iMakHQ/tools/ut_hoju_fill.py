@@ -500,14 +500,16 @@ def confirm(dry_run=False, min_backups=0, max_backups=AUX_MAX):
     _n = remember_cand_ng(_ng_new)
     if _n:
         print(f"  🚫 違うと外した候補 {_n}件を記録しました (次回は出しません)")
-    row_to_urls = {}
+    row_to_urls, iid_of = {}, {}
     for c in res.get("confirmed", []):
         t = back[c["idx"]]
         row_to_urls[t["row"]] = merge_aux(t["have"], c.get("urls") or [])
+        iid_of[t["row"]] = t["itemID"]
     if not row_to_urls:
         print("選ばれた候補はありませんでした")
         return 0
-    n = sheet_io.write_aux_urls(row_to_urls)
+    # ★2026-09-27: 目視の間に行がずれたら別の出品に書くので、行の itemID を確かめてから書く
+    n = sheet_io.write_aux_urls(row_to_urls, expect_iid=iid_of)
     print(f"✅ 補URL を {n}行 に書きました (既存はそのまま・空き枠にだけ追加)")
     return n
 

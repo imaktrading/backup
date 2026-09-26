@@ -403,15 +403,18 @@ def merge_aux(existing, url, max_n=AUX_MAX):
     return urls
 
 
-def write_aux(row_to_urls):
-    """補URL列 (AC-AG) に書く (I/O)。書けなければ 0 を返し、本処理は止めない。"""
+def write_aux(row_to_urls, expect_iid):
+    """補URL列 (AC-AG) に書く (I/O)。書けなければ 0 を返し、本処理は止めない。
+
+    expect_iid = {行: itemID または ("A", 仕入元URL)}。行がずれていたら書かない (sheet_io 側で確認)。
+    """
     if not row_to_urls:
         return 0
     try:
         import sys as _sys
         _sys.path.insert(0, r"C:\dev\iMak\iMakHQ\tools")
         import sheet_io
-        return sheet_io.write_aux_urls(row_to_urls)
+        return sheet_io.write_aux_urls(row_to_urls, expect_iid=expect_iid)
     except Exception as e:                                         # noqa: BLE001
         print(f"  ⚠ 補URL を書けませんでした ({type(e).__name__}: {e})")
         return 0

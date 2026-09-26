@@ -528,15 +528,51 @@ def product_index():
     return key_map, itemid_to_row, cert_map
 
 
-def write_aux_urls(row_to_urls):
+def rows_moved(expect_iid, all_rows):
+    """{行: 予定の itemID} のうち、今のシートでその行の itemID が違う行 (純関数)。
+
+    予定の itemID が空の行も「違う」に入れる (誰の行か分からないまま書かない)。
+    まだ出品していない行 (itemID が無い) は ("A", 仕入元URL) を渡すと A列で確かめる。
+    """
+    out = []
+    for row, iid in (expect_iid or {}).items():
+        r = all_rows[row - 1] if 0 < row <= len(all_rows) else []
+        col = PRODUCT_COL_ITEMID
+        if isinstance(iid, tuple) and len(iid) == 2 and iid[0] == "A":
+            col, iid = 0, iid[1]
+        now = (r[col] if len(r) > col else "").strip()
+        if not str(iid or "").strip() or now != str(iid).strip():
+            out.append(row)
+    return out
+
+
+def write_aux_urls(row_to_urls, expect_iid):
     """{1-indexed行番号: [url,...]} を 商品管理シート 補URL列(AC-AG)に batch_update。
 
     各行 最大5URL、不足は空文字でクリア(古い補URLを残さない)。touch するのは AC-AG のみ。
     戻り: 書込んだ行数。row_to_urls 空なら 0。
+
+    expect_iid = {行: その行だと思っている itemID} (必須)。
+    ★2026-09-27: 行はシートの手作業や他の担当で日々ずれる (実例: 9/10 に行1320 の出品が
+      9/26 には行1318)。読んでから書くまでにずれると **別の出品に補URLを書く**。
+      書く直前に読んだシートで行の itemID を確かめ、合わない行は書かずに飛ばす。
+      シートを読めない時は書かない (誰の行か確かめられないため)。
     """
     if not row_to_urls:
         return 0
     ws = _product_ws()
+    try:
+        _now = ws.get_all_values()
+    except Exception as e:                                     # noqa: BLE001
+        print(f"⚠️要対応 補URL: 書く直前にシートを読めず **書込を中止**: {type(e).__name__}")
+        return 0
+    _moved = rows_moved({row: (expect_iid or {}).get(row, "") for row in row_to_urls}, _now)
+    if _moved:
+        print(f"⚠️要対応 補URL: 行の出品が予定と違うので書かずに飛ばします: 行 {_moved[:10]}"
+              f" (行がずれた / itemID が変わった)")
+        row_to_urls = {row: u for row, u in row_to_urls.items() if row not in _moved}
+        if not row_to_urls:
+            return 0
 
     def _coln(idx0):
         return chr(65 + idx0) if idx0 < 26 else "A" + chr(65 + idx0 - 26)
@@ -547,7 +583,7 @@ def write_aux_urls(row_to_urls):
     #   読めなくても書込は止めない (記録は本業ではない)。
     before = {}
     try:
-        _all = ws.get_all_values()
+        _all = _now
         for row in row_to_urls:
             r = _all[row - 1] if 0 < row <= len(_all) else []
             before[row] = [(r[PRODUCT_COL_AUX_START + k].strip()

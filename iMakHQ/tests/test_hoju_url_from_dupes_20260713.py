@@ -148,7 +148,7 @@ def test_書けていない行を要対応として出す():
     src = io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                                "tools", "hoju_url_from_dupes.py"), encoding="utf-8").read()
     assert "verify_written(" in src and "要対応" in src
-    assert src.index("verify_written(row_to_urls)") > src.index("write_aux_urls(row_to_urls)")
+    assert src.index("verify_written(row_to_urls)") > src.index("write_aux_urls(row_to_urls,")
 
 
 class Test複数live出品にどう付けるか:

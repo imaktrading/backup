@@ -524,14 +524,15 @@ def main():
             print("   人が採否を決めます: python aux_pending.py で中身を確認")
             _record(0, total_add, urgent, len(warns), unverified=0)
             return
-        n = sheet_io.write_aux_urls(row_to_urls)
+        _iid_of = {row: plan[row].get("itemid", "") for row in row_to_urls}
+        n = sheet_io.write_aux_urls(row_to_urls, expect_iid=_iid_of)
         missing = verify_written(row_to_urls)
         if missing:
             # ★2026-08-18: 書込の戻り値を信じない。実測で「16行 完了」と出たのに
             #   1行分が入っていなかった (row 1341)。事後確認が無いので誰も気づけなかった。
             #   規約「送った後に実状態を verify し、漏れは同サイクル内で完結」に合わせる。
             print(f"⚠️ 書けていない行 {len(missing)}件 → もう一度書きます")
-            sheet_io.write_aux_urls({row: row_to_urls[row] for row in missing})
+            sheet_io.write_aux_urls({row: row_to_urls[row] for row in missing}, expect_iid=_iid_of)
             missing = verify_written({row: row_to_urls[row] for row in missing})
         print(f"=== 実書込 完了: {n} 行 (既存保持+新規追加)"
               + (f" / ⚠️**{len(missing)}行は書けていません (要対応)**" if missing else " / 全行 確認済")
