@@ -116,3 +116,12 @@ def test_判定不能は出せるまま_機会を静かに失わない():
 
 def test_通ったものは空文字_OKのまま():
     assert downgrade_by_preflight("c1", set(), {"status": "OK"}, True, False) == ""
+
+
+def test_仕入元URLが出品中の行で使用中なら出せるにしない_20260926():
+    from sheet_listable_flag import URL_TAKEN
+    row = [""] * 42
+    row[0], row[8], row[17], row[13] = "https://jp.mercari.com/item/m60630556837", "174855277", "TCG", "11000"
+    taken = {"https://jp.mercari.com/item/m60630556837"}
+    assert classify_row(row, set(), set(), _reason, lambda u: u in taken) == URL_TAKEN
+    assert classify_row(row, set(), set(), _reason) != URL_TAKEN      # 渡さなければ従来どおり

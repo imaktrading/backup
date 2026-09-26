@@ -48,13 +48,15 @@ REVIEW_SKIP = "目視で該当なし(待機)"
 GAP = "カタログ未収録"
 OUT_OF_SCOPE = "参入しないゲーム"
 NO_IMAGE = "画像が無く目視できない"
+# ★2026-09-26: 出品くん (psa_to_csv) の抽出に同じ判定を足したので揃える
+URL_TAKEN = "仕入元が出品中の別の行で使用中"
 
 
 def _cell(row, idx):
     return (row[idx].strip() if len(row) > idx else "")
 
 
-def classify_row(row, listed_certs, listed_keys, already_listed_reason):
+def classify_row(row, listed_certs, listed_keys, already_listed_reason, url_taken=None):
     """1行 → AP列に書く文字 (純関数・test可)。空文字 = 何も書かない (=塗らない)。
 
     対象は **R列='TCG' かつ cert と URL があり itemID が空** の行だけ。
@@ -70,6 +72,8 @@ def classify_row(row, listed_certs, listed_keys, already_listed_reason):
         return SAME_CERT
     if dup:
         return SECOND
+    if url_taken and url_taken(url):
+        return URL_TAKEN
     if _cell(row, D):
         return SOLD
     if _cell(row, K):
@@ -79,11 +83,11 @@ def classify_row(row, listed_certs, listed_keys, already_listed_reason):
     return OK
 
 
-def classify_all(rows2d, listed_certs, listed_keys, already_listed_reason):
+def classify_all(rows2d, listed_certs, listed_keys, already_listed_reason, url_taken=None):
     """(pure) 全行 → [AP列の値] (header 行を含む・1行目は見出し)。"""
     out = [FLAG_HEADER]
     for row in rows2d[1:]:
-        out.append(classify_row(row, listed_certs, listed_keys, already_listed_reason))
+        out.append(classify_row(row, listed_certs, listed_keys, already_listed_reason, url_taken))
     return out
 
 
@@ -216,7 +220,10 @@ def main():
 
     listed_keys = sheet_io.listed_key_forms(vals)
     listed_certs = sheet_io.listed_certs(vals) | sheet_io.live_listed_certs()
-    flags = classify_all(vals, listed_certs, listed_keys, sheet_io.already_listed_reason)
+    import dup_guard
+    _taken = dup_guard.live_supply_urls(vals)
+    flags = classify_all(vals, listed_certs, listed_keys, sheet_io.already_listed_reason,
+                         lambda u: dup_guard.norm_url(u) in _taken)
     flags, changed = _preflight_pass(vals, flags)
     if changed:
         print(f"  🔎 前段フィルタで {len(changed)}件を「{OK}」から外した "
