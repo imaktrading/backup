@@ -1677,6 +1677,16 @@ def pushed_out_as_skipped(confirmed, item_targets, vals, aux_writeback, price_by
     return out
 
 
+def moved_target_indices(item_targets, fresh_rows):
+    """書く直前のシートで、行の itemID が変わっている出品の番号 (純関数, test可)。"""
+    out = set()
+    for i, t in enumerate(item_targets):
+        r = t.get("row")
+        if r and _cell(fresh_rows[r - 1] if r <= len(fresh_rows) else [], B) != t["itemID"]:
+            out.add(i)
+    return out
+
+
 def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, aux_max=None,
                        price_by_url=None):
     """確定URL → 補URL書込計画 {row: [URL×5]} を決める **純関数**(I/Oなし・test可)。
@@ -2453,14 +2463,17 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     #   3分後には無く、同じ候補がまた出た)。**書く直前に読み直して**、今の5本を元に並べる。
     try:
         _fresh = _read_high()
-        _moved = [t["itemID"] for t in item_targets
-                  if t.get("row") and _cell(_fresh[t["row"] - 1] if t["row"] <= len(_fresh) else [], B)
-                  != t["itemID"]]
-        if _moved:
-            print(f"⚠️要対応 行がずれた出品があるので補URL書込を中止: {_moved[:5]}")
-            _guard_ok = False
-        else:
-            vals = _fresh
+        _moved_idx = moved_target_indices(item_targets, _fresh)
+        # ★2026-09-27: 1行でもずれたら **全部** 止めていた。実害: ユーザーが英語版と分かった
+        #   1件 (m56297412109) の itemID を手で 9999 にしただけで、確かめた他の13件も書かれなかった。
+        #   書く前に **行ごとに** 「その行の itemID が今も同じか」を見ているので、合わない行だけ
+        #   飛ばせば残りは正しい行に書ける (行の挿入で大量にずれた時も、ずれた行は全部ここで落ちる)。
+        if _moved_idx:
+            print(f"⚠️要対応 行が変わった出品は補URLを書かずに飛ばします: "
+                  f"{[item_targets[i]['itemID'] for i in sorted(_moved_idx)][:5]} "
+                  f"(itemID が書き換わった / 行がずれた。他の出品は書きます)")
+            confirmed = {i: u for i, u in confirmed.items() if i not in _moved_idx}
+        vals = _fresh
     except Exception as _e_fr:                                   # noqa: BLE001
         print(f"⚠️要対応 書く直前の読み直しに失敗 → 書込を中止: {type(_e_fr).__name__}: {_e_fr}")
         _guard_ok = False
