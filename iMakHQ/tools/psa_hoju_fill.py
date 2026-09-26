@@ -2240,11 +2240,11 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         except Exception:                                      # noqa: BLE001
             _sd_info = {}
         for _r in aux_pending.load():
+            # ★2026-09-27 ユーザー「候補が全部違う」(ダークライGX にカビゴンが並んだ)。
+            #   itemID の無い行を **今の** 行番号から引いていたが、行は日々ずれる。
+            #   実測: 持ち主が分かる153本のうち今の行と一致は13本だけ = 140本が別の出品に出ていた。
+            #   itemID が無い物は誰の候補か分からないので出さない (空の行は 9/9〜9/13 の分だけ)。
             _iid = (_r.get("itemID") or "").strip()
-            if not _iid:
-                _row = _r.get("row")
-                if isinstance(_row, int) and 0 < _row <= len(vals):
-                    _iid = _cell(vals[_row - 1], B)
             if not _iid:
                 continue
             _u = _r["url"]

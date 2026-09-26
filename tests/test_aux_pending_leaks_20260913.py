@@ -64,13 +64,18 @@ def test_nightly_writer_passes_itemid():
     assert "item_of=item_of" in call, "夜間の積み込みが itemID を渡していない"
 
 
-def test_reader_recovers_blank_itemid_from_row():
-    """見る側が、itemID の空いた古い行を行番号から拾い直すこと。"""
+def test_reader_does_not_guess_blank_itemid_from_row():
+    """★2026-09-27 決定変更: itemID の空いた行を **今の** 行番号から拾い直さない。
+
+    行は日々ずれるので、持ち主が分かる153本のうち今の行と一致は13本だけだった
+    (ダークライGX にカビゴンが並んだ)。空の行は探索キャッシュから復元済み (153本)、
+    残り225本は誰の分か分からないので出さない (test_pending_without_itemid_not_shown_20260927)。
+    """
     import io
     src = io.open(ROOT / "iMakHQ" / "tools" / "psa_hoju_fill.py", encoding="utf-8").read()
     i = src.index("for _r in aux_pending.load():")
-    block = src[i:i + 500]
-    assert "_r.get(\"row\")" in block, "itemID が空の行を捨てている (886本が死んだ経路)"
+    block = src[i:i + 900]
+    assert "_cell(vals[_row - 1], B)" not in block
 
 
 def test_dedupe_keeps_the_oldest_one(tmp_path):
