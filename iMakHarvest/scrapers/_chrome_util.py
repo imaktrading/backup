@@ -45,6 +45,7 @@ def detect_chrome_major() -> Optional[int]:
                     ["powershell", "-NoProfile", "-Command",
                      f"(Get-Item '{p}').VersionInfo.ProductVersion"],
                     capture_output=True, text=True, timeout=10,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
                 ).stdout.strip()
                 if out:
                     return int(out.split(".")[0])
@@ -91,7 +92,8 @@ def hide_chrome_windows_for_profile(profile_dir: str) -> int:
           "ForEach-Object { $_.ProcessId }")
     try:
         out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                             capture_output=True, text=True, timeout=60)
+                             capture_output=True, text=True, timeout=60,
+                             creationflags=subprocess.CREATE_NO_WINDOW)
         pids = {int(x) for x in (out.stdout or "").split() if x.strip().isdigit()}
     except Exception:  # noqa: BLE001
         return 0
@@ -178,7 +180,8 @@ def kill_chrome_for_profile(profile_dir: str) -> int:
     )
     try:
         out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                             capture_output=True, text=True, timeout=60)
+                             capture_output=True, text=True, timeout=60,
+                             creationflags=subprocess.CREATE_NO_WINDOW)
         return int((out.stdout or "0").strip().splitlines()[-1] or 0)
     except Exception:  # noqa: BLE001 - 掃除に失敗しても走行は続ける
         return 0
@@ -202,7 +205,8 @@ def kill_orphan_chromedriver() -> int:
     )
     try:
         out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                             capture_output=True, text=True, timeout=60)
+                             capture_output=True, text=True, timeout=60,
+                             creationflags=subprocess.CREATE_NO_WINDOW)
         return int((out.stdout or "0").strip().splitlines()[-1] or 0)
     except Exception:  # noqa: BLE001 - 掃除に失敗しても走行は続ける
         return 0
