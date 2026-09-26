@@ -62,6 +62,10 @@ _VARIETY_WORDS = (
     "ALTERNATE ART", "ALT ART", "SPECIAL ART", "MANGA ART", "FULL ART", "PARALLEL",
     "SECRET RARE", "SPECIAL CARD SET", "CHARACTER RARE", "TRAINER GALLERY", "ART RARE",
     "SUPER RARE", "PROMO", "GOLD", "FOIL",
+    # ★2026-09-27: ポケモンのミラー。無いと 'UMBREON MASTER BALL REVERSE HOLO' の版が空になり、
+    #   目視画面にマスターボールと出なかった (長い方から当てるので MASTER BALL が先に取れる)
+    "MASTER BALL REVERSE HOLO", "POKE BALL REVERSE HOLO", "TEAM ROCKET REVERSE HOLO",
+    "REVERSE HOLO",
 )
 
 
@@ -150,6 +154,7 @@ def psa_label_facts(cert, card_no=""):
     if not d:
         return {"number": card_no or "", "variety": "", "brand": ""}
     _name, variety = split_subject_variety(d.get("Subject"))
+    variety = _s(d.get("Variety")) or variety      # PSA が Variety を持っていればそれが正
     return {"number": card_no or _s(d.get("CardNumber")),
             "variety": variety,
             "brand": _s(d.get("Brand"))}

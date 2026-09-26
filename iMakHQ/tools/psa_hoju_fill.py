@@ -286,6 +286,42 @@ def _card_no_from_key(key):
     return _mp.card_no_from_key(key)
 
 
+def mirror_kind_for_target(target, mp):
+    """出品の鑑定番号 → ミラーの版 ('master' / 'mirror' / '')。鑑定データが無ければ ''。"""
+    try:
+        import psa_resource_confirm as _prc
+        return mp.mirror_kind(_prc.psa_label_facts((target or {}).get("cert")).get("variety"))
+    except Exception:                                          # noqa: BLE001
+        return ""
+
+
+def filter_candidates_by_mirror(cands, kind, mp):
+    """候補リストから **ミラーの版が違う** 物を除く。戻り: (残す, 落とした)。純関数。"""
+    keep, drop = [], []
+    for c in (cands or []):
+        (drop if mp.mirror_title_conflicts(kind, c.get("name")) else keep).append(c)
+    return keep, drop
+
+
+def filter_mercari_result_by_mirror(m, kind, mp):
+    """夜の検索結果 (best / cands / all_cands = [値段, URL, 出品名]) から版違いを除く (純関数)。
+
+    キャッシュに焼く前に落とす = 再仕入れ照合など、同じキャッシュを読む他の画面にも出ない。
+    """
+    if not kind or not isinstance(m, dict):
+        return m
+    def _ok(x):
+        return not (isinstance(x, (list, tuple)) and len(x) > 2
+                    and mp.mirror_title_conflicts(kind, x[2]))
+    out = dict(m)
+    for k in ("cands", "all_cands"):
+        if isinstance(out.get(k), list):
+            out[k] = [x for x in out[k] if _ok(x)]
+    if out.get("best") and not _ok(out["best"]):
+        out["best"] = min(out.get("cands") or [], key=lambda x: x[0], default=None)
+    return out
+
+
 def build_search_query(target, mp):
     """1対象 → 検索クエリ(build_card_query + KEYフォールバック)。card_no 空なら kw も空(=探索不能)。
 
@@ -297,6 +333,10 @@ def build_search_query(target, mp):
     #   本体が KEY→set_no→title の順で番号を決めるので、呼び出し側は素直に渡すだけでよい。
     #   (同定を1箇所に寄せる = 同じ判定が2度出たら発生源を直す、の実行)
     q = mp.build_card_query(target.get("title", ""), "", target.get("key") or None)
+    # ★2026-09-27: マスターボールミラーは検索語にも書く (通常ミラーの方が多く、上位が埋まる)
+    q["mirror"] = mirror_kind_for_target(target, mp)
+    if q["mirror"] == "master" and q.get("kw"):
+        q["kw"] = f"{q['kw']} マスターボール"
     # 番号が KEY と食い違っていた事実は **見えるようにする** (出品者の誤記が何件あるかの計測)。
     _cn_key = _card_no_from_key(target.get("key"))
     _cn_title = mp._extract_card_no(target.get("title", ""), "", None)
@@ -981,7 +1021,7 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
                                                multi_variant=q.get("multi_variant"))
                 except Exception as e:
                     snkr = {"_error": str(e)[:40] or "error", "available": False, "psa10_price_jpy": None}
-                m = mercari_res.get(i)
+                m = filter_mercari_result_by_mirror(mercari_res.get(i), q.get("mirror"), mp)
                 if isinstance(m, dict) and m.get("best"):
                     m_hit += 1
                 if isinstance(snkr, dict) and snkr.get("available"):
@@ -1952,6 +1992,9 @@ def confirm_survivors(t, vals, cache, ctx, today, *, ref_of, art_of, stats):
         stats["all_cost"] += 1
         return [], "", "all_cost", []
     cands, dropped_var = filter_candidates_by_variant(cands, t.get("title"))
+    # ★2026-09-27: ミラーの版 (マスターボールか) も。既に貯まった候補もここで落ちる
+    cands, dropped_mir = filter_candidates_by_mirror(cands, mirror_kind_for_target(t, mp), mp)
+    dropped_var = list(dropped_var) + dropped_mir
     stats["cand_variant"] += len(dropped_var)
     if not cands:
         stats["all_variant"] += 1
@@ -2308,6 +2351,8 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
                 _have.add(_norm_url(_p["url"]))
                 if _PLLp and _pidp and _PLLp.url_verdict(_pidp, _p["url"], _uvp) == "diff":
                     continue                            # どこかの画面で「違う」と決めた仕入元
+                if mp.mirror_title_conflicts(mirror_kind_for_target(t, mp), _p.get("name")):
+                    continue                            # ★2026-09-27 ミラーの版違い (通常の候補と同じ門)
                 cands = list(cands) + [{"url": _p["url"], "site": _p.get("site") or "",
                                         "channel": _p.get("channel") or "",
                                         "image": _p.get("image") or "",

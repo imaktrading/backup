@@ -533,6 +533,40 @@ def print_word_for_key(key, hint=None):
     return "パラレル"
 
 
+# ★2026-09-27 ユーザー「A (リバースホロ) は B (マスターボールミラー) と違うよね」。
+#   ポケモンのミラーは同じ番号で 通常ミラー / モンスターボール / マスターボール がある。
+#   カタログ・公式は番号1つ (分かれていない) ので、版を知っているのは **PSA の鑑定データ**だけ。
+#   実測 (鑑定データ 2,053件): MASTER BALL は10件とも出品名もマスターボール = 確か。
+#   ところが「REVERSE HOLO」だけの物に モンボ / モンスターボール / エネルギーミラー が混ざる
+#   (PSA が区別していない)。→ **確かな「マスターボールか否か」だけ** で絞る。
+_MASTER_BALL_WORDS = ("マスターボール", "マスボ", "MASTER BALL", "MASTERBALL")
+
+
+def mirror_kind(variety):
+    """PSA の Variety / Subject → 'master' (マスターボールミラー) / 'mirror' (それ以外のミラー) / ''。"""
+    u = (variety or "").upper()
+    if "MASTER BALL" in u:
+        return "master"
+    if "REVERSE HOLO" in u:
+        return "mirror"
+    return ""
+
+
+def mirror_title_conflicts(kind, title):
+    """候補の出品名が、こちらのミラーの版と食い違うか (純関数)。True = 外す。
+
+    - こちらがマスターボール → 出品名に マスターボール/マスボ が無ければ外す
+      (マスターボールは売り手が必ず書く。書いていない物はほぼ別の版)
+    - こちらがそれ以外のミラー → 出品名が マスターボール を名乗れば外す
+    - 版が分からない ('') → 外さない
+    """
+    if not kind:
+        return False
+    u = unicodedata.normalize("NFKC", title or "").upper()
+    has_master = any(w.upper() in u for w in _MASTER_BALL_WORDS)
+    return (not has_master) if kind == "master" else has_master
+
+
 def build_card_query(title, set_no, key=None):
     """1カード分の検索情報を作る → {kw, card_no, name_jp, key, image}。
 
