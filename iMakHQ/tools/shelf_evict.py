@@ -116,7 +116,18 @@ ONHAND_CACHE = r"C:/dev/iMak_data/hq/shelf_onhand_cache.json"
 ONE_OFF_SUPPLY = re.compile(r"jp\.mercari\.com|fril\.jp", re.I)       # メルカリ・ラクマ = 1点物の仕入元
 
 
-def category_for(item_id, sheet_category, supply_url="", onhand=(), known=None):
+# ★2026-09-27 (残務 №289): Montbell / graniph / UNIQLO の公式サイト仕入は SKU が '… official website'。
+#   商品管理シートに行が無いのが正常なので「有在庫？ (どのシートにも無い)」に出さない (表示のノイズだけだった)。
+OFFICIAL_SKU = re.compile(r"official\s*website", re.I)
+OFFICIAL = "公式サイト仕入"
+
+
+def is_official_sku(sku):
+    """SKU が公式サイト仕入の印を持つか (純関数)。"""
+    return bool(OFFICIAL_SKU.search(sku or ""))
+
+
+def category_for(item_id, sheet_category, supply_url="", onhand=(), known=None, sku=""):
     """棚が使うカテゴリ (純関数, test 可)。
 
     有在庫 → "有在庫" (どの期限にも入らない = 落とさない) /
@@ -127,6 +138,8 @@ def category_for(item_id, sheet_category, supply_url="", onhand=(), known=None):
     if onhand and iid in onhand:
         return ONHAND
     if known is not None and iid not in known:
+        if is_official_sku(sku):
+            return OFFICIAL                # 公式サイト仕入 = シートに行が無いのが正常 (落とさない)
         return ONHAND_UNKNOWN              # どのシートにも無い = 調べるまで落とさない
     if (sheet_category or "").strip() == "Tシャツ":
         return "Tシャツ" if ONE_OFF_SUPPLY.search(supply_url or "") else "Tシャツ(公式等)"
@@ -764,7 +777,8 @@ def _load():
 
     def cat_of(row):
         iid = str(row.get("item_id") or "")
-        return category_for(iid, by_item.get(iid), supply.get(iid, ""), onhand, known)
+        return category_for(iid, by_item.get(iid), supply.get(iid, ""), onhand, known,
+                            sku=row.get("sku") or "")
 
     return fr, shelf_of, cat_of
 

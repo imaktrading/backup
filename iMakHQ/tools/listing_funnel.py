@@ -652,6 +652,8 @@ def evict_group(r, onhand=None, sheet_cat=None, known=None):
     if onhand and str(r.get("item_id") or "") in onhand:
         return _EVICT_ONHAND                  # ★2026-09-15 有在庫は全カテゴリ落とさない
     if known is not None and str(r.get("item_id") or "") not in known:
+        if se.is_official_sku(r.get("sku")):
+            return se.OFFICIAL                # ★2026-09-27 公式サイト仕入 = シートに無いのが正常 (落とさない)
         return _EVICT_UNKNOWN                 # どのシートにも無い = 調べるまで落とさない
     if se._f(r.get("sold_qty")) + se._f(r.get("sales90")) > 0:
         return _EVICT_KEEP_SOLD
