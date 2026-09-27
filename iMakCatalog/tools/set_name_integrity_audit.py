@@ -825,9 +825,52 @@ def main():
               "- rarity が空で、同じ弾の他の行には入っていて、まだ公式で確かめていない行。0件で維持。\n"
               "- 出たら `python tools/pokemon_rarity_gap_check.py --commit` (倉庫の公式ページで確かめる)。")
 
+    # 15. specs の壊れ (2026-09-27・PC のブルースクリーン対策)
+    #     ①JSON として読めない値 ②キー名が1文字化けている行。どちらも 0件で維持する。
+    #     キー名の化けは JSON としては読めるので、①だけでは捕まらない
+    #     (2026-09-26 は eBay 値のテストが1件赤くなって初めて気づき、4件見つかった)。
+    broken_json = broken_keys = 0
+    _bc = None
+    try:
+        _bc = sqlite3.connect(str(DB_PATH), timeout=120)
+        _bc.text_factory = bytes
+        for _pid, _sp, _im in _bc.execute("SELECT product_id, specs, images FROM products"):
+            for _v in (_sp, _im):
+                if _v is None:
+                    continue
+                try:
+                    json.loads(_v.decode("utf-8"))
+                except Exception:
+                    broken_json += 1
+                    print(f"    ⚠️ JSON が壊れている: {_pid.decode('utf-8', 'replace')}")
+    except Exception as _e:                      # 監査ごと落とさない
+        print(f"    (壊れ検査を飛ばした: {type(_e).__name__})")
+    finally:
+        # ★必ず閉じる。開いたままだと回帰テストの一時 DB を消せず7本落ちる
+        #   (2026-09-27 に実際に落ちた。§14 の rarity_gap と同じ穴)
+        if _bc is not None:
+            _bc.close()
+    # キー名の化けは **本番の DB の時だけ**見る (最小 fixture は母数が足りず誤検知する)
+    if str(DB_PATH).replace("\\", "/") == "C:/dev/iMak_data/catalog/products.sqlite":
+        try:
+            sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.dirname(
+                _os.path.abspath(__file__))), "tests"))
+            import test_spec_key_names_20260927 as _K  # noqa: E402
+
+            for _cat, _pid, _k, _good in _K._suspects():
+                broken_keys += 1
+                print(f"    ⚠️ キー名が化けている: {_pid} {_k!r} -> {_good!r} ({_cat})")
+        except Exception as _e:
+            print(f"    (キー名の検査を飛ばした: {type(_e).__name__})")
+    print(f"\n## 15. specs の壊れ — JSON 不正 {broken_json}件 / キー名の化け {broken_keys}件\n"
+          "- PC が落ちた時のビット化け。0件で維持する。\n"
+          "- 直し方: migrations/2026-09-26_restore_broken_json_from_backup.py /\n"
+          "  migrations/2026-09-26_fix_corrupted_spec_keys.py (バックアップから戻す)。")
+
     # 完走マーカー (末尾に必ず出す。ログの grep でこれが無ければ途中死亡).
     print(
         f"{_END_MARK}: era={len(era_mismatch)} inconsistent={len(inconsistent)} "
+        f"broken_json={broken_json} broken_keys={broken_keys} "
         f"none_src={len(none_list)} name_desync={len(name_desync)} "
         f"name_propagate_viol={len(name_viol)} facet_n1_candidates={len(facet_n1)} "
         f"canonical_drift={sum(drift_by_cat.values())} "
