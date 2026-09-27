@@ -536,13 +536,12 @@ def write_restock(sheet_rows):
     # ★2026-09-27: 行番号で A/B/D/M/I を書くので、目視の間に行がずれると **別の出品の行**を
     #   書き換える。書く直前に「その行が今も同じ出品か」を確かめ、違う行は飛ばす。
     #   比べるのは書く前の itemID ("was"。eBay で出し直すと b は新しい番号になるため)。
+    #   ずれていたら今の行を探し直してそこに書く (見つからない行だけ書かない)。
     _was = {row: (d.get("was") or d.get("b") or "") for row, d in sheet_rows.items()}
-    _moved = sheet_io.rows_moved(_was, ws.get_all_values())
-    if _moved:
-        print(f"⚠️要対応 一番くじ: 行の出品が予定と違うので書かずに飛ばします: 行 {_moved[:10]}")
-        sheet_rows = {row: d for row, d in sheet_rows.items() if row not in _moved}
-        if not sheet_rows:
-            return 0
+    _to = sheet_io.relocate_rows(_was, ws.get_all_values(), "一番くじ")
+    sheet_rows = {_to[row]: d for row, d in sheet_rows.items() if row in _to}
+    if not sheet_rows:
+        return 0
     ws.batch_update(build_restock_reqs(sheet_rows), value_input_option="RAW")
     aux = {row: d["aux"] for row, d in sheet_rows.items() if d.get("aux")}
     if aux:

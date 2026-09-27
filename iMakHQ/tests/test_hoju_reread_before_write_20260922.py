@@ -13,10 +13,12 @@ def test_reread_happens_before_planning():
     assert i < j and "vals = _fresh" in SRC[i:j]
 
 
-def test_moved_rows_are_skipped_not_written():
-    # ★2026-09-27: 全部止めるのではなく、変わった行だけ飛ばす (test_hoju_moved_row_skip_20260927)
+def test_moved_rows_are_relocated_not_skipped():
+    # ★2026-09-27: 全部止めない → 変わった行は itemID で今の行を探し直して書く。見つからない物だけ飛ばす
     i = SRC.index("_moved_idx = moved_target_indices(item_targets, _fresh)")
-    assert "confirmed = {i: u for i, u in confirmed.items() if i not in _moved_idx}" in SRC[i:i + 900]
+    blk = SRC[i:i + 1800]
+    assert "_sio.find_current_row(item_targets[i][\"itemID\"], _fresh" in blk
+    assert "confirmed = {i: u for i, u in confirmed.items() if i not in _lost}" in blk
 
 
 def test_read_back_after_write():

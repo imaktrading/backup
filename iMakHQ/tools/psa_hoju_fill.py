@@ -2513,11 +2513,22 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         #   1件 (m56297412109) の itemID を手で 9999 にしただけで、確かめた他の13件も書かれなかった。
         #   書く前に **行ごとに** 「その行の itemID が今も同じか」を見ているので、合わない行だけ
         #   飛ばせば残りは正しい行に書ける (行の挿入で大量にずれた時も、ずれた行は全部ここで落ちる)。
+        # ★2026-09-27 (2): 飛ばすだけだと本来の書込が残らない。itemID で **今の行を探し直す**。
+        #   見つからない (取り下げで消えた / 2行ある) 物だけ飛ばす。
         if _moved_idx:
-            print(f"⚠️要対応 行が変わった出品は補URLを書かずに飛ばします: "
-                  f"{[item_targets[i]['itemID'] for i in sorted(_moved_idx)][:5]} "
-                  f"(itemID が書き換わった / 行がずれた。他の出品は書きます)")
-            confirmed = {i: u for i, u in confirmed.items() if i not in _moved_idx}
+            import sheet_io as _sio
+            _lost = []
+            for i in sorted(_moved_idx):
+                _new = _sio.find_current_row(item_targets[i]["itemID"], _fresh, item_targets[i].get("row"))
+                if _new:
+                    print(f"  ↪ 行がずれていた {item_targets[i]['itemID']}: 行{item_targets[i]['row']} → 行{_new}")
+                    item_targets[i]["row"] = _new
+                else:
+                    _lost.append(i)
+            if _lost:
+                print(f"⚠️要対応 出品が見つからない (消えた / 2行ある) ので補URLを書きません: "
+                      f"{[item_targets[i]['itemID'] for i in _lost][:5]}")
+                confirmed = {i: u for i, u in confirmed.items() if i not in _lost}
         vals = _fresh
     except Exception as _e_fr:                                   # noqa: BLE001
         print(f"⚠️要対応 書く直前の読み直しに失敗 → 書込を中止: {type(_e_fr).__name__}: {_e_fr}")
@@ -2535,7 +2546,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         print("  (ガード不成立のため書込0行。確証結果は台帳に残るので再実行で復帰できます)")
     elif aux_writeback:
         try:
-            from sheet_io import write_aux_urls
+            from sheet_io import write_aux_urls, current_row
             written = write_aux_urls(aux_writeback,
                                      expect_iid={t["row"]: t["itemID"] for t in item_targets
                                                  if t.get("row") in aux_writeback})
@@ -2543,8 +2554,9 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
                   f"/ 入替 {len(replaced)}本 (安い順に最大{AUXN}本)")
             # 書いた後に読み返して、入ったことを確かめる (入っていなければ要対応と言う)
             _after = _read_high()
+            # 行がずれていた分は、実際に書いた行 (current_row) で確かめる
             _bad = [row for row, full in aux_writeback.items()
-                    if [_cell(_after[row - 1], AUX0 + k) for k in range(AUXN)]
+                    if [_cell(_after[current_row(row) - 1], AUX0 + k) for k in range(AUXN)]
                     != (list(full) + [""] * AUXN)[:AUXN]]
             if _bad:
                 print(f"⚠️要対応 補URLを書いたのに読み返すと違う行: {_bad[:10]} "

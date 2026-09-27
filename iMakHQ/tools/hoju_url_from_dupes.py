@@ -568,7 +568,8 @@ def verify_written(row_to_urls):
         return []
     actual = {}
     for row in row_to_urls:
-        r = vals[row - 1] if 0 < row <= len(vals) else []
+        _r = sheet_io.current_row(row)          # 行がずれていた分は実際に書いた行で確かめる
+        r = vals[_r - 1] if 0 < _r <= len(vals) else []
         actual[row] = [u for u in (_cell(r, AUX0 + k) for k in range(AUXN)) if u]
     return diff_written(row_to_urls, actual)
 

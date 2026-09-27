@@ -256,16 +256,26 @@ def main():
         ws = gc.open_by_key(cfg["id"]).get_worksheet_by_id(cfg["gid"])
         vals = ws.get_all_values()
         rows = []
+        # ★2026-09-27: 控えの行番号は前の走行のもの。行がずれていると別の出品に印を付ける。
+        #   B列は空なので、控えた A列 (仕入元URL) で **今の行を探し直す**。見つからない・2行ある・
+        #   控えに URL が無い物だけ書かない
+        _targets = set()
+        if a.from_backup:
+            import sheet_io as _si
+            for (lab, r0), url in a_of.items():
+                if lab != cfg["label"]:
+                    continue
+                r1 = _si.find_current_row(("A", url), vals, r0) if url else None
+                if r1:
+                    _targets.add(r1)
+                    if r1 != r0:
+                        print(f"    ↪ {r0}行目 → 今は {r1}行目 に書きます")
+                else:
+                    print(f"    ⚠️ {r0}行目: 控えの仕入元URLの行が見つからない/控えにURLが無い → 書かない")
         for n, row in enumerate(vals[1:], start=2):
             cur_flg = row[FLG_COL - 1].strip() if len(row) >= FLG_COL else ""
             if a.from_backup:
-                if (cfg["label"], n) not in by_row:
-                    continue
-                # ★2026-09-27: 控えの行番号は前の走行のもの。行がずれていると別の出品に印を付ける。
-                #   B列は空なので、控えた A列 (仕入元URL) が今も同じ行だけ書く。A が無い控えは書かない
-                _a_now = row[0].strip() if row else ""
-                if not a_of.get((cfg["label"], n)) or _a_now != a_of[(cfg["label"], n)]:
-                    print(f"    ⚠️ {n}行目: 控えの仕入元URLと今の行が違う/控えにURLが無い → 書かない")
+                if n not in _targets:
                     continue
             else:
                 b = row[ITEM_COL - 1].strip() if len(row) >= ITEM_COL else ""

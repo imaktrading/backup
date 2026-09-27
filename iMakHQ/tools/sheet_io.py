@@ -546,18 +546,76 @@ def rows_moved(expect_iid, all_rows):
     return out
 
 
+def find_current_row(ident, all_rows, row_hint=None):
+    """その出品が **今** 何行目にあるか (純関数)。見つからない / 2行以上ある → None。
+
+    ident: itemID か 鑑定番号 (B列 か I列 で探す)、または ("A", 仕入元URL)
+           (まだ出品していない行 = B列が空の行を A列で探す)。
+    row_hint (前に読んだ時の行) が今も合っていればそれを返す。
+    """
+    def _c(r, i):
+        return (r[i] if len(r) > i else "").strip()
+
+    if isinstance(ident, tuple) and len(ident) == 2 and ident[0] == "A":
+        want = str(ident[1] or "").strip()
+        ok = lambda r: bool(want) and _c(r, 0) == want and not _c(r, PRODUCT_COL_ITEMID)  # noqa: E731
+    else:
+        want = str(ident or "").strip()
+        ok = lambda r: bool(want) and want in (_c(r, PRODUCT_COL_ITEMID), _c(r, PRODUCT_COL_CERT))  # noqa: E731
+    if not want:
+        return None
+    if row_hint and 0 < row_hint <= len(all_rows) and ok(all_rows[row_hint - 1]):
+        return row_hint
+    hits = [n for n, r in enumerate(all_rows[1:], start=2) if ok(r)]
+    return hits[0] if len(hits) == 1 else None
+
+
+# 直近の書込で行を探し直した分 {予定の行: 実際に書いた行}。書いた後に読み返して確かめる側が使う
+LAST_ROW_MOVES = {}
+
+
+def current_row(row):
+    """直近の書込で行を探し直していれば、実際に書いた行を返す。"""
+    return LAST_ROW_MOVES.get(row, row)
+
+
+def relocate_rows(expect, all_rows, what):
+    """{予定の行: 出品の目印} → {予定の行: 今の行} (見つからない行は入れない)。
+
+    ★2026-09-27: 行はシートの手作業や他の担当で日々ずれる (実例: 9/10 に行1320 の出品が
+      9/26 には行1318)。前に読んだ行番号のまま書くと **別の出品の行**を書き換える。
+      書く直前のシートで目印 (itemID / 鑑定番号 / 未出品なら仕入元URL) を探し直し、
+      今の行に書く。見つからない・2行ある・2件が同じ行に当たる時だけ書かない。
+    """
+    out, lost = {}, []
+    for row, ident in (expect or {}).items():
+        new = find_current_row(ident, all_rows, row)
+        (out.__setitem__(row, new) if new else lost.append(row))
+    _dup = {n for n in out.values() if list(out.values()).count(n) > 1}
+    for row in [r for r, n in out.items() if n in _dup]:
+        lost.append(out.pop(row))
+    moved = {r: n for r, n in out.items() if r != n}
+    LAST_ROW_MOVES.clear()
+    LAST_ROW_MOVES.update(moved)
+    if moved:
+        print(f"  ↪ {what}: 行がずれていたので、今の行に書きます: "
+              + ", ".join(f"{r}→{n}" for r, n in list(moved.items())[:10]))
+    if lost:
+        print(f"⚠️要対応 {what}: 出品が見つからない (消えた / 2行ある) ので書きません: 予定の行 {sorted(lost)[:10]}")
+    return out
+
+
 def write_aux_urls(row_to_urls, expect_iid):
     """{1-indexed行番号: [url,...]} を 商品管理シート 補URL列(AC-AG)に batch_update。
 
     各行 最大5URL、不足は空文字でクリア(古い補URLを残さない)。touch するのは AC-AG のみ。
     戻り: 書込んだ行数。row_to_urls 空なら 0。
 
-    expect_iid = {行: その行だと思っている itemID} (必須)。
-    ★2026-09-27: 行はシートの手作業や他の担当で日々ずれる (実例: 9/10 に行1320 の出品が
-      9/26 には行1318)。読んでから書くまでにずれると **別の出品に補URLを書く**。
-      書く直前に読んだシートで行の itemID を確かめ、合わない行は書かずに飛ばす。
-      シートを読めない時は書かない (誰の行か確かめられないため)。
+    expect_iid = {行: その行の出品の目印 (itemID / 鑑定番号 / ("A", 仕入元URL))} (必須)。
+    書く直前のシートで出品を探し直し、今の行に書く (relocate_rows)。
+    シートを読めない時は書かない (誰の行か確かめられないため)。
     """
+    LAST_ROW_MOVES.clear()
     if not row_to_urls:
         return 0
     ws = _product_ws()
@@ -566,13 +624,10 @@ def write_aux_urls(row_to_urls, expect_iid):
     except Exception as e:                                     # noqa: BLE001
         print(f"⚠️要対応 補URL: 書く直前にシートを読めず **書込を中止**: {type(e).__name__}")
         return 0
-    _moved = rows_moved({row: (expect_iid or {}).get(row, "") for row in row_to_urls}, _now)
-    if _moved:
-        print(f"⚠️要対応 補URL: 行の出品が予定と違うので書かずに飛ばします: 行 {_moved[:10]}"
-              f" (行がずれた / itemID が変わった)")
-        row_to_urls = {row: u for row, u in row_to_urls.items() if row not in _moved}
-        if not row_to_urls:
-            return 0
+    _to = relocate_rows({row: (expect_iid or {}).get(row, "") for row in row_to_urls}, _now, "補URL")
+    row_to_urls = {_to[row]: u for row, u in row_to_urls.items() if row in _to}
+    if not row_to_urls:
+        return 0
 
     def _coln(idx0):
         return chr(65 + idx0) if idx0 < 26 else "A" + chr(65 + idx0 - 26)
@@ -612,31 +667,39 @@ def write_aux_urls(row_to_urls, expect_iid):
 
 
 def _rows_still_same(ws, itemid_to_row, what):
-    """{itemID または 鑑定番号: 行} のうち、今もその行がその出品の物だけを返す (I/O)。
+    """{itemID または 鑑定番号: 前に読んだ行} → {同: 今の行} (I/O)。見つからない物は入れない。
 
     B=itemID か I=鑑定番号 のどちらかが一致すれば同じ行 (出品前の行は itemID が無く、
     psa_to_csv は鑑定番号で KEY を書くため)。
 
     ★2026-09-27: 行はシートの手作業や他の担当で日々ずれる。目視画面 (最大3時間) の前に
-      読んだ行番号で書くと、別の出品の行を書き換える。書く直前に B列を読み直して確かめる。
+      読んだ行番号で書くと、別の出品の行を書き換える。書く直前に探し直して **今の行** を返す。
       読めなければ {} (= 書かない。誰の行か確かめられないため)。
     """
     try:
-        _cols = [ws.col_values(PRODUCT_COL_ITEMID + 1), ws.col_values(PRODUCT_COL_CERT + 1)]
+        _b = ws.col_values(PRODUCT_COL_ITEMID + 1)
+        _i = ws.col_values(PRODUCT_COL_CERT + 1)
     except Exception as e:                                     # noqa: BLE001
         print(f"⚠️要対応 {what}: 書く直前にシートを読めず **書込を中止**: {type(e).__name__}")
         return {}
-    keep, moved = {}, []
-    for iid, r in itemid_to_row.items():
-        if not r:
-            continue
-        now = {(c[r - 1] if 0 < r <= len(c) else "").strip() for c in _cols} - {""}
-        if str(iid or "").strip() and str(iid).strip() in now:
-            keep[iid] = r
-        else:
-            moved.append(r)
+    n = max(len(_b), len(_i))
+    rows = [[""] * PRODUCT_COL_ITEMID
+            + [_b[k] if k < len(_b) else ""]
+            + [""] * (PRODUCT_COL_CERT - PRODUCT_COL_ITEMID - 1)
+            + [_i[k] if k < len(_i) else ""] for k in range(n)]
+    pairs = [(iid, r) for iid, r in itemid_to_row.items() if r]
+    keep, lost = {}, []
+    for iid, r in pairs:
+        new = find_current_row(iid, rows, r)
+        (keep.__setitem__(iid, new) if new else lost.append(r))
+    moved = {r: keep[iid] for iid, r in pairs if iid in keep and keep[iid] != r}
+    LAST_ROW_MOVES.clear()
+    LAST_ROW_MOVES.update(moved)
     if moved:
-        print(f"⚠️要対応 {what}: 行の出品が予定と違うので書かずに飛ばします: 行 {sorted(moved)[:10]}")
+        print(f"  ↪ {what}: 行がずれていたので、今の行に書きます: "
+              + ", ".join(f"{r}→{n2}" for r, n2 in list(moved.items())[:10]))
+    if lost:
+        print(f"⚠️要対応 {what}: 出品が見つからない (消えた / 2行ある) ので書きません: 予定の行 {sorted(lost)[:10]}")
     return keep
 
 
