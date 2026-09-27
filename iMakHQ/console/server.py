@@ -971,8 +971,17 @@ def _run_worker(script, cmd=None):
         ★ここを「記録にも書く」にすると旧パネルと動きが変わる: 後処理は run log を
           「今回の stdout」として読み直すので、後処理自身が書いた文 (問題提起の引用など) が
           次の段の入力に混ざり、NO-GO 行を二重に拾う。旧パネルは画面にしか出していない。
+        ★2026-09-27: ただし画面だけだと後から追えない (9/22 の書き戻し失敗の理由が特定できなかった)。
+          run log とは **別のファイル** (<run log>.after.txt) に残す = 後処理の入力には混ざらない。
+          拡張子を .log にしない (run_logs/*.log の「一番新しい走行」を拾う処理に混ざるため)。
         """
         _log(text)
+        if path:
+            try:
+                with open(path + ".after.txt", "a", encoding="utf-8") as _af:
+                    _af.write(text if str(text).endswith("\n") else "%s\n" % text)
+            except OSError:
+                pass
 
     def _run_log_text():
         """今回の走行の stdout (旧パネルの _run_log_text と同じ: run log ファイルから読む)。"""
