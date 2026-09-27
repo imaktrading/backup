@@ -611,6 +611,35 @@ def write_aux_urls(row_to_urls, expect_iid):
     return len(reqs)
 
 
+def _rows_still_same(ws, itemid_to_row, what):
+    """{itemID または 鑑定番号: 行} のうち、今もその行がその出品の物だけを返す (I/O)。
+
+    B=itemID か I=鑑定番号 のどちらかが一致すれば同じ行 (出品前の行は itemID が無く、
+    psa_to_csv は鑑定番号で KEY を書くため)。
+
+    ★2026-09-27: 行はシートの手作業や他の担当で日々ずれる。目視画面 (最大3時間) の前に
+      読んだ行番号で書くと、別の出品の行を書き換える。書く直前に B列を読み直して確かめる。
+      読めなければ {} (= 書かない。誰の行か確かめられないため)。
+    """
+    try:
+        _cols = [ws.col_values(PRODUCT_COL_ITEMID + 1), ws.col_values(PRODUCT_COL_CERT + 1)]
+    except Exception as e:                                     # noqa: BLE001
+        print(f"⚠️要対応 {what}: 書く直前にシートを読めず **書込を中止**: {type(e).__name__}")
+        return {}
+    keep, moved = {}, []
+    for iid, r in itemid_to_row.items():
+        if not r:
+            continue
+        now = {(c[r - 1] if 0 < r <= len(c) else "").strip() for c in _cols} - {""}
+        if str(iid or "").strip() and str(iid).strip() in now:
+            keep[iid] = r
+        else:
+            moved.append(r)
+    if moved:
+        print(f"⚠️要対応 {what}: 行の出品が予定と違うので書かずに飛ばします: 行 {sorted(moved)[:10]}")
+    return keep
+
+
 def write_keys(itemid_to_row, itemid_to_key):
     """{itemID: canonical_KEY} を 商品管理シート AI列(canonical KEY) に書く (I/O)。
 
@@ -620,6 +649,8 @@ def write_keys(itemid_to_row, itemid_to_key):
     if not itemid_to_key:
         return 0
     ws = _product_ws()
+    itemid_to_row = _rows_still_same(
+        ws, {iid: itemid_to_row.get(iid) for iid in itemid_to_key}, "KEY書込")
     idx0 = PRODUCT_COL_KEY
     col = chr(65 + idx0) if idx0 < 26 else "A" + chr(65 + idx0 - 26)   # 34 → AI
     reqs = []
@@ -656,6 +687,9 @@ def restock_reactivate_master(itemid_to_row, itemid_to_url, itemid_to_cost=None)
     if not itemid_to_row:
         return 0
     ws = _product_ws()
+    itemid_to_row = _rows_still_same(ws, itemid_to_row, "再仕入れの書戻し")
+    if not itemid_to_row:
+        return 0
     # ★2026-09-08: M は **seed (空欄を埋める) のつもりが、毎回 上書き**していた。
     #   「RESTOCK確定」タブの最安¥ は確定した時点の値で、後から古くなる。走行のたびに
     #   それを書き戻すので、**人が直した仕入値が古い値に戻る**。

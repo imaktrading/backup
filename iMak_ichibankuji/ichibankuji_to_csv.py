@@ -1119,8 +1119,14 @@ def _process_sheet_to_ebay_csv():
                         if p and p.get('size_cm'):
                             t['size_cm'] = p['size_cm']
                             # 統合Hight AB列(size_cm)も更新
+                            # ★2026-09-27: 行番号は再スクレイプ (数分) の前に読んだもの。行がずれていると
+                            #   別の行に書くので、A列 (仕入元URL) が今も同じ時だけ書く
                             try:
-                                ws.update_acell(f"AB{t['sheet_row']}", p['size_cm'])
+                                _a_now = (ws.acell(f"A{t['sheet_row']}").value or "").strip()
+                                if _a_now == t['mercari_url'].strip():
+                                    ws.update_acell(f"AB{t['sheet_row']}", p['size_cm'])
+                                else:
+                                    print(f"   ⚠️ 行{t['sheet_row']} の仕入元URLが変わった → AB列は書かない")
                             except Exception:
                                 pass
                             print(f"   ✓ 行{t['sheet_row']} {t['prize_code']} size_cm={p['size_cm']}")

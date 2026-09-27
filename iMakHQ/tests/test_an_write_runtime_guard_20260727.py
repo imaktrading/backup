@@ -135,6 +135,7 @@ def test_restock_reactivate_master_still_works_under_guard(monkeypatch):
     """M seed(正しい書き方)はガード下でも通ること = 既存機能を壊していない。"""
     ws = _FakeWS()
     monkeypatch.setattr(sheet_io, "_product_ws", lambda: sheet_io._ANWriteGuard(ws))
+    monkeypatch.setattr(sheet_io, "_rows_still_same", lambda ws, m, w: {k: v for k, v in m.items() if v})  # 行の確認は test_aux_write_checks_row_owner で見る
     n = sheet_io.restock_reactivate_master({"358x": 100}, {"358x": "https://s/1"}, {"358x": "18000"})
     assert n == 1
     ranges = [r["range"] for r in ws.calls[0][1]]
@@ -145,6 +146,7 @@ def test_write_keys_still_works_under_guard(monkeypatch):
     """KEY(AI列)書込もガードに掛からないこと(AI は AN の手前)。"""
     ws = _FakeWS()
     monkeypatch.setattr(sheet_io, "_product_ws", lambda: sheet_io._ANWriteGuard(ws))
+    monkeypatch.setattr(sheet_io, "_rows_still_same", lambda ws, m, w: {k: v for k, v in m.items() if v})  # 行の確認は test_aux_write_checks_row_owner で見る
     n = sheet_io.write_keys({"iid": 50}, {"iid": "RP-028"})
     assert n == 1
     assert ws.calls[0][1][0]["range"] == "AI50"

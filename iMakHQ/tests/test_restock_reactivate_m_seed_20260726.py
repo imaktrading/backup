@@ -23,6 +23,7 @@ class _FakeWS:
 def test_reactivate_seeds_M_not_AN(monkeypatch):
     fake = _FakeWS()
     monkeypatch.setattr(sheet_io, "_product_ws", lambda: fake)
+    monkeypatch.setattr(sheet_io, "_rows_still_same", lambda ws, m, w: {k: v for k, v in m.items() if v})  # 行の確認は test_aux_write_checks_row_owner で見る
     n = sheet_io.restock_reactivate_master(
         {"358x": 100}, {"358x": "https://sup/1"}, {"358x": "18000"})
     assert n == 1
@@ -40,6 +41,7 @@ def test_reactivate_seeds_M_not_AN(monkeypatch):
 def test_reactivate_no_cost_skips_M(monkeypatch):
     fake = _FakeWS()
     monkeypatch.setattr(sheet_io, "_product_ws", lambda: fake)
+    monkeypatch.setattr(sheet_io, "_rows_still_same", lambda ws, m, w: {k: v for k, v in m.items() if v})  # 行の確認は test_aux_write_checks_row_owner で見る
     sheet_io.restock_reactivate_master({"358y": 5}, {"358y": "https://sup/2"}, {})
     ranges = [r["range"] for r in fake.reqs]
     assert "A5" in ranges and "D5" in ranges and "M5" not in ranges  # cost無=M seed しない

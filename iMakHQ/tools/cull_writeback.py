@@ -236,9 +236,11 @@ def main():
 
     # 対象の作り方は2通り。既定は eBay の結果 CSV。
     by_row = {}                        # (label, row) → itemID
+    a_of = {}                          # (label, row) → 控えた時の A列 (仕入元URL)
     if a.from_backup:
         for b in json.load(io.open(a.from_backup, encoding="utf-8")):
             by_row[(b["sheet"], b["row"])] = b["item_id"]
+            a_of[(b["sheet"], b["row"])] = (b.get("a") or "").strip()
         print(f"控えから {len(by_row)}件 (B列は既に空の想定)")
     else:
         files = find_result_files()
@@ -258,6 +260,12 @@ def main():
             cur_flg = row[FLG_COL - 1].strip() if len(row) >= FLG_COL else ""
             if a.from_backup:
                 if (cfg["label"], n) not in by_row:
+                    continue
+                # ★2026-09-27: 控えの行番号は前の走行のもの。行がずれていると別の出品に印を付ける。
+                #   B列は空なので、控えた A列 (仕入元URL) が今も同じ行だけ書く。A が無い控えは書かない
+                _a_now = row[0].strip() if row else ""
+                if not a_of.get((cfg["label"], n)) or _a_now != a_of[(cfg["label"], n)]:
+                    print(f"    ⚠️ {n}行目: 控えの仕入元URLと今の行が違う/控えにURLが無い → 書かない")
                     continue
             else:
                 b = row[ITEM_COL - 1].strip() if len(row) >= ITEM_COL else ""

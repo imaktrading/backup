@@ -71,6 +71,61 @@ def test_kuji_restock_skips_moved_rows(monkeypatch):
     assert {r["range"][1:] for r in ws.sent} == {"2"}
 
 
+class _WSB(_WS):
+    def col_values(self, n):
+        return [(r[n - 1] if len(r) >= n else "") for r in self.rows]
+
+
+def test_write_keys_skips_moved_rows(monkeypatch):
+    """KEY 書込 (PSA 再仕入れの目視の後) も、行の itemID を確かめてから書く。"""
+    ws = _WSB(SHEET)
+    monkeypatch.setattr(sheet_io, "_product_ws", lambda: ws)
+    n = sheet_io.write_keys({"111": 2, "333": 3}, {"111": "K1", "333": "K3"})   # 333 は今 行4
+    assert n == 1 and [r["range"] for r in ws.sent] == ["AI2"]
+
+
+def test_write_keys_by_cert_for_unlisted_rows(monkeypatch):
+    """psa_to_csv は出品前の行 (itemID 無し) に 鑑定番号 をキーにして KEY を書く。I列で確かめる。"""
+    rows = [list(r) for r in SHEET]
+    rows[2][8] = "150000001"                     # 行3: itemID 空 / 鑑定番号あり
+    ws = _WSB(rows)
+    monkeypatch.setattr(sheet_io, "_product_ws", lambda: ws)
+    n = sheet_io.write_keys({"150000001": 3, "150000002": 3}, {"150000001": "K", "150000002": "K"})
+    assert n == 1 and [r["range"] for r in ws.sent] == ["AI3"]
+
+
+def test_restock_reactivate_skips_moved_rows(monkeypatch):
+    """再仕入れの書戻し (A/D/M。UT は目視 最大3時間の後) も同じ。"""
+    ws = _WSB(SHEET)
+    monkeypatch.setattr(sheet_io, "_product_ws", lambda: ws)
+    n = sheet_io.restock_reactivate_master({"111": 2, "333": 2}, {"111": "https://a", "333": "https://b"})
+    assert n == 1 and all(r["range"].endswith("2") for r in ws.sent)
+    assert {"range": "A2", "values": [["https://a"]]} in ws.sent
+
+
+def test_row_check_stops_when_unreadable(monkeypatch):
+    class _Bad(_WS):
+        def col_values(self, n):
+            raise RuntimeError("x")
+    ws = _Bad(SHEET)
+    monkeypatch.setattr(sheet_io, "_product_ws", lambda: ws)
+    assert sheet_io.write_keys({"111": 2}, {"111": "K"}) == 0 and ws.sent == []
+
+
+def test_cull_from_backup_checks_supply_url():
+    """取下げの書戻しを控えからやり直す時、控えの行番号を A列 (仕入元URL) で確かめる。"""
+    src = open(os.path.join(ROOT, "iMakHQ", "tools", "cull_writeback.py"), encoding="utf-8").read()
+    i = src.index("if (cfg[\"label\"], n) not in by_row:")
+    assert "_a_now != a_of[(cfg[\"label\"], n)]" in src[i:i + 700]
+
+
+def test_kuji_size_write_checks_supply_url():
+    """一番くじのサイズ (AB列) は再スクレイプの後に書くので、A列が同じ時だけ書く。"""
+    src = open(os.path.join(ROOT, "iMak_ichibankuji", "ichibankuji_to_csv.py"), encoding="utf-8").read()
+    i = src.index('ws.update_acell(f"AB{t[\'sheet_row\']}"')
+    assert "_a_now == t['mercari_url'].strip()" in src[i - 400:i]
+
+
 def test_every_caller_passes_expect_iid():
     """expect_iid は必須引数。全部の呼び出しが渡していること (渡し忘れは TypeError で落ちる)。"""
     calls = []

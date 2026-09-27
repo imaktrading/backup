@@ -26,6 +26,7 @@ class _FakeWS:
 def test_restock_cost_goes_to_AN_not_N(monkeypatch):
     fake = _FakeWS()
     monkeypatch.setattr(sheet_io, "_product_ws", lambda: fake)
+    monkeypatch.setattr(sheet_io, "_rows_still_same", lambda ws, m, w: {k: v for k, v in m.items() if v})  # 行の確認は test_aux_write_checks_row_owner で見る
     n = sheet_io.restock_reactivate_master(
         itemid_to_row={"111": 227},
         itemid_to_url={"111": "https://jp.mercari.com/item/mXXX"},
@@ -50,6 +51,7 @@ def test_override_col_is_AN():
 def test_no_cost_skips_M_seed(monkeypatch):
     fake = _FakeWS()
     monkeypatch.setattr(sheet_io, "_product_ws", lambda: fake)
+    monkeypatch.setattr(sheet_io, "_rows_still_same", lambda ws, m, w: {k: v for k, v in m.items() if v})  # 行の確認は test_aux_write_checks_row_owner で見る
     sheet_io.restock_reactivate_master(
         itemid_to_row={"111": 227},
         itemid_to_url={"111": "https://x"},

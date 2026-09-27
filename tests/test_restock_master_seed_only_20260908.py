@@ -35,6 +35,7 @@ class _WS:
 def _run(monkeypatch, m_by_row, cost):
     ws = _WS(m_by_row)
     monkeypatch.setattr(sheet_io, "_product_ws", lambda: ws)
+    monkeypatch.setattr(sheet_io, "_rows_still_same", lambda ws, m, w: {k: v for k, v in m.items() if v})  # 行の確認は test_aux_write_checks_row_owner で見る
     sheet_io.restock_reactivate_master({"111": 10}, {"111": "https://x/1"}, {"111": cost})
     return ws.sent
 
