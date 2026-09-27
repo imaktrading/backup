@@ -35,7 +35,9 @@ import zipfile
 SRC = r"C:\dev\iMak_data"
 DB = os.path.join(SRC, "catalog", "products.sqlite")
 DEST = r"G:\マイドライブ\iMak_backup\daily"
-KEEP = 7
+# ★2026-09-27 Catalog 依頼: 7 → 14。9/26 の products.sqlite ビット化けは 9/24 分で戻せたが、
+#   気づくのが1週間遅れると戻せない (1本 110〜130MB / +約1GB)
+KEEP = 14
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATUS = os.path.join(HERE, "..", "review_logs", "data_backup_last.json")
 
