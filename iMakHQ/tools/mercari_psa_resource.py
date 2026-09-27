@@ -1270,24 +1270,69 @@ NOT_BUYABLE_PATH = os.path.join("C:/dev/iMak_data/hq", "not_buyable_urls.json")
 RESTOCKABLE_SOLD_PATH = os.path.join("C:/dev/iMak_data/hq", "not_buyable_restockable.json")
 
 
-def load_not_buyable(path=NOT_BUYABLE_PATH):
-    """{url: {"why","at"}} を読む。読めなければ空 (候補を消す方に倒さない)。"""
+# ★2026-09-27 (残務 №372): 監視くんが LAPTOP に移り、監視くんが書く分がこの PC のファイルに届かなく
+#   なった。監視くんはスプシのタブ「買えない仕入元」にも書く (依頼済み)。出品くんはファイルとタブの
+#   両方を読んで合わせる。タブが読めない時はファイルだけ (今までどおり)。
+#   タブの列: url / 種類 (not_buyable | restockable) / 理由 / 日時 / 書いた担当
+NOT_BUYABLE_TAB = "買えない仕入元"
+_TAB_MEMO = {}
+
+
+def tab_rows_by_kind(rows2d):
+    """タブの2次元配列 → {種類: {url: {"why","at","by"}}} (純関数)。見出し行は読み飛ばす。"""
+    out = {}
+    for r in (rows2d or [])[1:]:
+        url = (r[0] if len(r) > 0 else "").strip()
+        kind = (r[1] if len(r) > 1 else "").strip()
+        if not url or not kind:
+            continue
+        out.setdefault(kind, {})[url] = {"why": (r[2] if len(r) > 2 else ""),
+                                         "at": (r[3] if len(r) > 3 else ""),
+                                         "by": (r[4] if len(r) > 4 else "")}
+    return out
+
+
+def _from_tab(kind):
+    """タブの kind の分 (1走行で1回だけ読む)。読めなければ {}。"""
+    if "rows" not in _TAB_MEMO:
+        if os.environ.get("PYTEST_CURRENT_TEST"):              # テストでは本物のスプシを読まない
+            return {}
+        try:
+            import sheet_io as _si
+            _TAB_MEMO["rows"] = tab_rows_by_kind(_si.read_tab(NOT_BUYABLE_TAB))
+        except Exception:                                      # noqa: BLE001
+            _TAB_MEMO["rows"] = {}
+    return dict(_TAB_MEMO["rows"].get(kind) or {})
+
+
+def _load_json_dict(path):
     try:
         with open(path, encoding="utf-8") as f:
             d = json.load(f)
         return d if isinstance(d, dict) else {}
     except Exception:                                          # noqa: BLE001
         return {}
+
+
+def load_not_buyable(path=NOT_BUYABLE_PATH):
+    """{url: {"why","at"}} を読む。読めなければ空 (候補を消す方に倒さない)。
+
+    既定の置き場を読む時は、スプシのタブ (監視くんが LAPTOP から書く分) も合わせる。
+    """
+    d = _load_json_dict(path)
+    if path == NOT_BUYABLE_PATH:
+        for u, v in _from_tab("not_buyable").items():
+            d.setdefault(u, v)
+    return d
 
 
 def load_restockable_sold(path=RESTOCKABLE_SOLD_PATH):
     """{url: {...}} を読む。今は売り切れだが再入荷する仕入元。読めなければ空。"""
-    try:
-        with open(path, encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
-    except Exception:                                          # noqa: BLE001
-        return {}
+    d = _load_json_dict(path)
+    if path == RESTOCKABLE_SOLD_PATH:
+        for u, v in _from_tab("restockable").items():
+            d.setdefault(u, v)
+    return d
 
 
 def remember_not_buyable(url, why, path=NOT_BUYABLE_PATH):
