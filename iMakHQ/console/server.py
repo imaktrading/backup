@@ -779,8 +779,21 @@ def _watcher_worker():
         runs = watcher.update_runs(watcher.load_runs(), running, now)
         watcher.save_runs(runs)
         rows = watcher.status(runs, running, nexts, now)
-        STATE["watcher"] = {"rows": rows, "line": watcher.headline(rows, now),
-                            "at": now.strftime("%H:%M")}
+        line = watcher.headline(rows, now)
+        # ★2026-09-27 (残務 №373): 監視くんは LAPTOP に移った。この PC で巡回が動いておらず次回も無い
+        #   (タスクは Disabled) 時は、スプシの「売り切れチェック時間」(O列) の一番新しい時刻を出す。
+        if not running and not any(nexts.values()):
+            if time.time() - STATE.get("remote_at", 0) > 600 or "remote_last" not in STATE:
+                try:
+                    if TOOLS not in sys.path:
+                        sys.path.insert(0, TOOLS)
+                    import sheet_io as _si
+                    STATE["remote_last"] = watcher.latest_check(_si._product_ws().col_values(15)[1:])
+                except Exception:                              # noqa: BLE001
+                    STATE["remote_last"] = None
+                STATE["remote_at"] = time.time()
+            line = watcher.remote_line(STATE["remote_last"], now)
+        STATE["watcher"] = {"rows": rows, "line": line, "at": now.strftime("%H:%M")}
     except Exception as e:                                     # noqa: BLE001
         STATE["watcher"] = {"rows": [], "line": "巡回の状況が取れません (%s)" % e, "at": ""}
     STATE["watcher_at"] = time.time()

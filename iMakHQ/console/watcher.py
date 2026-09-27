@@ -40,6 +40,30 @@ def task_of_cmdline(cmdline):
     return "iMakInventory_Cycle"
 
 
+def latest_check(values):
+    """商品管理シート O列 (売り切れチェック時間 '2026/9/27 7:31:03') の一番新しい時刻。純関数。"""
+    best = None
+    for v in values or []:
+        try:
+            dt = datetime.datetime.strptime(str(v).strip(), "%Y/%m/%d %H:%M:%S")
+        except ValueError:
+            continue
+        if best is None or dt > best:
+            best = dt
+    return best
+
+
+def remote_line(last, now):
+    """★2026-09-27: 監視くんが LAPTOP に移った後の帯 (残務 №373)。
+    この PC では巡回しないので「巡回していない」ではなく、LAPTOP が最後に仕入元を見た時刻を出す。純関数。"""
+    if last is None:
+        return "巡回は LAPTOP で動いています (最後に見た時刻が読めません)"
+    mins = int((now - last).total_seconds() // 60)
+    ago = "%d分前" % mins if mins < 120 else "%.1f時間前" % (mins / 60)
+    warn = " — ⚠️ 3時間以上 止まっています。LAPTOP を確認" if mins >= 180 else ""
+    return "巡回は LAPTOP で動いています (最後に仕入元を見た %s・%s)%s" % (last.strftime("%H:%M"), ago, warn)
+
+
 def _parse(ts):
     try:
         return datetime.datetime.fromisoformat(str(ts)[:19])
