@@ -1169,7 +1169,13 @@ def main():
             go += 1
             if _iid:
                 wait_resourceable.add(_iid)
-            _cands = _build_visual_candidates(mr, c, card_pid=mp.split_key(r.get("key"))[1])
+            # ★2026-09-27 ユーザー「イーブイex SAR 224 の候補に 223 が出ている」。ここだけ card_no /
+            #   category を渡しておらず、番号の書いていない候補の絞り込み (同じ名前が複数の番号にある
+            #   カードでは出さない / 別番号・海外版を外す) が全部すり抜けていた。補URL③ と同じ値を渡す。
+            _q = mp.build_card_query(r.get("title", ""), r.get("set_no", ""), r.get("key") or None)
+            _cands = _build_visual_candidates(mr, c, card_no=_q.get("card_no") or None,
+                                              category=mp.split_key(r.get("key"))[0],
+                                              card_pid=mp.split_key(r.get("key"))[1])
             try:
                 _cur = float(r.get("ebay_price")) if r.get("ebay_price") else None
             except (TypeError, ValueError):
