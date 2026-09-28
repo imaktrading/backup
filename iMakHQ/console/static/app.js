@@ -132,11 +132,18 @@
     return { todo: todo.length, total: sum(list, function (j) { return j.n; }), hold: sum(list, function (j) { return j.hold; }) };
   }
 
+  function noteOf(j) {
+    // ★2026-09-28 ユーザー「棚②が10件と表示されているけど、金額も表示して」:
+    //   棚② は説明 (INFO) の後ろに 空く額 を足す。他は今まで通り INFO が優先
+    if (j.kind === "shelf_evict" && j.note) return (INFO[j.kind] ? INFO[j.kind] + " · " : "") + j.note;
+    return INFO[j.kind] || j.note || "";
+  }
+
   function liCard(j) {
     var hot = j.state === "todo";
     return openTag(j, "li" + (hot ? " hot" : ""), "", ' title="' + esc(j.tip) + '"') +
       '<span class="t">' + esc(j.label) + "</span>" +
-      '<span class="note">' + esc(INFO[j.kind] || j.note || "") + "</span>" +
+      '<span class="note">' + esc(noteOf(j)) + "</span>" +
       '<span class="row"><span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" +
       chip(j) + goMark(j) + "</span>" + closeTag(j);
   }
@@ -290,7 +297,8 @@
           return openTag(j, "task", ' style="--gc:var(--g-' + esc(j.group) + ');--pc:var(' + L[2] + ')"', ' title="' + esc(j.tip) + '"') +
             '<span class="tag"><span class="pg it" data-it="' + esc(itemOf(j)) + '">' + esc(itemOf(j)) + '</span><span class="gp">' + esc(tagOf(j)) + "</span></span>" +
             '<span class="nm">' + esc(shortName(j.label)) + "</span>" +
-            '<span class="row"><span class="n">' + num(j) + "<small>件</small></span>" + goMark(j) + "</span>" + closeTag(j);
+            '<span class="row"><span class="n">' + num(j) + "<small>件</small></span>" + goMark(j) + "</span>" +
+            (j.kind === "shelf_evict" && j.note ? '<span class="note">' + esc(j.note) + "</span>" : "") + closeTag(j);
         }).join("") + "</div></div>";
     }).join("");
     $("today-lanes").innerHTML = html || '<div class="card"><div class="empty">押さないと減らない残件はありません</div></div>';

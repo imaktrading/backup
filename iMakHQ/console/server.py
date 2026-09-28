@@ -222,10 +222,29 @@ def summarize(d, nightly_ok=False):
             # 1段目が残っている時は、次の段が何件あるかを note に出す (隠したわけではない)
             if kind == "psa_gate" and _num(p.get("variant_todo")) and _num(p.get("actionable")):
                 note = (note + " / " if note else "") +                     "答えたら 仕入元の照合 %d件 に進みます" % _num(p.get("actionable"))
+            if kind == "shelf_evict" and n:
+                note = (note + " / " if note else "") + shelf_note(p)
             if kind == "sold_restock" and _num(p.get("unknown")):
                 note = (note + " / " if note else "") + "判定できない %d件 (押しても動きません)" % _num(p.get("unknown"))
             put(kind, n, n > 0, note, hold)
     return out
+
+
+def shelf_note(p):
+    """棚② の件数の横に出す金額。純関数。
+
+    ★2026-09-28 ユーザー「棚②が10件と表示されているけど、金額も表示して」。
+      件数だけだと、押すと棚がいくら空くのか・もっと落とすといくらまで空けられるのかが分からない。
+    """
+    def usd(k):
+        try:
+            return format(round(float(p.get(k) or 0)), ",")
+        except (TypeError, ValueError):
+            return "0"
+    s = "空く額 $%s (今日の目標 $%s)" % (usd("amount"), usd("target"))
+    if _num(p.get("max_picked")):
+        s += " / 全部なら %d件 $%s" % (_num(p.get("max_picked")), usd("max_amount"))
+    return s
 
 
 def shelf_looks_unread(shelf_rows):
