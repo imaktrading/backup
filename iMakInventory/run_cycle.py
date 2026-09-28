@@ -1442,6 +1442,29 @@ def run_cycle(
             _log(f"  [NG] audit sample 例外: {type(e).__name__}: {e}", test_mode)
             cycle_log["phases"]["audit_sample"] = {"error": f"{type(e).__name__}: {e}"}
 
+        # ★ 2026-09-28 (ADV 依頼): 買えない仕入元の台帳と補URL消込の日別本数をスプシへ写す。
+        #   LAPTOP の台帳ファイルはメインPC に届かないため、出品くんが読むタブへ。書けなくても続ける。
+        if not test_mode:
+            progress_writer.update(phase="not_buyable_tab", force=True)
+            try:
+                import not_buyable_tab_sync as _nbt  # noqa: PLC0415
+                from monitor_listings import (  # noqa: PLC0415
+                    NOT_BUYABLE_LEDGER, NOT_BUYABLE_RESTOCKABLE, CLEARED_BACKUPS_ARCHIVE,
+                )
+                nbt_result = _nbt.sync(NOT_BUYABLE_LEDGER, NOT_BUYABLE_RESTOCKABLE,
+                                       CLEARED_BACKUPS_ARCHIVE)
+                cycle_log["phases"]["not_buyable_tab"] = nbt_result
+                if nbt_result.get("error"):
+                    _log(f"  [!] 買えない仕入元タブ 書込失敗 (巡回は続行): {nbt_result['error']}",
+                         test_mode)
+                else:
+                    _log(f"  [OK] 買えない仕入元タブ: not_buyable {nbt_result['not_buyable']} / "
+                         f"restockable {nbt_result['restockable']} / 消込 {nbt_result['clear_days']} 日分",
+                         test_mode)
+            except Exception as e:
+                _log(f"  [!] 買えない仕入元タブ 例外 (巡回は続行): {type(e).__name__}: {e}", test_mode)
+                cycle_log["phases"]["not_buyable_tab"] = {"error": f"{type(e).__name__}: {e}"}
+
         # Phase 5: reverse_audit (= 意図 D=○ vs 実 eBay qty>0 reconciliation)
         # HQ 2026-06-10 confirm 指示 B 準拠:
         # - 「再発しないこと」 の唯一の客観証拠 (= 継続乖離 0 件)
