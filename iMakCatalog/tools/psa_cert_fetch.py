@@ -23,8 +23,11 @@ import subprocess
 import sys
 import time
 
+# ★PSA の欄名は `Variety/Pedigree`。`Variety` だけで探すと **常に空で返る** (2026-09-28)。
+#   実害: GD02-094 (ガンダム) は現物が `RARE+` のパラレルなのに、こちらが空と表示したので
+#   通常版の行を見ていた。ラベルの3行目 (RARE+ 等) はここにしか出ない。
 FIELDS = ("Cert Number", "Item Grade", "Label Type", "Year", "Brand/Title",
-          "Subject", "Card Number", "Variety", "Category")
+          "Subject", "Card Number", "Variety/Pedigree", "Variety", "Category")
 
 
 def chrome_major() -> int | None:

@@ -297,9 +297,42 @@ def audit(categories):
     if categories:
         ph = ",".join("?" for _ in categories)
         q += f" WHERE category IN ({ph})"
-        rows = conn.execute(q, categories).fetchall()
-    else:
-        rows = conn.execute(q).fetchall()
+    params = categories if categories else ()
+    # ★壊れた行1つで監査ごと死なせない (2026-09-27)。
+    #   PC のブルースクリーンでビット化けした行に当たると `Could not decode to UTF-8` が出て、
+    #   **9/25・9/26・9/27 の3日連続で監査が丸ごと止まっていた** (誰も気づかなかった)。
+    #   読めない行は数えて飛ばし、§15 で件数を出す。
+    unreadable = []
+
+    def _clean(raw):
+        """読める行だけ dict にして返す。読めない行は unreadable に積む."""
+        out = []
+        for r in raw:
+            keys = r.keys() if hasattr(r, "keys") else None
+            vals = tuple(r)
+            try:
+                d = {k: (v.decode("utf-8") if isinstance(v, bytes) else v)
+                     for k, v in zip(keys, vals)}
+            except UnicodeDecodeError:
+                pid = vals[1]
+                unreadable.append(pid.decode("utf-8", "replace")
+                                  if isinstance(pid, bytes) else str(pid))
+                continue
+            out.append(d)
+        return out
+
+    try:
+        rows = _clean(conn.execute(q, params).fetchall())
+    except sqlite3.OperationalError as e:
+        if "decode" not in str(e).lower():
+            raise
+        # 取り出す時点で落ちる行がある DB (TEXT 列に UTF-8 でないバイト)
+        conn.text_factory = bytes
+        rows = _clean(conn.execute(q, params).fetchall())
+        conn.text_factory = str
+    if unreadable:
+        print(f"    ⚠️ 読めない行を飛ばした: {len(unreadable)}件 {unreadable[:5]} "
+              "(直し方: migrations/2026-09-26_restore_corrupted_rows.py)")
 
     # set_code -> {set_name_ebay -> count}, set_code -> source set, set_code -> category
     by_code = defaultdict(lambda: defaultdict(int))
@@ -866,6 +899,16 @@ def main():
           "- PC が落ちた時のビット化け。0件で維持する。\n"
           "- 直し方: migrations/2026-09-26_restore_broken_json_from_backup.py /\n"
           "  migrations/2026-09-26_fix_corrupted_spec_keys.py (バックアップから戻す)。")
+
+    # 16. 共有領域に置く表を揃える (2026-09-27)
+    #     HQ は決まりでカタログの作業フォルダを読めないので、**共有側の写しが出品くんの入口**。
+    #     依頼 `2026-09-27_psa_brand_set_code_yaml_to_shared.md`
+    try:
+        sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+        import publish_shared_tables as _P  # noqa: E402
+        _P.main()
+    except Exception as _e:                      # 監査ごと落とさない
+        print(f"    (共有領域への写しを飛ばした: {type(_e).__name__})")
 
     # 完走マーカー (末尾に必ず出す。ログの grep でこれが無ければ途中死亡).
     print(

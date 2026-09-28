@@ -1347,8 +1347,14 @@ def lookup_gundam(
     card_number: str,
     subject: str = "",
     verbose: bool = True,
+    variety: str = "",
 ) -> Optional[dict]:
-    """Gundam Card Game カードを iMakCatalog DB から ID 完全一致で lookup."""
+    """Gundam Card Game カードを iMakCatalog DB から ID 完全一致で lookup.
+
+    Args:
+        variety: PSA の `Variety/Pedigree` 欄 (例 `RARE+`)。**パラレルはここにしか出ない**。
+            渡さなければ従来どおり (通常版を返す)。
+    """
     if not card_number:
         return None
     set_code = extract_set_code_from_brand_gundam(brand)
@@ -1366,7 +1372,19 @@ def lookup_gundam(
     #   PB01 収録カードは番号→base pid が固定 (公式 products/pb01.html: カード2種) なので
     #   明示 map で引き直す。名前一致ガードは従来どおり (fail-closed)。
     record = None
-    if "PREMIUM GOODS" in (brand or "").upper():
+    # ★PSA が `RARE+` のように **+ 付きのレアリティ**と言っている時はパラレル (2026-09-28)。
+    #   実害: GD02-094 (ガロード・ラン&ティファ・アディール) は現物がアイスの絵のパラレルなのに、
+    #   通常版 (紫の絵) の行を返していた。ラベルの3行目 = PSA の `Variety/Pedigree` 欄。
+    #   ★`_para` が在って名前も合う時だけ採る。無ければ従来どおり通常版に落ちる。
+    _var = (variety or "").upper()
+    if re.search(r"[A-Z]{1,3}\+", _var) or "RARE+" in _var:
+        cand = api.lookup(GUNDAM_CATEGORY, f"{base_pid}_para")
+        if cand and _record_name_matches_subject(cand, subject):
+            record = cand
+            if verbose:
+                print(f"    🎯 iMakCatalog (Gundam) hit (パラレルを優先): {base_pid}_para "
+                      f"(PSA Variety={variety!r})")
+    if record is None and "PREMIUM GOODS" in (brand or "").upper():
         _pb01_base = _PB01_BASE_BY_NUMBER.get(card_number.zfill(3))
         pb_base = _pb01_base or base_pid
         for pid_try in (f"{pb_base}_PB01", f"{pb_base}_P"):
