@@ -3668,6 +3668,10 @@ def main():
         PSA_BATCH_LIMIT = max(1, int(os.environ.get("PSA_BATCH_LIMIT") or 15))
     except ValueError:
         PSA_BATCH_LIMIT = 15
+    # ★2026-09-28 ユーザー「CAP 20件は 20件出品したいから」: 仕入元を読んだ後に減った分を
+    #   残りの候補から補うため、選ぶ前の候補全体を控えておく
+    _pool_all = list(cert_numbers)
+    _cost_all = dict(cost_map)
     if len(cert_numbers) > PSA_BATCH_LIMIT:
         # franchise 均等サンプリング (2026-06-23 ユーザー要望: Pokemon/One Piece/Dragon Ball 均等)
         # 在庫は Pokemon 大半 → 従来の全体 shuffle だと Pokemon ばかり選ばれ OP/DB が滞留。
@@ -3758,81 +3762,111 @@ def main():
     _variant_skipped = []   # ★2026-09-28 刷りが PSA ラベルと合わず出さなかった cert
     if _verify_mode:
         print("\n🔎 verify→build モード: 先に scrape → 目視確認 → 確定カードのみ生成")
-        for cert in cert_numbers:
-            print(f"取得中(確認用): #{cert}...", end="", flush=True)
-            try:
-                d = get_psa_data(driver, cert)
-            except Exception as _e:
-                if not is_dead_session(_e):
-                    print(f" 失敗 ({type(_e).__name__})")
-                    _prescraped[cert] = None
-                    continue
-                # ★ブラウザが死んだ → 作り直して この cert からやり直す。
-                #   ここで作り直さないと、残り全部が同じエラーで空振りする (8/26 に13件)。
-                print(" ⟳ Chrome が落ちたので起動し直します...", flush=True)
+        # ★2026-09-28 ユーザー「CAP 20件は 20件出品したいから」「時間ばかり長くなっても困る」:
+        #   仕入元を読んだ後に減った分 (出品中と同じカード等) を、目視に出す前に残りの候補から補う。
+        #   目視は1回のまま。補う周回は最大 _REFILL_ROUNDS 回 (走る時間を延ばしすぎない)。
+        #   目視の後で減った分 (未回答・名前不一致) は補わない (もう一度 目視が要るため)。
+        _REFILL_ROUNDS = 2
+        _batch = list(cert_numbers)
+        _tried = set(cert_numbers)
+        _round = 0
+        while True:
+            for cert in _batch:
+                print(f"取得中(確認用): #{cert}...", end="", flush=True)
                 try:
-                    driver = restart_psa_driver(driver)
                     d = get_psa_data(driver, cert)
-                except Exception as _e2:
-                    print(f" ✗ 起動し直しても取れません ({type(_e2).__name__}) → 以降は中止")
-                    _prescraped[cert] = None
-                    break
-            _prescraped[cert] = d
-            print(" ✓" if d else " 失敗")
-        # ★2026-09-01: **scrape が済んだ直後に、もう一度 重複を見る**。
-        #   枠を選ぶ前の LIVE-DUP は「まだ一度も scrape していない cert」を判定できない
-        #   (PSA の per-cert json が無い = 判定不能で残置)。その分は目視にも生成にも回った上で、
-        #   最後に重複くんが物理除外していた。
-        #   実測 2026-09-01: 18件生成 → 6件が live 重複で除外 (目視19件のうち6件も無駄)。
-        #   **判定の基準は後段の除外と同じ**なので、ここで落としても出品は1件も減らない。
-        #   減るのは 目視の手間 と 生成の課金だけ。
-        try:
-            _tools0 = r"C:/dev/iMak/iMakHQ/tools"
-            if _tools0 not in sys.path:
-                sys.path.insert(0, _tools0)
-            import dup_guard as _dg2
-            import psa_preflight as _pf2
-            import sheet_io as _si2
-            import sqlite3 as _sq32
-            _t2, _s2, _fresh2 = _dg2.ensure_fresh_live_cache()
-            _t2 = _t2 or {}
-            if _fresh2 and _t2:
-                _rows2 = _si2._product_ws().get_all_values()
-                _idx2, _ = _dg2.live_card_index(_rows2, _t2, set(_t2.keys()))
-                _con2 = _sq32.connect(_pf2.CATALOG_DB)
-                _dup2, _cls2 = [], {}
-                for _c2 in list(cert_numbers):
-                    if not _prescraped.get(_c2):
+                except Exception as _e:
+                    if not is_dead_session(_e):
+                        print(f" 失敗 ({type(_e).__name__})")
+                        _prescraped[cert] = None
                         continue
-                    _f2 = _pf2.PSA_CERTS_DIR / (str(_c2) + '.json')
-                    if not _f2.exists():
-                        continue
+                    # ★ブラウザが死んだ → 作り直して この cert からやり直す。
+                    #   ここで作り直さないと、残り全部が同じエラーで空振りする (8/26 に13件)。
+                    print(" ⟳ Chrome が落ちたので起動し直します...", flush=True)
                     try:
-                        _r3 = _pf2.classify(str(_c2), json.loads(_f2.read_text(encoding='utf-8')), _con2)
-                    except Exception:
-                        continue
-                    _pid2 = _r3.get('product_id') if isinstance(_r3, dict) else None
-                    if not _pid2:
-                        continue
-                    _cls2[_c2] = _r3
-                    if _dg2.group_key(str(_r3.get('category')) + ':' + str(_pid2)) in _idx2:
-                        _dup2.append(_c2)
-                _con2.close()
-                if _dup2:
-                    # 落とす前に KEY をシートへ (補URL に回すため。枠前の LIVE-DUP と同じ理由)
-                    try:
-                        _kr2, _kk2 = _keys_for_dropped_dupes(_rows2, _dup2, _cls2)
-                        if _kk2:
-                            _si2.write_keys(_kr2, _kk2)
-                            print(f'  🔗 補URL に回すため KEY を先に書込: {len(_kk2)}件')
-                    except Exception as _ke2:
-                        print(f'  ⚠️ KEY 先行書込 skip: {type(_ke2).__name__}: {_ke2}')
-                    cert_numbers = [_c for _c in cert_numbers if _c not in set(_dup2)]
-                    print(f'  ⏭️ scrape後に除外 [LIVE-DUP=同じカードが既に出品中]: {len(_dup2)}件 '
-                          f'→ {_dup2}')
-                    print('     (目視にも生成にも回さない。基準は後段の重複除外と同じなので出品は減らない)')
-        except Exception as _de2:
-            print(f'  ⚠️ scrape後の重複チェック skip: {type(_de2).__name__}: {_de2}')
+                        driver = restart_psa_driver(driver)
+                        d = get_psa_data(driver, cert)
+                    except Exception as _e2:
+                        print(f" ✗ 起動し直しても取れません ({type(_e2).__name__}) → 以降は中止")
+                        _prescraped[cert] = None
+                        break
+                _prescraped[cert] = d
+                print(" ✓" if d else " 失敗")
+            # ★2026-09-01: **scrape が済んだ直後に、もう一度 重複を見る**。
+            #   枠を選ぶ前の LIVE-DUP は「まだ一度も scrape していない cert」を判定できない
+            #   (PSA の per-cert json が無い = 判定不能で残置)。その分は目視にも生成にも回った上で、
+            #   最後に重複くんが物理除外していた。
+            #   実測 2026-09-01: 18件生成 → 6件が live 重複で除外 (目視19件のうち6件も無駄)。
+            #   **判定の基準は後段の除外と同じ**なので、ここで落としても出品は1件も減らない。
+            #   減るのは 目視の手間 と 生成の課金だけ。
+            try:
+                _tools0 = r"C:/dev/iMak/iMakHQ/tools"
+                if _tools0 not in sys.path:
+                    sys.path.insert(0, _tools0)
+                import dup_guard as _dg2
+                import psa_preflight as _pf2
+                import sheet_io as _si2
+                import sqlite3 as _sq32
+                _t2, _s2, _fresh2 = _dg2.ensure_fresh_live_cache()
+                _t2 = _t2 or {}
+                if _fresh2 and _t2:
+                    _rows2 = _si2._product_ws().get_all_values()
+                    _idx2, _ = _dg2.live_card_index(_rows2, _t2, set(_t2.keys()))
+                    _con2 = _sq32.connect(_pf2.CATALOG_DB)
+                    _dup2, _cls2 = [], {}
+                    for _c2 in list(cert_numbers):
+                        if not _prescraped.get(_c2):
+                            continue
+                        _f2 = _pf2.PSA_CERTS_DIR / (str(_c2) + '.json')
+                        if not _f2.exists():
+                            continue
+                        try:
+                            _r3 = _pf2.classify(str(_c2), json.loads(_f2.read_text(encoding='utf-8')), _con2)
+                        except Exception:
+                            continue
+                        _pid2 = _r3.get('product_id') if isinstance(_r3, dict) else None
+                        if not _pid2:
+                            continue
+                        _cls2[_c2] = _r3
+                        if _dg2.group_key(str(_r3.get('category')) + ':' + str(_pid2)) in _idx2:
+                            _dup2.append(_c2)
+                    _con2.close()
+                    if _dup2:
+                        # 落とす前に KEY をシートへ (補URL に回すため。枠前の LIVE-DUP と同じ理由)
+                        try:
+                            _kr2, _kk2 = _keys_for_dropped_dupes(_rows2, _dup2, _cls2)
+                            if _kk2:
+                                _si2.write_keys(_kr2, _kk2)
+                                print(f'  🔗 補URL に回すため KEY を先に書込: {len(_kk2)}件')
+                        except Exception as _ke2:
+                            print(f'  ⚠️ KEY 先行書込 skip: {type(_ke2).__name__}: {_ke2}')
+                        cert_numbers = [_c for _c in cert_numbers if _c not in set(_dup2)]
+                        print(f'  ⏭️ scrape後に除外 [LIVE-DUP=同じカードが既に出品中]: {len(_dup2)}件 '
+                              f'→ {_dup2}')
+                        print('     (目視にも生成にも回さない。基準は後段の重複除外と同じなので出品は減らない)')
+            except Exception as _de2:
+                print(f'  ⚠️ scrape後の重複チェック skip: {type(_de2).__name__}: {_de2}')
+
+            _have = sum(1 for _c in cert_numbers if _prescraped.get(_c))
+            _need = PSA_BATCH_LIMIT - _have
+            _rest = [_c for _c in _pool_all if _c not in _tried]
+            if _need <= 0 or not _rest or _round >= _REFILL_ROUNDS:
+                if _round:
+                    print(f"  ➕ 補った結果: 目視に出す {_have}件 (目標 {PSA_BATCH_LIMIT}件 / 補った周回 {_round})")
+                break
+            _round += 1
+            try:
+                from tcg_batch_select import balanced_sample as _bs, build_popular_of as _bpo
+                _batch = (_bs(_rest, mercari_title_map, _need, cost_of=_cost_all.get,
+                              popular_of=_bpo(_rest, mercari_title_map))
+                          if len(_rest) > _need else list(_rest))
+            except Exception as _be:
+                print(f"  ⚠️ 補う候補を選べなかった → 補わずに進む: {type(_be).__name__}: {_be}")
+                break
+            _tried.update(_batch)
+            cert_numbers = list(cert_numbers) + list(_batch)
+            cost_map.update({_c: _cost_all[_c] for _c in _batch if _c in _cost_all})
+            print(f"  ➕ {_need}件足りないので残りの候補から補う (周回 {_round}/{_REFILL_ROUNDS}): {_batch}")
 
         try:
             _tools = r"C:/dev/iMak/iMakHQ/tools"
