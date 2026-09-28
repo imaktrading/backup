@@ -3747,6 +3747,7 @@ def main():
     _prescraped = {}
     _confirmed_pids = {}
     _skipped_unconfirmed = []
+    _variant_skipped = []   # ★2026-09-28 刷りが PSA ラベルと合わず出さなかった cert
     if _verify_mode:
         print("\n🔎 verify→build モード: 先に scrape → 目視確認 → 確定カードのみ生成")
         for cert in cert_numbers:
@@ -3867,13 +3868,49 @@ def main():
                 errors.append(cert)
                 card_info.append((cert, None))
                 continue
+            # ★2026-09-28 PSA ラベルの刷り (セット記号 / ALTERNATE ART / WANTED / MASTER BALL) と
+            #   KEY を突き合わせる。9/27〜28 に 8件が別の刷りで出品され、全部 手で Revise した。
+            #   原因: 目視の答え (前日に選んだ OP05-119) や通常行の KEY を、ラベルを見ずに使っていた。
+            #   合わなければ同じ番号の行から合う1件に直す。絞れなければ出品しない (fail-closed)。
+            _gate_pid, _gate_rebuilt = "", False
+            _cur_pid = ((_confirmed_pids.get(cert, "") if _verify_mode else "")
+                        or (pid_by_cert or {}).get(str(cert), ""))
+            if _cur_pid:
+                try:
+                    _dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakHQ", "tools")
+                    if _dir not in sys.path:
+                        sys.path.insert(0, _dir)
+                    import psa_variant_gate as _PVG
+                    _rec = (pid_by_cert or {}).get(str(cert), "")
+                    _cat = (_cur_pid.split(":", 1)[0] if ":" in _cur_pid
+                            else _rec.split(":", 1)[0] if ":" in _rec else "")
+                    if _cat:
+                        _new, _why = _PVG.pick(_cat, data.get("Brand", ""), data.get("Subject", ""), _cur_pid)
+                        _old = _cur_pid.split(":", 1)[-1]
+                        if not _new:
+                            print(f"    ⏭️ Skip (刷りがPSAラベルと合わない): #{cert} {_old} — {_why}")
+                            _variant_skipped.append(cert)
+                            card_info.append((cert, None))
+                            continue
+                        if _new != _old:
+                            print(f"    🔁 刷りを直した: #{cert} {_old} → {_new} ({_why})")
+                            _gate_pid = _new
+                            if _verify_mode:
+                                _confirmed_pids[cert] = _new
+                            if pid_by_cert is not None:
+                                pid_by_cert[str(cert)] = f"{_cat}:{_new}"
+                except Exception as _e:
+                    print(f"    ⏭️ Skip (刷りの照合に失敗・出品しない): #{cert} {type(_e).__name__}: {_e}")
+                    _variant_skipped.append(cert)
+                    card_info.append((cert, None))
+                    continue
             # 並行ビルド切替 (strangler): TCG_USE_NEW_GEN=1 の時だけ catalog 決定論値で上書き。
             # 既定 OFF=この分岐は no-op で旧挙動を完全維持 (本番不変)。
             # verify_mode 時は確定 product_id (forced_card_id) で再生成 = 人が選んだカードを権威に。
             try:
                 from tcg_new_gen_override import env_enabled, apply_new_gen_override
                 if env_enabled():
-                    _forced = _confirmed_pids.get(cert, "") if _verify_mode else ""
+                    _forced = _gate_pid or (_confirmed_pids.get(cert, "") if _verify_mode else "")
                     # ★catalog hit 判定 (新コア・全 franchise の決定論解決)。
                     #   miss = 公式データ無し → **入稿しない** (fail-closed / catalog_official_only)。
                     #   catalog-miss を弾く正規ゲートはここ1本。
@@ -3892,8 +3929,15 @@ def main():
                         print(f"    🏷️ 注意 #{cert}: プロモ系だが配布元名 未確定(promo override 無)"
                               f" → generic タイトルで出品。PSA Review の promo欄で確定すると次回反映")
                     row = apply_new_gen_override(row, headers, cert, forced_card_id=_forced)
+                    _gate_rebuilt = bool(_gate_pid)
             except Exception as _e:
                 print(f"    ⚠️ new-gen override skip (#{cert}): {type(_e).__name__}: {_e}")
+            if _gate_pid and not _gate_rebuilt:
+                # 刷りを直したのに行を作り直せていない = 古い刷りの行が残っている → 出さない
+                print(f"    ⏭️ Skip (刷りを直したが行を作り直せなかった): #{cert} → {_gate_pid}")
+                _variant_skipped.append(cert)
+                card_info.append((cert, None))
+                continue
             apply_ebay_filter_to_row(row, headers, category="tcg")
             rows.append(row)
             card_info.append((cert, data))
@@ -3904,6 +3948,8 @@ def main():
 
     if _verify_mode and _skipped_unconfirmed:
         print(f"\n🔎 目視未確定で出品見送り: {len(_skipped_unconfirmed)} 件 {_skipped_unconfirmed}")
+    if _variant_skipped:
+        print(f"\n🔀 刷りが PSA ラベルと合わず出品見送り: {len(_variant_skipped)} 件 {_variant_skipped}")
 
     driver.quit()
 

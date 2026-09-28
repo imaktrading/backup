@@ -650,6 +650,26 @@ def _cert_expected(cert) -> str:
         return ""
 
 
+def _expected_checked(cert, brand, subject, card_number, category):
+    """目視の既定値 (前に選んだ答え / カタログの答え) を PSA ラベルの刷りで確かめてから使う。
+
+    ★2026-09-28: 前日に選んだ OP05-119 (通常版) が、PRB01 のスラブの既定値として翌日も
+      使われ、そのまま出品された。既定値もラベルと合わなければ使わない
+      (合う行が1つに絞れればそれに直す。絞れなければ既定値なし = 人に選ばせる)。
+    """
+    pid = _cert_expected(cert) or _catalog_lookup_expected(brand, subject, card_number, category)
+    if not pid:
+        return pid
+    try:
+        import psa_variant_gate as _PVG
+        new, why = _PVG.pick(category, brand, subject, pid)
+    except Exception:                                          # noqa: BLE001 照合できなければ既定値にしない
+        return None
+    if new != str(pid).split(":", 1)[-1]:
+        print("    🔀 既定値を刷りで直した: %s → %s (%s)" % (pid, new or "なし", why))
+    return new or None
+
+
 def _catalog_lookup_expected(brand: str, subject: str, card_number: str, category: str) -> str | None:
     """catalog lookup 経由で expected product_id 取得 (= 5/28 lookup_one_piece Promo 拡張 + lookup_don 等を活用)."""
     if not category:
@@ -2311,7 +2331,7 @@ def _build_target_for_cert(cert: str):
     if not category or category == "yugioh_tcg":
         return None
     set_code = _extract_set_code(brand, category)
-    csv_expected = _cert_expected(cert) or _catalog_lookup_expected(brand, subject, card_number, category)
+    csv_expected = _expected_checked(cert, brand, subject, card_number, category)
     if not csv_expected:
         csv_expected = synthesized_expected(set_code, card_number)
     candidates = _get_candidates(category, set_code, card_number, brand=brand,
@@ -2715,7 +2735,7 @@ def run_post_psa_review(csv_path: str, append_log_func) -> bool:
             continue
         set_code = _extract_set_code(brand, category)
         # 期待値 = catalog lookup 経由 (= 信頼性 ↑、 brand 推定より確実)
-        csv_expected = _cert_expected(cert) or _catalog_lookup_expected(brand, subject, card_number, category)
+        csv_expected = _expected_checked(cert, brand, subject, card_number, category)
         if not csv_expected and set_code and card_number:
             # fallback: brand 推定
             csv_expected = f"{set_code}-{card_number}"

@@ -25,4 +25,7 @@ def test_newcand_records_after_append():
 
 def test_review_prefers_human_pick_in_both_builders():
     s = SRC("post_psa_review.py")
-    assert s.count("_cert_expected(cert) or _catalog_lookup_expected(") == 2
+    # ★2026-09-28: 2か所とも _expected_checked を通す (中身は 人の答え → カタログの答え の順のまま、
+    #   その後に PSA ラベルの刷りで確かめる)
+    assert s.count("csv_expected = _expected_checked(cert, brand, subject, card_number, category)") == 2
+    assert s.count("_cert_expected(cert) or _catalog_lookup_expected(") == 1
