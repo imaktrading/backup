@@ -46,7 +46,19 @@ STALE_MIN = 15                # 別PCの書込がこれより古ければ「不�
 
 
 def host():
-    return (os.environ.get("COMPUTERNAME") or "").upper() or "THIS-PC"
+    """タブ名に使う PC 名。AGENT_BOARD_HOST があれば優先 (LAPTOP の実名は IMAKTRADING なので、
+    向こうはこれで LAPTOP に揃える。2026-09-29 LAPTOP 回答)。"""
+    return (os.environ.get("AGENT_BOARD_HOST") or os.environ.get("COMPUTERNAME") or "").upper() or "THIS-PC"
+
+
+def _claude_exe():
+    """タスクから起動すると PATH に ~/.local/bin が無く claude が見つからない (2026-09-29 LAPTOP 回答)。"""
+    import shutil
+    got = shutil.which("claude")
+    if got:
+        return got
+    p = os.path.expanduser("~/.local/bin/claude.exe")
+    return p if os.path.isfile(p) else "claude"
 
 
 # ------------------------------------------------------------------ 記録を読む (純関数)
@@ -186,7 +198,7 @@ def list_windows():
     """`claude agents --json` の結果。取れなければ []。"""
     env = dict(os.environ, DISABLE_AUTOUPDATER="1")
     try:
-        r = subprocess.run(["claude", "agents", "--json"], capture_output=True, text=True,
+        r = subprocess.run([_claude_exe(), "agents", "--json"], capture_output=True, text=True,
                            encoding="utf-8", errors="ignore", timeout=20, env=env,
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), shell=False)
         return json.loads(r.stdout or "[]")
