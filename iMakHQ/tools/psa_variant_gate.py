@@ -47,6 +47,15 @@ _MIRROR_WORDS = ("MASTER BALL", "POKE BALL", "POKEBALL", "POKÉ BALL")
 _ALT_TYPES = ("alt_art", "parallel", "sp", "super_parallel", "manga")
 
 
+_GD_RARITY_RE = re.compile(r"(LEGEND RARE\+?|RARE\+?|COMMON\+?|UNCOMMON|LR\+?|R\+|C\+)(?=\s|$)")
+
+
+def label_text(psa):
+    """PSA データから ラベルの文字 (Subject + Variety + 除かれたレアリティ) をまとめる。純関数。"""
+    psa = psa or {}
+    return " ".join(str(psa.get(k) or "") for k in ("Subject", "Variety", "LabelRarity")).strip()
+
+
 def _norm(s):
     return re.sub(r"[\s\-_]", "", str(s or "").upper())
 
@@ -124,6 +133,19 @@ def conflict(category, brand, subject, row):
             return "PSA は通常だが行は別絵柄"
         if alt and has_sp_mark(subject) != row_is_sp(row):
             return "SP の有無が違う (PSA=%s)" % subject
+    elif category == "gundam_tcg":
+        # 「+」がパラレルの印 (RARE+ / LR+ / C+)。ラベルにレアリティが読めない時は判断しない
+        m = _GD_RARITY_RE.search(" " + str(subject or "").upper() + " ")
+        if m:
+            plus = "+" in m.group(1)
+            sp = _specs(row)
+            is_para = (str(sp.get("variant_type") or "").lower() in _ALT_TYPES
+                       or str(sp.get("rarity") or "").endswith("+")
+                       or bool(re.search(r"_(para|p\d+)(_|$)", str(row.get("product_id") or ""))))
+            if plus and not is_para:
+                return "PSA はパラレル (%s) だが行は通常" % m.group(1)
+            if not plus and is_para:
+                return "PSA は通常 (%s) だが行はパラレル" % m.group(1)
     elif category == "pokemon_tcg":
         if has_mirror_mark(subject):
             return "PSA はミラー (%s) だがカタログにミラーの行は無い" % subject
@@ -164,13 +186,13 @@ def pick(category, brand, subject, current_pid, db=CATALOG_DB, con=None):
         why = conflict(category, brand, subject, _row(con, category, pid))
         if not why:
             return pid, ""
-        if category != "one_piece_tcg":
+        if category not in ("one_piece_tcg", "gundam_tcg"):
             return "", why
         base = re.sub(r"_.*$", "", pid)
         good = [r for r in _siblings(con, category, base) if not conflict(category, brand, subject, r)]
         ok = [r["product_id"] for r in good]
         # 同じ刷りが2つの取り込み元に入っている (2026-09-28 カタログ回答: 正は公式サイト側)
-        official = [r["product_id"] for r in good if "opcg_official" in str(r.get("source") or "")]
+        official = [r["product_id"] for r in good if "official" in str(r.get("source") or "")]
         if len(ok) > 1 and len(official) == 1:
             ok = official
         if len(ok) == 1:

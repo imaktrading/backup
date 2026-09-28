@@ -1534,6 +1534,11 @@ def parse_psa_page(text):
             subject_raw = match.group(3).strip()
             # レアリティを除去
             subject = RARITY_PATTERN.sub('', subject_raw).strip()
+            # ★2026-09-28: 除いたレアリティ (RARE+ 等) を捨てない。ガンダムは「+」がパラレルの印で、
+            #   ここで消えると通常版の KEY で探し・出品していた (cert 151333415 GD02-094 RARE+)
+            _lr = RARITY_PATTERN.search(subject_raw)
+            if _lr:
+                data['LabelRarity'] = _lr.group(1).strip().upper()
             # 年号をBrandから除去（例："2025 GUNDAM..." → "GUNDAM..."）
             brand = re.sub(r'^\d{4}\s+', '', brand_raw).strip()
             data['Brand'] = brand
@@ -2495,7 +2500,10 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     elif franchise == "Gundam":
         # iMakCatalog DB lookup (Phase 2: bandai_tcg_plus.fetch_card から移行).
         # ID 完全一致のみ + 名前検証. eBay フィルタ値変換は adapter で済.
-        gd_card = catalog_psa.lookup_gundam(brand, card_number, subject)
+        # ★2026-09-28 カタログ依頼: パラレル (RARE+ 等) は PSA の Variety 欄にしか出ない。
+        #   Variety が取れていない古いキャッシュでも、ページの行末から除いたレアリティ (LabelRarity) を渡す
+        gd_card = catalog_psa.lookup_gundam(brand, card_number, subject,
+                                            variety=(data.get('Variety') or data.get('LabelRarity') or ''))
         if gd_card:
             _catalog_hit = True
             _catalog_pid = gd_card.get("card_id") or gd_card.get("product_id") or ""
@@ -3885,7 +3893,7 @@ def main():
                     _cat = (_cur_pid.split(":", 1)[0] if ":" in _cur_pid
                             else _rec.split(":", 1)[0] if ":" in _rec else "")
                     if _cat:
-                        _new, _why = _PVG.pick(_cat, data.get("Brand", ""), data.get("Subject", ""), _cur_pid)
+                        _new, _why = _PVG.pick(_cat, data.get("Brand", ""), _PVG.label_text(data), _cur_pid)
                         _old = _cur_pid.split(":", 1)[-1]
                         if not _new:
                             print(f"    ⏭️ Skip (刷りがPSAラベルと合わない): #{cert} {_old} — {_why}")

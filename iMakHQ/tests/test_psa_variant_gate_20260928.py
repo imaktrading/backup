@@ -88,3 +88,20 @@ def test_pick_fixes_or_refuses_the_8_cases():
                   "WARTORTLE MASTER BALL REVERSE HOLO", "SV2a-008")[0] == ""
     assert G.pick(OP, "ONE PIECE JAPANESE OP06-WINGS OF THE CAPTAIN",
                   "RORONOA ZORO ALTERNATE ART", "OP06-118_p1")[0] == "OP06-118_p1"
+
+
+def test_gundam_plus_is_parallel():
+    # cert 151333415 GD02-094 のラベル3行目は RARE+ (パラレル)。PSA データでは Variety 欄にだけ出る
+    base = {"product_id": "GD02-094", "specs": {"rarity": "R"}}
+    para = {"product_id": "GD02-094_para", "specs": {"rarity": "R+", "variant_type": "parallel"}}
+    b = "GUNDAM JAPANESE DUAL IMPACT"
+    assert G.conflict("gundam_tcg", b, "GARROD RAN/TIFFA ADILL RARE+", base)
+    assert not G.conflict("gundam_tcg", b, "GARROD RAN/TIFFA ADILL RARE+", para)
+    assert G.conflict("gundam_tcg", b, "GARROD RAN/TIFFA ADILL RARE", para)
+    # レアリティが読めない (古いキャッシュ) 時は判断しない
+    assert not G.conflict("gundam_tcg", b, "GARROD RAN/TIFFA ADILL", base)
+
+
+def test_label_text_keeps_variety_and_stripped_rarity():
+    assert G.label_text({"Subject": "GARROD RAN/TIFFA ADILL", "Variety": None,
+                         "LabelRarity": "RARE+"}) == "GARROD RAN/TIFFA ADILL  RARE+"
