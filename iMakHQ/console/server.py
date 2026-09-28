@@ -1281,7 +1281,7 @@ def _port_in_use(port):
         return s.connect_ex((HOST, port)) == 0
 
 
-WINDOW_TITLE = "出品くん Console"          # index.html の <title> と同じ
+WINDOW_TITLE = "神風"          # index.html の <title> と同じ (2026-09-29 出品くん Console → 神風 に改名)
 
 
 def _console_windows():
