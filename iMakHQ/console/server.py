@@ -529,7 +529,7 @@ def get_jobs():
         if kind == "order_sync":
             info = order_job_info(_load_order_status())
         jobs.append({"kind": kind, "i": i, "label": label, "step": m.group(0) if m else "",
-                     "group": group_of(label), "tip": (s.get("tip") or "")[:160],
+                     "group": group_of(label), "tip": (s.get("tip") or "")[:400],
                      "runnable": runnable(s), "params": s.get("params") or [],
                      "ask_amount": bool(s.get("ask_amount")), **info})
     return {"jobs": jobs, "counts_at": STATE["counts_at"], "counting": STATE["counting"],
@@ -545,7 +545,7 @@ def get_buttons():
                     "label": display_label(s["label"]), "badge": s.get("badge"),
                     "runnable": runnable(s), "why": version.why_not_runnable(s),
                     "params": s.get("params") or [], "ask_amount": bool(s.get("ask_amount")),
-                    "tip": (s.get("tip") or "")[:160]})
+                    "tip": (s.get("tip") or "")[:400]})
     return {"buttons": out}
 
 

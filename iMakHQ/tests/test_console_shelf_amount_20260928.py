@@ -20,3 +20,9 @@ def test_shelf_note_shows_amount_target_and_max():
 
 def test_shelf_note_without_max():
     assert S.shelf_note({"amount": 120.4, "target": 100}) == "空く額 $120 (今日の目標 $100)"
+
+
+def test_tip_is_not_cut_at_160():
+    # ユーザー「ヒントテキストの最後が見切れてる」: 説明を 160字で切っていた (棚② は172字)
+    src = open(os.path.join(HQ, "console", "server.py"), encoding="utf-8").read()
+    assert '"tip": (s.get("tip") or "")[:160]' not in src
