@@ -86,10 +86,14 @@ LOCK_WAIT_POLL_SEC = 60
 #   4h 間隔では前の回が終わらないうちに次が来て skip されていた
 #   (09-09: 17:30 の回が入れず、完走が 08:38 → 18:15 の 9.6h 空いた)。
 #   Task Scheduler の trigger と対で変更すること (片方だけ直すと staleness が誤発火する)。
-CYCLE_INTERVAL_HOURS = {"SHEET": 6, "LOW": 8, "CAND": 12}   # 各 label の巡回間隔 (Task Scheduler と対)
+# ★ 2026-09-29 ユーザー判断: CAND を 1日2回 (05:00/16:00) → 1日1回 (05:00) に。LAPTOP では 1 巡回が
+#   延び (SHEET 3.2〜4.1h / CAND 2.2〜3.7h)、共有 lock 側が1日 20h 超で埋まって、CAND がはみ出た分
+#   SHEET が 45 分待って skip された (09-29 07:30)。取下げに直結する SHEET を優先し、SHEET の lock 待ちも
+#   180 分に延ばした (タスクの引数 --lock-wait-minutes 180)。
+CYCLE_INTERVAL_HOURS = {"SHEET": 6, "LOW": 8, "CAND": 24}   # 各 label の巡回間隔 (Task Scheduler と対)
 
 # label ごとに「どの行を見るか」(2026-09-19 ユーザー判断)。
-#   SHEET/HIGH = 出品済 (itemID あり) だけ。CAND = 出品候補 (itemID 空) だけ、1日2回。
+#   SHEET/HIGH = 出品済 (itemID あり) だけ。CAND = 出品候補 (itemID 空) だけ、1日1回 (2026-09-29 から)。
 #   LOW は従来どおり全部 (候補がほぼ無く、分ける実益が無い)。
 ROWS_FILTER_BY_LABEL = {"SHEET": "listed", "HIGH": "listed", "CAND": "candidate"}
 CYCLE_STALE_MULT = 2.2                          # この倍率を超えたら「止まっている」
