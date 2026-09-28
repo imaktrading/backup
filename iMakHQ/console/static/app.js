@@ -109,7 +109,7 @@
         var j = k && job(k);
         if (!j) return '<td class="pad"><div class="cell na">この段は無し</div></td>';
         var hot = j.state === "todo";
-        return '<td class="pad' + (hot ? " hot" : "") + '">' + openTag(j, "cell", "", ' title="' + esc(j.tip) + '"') +
+        return '<td class="pad' + (hot ? " hot" : "") + '">' + openTag(j, "cell", "", ' title="' + esc(tipOf(j)) + '"') +
           '<span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" +
           '<span class="meta">' + chip(j) + "</span>" +
           '<span class="act">' + goMark(j) + "</span>" + closeTag(j) + "</td>";
@@ -132,18 +132,17 @@
     return { todo: todo.length, total: sum(list, function (j) { return j.n; }), hold: sum(list, function (j) { return j.hold; }) };
   }
 
-  function noteOf(j) {
-    // ★2026-09-28 ユーザー「棚②が10件と表示されているけど、金額も表示して」:
-    //   棚② は説明 (INFO) の後ろに 空く額 を足す。他は今まで通り INFO が優先
-    if (j.kind === "shelf_evict" && j.note) return (INFO[j.kind] ? INFO[j.kind] + " · " : "") + j.note;
-    return INFO[j.kind] || j.note || "";
+  function tipOf(j) {
+    // ★2026-09-28 ユーザー「ボタンが広がるから、ヒントテキスト内にして」:
+    //   棚② の 空く額 はボタンに書かず、マウスを乗せた時の説明の先頭に出す
+    return (j.kind === "shelf_evict" && j.note ? j.note + "\n\n" : "") + (j.tip || "");
   }
 
   function liCard(j) {
     var hot = j.state === "todo";
-    return openTag(j, "li" + (hot ? " hot" : ""), "", ' title="' + esc(j.tip) + '"') +
+    return openTag(j, "li" + (hot ? " hot" : ""), "", ' title="' + esc(tipOf(j)) + '"') +
       '<span class="t">' + esc(j.label) + "</span>" +
-      '<span class="note">' + esc(noteOf(j)) + "</span>" +
+      '<span class="note">' + esc(INFO[j.kind] || j.note || "") + "</span>" +
       '<span class="row"><span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" +
       chip(j) + goMark(j) + "</span>" + closeTag(j);
   }
@@ -294,11 +293,10 @@
       if (!list.length) return "";
       return '<div class="lane" style="--pc:var(' + L[2] + ')"><h2>' + esc(L[1]) + " <small>" + list.length + "</small></h2>" +
         '<div class="tasks">' + list.map(function (j) {
-          return openTag(j, "task", ' style="--gc:var(--g-' + esc(j.group) + ');--pc:var(' + L[2] + ')"', ' title="' + esc(j.tip) + '"') +
+          return openTag(j, "task", ' style="--gc:var(--g-' + esc(j.group) + ');--pc:var(' + L[2] + ')"', ' title="' + esc(tipOf(j)) + '"') +
             '<span class="tag"><span class="pg it" data-it="' + esc(itemOf(j)) + '">' + esc(itemOf(j)) + '</span><span class="gp">' + esc(tagOf(j)) + "</span></span>" +
             '<span class="nm">' + esc(shortName(j.label)) + "</span>" +
-            '<span class="row"><span class="n">' + num(j) + "<small>件</small></span>" + goMark(j) + "</span>" +
-            (j.kind === "shelf_evict" && j.note ? '<span class="note">' + esc(j.note) + "</span>" : "") + closeTag(j);
+            '<span class="row"><span class="n">' + num(j) + "<small>件</small></span>" + goMark(j) + "</span>" + closeTag(j);
         }).join("") + "</div></div>";
     }).join("");
     $("today-lanes").innerHTML = html || '<div class="card"><div class="empty">押さないと減らない残件はありません</div></div>';

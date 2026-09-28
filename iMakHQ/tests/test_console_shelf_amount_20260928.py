@@ -15,7 +15,7 @@ import server as S  # noqa: E402
 def test_shelf_note_shows_amount_target_and_max():
     p = {"picked": 10, "amount": 5046.04, "target": 4009.93,
          "max_picked": 465, "max_amount": 473473.84}
-    assert S.shelf_note(p) == "空く額 $5,046 (今日の目標 $4,010) / 全部なら 465件 $473,474"
+    assert S.shelf_note(p) == "空く額 $5,046 (今日の目標 $4,010)\n落とせる対象の全部 (上限・落とすべき量ではない): 465件 $473,474"
 
 
 def test_shelf_note_without_max():

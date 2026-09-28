@@ -243,7 +243,7 @@ def shelf_note(p):
             return "0"
     s = "空く額 $%s (今日の目標 $%s)" % (usd("amount"), usd("target"))
     if _num(p.get("max_picked")):
-        s += " / 全部なら %d件 $%s" % (_num(p.get("max_picked")), usd("max_amount"))
+        s += "\n落とせる対象の全部 (上限・落とすべき量ではない): %d件 $%s" % (_num(p.get("max_picked")), usd("max_amount"))
     return s
 
 
