@@ -818,6 +818,45 @@ def _watcher_worker():
     STATE["watcher_at"] = time.time()
 
 
+# ★2026-09-29: 担当ボード。各 PC の Claude の窓の状態 (中身は tools/agent_board.py が唯一の口)。
+#   この PC の分は画面が開いている間 25秒ごと (1回 約1秒・claude.exe を一瞬起こす)、
+#   別の PC (LAPTOP) の分はスプシから 2分ごと。
+AGENTS = {"data": None, "at": 0.0, "busy": False, "remote": {}, "remote_at": 0.0}
+AGENTS_TTL, AGENTS_REMOTE_TTL = 25, 120
+
+
+def _agents_worker():
+    try:
+        if TOOLS not in sys.path:
+            sys.path.insert(0, TOOLS)
+        import agent_board as AB
+        machines = [{"host": AB.host(), "label": "この PC", "via": "この PC の窓を直接読む",
+                     "rows": AB.local_agents(), "stale": False, "at": ""}]
+        if time.time() - AGENTS["remote_at"] > AGENTS_REMOTE_TTL:
+            got = {}
+            for h in AB.REMOTE_HOSTS:
+                try:
+                    got[h] = AB.remote(h)
+                except Exception as e:                           # noqa: BLE001 読めない PC は理由を出す
+                    got[h] = {"rows": [], "stale": True, "at": "", "error": str(e)[:120]}
+            AGENTS["remote"], AGENTS["remote_at"] = got, time.time()
+        for h, r in AGENTS["remote"].items():
+            machines.append({"host": h, "label": h, "via": "%s が5分ごとにスプシへ書く分" % h, **r})
+        AGENTS["data"] = {"machines": machines, "at": datetime.datetime.now().strftime("%H:%M:%S")}
+    except Exception as e:                                       # noqa: BLE001 画面に出して知らせる
+        AGENTS["data"] = {"machines": [], "error": str(e)[:200],
+                          "at": datetime.datetime.now().strftime("%H:%M:%S")}
+    finally:
+        AGENTS["at"], AGENTS["busy"] = time.time(), False
+
+
+def get_agents():
+    if not AGENTS["busy"] and time.time() - AGENTS["at"] > AGENTS_TTL:
+        AGENTS["busy"] = True
+        threading.Thread(target=_agents_worker, daemon=True).start()
+    return AGENTS["data"] or {"machines": [], "loading": True}
+
+
 def get_watcher():
     """監視くんの巡回 (巡回中か / 終了めやす / 次回)。記録は _watcher_loop が2分ごとに回す。"""
     if STATE["watcher"] is None and time.time() - STATE["watcher_at"] > 30:
@@ -1126,6 +1165,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, get_tasks())
         if u.path == "/api/watcher":
             return self._json(200, get_watcher())
+        if u.path == "/api/agents":
+            return self._json(200, get_agents())
         if u.path == "/api/version":
             return self._json(200, get_version())
         if u.path == "/api/research":

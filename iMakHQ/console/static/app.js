@@ -543,6 +543,7 @@
     document.querySelectorAll('[role="tab"]').forEach(function (t) { t.setAttribute("aria-selected", String(t.dataset.page === name)); });
     document.querySelectorAll(".page").forEach(function (p) { p.hidden = p.id !== "p-" + name; });
     if (name === "sch" && !schLoaded) { schLoaded = true; refreshTasks(); }
+    if (name === "agents") refreshAgents();
   }
   document.querySelectorAll('[role="tab"]').forEach(function (t) {
     t.addEventListener("click", function () { show(t.dataset.page); history.replaceState(null, "", "#" + t.dataset.page); });
@@ -715,6 +716,66 @@
       setTimeout(bootstrap, 3000);
     });
   }
+
+  // ---------------------------------------------------------------- 担当 (2026-09-29)
+  // 中身は tools/agent_board.py。行を押すと claude.ai/code のその会話が開く (見るだけでは意味がない)。
+  var AG_LAB = { busy: "作業中", ask: "返事待ち", idle: "待機中" };
+  function agDur(iso) {
+    if (!iso) return "";
+    var m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+    return m < 60 ? m + "分" : Math.floor(m / 60) + "時間" + (m % 60 ? (m % 60) + "分" : "");
+  }
+  function agSpark(v) {
+    v = (v && v.length > 1) ? v : [0, 0];
+    var w = 120, h = 30, p = 3, mx = Math.max.apply(null, v.concat([1])), st = (w - 2 * p) / (v.length - 1);
+    var pts = v.map(function (y, i) { return [p + i * st, h - p - (y / mx) * (h - 2 * p)]; });
+    var line = pts.map(function (q, i) { return (i ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1); }).join(" ");
+    var e = pts[pts.length - 1];
+    return '<svg class="agsp" viewBox="0 0 ' + w + " " + h + '" aria-hidden="true">' +
+      '<line x1="' + p + '" y1="' + (h - p) + '" x2="' + (w - p) + '" y2="' + (h - p) + '" stroke="var(--line)" stroke-width="1"/>' +
+      '<path d="' + line + " L " + e[0].toFixed(1) + " " + (h - p) + " L " + p + " " + (h - p) + ' Z" fill="var(--ai)" fill-opacity=".12"/>' +
+      '<path d="' + line + '" fill="none" stroke="var(--ai)" stroke-width="1.5" stroke-linejoin="round"/>' +
+      '<circle cx="' + e[0] + '" cy="' + e[1] + '" r="2.6" fill="var(--ai)"/></svg>';
+  }
+  function agRow(a, stale) {
+    var st = stale ? "idle" : a.state;
+    var lead = st === "busy" ? "作業して " : st === "ask" ? "待たせて " : "止まって ";
+    var tag = a.url ? "a" : "div";
+    var href = a.url ? ' href="' + esc(a.url) + '" target="_blank" rel="noopener"' : "";
+    return "<" + tag + ' class="ag ' + st + '"' + href + '><span class="agbar"></span>' +
+      '<span class="agtop"><span class="agnm">' + esc(a.name) + '</span><span class="agst"><span class="agdt"></span>' +
+      (stale ? "不明" : AG_LAB[a.state] || a.state) + '</span><span class="agwh">' + esc(a.where || "") + "</span></span>" +
+      '<span class="agnow">' + esc(a.now || "—") + "</span>" +
+      '<span class="agmeta"><span>' + lead + agDur(a.since) + "</span><span>起動 " + agDur(a.started) + "前</span>" +
+      (a.url ? '<span class="agopen">開いて打つ →</span>' : "<span>会話の住所が取れません</span>") + "</span>" +
+      '<span class="agside"><span class="aglab">直近60分</span>' + agSpark(a.act) + "</span></" + tag + ">";
+  }
+  function paintAgents(d) {
+    var n = { busy: 0, ask: 0, idle: 0 };
+    (d.machines || []).forEach(function (m) { (m.rows || []).forEach(function (a) { if (!m.stale && n[a.state] != null) n[a.state]++; }); });
+    $("tab-agents").textContent = n.ask ? String(n.ask) : "";
+    $("tab-agents").className = "agdot" + (n.ask ? " on" : "");
+    if (d.loading) { $("ag-fresh").textContent = "読込中…"; return; }
+    $("ag-tally").innerHTML = ["busy", "ask", "idle"].map(function (k) {
+      return '<div class="agt ' + k + '"><b>' + n[k] + "</b><span>" + AG_LAB[k] + "</span></div>";
+    }).join("");
+    $("ag-fresh").innerHTML = "<i></i>更新 " + esc(d.at || "") + (d.error ? " · 読めません: " + esc(d.error) : "");
+    $("ag-lanes").innerHTML = (d.machines || []).map(function (m) {
+      var note = m.error ? "読めません: " + m.error : m.stale ?
+        (m.at ? "最後の書込 " + m.at.slice(11, 16) + " — 15分以上 届いていません" : "まだ一度も届いていません") : m.via;
+      var rows = (m.rows || []).length ? m.rows.map(function (a) { return agRow(a, m.stale); }).join("") :
+        '<div class="empty">開いている窓はありません</div>';
+      return '<section class="aglane"><header><h2>' + esc(m.label) + '<span class="aghost">' + esc(m.host) + "</span></h2>" +
+        '<span class="agvia' + (m.stale ? " warn" : "") + '">' + esc(note) + "</span></header><div>" + rows + "</div></section>";
+    }).join("");
+  }
+  function refreshAgents() {
+    return getJSON("/api/agents").then(function (d) { paintAgents(d); if (d.loading) setTimeout(refreshAgents, 2000); })
+      .catch(function () {});
+  }
+  setInterval(function () { if (!$("p-agents").hidden) refreshAgents(); }, 25000);
+  setInterval(function () { if ($("p-agents").hidden) refreshAgents(); }, 120000);   // タブの橙の数だけ
+  refreshAgents();
   // ---------------------------------------------------------------- リサーチ
   // 条件 (カテゴリ・形式・セラー国・並び) は tools/market_ledger.py が唯一の口。
   // ここで持つのは「どれを選んだか」だけ。

@@ -151,7 +151,11 @@ def test_every_button_has_a_place_on_the_screen():
 def test_screen_has_no_crew_or_permanent_log_panel():
     """ユーザー「担当・実行ログの欄は要らない」(2026-09-15)。ログは実行中・直後だけ下から出す。"""
     html = open(os.path.join(HQ, "console", "static", "index.html"), encoding="utf-8").read()
-    assert "担当" not in html
+    # ★2026-09-29: ユーザーが別物として頼んだ「担当」タブ (Claude の窓の状態・p-agents) は別ページで持つ。
+    #   外したのは各ページに常設していた「担当」(プログラムの担当表) の欄なので、それが無いことを見る
+    body = html.split('id="p-agents"')[0]
+    assert "担当" not in body.split('class="nav"')[-1].split("</div><!-- /.stick -->")[-1]
+    assert 'id="crew' not in html
     assert 'id="drawer" hidden' in html                  # 既定は出さない
 
 
