@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "URL一括で開く (Pasty の代わり)",
+  "version": "1.0",
+  "description": "コピーした URL の一覧を、アイコン1回で全部タブで開く。2026-09-28 Pasty が Edge を落とすので作った。",
+  "permissions": ["clipboardRead"],
+  "action": { "default_title": "コピーした URL を全部開く", "default_popup": "popup.html" }
+}
