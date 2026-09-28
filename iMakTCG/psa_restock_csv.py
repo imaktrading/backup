@@ -2501,6 +2501,24 @@ def main():
                         _bare, _berr = _blf(str(cert), _game or "")
                         _conf = forced_key_conflict(_forced, _bare, _berr)
                         if _conf:
+                            # ★2026-09-28: 「現物からの解決」は刷り (ALTERNATE ART / RARE+ 等) を見ないので、
+                            #   パラレルを通常版に引き直して食い違う (cert 151333415 GD02-094_p1 /
+                            #   154802375 PRB02-010_p1 が止まった)。シートの KEY が PSA ラベルの刷りと
+                            #   合っているなら、そちらが正しい。ラベルとも合わない時だけ止める。
+                            try:
+                                _hq_tools = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakHQ", "tools")
+                                if _hq_tools not in sys.path:
+                                    sys.path.insert(0, _hq_tools)
+                                import psa_variant_gate as _PVG
+                                _fcat, _, _fpid = str(_forced).rpartition(":")
+                                if _fcat and _PVG.pick(_fcat, data.get("Brand", ""), _PVG.label_text(data),
+                                                       _fpid)[0] == _fpid and _PVG.label_text(data) != data.get("Subject", ""):
+                                    print(f"    🔁 cert {cert}: 引き直し={_conf} だが シートの KEY={_forced} が "
+                                          f"PSA ラベルの刷り ({_PVG.label_text(data)}) と合う → KEY を使う")
+                                    _conf = ""
+                            except Exception as _ge:
+                                print(f"    ⚠️ 刷りの照合に失敗 (止めたまま): {type(_ge).__name__}: {_ge}")
+                        if _conf:
                             print(f"    ⚠️ cert {cert}: シートの KEY={_forced} と現物からの解決={_conf} が"
                                   f"別カード → 出さない (商品管理シートの KEY 列を確認) (build skip)")
                             errors.append(cert)

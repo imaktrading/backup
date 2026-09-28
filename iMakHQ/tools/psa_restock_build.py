@@ -426,8 +426,19 @@ def main():
     print(f"✅ Add CSV生成: {add_csv}")
     # ★2026-09-07: 押した直後にヒントが減るよう、CSV に出した分を控える (詳細は _BUILT_LEDGER)。
     _skipped_ids = {str(i).strip() for i, _ in skipped}
+    # ★2026-09-28: 生成の途中で止まった行 (KEY と現物が食い違う等) まで「出した」と控えていたので、
+    #   ③ を押しても件数が減らなかった (2件 → 2件)。**CSV に実際に載った cert の行だけ**控える。
+    try:
+        import csv as _csv
+        with open(add_csv, encoding="utf-8-sig", newline="") as _fh:
+            _rd = _csv.DictReader(_fh)
+            _ccol = next((c for c in (_rd.fieldnames or []) if "Certification Number" in c), None)
+            _in_csv = {str(r.get(_ccol) or "").strip() for r in _rd} if _ccol else None
+    except Exception:                                          # noqa: BLE001 読めなければ従来どおり
+        _in_csv = None
     _built = [r["itemID"] for r in rows
-              if (r.get("itemID") or "").strip() and r["itemID"] not in _skipped_ids]
+              if (r.get("itemID") or "").strip() and r["itemID"] not in _skipped_ids
+              and (_in_csv is None or str(itemid_to_cert.get(r["itemID"]) or "") in _in_csv)]
     record_built(_built)
     print(f"  🗒 今回CSVに出した {len(_built)}件を控えました (ヒントの残数から引きます)")
     # Add→Revise 変換は **control_panel の post-chain (excluder/title-fix/dedup) の後** に実施する
