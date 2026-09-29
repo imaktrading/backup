@@ -1327,6 +1327,16 @@ def _own_profile_dirs() -> tuple:
     return tuple(d.strip().lower() for d in dirs if isinstance(d, str) and d.strip())
 
 
+def _norm_dir(d: str) -> str:
+    return str(d).strip().strip('"').replace("/", "\\").rstrip("\\").lower()
+
+
+def _user_data_dirs(cmd: str) -> set:
+    """コマンドラインの --user-data-dir の値 (正規化済み) の集合。引用符あり/なし両方を読む。"""
+    return {_norm_dir(q or bare)
+            for q, bare in re.findall(r'--user-data-dir=(?:"([^"]+)"|(\S+))', cmd or "")}
+
+
 def _select_stale_scraper_pids(procs, profile_dirs, self_pid: int = 0) -> list:
     """kill すべき PID を選ぶ純粋関数 (2026-07-28 に無差別 kill から限定 kill へ)。
 
@@ -1339,7 +1349,13 @@ def _select_stale_scraper_pids(procs, profile_dirs, self_pid: int = 0) -> list:
                                  (他プロジェクトの稼働中 driver は親 python が生きているので残る)
 
       CommandLine が取れないプロセスは **kill しない** (fail-safe: 判定不能なら触らない)。
+
+    ★ 2026-09-29: profile は --user-data-dir の値と **完全一致** で見る。旧実装は「コマンドラインに
+      自分の profile のパスが含まれるか」で見ていたため、HIGH の `...\\chrome_profile` が LOW の
+      `...\\chrome_profile_LOW` にも当たり、HIGH の開始時の掃除が並走中の LOW の Chrome を殺していた
+      (09-28 07:30 / 09-29 09:06、LOW の amazon が invalid session id で 30 件前後落ちた)。
     """
+    own = {_norm_dir(d) for d in profile_dirs if d}
     live = {int(p.get("ProcessId") or 0) for p in procs if p.get("ProcessId")}
     out = []
     for p in procs:
@@ -1355,8 +1371,8 @@ def _select_stale_scraper_pids(procs, profile_dirs, self_pid: int = 0) -> list:
             low = cmd.lower()
             if "--headless" not in low:
                 continue                        # ユーザーの通常ブラウザは温存
-            if not any(d and d in low for d in profile_dirs):
-                continue                        # 他プロジェクトの headless chrome は触らない
+            if not own.intersection(_user_data_dirs(cmd)):
+                continue                        # 他プロジェクト・他 label の headless chrome は触らない
             out.append(pid)
         elif name.startswith("undetected_chromedriver"):
             try:

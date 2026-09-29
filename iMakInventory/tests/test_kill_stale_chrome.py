@@ -27,6 +27,24 @@ def _p(pid, name, cmd="", ppid=1):
 
 
 # ------------------------------------------------------------------ 選定ロジック
+def test_keeps_parallel_low_chrome_whose_profile_starts_with_mine():
+    """★2026-09-29: HIGH の掃除が、並走中の LOW (…\\chrome_profile_LOW) の Chrome を殺さない.
+
+    旧実装は部分一致だったので chrome_profile が chrome_profile_LOW にも当たっていた。
+    """
+    procs = [_p(10, "chrome.exe", f'chrome.exe --headless --user-data-dir="{MINE_MERCARI}_LOW"'),
+             _p(11, "chrome.exe", f'chrome.exe --headless --user-data-dir={MINE_AMAZON}_LOW --x'),
+             _p(12, "chrome.exe", f'chrome.exe --headless --user-data-dir="{MINE_MERCARI}"')]
+    assert ml._select_stale_scraper_pids(procs, PROFILES) == [12]
+
+
+def test_low_cleanup_does_not_touch_high_chrome():
+    low_dirs = ((MINE_MERCARI + "_LOW").lower(), (MINE_AMAZON + "_LOW").lower())
+    procs = [_p(10, "chrome.exe", f'chrome.exe --headless --user-data-dir="{MINE_MERCARI}"'),
+             _p(11, "chrome.exe", f'chrome.exe --headless --user-data-dir="{MINE_AMAZON}_LOW\\"')]
+    assert ml._select_stale_scraper_pids(procs, low_dirs) == [11]
+
+
 def test_kills_own_headless_chrome():
     procs = [_p(10, "chrome.exe", f'chrome.exe --headless --user-data-dir="{MINE_MERCARI}"'),
              _p(11, "chrome.exe", f'chrome.exe --headless --user-data-dir={MINE_AMAZON}')]
