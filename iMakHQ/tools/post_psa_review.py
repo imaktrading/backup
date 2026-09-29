@@ -2376,6 +2376,74 @@ def split_verified(certs, vc):
     return confirmed, viewer
 
 
+def drop_same_card_after_identify(targets, live_index):
+    """特定した KEY で、出品中と重なる物・同じ回の2件目を外す (純関数)。
+
+    live_index: dup_guard.live_card_index の {group_key: [itemID]}。None なら出品中の照合はしない
+    (読めない時に「出品中でない」と決めつけない = その分は後段の入稿前チェックに任せる)。
+    戻り: (残す targets, [(外した target, KEY, "出品中"|"同じ回の2件目")])。KEY が決まらない物は残す。
+    """
+    try:
+        import dup_guard as _dg
+        gk = _dg.group_key
+    except Exception:                                          # noqa: BLE001
+        gk = lambda k: k                                       # noqa: E731
+    keep, dropped, seen = [], [], set()
+    for t in targets or []:
+        pid = (t.get("csv_expected") or "").strip()
+        cat = (t.get("category") or "").strip()
+        if not (pid and cat):
+            keep.append(t)
+            continue
+        key = f"{cat}:{pid}"
+        g = gk(key)
+        if live_index is not None and g in live_index:
+            dropped.append((t, key, "出品中"))
+        elif g in seen:
+            dropped.append((t, key, "同じ回の2件目"))
+        else:
+            seen.add(g)
+            keep.append(t)
+    return keep, dropped
+
+
+def _live_card_index_or_none():
+    """出品中のカードの索引 (eBay の出品一覧 + シートの KEY)。読めなければ None (I/O)。"""
+    try:
+        import dup_guard as _dg
+        import sheet_io as _sio
+        titles, _skus, fresh = _dg.ensure_fresh_live_cache()
+        if not fresh or not titles:
+            return None
+        idx, _ = _dg.live_card_index(_sio._product_ws().get_all_values(), titles, set(titles))
+        return idx
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+def _write_keys_for_dropped(dropped, append_log_func):
+    """外した cert の行 (まだ itemID が無い行) に KEY を書く。補URL に回すため (I/O・失敗しても続行)。"""
+    try:
+        import sheet_io as _sio
+        ws = _sio._product_ws()
+        vals = ws.get_all_values()
+        ci, ki, bi = _sio.PRODUCT_COL_CERT, _sio.PRODUCT_COL_KEY, _sio.PRODUCT_COL_ITEMID
+        n = 0
+        for t, key, _why in dropped:
+            for i, r in enumerate(vals[1:], start=2):
+                c = r[ci].strip() if len(r) > ci else ""
+                b = r[bi].strip() if len(r) > bi else ""
+                k = r[ki].strip() if len(r) > ki else ""
+                if c == str(t["cert"]) and not b and not k:
+                    ws.update_cell(i, ki + 1, key)
+                    n += 1
+                    break
+        if n:
+            append_log_func(f"     (KEY をシートに書きました {n}件 → 補URL がこの仕入元を予備に回せます){chr(10)}")
+    except Exception as e:                                     # noqa: BLE001
+        append_log_func(f"     ⚠️ 外した分の KEY 書込を skip ({type(e).__name__}){chr(10)}")
+
+
 def dedupe_certs_keep_order(certs):
     """cert list から重複を除く (並び順は保つ・純関数, test可)。
 
@@ -2516,6 +2584,19 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
             _unavailable.append(cert)
             continue
         targets.append(t)
+
+    # ★2026-09-29 ユーザー「新規の目視の中に同じカードが出てくる。おかしいよね」:
+    #   「同じカードか / もう出品中か」は、カードを最終的に特定する前 (枠を選ぶ時) に見ていた。
+    #   特定はここ (前に選んだカード・再録版・兄弟デッキを当てる) で決まるので、特定した後に
+    #   同じ KEY になった物がすり抜けていた (実例: M-P-KC-019 が2件 / EB03-026_p1 が2件で片方は出品中)。
+    #   特定した KEY で **出品中と重なる物** と **同じ回の2件目** を目視に出さない。
+    #   外した行には KEY をシートに書く = 補URL (hoju_url_from_dupes) がその仕入元を予備に回せる。
+    targets, _same_key = drop_same_card_after_identify(targets, _live_card_index_or_none())
+    if _same_key:
+        append_log_func("  🚫 特定したら同じカード → 目視に出しません: %d件 %s%s" % (
+            len(_same_key), ["%s=%s(%s)" % (t["cert"], k, why) for t, k, why in _same_key][:6], chr(10)))
+        _write_keys_for_dropped(_same_key, append_log_func)
+        _dup_skip = list(_dup_skip) + [t["cert"] for t, _, _ in _same_key]
 
     # ★2026-08-27 重複くん依頼: 再確認で出す既決 cert は **前回の答えを既定選択にして下に**。
     #   人が一度出した答えを毎回まっさらで聞き直さない (回答書:
