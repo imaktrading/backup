@@ -24,7 +24,7 @@ except Exception:
     pass
 
 DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
-KW_DIR = r"C:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\iMakKeywords"
+KW_DIR = r"C:\dev\iMak\iMakKeywords"   # 2026-09-29: OneDrive の旧 iMak_workspace を片付けたので作業ルート側へ (同じ PDF)
 FUNNEL_CSV = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "funnel_output"))
 
 # LQR category → iMakKeywords PDF

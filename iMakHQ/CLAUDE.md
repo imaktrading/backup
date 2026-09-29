@@ -191,6 +191,8 @@ python iMakHQ/tools/claim.py take 4   # 番号で指定
 
 - **作業ルート**: `C:\dev\iMak\` （OneDrive 同期外、Git monorepo）
 - **バックアップ**: `C:\Users\imax2\iMak_backup_20260425.zip`
-- **OneDrive 旧パス**: `c:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\` は当面保持（削除はユーザー判断、Claude が自発的に削除することは禁止）
+- **OneDrive 旧パス**: 2026-09-29 に `デスクトップ\旧iMak_workspace\` へ名前を変えた (ユーザー判断)。読んでいた道具
+  (title_keyword_proposal の KW_DIR) は `C:\dev\iMak\iMakKeywords` に、旧側にしか無かった物 (9/3 の監査記録・料金表PDF) は
+  `iMakAudit/audit_logs` と `iMak_data/shipping` に写し済み。削除はユーザー判断 (Claude が自発的に削除することは禁止)
 - **Git**: ローカル master ブランチ運用、ブランチ切換で実験可
 - **Pre-commit hook**: `tools/hooks/pre-commit` （pytest 失敗で commit 拒否）
