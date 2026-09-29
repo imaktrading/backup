@@ -115,6 +115,7 @@ iMakAdvisor/.decompile_tmp/
 
 # === 一時 scripts (アンダースコア始まり Python) ===
 **/_*.py
+!**/__init__.py
 
 # === decision logs (運用データ、再生成可) ===
 **/decision_logs/
