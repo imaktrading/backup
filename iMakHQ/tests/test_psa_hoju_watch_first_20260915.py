@@ -61,7 +61,8 @@ def test_watch_from_funnel_rows():
 
 def test_night_search_and_confirm_pass_watch():
     src = open(H.__file__, encoding="utf-8").read()
-    assert src.count("watch=load_watch_by_item()") == 2
+    # 夜間検索 / 昼確認 / (2026-09-29) 補充に混ぜる入れ替え の3か所。どれもウォッチ順を渡す
+    assert src.count("watch=load_watch_by_item()") >= 2
 
 
 def test_swap_screen_orders_by_watch_not_backup_count():

@@ -2176,7 +2176,20 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
             "swap": {"ready": swap_ready, "unjudged": swap_unjudged}}
 
 
-def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups=0):
+def split_fill_and_swap(items, item_targets, limit, swap_limit=0):
+    """目視に出す分を 補充 (補<4) は limit 件・入れ替え (補4以上) は swap_limit 件で切る (純関数)。
+
+    swap_limit=0 なら今までどおり先頭から limit 件 (入れ替えボタン単独で押した時もこれ)。
+    """
+    if not swap_limit:
+        return items[:limit], item_targets[:limit]
+    fill = [k for k, t in enumerate(item_targets) if t.get("n_backups", 0) < CONFIRM_MAX_BACKUPS][:limit]
+    swap = [k for k, t in enumerate(item_targets) if t.get("n_backups", 0) >= CONFIRM_MAX_BACKUPS][:swap_limit]
+    keep = fill + swap
+    return [items[k] for k in keep], [item_targets[k] for k in keep]
+
+
+def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups=0, swap_limit=0):
     """昼の確認(impure)。slice2 が焼いた当日キャッシュから候補を出し、現物と視覚確証→
     確定URLを補URL(AC-AG)へ **安い順に最大5本** 書く(2026-09-05)。主URL(A)は触らない。
 
@@ -2200,6 +2213,16 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     # ★2026-09-19: **前に出した順**に回す (ユーザー「全部に順番が回るようにしたい」)。
     #   並びが毎回同じで、1回に見る件数を超えた分は毎回同じ顔ぶれしか出ていなかった。
     targets = rotate_by_last_shown(targets, load_last_shown())
+    # ★2026-09-29 ユーザー「補充のついでに、高い予備を安い候補に替えるところまで1回で済ませて」。
+    #   補充 (補0〜3本) の後ろに 入れ替え (補4〜5本) の出品も並べ、同じ目視で片づける。
+    #   補充を先に置くのは 9/9 の理由 (丸腰の補充が入れ替えに埋もれない) を守るため。
+    #   件数は別枠 (limit=補充 / swap_limit=入れ替え) で切るので、補充が多い日も入れ替えが出る。
+    if swap_limit:
+        _have_iid = {t["itemID"] for t in targets}
+        _swap_t = select_backfill_targets(vals, max_backups=AUXN + 1,
+                                          min_backups=CONFIRM_MAX_BACKUPS, watch=load_watch_by_item())
+        _swap_t = rotate_by_last_shown(_swap_t, load_last_shown())
+        targets = list(targets) + [t for t in _swap_t if t["itemID"] not in _have_iid]
     cache = _load_cache()
 
     # ★前提(skip台帳 cooldown / 候補NG / 他出品が使用中のURL)は build_confirm_context に1本化。
@@ -2426,12 +2449,14 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     #   45件残っているのに10件見て終わりだと、終わったつもりで放置される。
     _ready = len(items)
     if limit is not None:
-        items, item_targets = items[:limit], item_targets[:limit]
+        items, item_targets = split_fill_and_swap(items, item_targets, limit, swap_limit)
         remember_shown([t.get("itemID") for t in item_targets], today)
         for n, it in enumerate(items):
             it["idx"] = n
         _rest = _ready - len(items)
-        print(f"  (limit={limit} → 今回 {len(items)}件 / 目視対象 計 {_ready}件"
+        _n_swap = sum(1 for t in item_targets if t.get("n_backups", 0) >= CONFIRM_MAX_BACKUPS)
+        _brk = f" (補充 {len(items) - _n_swap} + 入れ替え {_n_swap})" if swap_limit else ""
+        print(f"  (limit={limit} → 今回 {len(items)}件{_brk} / 目視対象 計 {_ready}件"
               + (f" / **残り {_rest}件は次回以降**" if _rest else " / 残りなし") + ")")
     else:
         _rest = 0
@@ -2915,7 +2940,7 @@ def main():
         return
     if "confirm" in sys.argv:
         max_backups, limit, dry = CONFIRM_MAX_BACKUPS, None, "--dry-run" in sys.argv
-        min_backups = 0
+        min_backups, swap_limit = 0, 0
         for a in sys.argv[1:]:
             if a.startswith("--max-backups="):
                 max_backups = int(a.split("=", 1)[1])
@@ -2923,8 +2948,10 @@ def main():
                 min_backups = int(a.split("=", 1)[1])
             elif a.startswith("--limit="):
                 limit = int(a.split("=", 1)[1])
+            elif a.startswith("--swap-limit="):
+                swap_limit = int(a.split("=", 1)[1])
         run_daytime_confirm(max_backups=max_backups, limit=limit, dry_run=dry,
-                            min_backups=min_backups)
+                            min_backups=min_backups, swap_limit=swap_limit)
         return
     if "workload" in sys.argv:
         # ボタンのラベル / status_now が使う件数を JSON で1行。**API/スクレイプ無し**。
