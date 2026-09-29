@@ -161,6 +161,29 @@ def pick_repo(repo=REPO):
     return out
 
 
+# ★2026-09-30: 各担当の worktree で GitHub に載らず取り直せない物 (担当の回答で決めた物だけ)。
+#   zip の中では _worktrees/<担当>/ の下に置く。足す時は requests/2026-09-30_backup_gaps_response.md を根拠に
+WORKTREE_DIRS = {
+    "revise/csv_output": r"C:\dev\iMak_revise\iMakRevise\csv_output",   # 日次 revise の差分記録 (値付けの履歴)
+}
+
+
+def pick_worktrees(dirs=None):
+    """担当の回答で決めた worktree のフォルダ → [(path, zip内の名前, size)] (読むだけ)。"""
+    out = []
+    for name, top in (WORKTREE_DIRS if dirs is None else dirs).items():
+        for root, _, names in os.walk(top):
+            for n in names:
+                q = os.path.join(root, n)
+                try:
+                    size = os.path.getsize(q)
+                except OSError:
+                    continue
+                if size <= MAX_FILE_MB * 1024 * 1024:
+                    out.append((q, f"_worktrees/{name}/" + os.path.relpath(q, top).replace("\\", "/"), size))
+    return out
+
+
 def copy_db(tmpdir):
     out = os.path.join(tmpdir, "products.sqlite")
     src = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
@@ -226,8 +249,10 @@ def main():
         extra = pick_extra()
         repo = pick_repo()
         st["claude_files"] = len(extra)
+        wt = pick_worktrees()
         st["repo_files"] = len(repo)
-        files = files + extra + repo
+        st["worktree_files"] = len(wt)
+        files = files + extra + repo + wt
         total = sum(s for _, _, s in files)
         st.update(files=len(files), raw_mb=round(total / 1e6, 1), skipped_type=skipped["type"],
                   skipped_big=skipped["big"][:20])
