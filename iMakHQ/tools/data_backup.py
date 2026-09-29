@@ -128,6 +128,39 @@ def pick_extra(home=CLAUDE_HOME, globs=EXTRA_GLOBS):
     return out
 
 
+# ★2026-09-30 ユーザー確定: 本元 (master) で GitHub に載せない設定のデータも入れる。
+#   判定の控え (psa_research_cache.json 等) が GitHub にも zip にも無く、PC を替えると消えていた。
+#   ログ・一時物・ブラウザのプロファイルは外す。zip の中では _repo/ の下に置く
+REPO = r"C:\dev\iMak"
+REPO_SKIP_DIRS = ("__pycache__", ".pytest_cache", "chrome_profile*", "edge_profile*", ".decompile_tmp",
+                  "debug", "node_modules")
+REPO_SKIP_FILES = EXCLUDE_FILE_PATTERNS + ("*.log", "*.lock", "*.heartbeat", "*.pyc")
+
+
+def pick_repo(repo=REPO):
+    """GitHub に載らない本元のデータ → [(path, zip内の名前, size)] (読むだけ)。"""
+    import subprocess
+    r = subprocess.run(["git", "-C", repo, "ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
+                       capture_output=True, check=True)
+    out = []
+    for rel in r.stdout.decode("utf-8", "replace").split("\0"):
+        if not rel:
+            continue
+        parts = rel.split("/")
+        if any(fnmatch.fnmatch(d, p) for d in parts[:-1] for p in REPO_SKIP_DIRS):
+            continue
+        if any(fnmatch.fnmatch(parts[-1].lower(), p) for p in REPO_SKIP_FILES):
+            continue
+        q = os.path.join(repo, *parts)
+        try:
+            size = os.path.getsize(q)
+        except OSError:
+            continue
+        if size <= MAX_FILE_MB * 1024 * 1024:
+            out.append((q, "_repo/" + rel, size))
+    return out
+
+
 def copy_db(tmpdir):
     out = os.path.join(tmpdir, "products.sqlite")
     src = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
@@ -191,8 +224,10 @@ def main():
     try:
         files, skipped = pick_files()
         extra = pick_extra()
+        repo = pick_repo()
         st["claude_files"] = len(extra)
-        files = files + extra
+        st["repo_files"] = len(repo)
+        files = files + extra + repo
         total = sum(s for _, _, s in files)
         st.update(files=len(files), raw_mb=round(total / 1e6, 1), skipped_type=skipped["type"],
                   skipped_big=skipped["big"][:20])
