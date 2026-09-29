@@ -140,7 +140,17 @@ def rotate_by_last_shown(targets, last_shown):
     return sorted(targets or [], key=lambda t: ls.get(str(t.get("itemID")), ""))
 
 
-def select_backfill_targets(rows2d, max_backups=1, min_backups=0, watch=None):
+def load_market_sold(keys):
+    """KEY → 市場で売れた数 (Terapeak の台帳)。読めなければ {} = 今までどおりの並び (I/O)。"""
+    try:
+        import market_ledger as ML
+        agg, _ = ML.by_card(ML.load_ledger())
+        return ML.sold_by_key(keys, agg)
+    except Exception:                                          # noqa: BLE001 並びの材料なので止めない
+        return {}
+
+
+def select_backfill_targets(rows2d, max_backups=1, min_backups=0, watch=None, market_sold=None):
     """HIGH rows2d(header含む) → 補が min_backups以上 max_backups未満 の live PSA 行。純関数。
 
     max_backups=1 → 補 0本のみ(残1件でリフィル=定常の既定)。
@@ -198,6 +208,13 @@ def select_backfill_targets(rows2d, max_backups=1, min_backups=0, watch=None):
         for t in out:
             t["watch"] = watch.get(t["itemID"], 0)
         out.sort(key=lambda t: -t["watch"])
+    # ★2026-09-29 ユーザー確定「売れた実績の多いカードを先に」: 予備が効くのは注文が来て買う時
+    #   = 売れるカードほど早く要る。ウォッチより確かな目印なので、同じ補の本数の中では
+    #   **市場で売れた数 → ウォッチ → 新規** の順。台帳に無いカードは 0 扱い (今までどおりの並び)。
+    if market_sold:
+        for t in out:
+            t["market_sold"] = market_sold.get(t.get("key"), 0)
+        out.sort(key=lambda t: -t["market_sold"])
     # ★2026-09-05: **補が少ない順**を上に置く (安定ソートなので同数の中は新規優先のまま)。
     #   目視の対象を満杯未満まで広げたので、これが無いと 補4本の出品が
     #   丸腰(補0本)より先に出てしまう。丸腰の方が死ぬ。
@@ -2208,8 +2225,10 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     today = datetime.date.today().isoformat()
     max_backups = CONFIRM_MAX_BACKUPS if max_backups is None else max_backups
     vals = _read_high()
+    _msold = load_market_sold([t.get("key") for t in select_backfill_targets(vals, max_backups=AUXN + 1)])
+    print(f"  市場で売れた実績のあるカード {len(_msold)}件 を先に並べます (Terapeak の台帳)", flush=True)
     targets = select_backfill_targets(vals, max_backups=max_backups, min_backups=min_backups,
-                                      watch=load_watch_by_item())
+                                      watch=load_watch_by_item(), market_sold=_msold)
     # ★2026-09-19: **前に出した順**に回す (ユーザー「全部に順番が回るようにしたい」)。
     #   並びが毎回同じで、1回に見る件数を超えた分は毎回同じ顔ぶれしか出ていなかった。
     targets = rotate_by_last_shown(targets, load_last_shown())
@@ -2220,7 +2239,8 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     if swap_limit:
         _have_iid = {t["itemID"] for t in targets}
         _swap_t = select_backfill_targets(vals, max_backups=AUXN + 1,
-                                          min_backups=CONFIRM_MAX_BACKUPS, watch=load_watch_by_item())
+                                          min_backups=CONFIRM_MAX_BACKUPS, watch=load_watch_by_item(),
+                                          market_sold=_msold)
         _swap_t = rotate_by_last_shown(_swap_t, load_last_shown())
         targets = list(targets) + [t for t in _swap_t if t["itemID"] not in _have_iid]
     cache = _load_cache()

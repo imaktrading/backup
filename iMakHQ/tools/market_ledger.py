@@ -479,6 +479,36 @@ def is_mine(key, title, idx):
     return key.upper() in mine_dash
 
 
+def sold_by_key(keys, agg):
+    """うちの KEY → 市場で売れた数 (純関数)。載っていない KEY は入れない。
+
+    ★2026-09-29 ユーザー確定: 補URL③ の目視の並びに「市場で売れた数」を使う。
+      is_mine と同じ突き合わせを逆向きにする (弾コード-番号 はそのまま / 番号/総数 はタイトルに弾コード)。
+      同じカードが別の書き方で2か所に入っていれば足す (by_card は出品ごとに1か所にしか数えない)。
+    """
+    dash, slash = {}, collections.defaultdict(list)
+    for k, v in (agg or {}).items():
+        if "/" in k:
+            slash[k.split("/")[0].lstrip("0")].append(
+                (re.sub(r"[^A-Z0-9]", "", (v.get("title") or "").upper()), v.get("sold", 0)))
+        else:
+            dash[k.upper()] = dash.get(k.upper(), 0) + v.get("sold", 0)
+    out = {}
+    for key in keys or []:
+        suf = (key or "").split(":")[-1]
+        m = re.match(r"^(.+)-(\d+)$", suf) or re.match(r"^([A-Za-z0-9]+)-(\d+)", suf)
+        if not m:
+            continue
+        s, n = m.group(1).upper(), m.group(2)
+        sn = re.sub(r"[^A-Z0-9]", "", s)
+        tot = dash.get(f"{s}-{n}", 0)
+        # 弾コードが1文字 (P-074 等) だと、どのタイトルにも含まれて何でも当たる → 番号/総数 側では使わない
+        tot += sum(sold for t, sold in slash.get(n.lstrip("0"), []) if len(sn) >= 2 and sn in t)
+        if tot:
+            out[key] = tot
+    return out
+
+
 def cards_with_flag(rows, live_keys, min_sold=2, lang=None, seller=None):
     """市場で min_sold 以上売れたカードを **出品済/未出品 の印つき**で返す (純関数)。
 
