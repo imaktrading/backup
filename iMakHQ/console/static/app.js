@@ -47,7 +47,7 @@
 
   var jobs = {}, jobList = [], buttons = [], running = null, logAfter = 0, toastTimer, drawerHidden = true, schLoaded = false;
   // 今日やることの「状態の1行」と「期限のある物」(2026-09-29)。各所が材料を入れ、renderStrip が描く
-  var STRIP = { counts: null, night: null, watch: null, errors: [], offer: null, order: null }, autoRecounted = false;
+  var STRIP = { counts: null, night: null, watch: null, integrity: null, errors: [], offer: null, order: null }, autoRecounted = false;
   var SALES_SHEET = ["https:", "", "docs.google.com", "spreadsheets", "d",   // 販売実績シート (// を文字列に書かない)
                      "1MufEUweIJcLv-NwT3KZsEJ_k_yl1rKryaqBZjUH7c2U", "edit#gid=1814510799"].join("/");
 
@@ -329,7 +329,7 @@
   }
   function renderStrip() {
     if (!$("today-strip")) return;
-    var oj = STRIP.offer, dj = STRIP.order, chips = [STRIP.counts, STRIP.night, STRIP.watch];
+    var oj = STRIP.offer, dj = STRIP.order, chips = [STRIP.counts, STRIP.night, STRIP.watch, STRIP.integrity];
     if (oj) chips.push(oj.state === "error" ? ["warn", "オファー 数えられない", ""]
                        : [oj.n ? "warn" : "", "オファー <b>" + (oj.n || 0) + "件</b>", ""]);
     if (dj) chips.push(["", "注文 " + (dj.note ? esc(dj.note).replace("最後の取り込み ", "最後の取り込み <b>") + "</b>" : "未取り込み"),
@@ -350,6 +350,22 @@
     }
     $("today-urgent").innerHTML = big.join("");
   }
+
+  // ★2026-09-29: 毎朝のデータの見張り (カタログ DB の壊れ・1ビット化け)。化けていたら赤く出す
+  function refreshIntegrity() {
+    return getJSON("/api/integrity").then(function (d) {
+      if (d.ok === null || d.ok === undefined) { STRIP.integrity = ["info", "データの見張り まだ動いていません", ""]; }
+      else if (d.ok) { STRIP.integrity = ["", "データ 化けなし <b>" + esc((d.at || "").slice(5, 16).replace("T", " ")) + "</b>", ""]; }
+      else {
+        STRIP.integrity = ["crit", "データが化けています: " + (d.flips ? d.flips + "か所" : "") +
+          (d.qc && d.qc !== "ok" ? " DB 破損" : "") + (d.error ? " (見張りの失敗)" : "") +
+          (d.request ? " → <b>カタログに復元を依頼済み</b>" : ""), ""];
+      }
+      renderStrip();
+    }).catch(function () {});
+  }
+  refreshIntegrity();
+  setInterval(refreshIntegrity, 600000);
 
   // ---------------------------------------------------------------- 置き場が無いボタン
   function paintLeftovers() {

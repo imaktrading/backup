@@ -1173,6 +1173,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, get_watcher())
         if u.path == "/api/agents":
             return self._json(200, get_agents())
+        if u.path == "/api/integrity":
+            # ★2026-09-29: 毎朝のデータの見張り (tools/data_integrity_watch.py) の結果
+            try:
+                with open(r"C:\dev\iMak_data\hq\data_integrity_last.json", encoding="utf-8") as f:
+                    d = json.load(f)
+                return self._json(200, {"at": d.get("at"), "ok": d.get("ok"), "qc": d.get("quick_check"),
+                                        "flips": len(d.get("flips") or []), "request": d.get("request") or "",
+                                        "error": d.get("error") or ""})
+            except (OSError, ValueError):
+                return self._json(200, {"ok": None})
         if u.path == "/api/version":
             return self._json(200, get_version())
         if u.path == "/api/research":

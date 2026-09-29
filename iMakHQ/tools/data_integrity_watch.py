@@ -1,0 +1,142 @@
+# -*- coding: utf-8 -*-
+"""共有カタログ DB の「壊れ」と「1ビット化け」を毎朝見つける (2026-09-29 ユーザー確定)。
+
+背景: この PC はメモリまわりの不具合で、書き込み中のデータが1ビット裏返る
+(9/23〜9/29 に 29欄 / 9/29 夕方に DB の骨組みまで壊れた / OCCT のメモリ負荷で1分以内に落ちる)。
+メモリは当面そのまま・重い負荷をかけない運用で様子見する (ユーザー判断)。その間、
+**人が気づく前に機械が見つけて、カタログに戻してもらう**。
+
+やること (毎朝のバックアップ data_backup.py の最後に呼ばれる):
+  1. 今の products.sqlite に quick_check (骨組みの壊れ)
+  2. 最新と1つ前のバックアップの products.sqlite を行ごとに比べ、**長さが同じで 1〜3 か所が
+     各1ビットだけ違う欄** を数える (大文字小文字の違い 0x20 は正当な直しなので数えない)
+  3. 結果を iMak_data/hq/data_integrity_last.json に書く (神風の状態の1行が読む)
+  4. 化け・壊れが1つでもあれば catalog/requests/ に復元の依頼書を置く (同じ日の2通目は置かない)
+
+    python data_integrity_watch.py          # 1回
+"""
+from __future__ import annotations
+
+import datetime
+import json
+import os
+import sqlite3
+import sys
+import tempfile
+import zipfile
+
+DB = r"C:\dev\iMak_data\catalog\products.sqlite"
+DAILY = r"G:\マイドライブ\iMak_backup\daily"
+STATUS = r"C:\dev\iMak_data\hq\data_integrity_last.json"
+REQ_DIR = r"C:\dev\iMak_data\catalog\requests"
+
+
+def bitflips(old_rows, new_rows, cols):
+    """{rowid: 行} ×2 → 1ビット化けの欄のリスト (純関数)。
+
+    同じ行・同じ列で、バイト長が同じ・違う所が1〜3か所・どれも1ビットだけの違い、を化けとみなす。
+    大文字小文字 (0x20) は人の直しなので外す。行が無い/長さが違う = 普通の書き換え。
+    """
+    out = []
+    for rid, new in new_rows.items():
+        old = old_rows.get(rid)
+        if old is None or old == new:
+            continue
+        for i, (a, b) in enumerate(zip(old, new)):
+            if a == b or not isinstance(a, bytes) or not isinstance(b, bytes) or len(a) != len(b):
+                continue
+            d = [(k, a[k] ^ b[k]) for k in range(len(a)) if a[k] != b[k]]
+            if 1 <= len(d) <= 3 and all(bin(v).count("1") == 1 and v != 0x20 for _, v in d):
+                k0 = d[0][0]
+                out.append({"rowid": rid, "column": cols[i] if i < len(cols) else str(i),
+                            "offsets": [k for k, _ in d], "bits": [hex(v) for _, v in d],
+                            "was": a[max(0, k0 - 25):k0 + 15].decode("utf-8", "replace"),
+                            "now": b[max(0, k0 - 25):k0 + 15].decode("utf-8", "replace")})
+    return out
+
+
+def _rows_from_zip(zp, tmp, name):
+    with zipfile.ZipFile(zp) as z:
+        n = [x for x in z.namelist() if x.endswith("products.sqlite")][0]
+        p = os.path.join(tmp, name)
+        with open(p, "wb") as f:
+            f.write(z.read(n))
+    con = sqlite3.connect(p)
+    con.text_factory = bytes
+    cols = [r[1].decode() if isinstance(r[1], bytes) else r[1] for r in con.execute("pragma table_info(products)")]
+    rows = {r[0]: r[1:] for r in con.execute("select rowid,* from products")}
+    ident = {r[0]: (r[1].decode("utf-8", "replace") if isinstance(r[1], bytes) else r[1],
+                    r[2].decode("utf-8", "replace") if isinstance(r[2], bytes) else r[2])
+             for r in con.execute("select rowid, category, product_id from products")}
+    con.close()
+    return rows, cols, ident
+
+
+def quick_check(path=DB):
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        r = con.execute("pragma quick_check").fetchone()[0]
+        con.close()
+        return r
+    except Exception as e:                                     # noqa: BLE001
+        return f"{type(e).__name__}: {e}"
+
+
+def _write_request(st):
+    today = datetime.date.today().isoformat()
+    path = os.path.join(REQ_DIR, f"{today}_catalog_integrity_auto.md")
+    if os.path.exists(path) or os.path.exists(path.replace(".md", "_processed.md")):
+        return ""
+    lines = [f"# 自動検出: カタログ DB の化け・壊れ ({today})", "",
+             f"- 依頼日: {today} / 依頼者: HQ (data_integrity_watch.py が自動で出した) / 緊急度: 高 / フェーズ: 実装 (復元)",
+             "- 種別: PC のメモリまわりの不具合による化け。値の判断ではなく、1つ前のバックアップの値への復元", "",
+             "## 既に判明していること (再調査するな)", "",
+             f"- quick_check: {st['quick_check']}",
+             f"- 比べたバックアップ: {os.path.basename(st['pair'][0])} → {os.path.basename(st['pair'][1])}",
+             f"- 1ビット化け {len(st['flips'])}欄 (rowid / category / product_id / 列 / バイト位置 / 前 → 今):"]
+    for f in st["flips"][:200]:
+        lines.append(f"  - {f['rowid']} / {f.get('category','')} / {f.get('product_id','')} / {f['column']} / "
+                     f"{f['offsets']} / {f['was']!r} → {f['now']!r}")
+    lines += ["", "## やってほしいこと", "",
+              "1. 上の欄を、前のバックアップ (1つ目の zip) の同じ行・同じ列の値に戻す (バイト位置で合わせる)",
+              "2. quick_check が ok でなければ DB を作り直す",
+              "3. 回答は同じ名前 + _response.md に「戻した件数 / 残り0件 / integrity_check」"]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return path
+
+
+def run():
+    st = {"at": datetime.datetime.now().isoformat(timespec="seconds"), "ok": False,
+          "quick_check": quick_check(), "flips": [], "pair": [], "request": ""}
+    try:
+        zs = sorted(os.path.join(DAILY, x) for x in os.listdir(DAILY) if x.endswith(".zip"))
+        if len(zs) >= 2:
+            st["pair"] = zs[-2:]
+            with tempfile.TemporaryDirectory() as tmp:
+                old, cols, _ = _rows_from_zip(zs[-2], tmp, "a.sqlite")
+                new, _, ident = _rows_from_zip(zs[-1], tmp, "b.sqlite")
+            fl = bitflips(old, new, cols)
+            for f in fl:
+                f["category"], f["product_id"] = ident.get(f["rowid"], ("", ""))
+            st["flips"] = fl
+        st["ok"] = st["quick_check"] == "ok" and not st["flips"]
+        if not st["ok"]:
+            st["request"] = _write_request(st)
+    except Exception as e:                                     # noqa: BLE001 見張り自体の失敗も知らせる
+        st["error"] = f"{type(e).__name__}: {e}"
+    os.makedirs(os.path.dirname(STATUS), exist_ok=True)
+    with open(STATUS, "w", encoding="utf-8") as f:
+        json.dump(st, f, ensure_ascii=False, indent=1)
+    msg = ("✅ 化けなし・DB 正常" if st["ok"] else
+           f"⚠️要対応 化け {len(st['flips'])}欄 / DB {st['quick_check']}" + (f" → 依頼書 {st['request']}" if st["request"] else ""))
+    print(f"データの見張り: {msg}" + (f" (見張りの失敗: {st['error']})" if st.get("error") else ""))
+    return st
+
+
+if __name__ == "__main__":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:                                          # noqa: BLE001
+        pass
+    sys.exit(0 if run().get("ok") else 1)

@@ -379,3 +379,6 @@ svg.agsp{display:block;width:120px;height:30px}
 .urgent .d{grid-column:1;font-size:12.5px;color:var(--ink-2)}
 .urgent .ugo{grid-row:1/4;grid-column:2}
 .urgent a.run{text-decoration:none;display:inline-block}
+
+.strip .st.crit{border-color:var(--crit);background:var(--crit-soft);color:var(--ink)}
+.strip .st.crit i{background:var(--crit)}

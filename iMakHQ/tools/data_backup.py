@@ -200,6 +200,12 @@ def main():
         st["sec"] = round(time.time() - t0)
         if not a.dry_run:
             write_status(st)
+            # ★2026-09-29: バックアップの後に、DB の壊れと1ビット化けを見張る (前日の zip と比べる)
+            try:
+                import data_integrity_watch
+                data_integrity_watch.run()
+            except Exception as e:                                 # noqa: BLE001 見張りの失敗でバックアップは失敗にしない
+                print(f"⚠️ データの見張りを動かせませんでした: {type(e).__name__}: {e}")
 
 
 if __name__ == "__main__":
