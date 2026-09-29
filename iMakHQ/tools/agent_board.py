@@ -393,6 +393,29 @@ def main():
     cmd = (sys.argv[1:] or ["show"])[0]
     if cmd == "push":
         return push()
+    if cmd == "wake":
+        # ★2026-09-29 ユーザー「依頼しているわけだから、すぐに処理してもらった方がいい」:
+        #   依頼を置いた相手が閉じていたら起動し、一覧に出るまで待つ (その後 SendMessage で呼び鈴)
+        #   使い方: python agent_board.py wake CATALOG   (key はデスクトップ「Claude」の担当名。一覧は show)
+        import time
+        key = (sys.argv[2:] or [""])[0]
+        roster = {r["key"]: r for r in read_roster()}
+        if key not in roster:
+            print(f"その担当がありません: {key} (ある物: {', '.join(sorted(roster))})")
+            return 1
+        running = {_norm(w.get("cwd")) for w in list_windows()}
+        if _norm(roster[key]["folder"]) in running:
+            print(f"{key} は開いています → そのまま呼び鈴を鳴らしてください")
+            return 0
+        ok, msg = launch(key)
+        print(msg)
+        for _ in range(40):                                    # 最大 約2分
+            time.sleep(3)
+            if _norm(roster[key]["folder"]) in {_norm(w.get("cwd")) for w in list_windows()}:
+                print(f"{key} が開きました → 呼び鈴を鳴らしてください (ListAgents に出る名前へ SendMessage)")
+                return 0
+        print(f"⚠️ {key} が2分たっても一覧に出ません。依頼書は置いてあるので、開いた時に読みます")
+        return 1
     for r in local_agents():
         print(f"{r['state']:5} {r['name']:12} {r['now'][:60]}  {r['url']}")
     return 0
