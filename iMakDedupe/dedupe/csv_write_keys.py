@@ -368,6 +368,36 @@ def write_keys_to_high(
 # (= 旧 KEY1/KEY2 2 列書込 → 単一 KEY 列書込)
 # ============================================================================
 
+def load_reviewed_keys(csv_path: Path) -> Dict[str, str]:
+    """`<CSV>.canonical.json` の by_cert (= 目視で決めた KEY の控え) を読む.
+
+    依頼: iMak_data/dedupe/requests/2026-09-29_write_keys_follow_reviewed_key.md
+    目視 = 出品データそのもの。引き直した KEY で上書きすると variant (_p1 等) が
+    落ちて同じカードの2つ目が出る (2026-09-29 cert 174855277 / 169977472)。
+
+    無い / 壊れている → {} (= fail-closed。従来の resolver 経路にそのまま戻る)。
+    """
+    import json
+
+    side = Path(str(csv_path) + ".canonical.json")
+    if not side.exists():
+        side = Path(csv_path).with_suffix(".canonical.json")
+    if not side.exists():
+        return {}
+    try:
+        data = json.loads(side.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    by_cert = data.get("by_cert") or {}
+    if not isinstance(by_cert, dict):
+        return {}
+    return {
+        str(c).strip(): str(k).strip()
+        for c, k in by_cert.items()
+        if str(c).strip() and str(k).strip()
+    }
+
+
 def write_canonical_key_to_high(
     ws,
     csv_path: Path,
@@ -438,8 +468,15 @@ def write_canonical_key_to_high(
         # 2026-07-27 Phase2b: カテゴリ prefix 内訳
         "written_with_category": 0,   # {category}:{pid} で書いた分
         "written_bare_pid": 0,        # category 空で bare pid を書いた分 (= 想定外)
+        # 2026-09-29: 目視控え (.canonical.json) 由来
+        "reviewed_keys_loaded": 0,
+        "from_reviewed": 0,           # 控えの KEY を採用した分
+        "reviewed_overrode_resolver": 0,  # 引き直した値と控えが違い、控えを採った分
         "samples": [],
     }
+
+    reviewed = load_reviewed_keys(path)
+    result["reviewed_keys_loaded"] = len(reviewed)
 
     updates = []
     SAMPLE_MAX = 10
@@ -464,6 +501,16 @@ def write_canonical_key_to_high(
         from .key_format import build_key
         _res = resolver_io.resolve_csv_row_with_category(csv_row, purpose="listing")
         canonical_key = build_key(_res.get("category"), _res.get("product_id"))
+
+        # 2026-09-29: 目視で決めた KEY (.canonical.json) があればそれを正とする。
+        # 引き直した値で上書きしない (= 目視の意味を消さない)。
+        reviewed_key = reviewed.get(cert, "")
+        if reviewed_key:
+            if reviewed_key != canonical_key:
+                result["reviewed_overrode_resolver"] += 1
+            canonical_key = reviewed_key
+            result["from_reviewed"] += 1
+
         new_type = classify_canonical_key(canonical_key)
 
         if new_type != KEY_TYPE_PRODUCT_ID:

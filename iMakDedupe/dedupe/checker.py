@@ -1712,6 +1712,7 @@ def run_write_keys_from_csv_canonical(csv_path: str, dry_run: bool = False) -> i
     print(f"  csv with cert           : {result['csv_with_cert']}")
     print(f"  HIGH TCG rows           : {result['high_tcg_rows']}")
     print(f"  matched                 : {result['matched']}")
+    print(f"  目視控え(.canonical.json): {result.get('reviewed_keys_loaded', 0)} 件 / 採用 {result.get('from_reviewed', 0)} / うち引き直しと不一致 {result.get('reviewed_overrode_resolver', 0)}")
     print(f"  written_key (新規)      : {result['written_key']}")
     print(f"    ├ written_with_category: {result.get('written_with_category', 0)}  (= {{category}}:{{pid}} 新形式)")
     print(f"    └ written_bare_pid     : {result.get('written_bare_pid', 0)}  (= category 空 bare。 0 のはず)")
