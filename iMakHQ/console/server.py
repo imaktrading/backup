@@ -950,12 +950,52 @@ ORPHAN_HINTS = ("psa_to_csv.py", "tshirt_listing.py", "gshock_to_csv.py", "psa_h
                 "montbell_listing.py", "csv_auditor.py")
 
 
+def is_batch_parent(parent_cmdline):
+    """親が .bat / .vbs (夜間バッチ・予約タスク) なら True (純関数)。神風が起こした走行ではない。"""
+    c = str(parent_cmdline or "").lower()
+    return ".bat" in c or ".vbs" in c or "wscript" in c
+
+
+def pid_alive(pid):
+    """その pid がまだ動いているか (I/O)。調べられない時は True (実行中のまま = 安全側)。"""
+    try:
+        r = subprocess.run(["tasklist", "/FI", "PID eq %d" % int(pid), "/NH"], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=20,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return str(int(pid)) in (r.stdout or "")
+    except Exception:                                          # noqa: BLE001
+        return True
+
+
+_ORPHAN_SEEN = {"at": 0.0}
+
+
+def settle_orphan():
+    """拾った「前のサーバの走行」が終わっていたら実行中を外す (15秒に1回だけ見る)。
+
+    ★2026-09-29: 一度拾うと見直さず、止めた後も「実行中」のまま他のボタンが押せなくなっていた。
+    """
+    job = STATE.get("job") or {}
+    if not (job.get("running") and job.get("orphan_pid")) or time.time() - _ORPHAN_SEEN["at"] < 15:
+        return
+    _ORPHAN_SEEN["at"] = time.time()
+    if not pid_alive(job["orphan_pid"]):
+        with _LOCK:
+            if STATE["job"] and STATE["job"].get("orphan_pid") == job["orphan_pid"]:
+                STATE["job"].update(running=False)
+        _log("✓ 前のサーバの走行は終わっていました (pid %s)" % job["orphan_pid"])
+
+
 def find_orphan_run():
     """前のサーバが残した走行 (pid, 何を動かしているか)。無ければ None。"""
     if sys.platform != "win32":
         return None
-    ps = ("Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | "
-          "Select-Object ProcessId,CommandLine,@{n='at';e={$_.CreationDate.ToString('s')}} | ConvertTo-Json -Compress")
+    # ★2026-09-29: 親の CommandLine も取る。夜間バッチ (run_hoju_search.bat 等) から動いている物を
+    #   「前のサーバの走行」と見間違え、ずっと実行中にしてボタンを押せなくしていた (実例 psa_hoju_fill search)
+    ps = ("$all = Get-CimInstance Win32_Process; $by = @{}; $all | % { $by[[int]$_.ProcessId] = $_.CommandLine }; "
+          "$all | ? { $_.Name -like 'python*' } | "
+          "Select-Object ProcessId,CommandLine,@{n='parent';e={$by[[int]$_.ParentProcessId]}},"
+          "@{n='at';e={$_.CreationDate.ToString('s')}} | ConvertTo-Json -Compress")
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
                            capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -966,6 +1006,8 @@ def find_orphan_run():
     for p in (data if isinstance(data, list) else [data]):
         cl = str((p or {}).get("CommandLine") or "")
         if "console" in cl.replace("\\", "/"):               # Console 自身は除く
+            continue
+        if is_batch_parent((p or {}).get("parent")):        # 夜間バッチ・予約タスクから動いている物は除く
             continue
         for hint in ORPHAN_HINTS:
             if hint in cl:
@@ -1241,6 +1283,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:                       # noqa: BLE001 画面に出して知らせる
                 return self._json(200, {"error": str(e)})
         if u.path == "/api/log":
+            settle_orphan()                              # 拾った前の走行が終わっていたら実行中を外す
             after = int((parse_qs(u.query).get("after") or ["0"])[0] or 0)
             with _LOCK:
                 lines = [(s, t) for s, t in STATE["log"] if s > after]
