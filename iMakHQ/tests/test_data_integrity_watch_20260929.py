@@ -76,3 +76,21 @@ def test_hourly_logs_marks_and_requests_when_broken(tmp_path, monkeypatch):
     st = W.run_hourly()
     assert st["change_counter"] == 19 and st["request"].endswith("_auto.md")
     assert json.loads((tmp_path / "h.jsonl").read_text(encoding="utf-8"))["quick_check"] == "*** broken"
+
+
+def test_hourly_retries_missing_daily_backup(tmp_path):
+    """2026-09-30: 9/25 は 5:01 に PC が落ちてバックアップが1日分抜けた。6時以降、今日の zip が無ければ取り直す。"""
+    import datetime
+    calls = []
+    now = datetime.datetime(2026, 9, 30, 7, 0)
+    assert "取り直した" in W.retry_backup_if_missing(now, str(tmp_path), lambda: calls.append(1) or 0)
+    (tmp_path / "iMak_daily_20260930_0500.zip").write_bytes(b"")
+    assert W.retry_backup_if_missing(now, str(tmp_path), lambda: calls.append(1) or 0) == ""
+    assert W.retry_backup_if_missing(now.replace(hour=5), str(tmp_path / "x"), lambda: 1 / 0) == ""
+    assert calls == [1]
+
+
+def test_backup_includes_claude_memory():
+    import data_backup as B
+    names = [n for _, n, _ in B.pick_extra()]
+    assert "_claude/CLAUDE.md" in names and any("/memory/MEMORY.md" in n for n in names)

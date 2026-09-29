@@ -54,6 +54,12 @@ EXCLUDE_DIRS = {
 EXCLUDE_DIR_PATTERNS = ("*_dumps", "*_dumps.bak_*", "*_dumps_*", "*.bak_*", "__pycache__", "_tmp*")
 EXCLUDE_FILE_PATTERNS = ("*.bak*", "*pre_*", "*.sqlite", "*.sqlite-shm", "*.sqlite-wal",
                          "*.jpg", "*.jpeg", "*.png", "*.webp", "*.gif", "*.pdf", "*.zip", "*.dmp")
+# ★2026-09-30 ユーザー確定: 共有データの外にある Claude の記憶・指示・skill も入れる
+#   (どこにも複製が無く、SSD が壊れたら消える状態だった)。会話の記録 (*.jsonl, 約900MB) は入れない。
+#   zip の中では _claude/ の下に置く
+CLAUDE_HOME = os.path.join(os.path.expanduser("~"), ".claude")
+EXTRA_GLOBS = ("CLAUDE.md", "skills", "agents", os.path.join("projects", "*", "memory"))
+
 MAX_FILE_MB = 50            # これより大きい1ファイルは入れない (件数は結果に残す)
 
 
@@ -93,6 +99,25 @@ def pick_files(src=SRC):
                 continue
             files.append((p, os.path.join(rel_root, n), size))
     return files, skipped
+
+
+def pick_extra(home=CLAUDE_HOME, globs=EXTRA_GLOBS):
+    """Claude の記憶・指示・skill → [(path, zip内の名前, size)] (読むだけ)。"""
+    import glob
+    out = []
+    for g in globs:
+        for top in glob.glob(os.path.join(home, g)):
+            walk = [(os.path.dirname(top), [], [os.path.basename(top)])] if os.path.isfile(top) else os.walk(top)
+            for root, _, names in walk:
+                for n in names:
+                    q = os.path.join(root, n)
+                    try:
+                        size = os.path.getsize(q)
+                    except OSError:
+                        continue
+                    if size <= MAX_FILE_MB * 1024 * 1024:
+                        out.append((q, "_claude/" + os.path.relpath(q, home).replace("\\", "/"), size))
+    return out
 
 
 def copy_db(tmpdir):
@@ -157,6 +182,9 @@ def main():
     st = {"at": datetime.datetime.now().isoformat(timespec="seconds"), "ok": False, "dest": DEST}
     try:
         files, skipped = pick_files()
+        extra = pick_extra()
+        st["claude_files"] = len(extra)
+        files = files + extra
         total = sum(s for _, _, s in files)
         st.update(files=len(files), raw_mb=round(total / 1e6, 1), skipped_type=skipped["type"],
                   skipped_big=skipped["big"][:20])
@@ -209,4 +237,8 @@ def main():
 
 
 if __name__ == "__main__":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")                # ⚠️ 等が cp932 で書けず見張りの表示が落ちた (2026-09-30)
+    except Exception:                                          # noqa: BLE001
+        pass
     sys.exit(main())

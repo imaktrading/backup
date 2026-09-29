@@ -202,6 +202,27 @@ def file_marks(path=DB):
     return m
 
 
+def retry_backup_if_missing(now=None, daily=DAILY, run=None):
+    """今日の zip が無ければ毎朝のバックアップを走らせ直す (2026-09-30 ユーザー確定)。
+
+    9/25 は 5:01 に PC が落ちてその日の分が丸ごと抜けた。5時台は本番の予約に任せ、6時以降の毎時で拾う。
+    """
+    now = now or datetime.datetime.now()
+    if now.hour < 6:
+        return ""
+    tag = f"iMak_daily_{now:%Y%m%d}_"
+    try:
+        if any(x.startswith(tag) and x.endswith(".zip") for x in os.listdir(daily)):
+            return ""
+    except OSError as e:
+        return f"G: が見えない ({type(e).__name__})"
+    if run is None:
+        import subprocess
+        run = lambda: subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                                   "data_backup.py")], timeout=1500).returncode
+    return f"今日のバックアップが無いので取り直した (終了コード {run()})"
+
+
 def run_hourly():
     st = {"at": datetime.datetime.now().isoformat(timespec="seconds"), "quick_check": quick_check(),
           **file_marks(), "request": ""}
@@ -209,6 +230,7 @@ def run_hourly():
         st["request"] = _write_request({"quick_check": st["quick_check"], "flips": [], "pair": ["(1時間ごとの検査)", ""]})
     with open(HOURLY_LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps(st, ensure_ascii=False) + "\n")
+    st["backup_retry"] = retry_backup_if_missing()
     print(f"データの見張り(1時間): quick_check={st['quick_check'][:60]} 変更カウンタ={st['change_counter']}"
           + (f" → 依頼書 {st['request']}" if st["request"] else ""))
     return st
