@@ -292,3 +292,11 @@
 - 決定: 引き直した KEY で上書きしない。`<CSV>.canonical.json` の by_cert にある cert はその KEY を写す。控え無し/壊れ → 従来経路 (fail-closed)。実害は 2026-09-29 cert 174855277/169977472 の `_p1` 落ちで同カード2つ目出品 (820185511332 END済)
 - 変更: dedupe/csv_write_keys.py (load_reviewed_keys 追加 + write_canonical_key_to_high で控え優先、採用件数カウンタ3種) / dedupe/checker.py (採用件数ログ1行) / tests/test_write_keys_reviewed_key_20260929.py 新規4件。commit 653fa4a7
 - 検証: offline 480件 緑。控え優先/控えに無い cert/控え無し/壊れた控え の4ケース pass。HQ 側 --keys-from-canonical は二重の網として存置 (HQ 合意済)
+
+## 2026-09-30
+
+### .gitignore の **/_*.py が __init__.py を巻き込み GitHub 未載 (HQ依頼・高)
+
+- 決定: PC 入替の備えで untracked 棚卸し中に発覚。`!**/__init__.py` を追加し __init__.py 3本を追加。extractors/__init__.py (regex 一式の入口) は失うと import 不能で、どこにも複製が無かった
+- 変更: .gitignore / dedupe/__init__.py / dedupe/extractors/__init__.py / tests/__init__.py。commit 6169d4e4 push 済
+- 検証: 残る `_*.py` 0件 (git ls-files --others --ignored)。取り直せない git 管理外データも 0件 (キャッシュ・試し打ちの残り・master に複製ありのみ)
