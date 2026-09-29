@@ -150,6 +150,38 @@ def load_market_sold(keys):
         return {}
 
 
+def load_same_verdicts():
+    """人が目視で出した「このURLはこのカードと同じ/違う」の記録 (どの画面の判定も)。読めなければ None。"""
+    try:
+        import psa_label_learned as PLL
+        return PLL, PLL.load(PLL.URL_PATH)
+    except Exception:                                          # noqa: BLE001 読めなければ全部目視へ
+        return None, None
+
+
+def split_known_same(cands, key, pll=None, uv=None):
+    """候補を (前に人が「同じ」と確かめた物, まだ見ていない物) に分ける (純関数に近い)。
+
+    ★2026-09-29 ユーザー確定「一度『同じ』と確かめた物は確定でしょ。2回出される方が無駄」。
+      実例: バオッキーVSTAR S12a-214 の候補6本のうち5本は 9/27 に再仕入れ①で「同じ」と判定済みなのに、
+      補URL③ 補充でまた目視に出ていた。確かめ済みの物は目視に出さず、そのまま補URL に書く。
+      (値段・他出品が使用中・見送り などの門は、この前の confirm_survivors で既に通っている)
+    """
+    if not (pll and uv):
+        return [], list(cands or [])
+    try:
+        import mercari_psa_resource as mp
+        pid = mp.split_key(key)[1]
+    except Exception:                                          # noqa: BLE001
+        pid = ""
+    if not pid:
+        return [], list(cands or [])
+    same, rest = [], []
+    for c in cands or []:
+        (same if pll.url_verdict(pid, c.get("url") or "", uv) == "same" else rest).append(c)
+    return same, rest
+
+
 def order_targets(out, min_backups=0, watch=None, market_sold=None):
     """補URL③の目視に出す順に並べ替える (純関数, test可)。out は新規優先で並んでいる前提。"""
     # ★2026-09-29 ユーザー確定: 並びは **市場で売れた数 → ウォッチ → 補が少ない順 → 新規**。
@@ -2161,10 +2193,13 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
     swap_ready = swap_unjudged = 0
     swap_targets = select_backfill_targets(vals, max_backups=AUXN + 1,
                                            min_backups=CONFIRM_MAX_BACKUPS)
+    _pll, _uv = load_same_verdicts()
     for t in list(c_targets) + list(swap_targets):
         is_swap = t["n_backups"] >= CONFIRM_MAX_BACKUPS
         cands, _ref, _why, _ = confirm_survivors(
             t, vals, cache, ctx, today, ref_of=_ref_of, art_of=_art_of, stats=stats)
+        # ★2026-09-29: 前に「同じ」と確かめた候補は目視に出ない (押すと自動で書く) ので数えない
+        _same, cands = split_known_same(cands, t.get("key"), _pll, _uv)
         if not cands:
             continue
         waiting = any(c.get("_art_unjudged") for c in cands)
@@ -2354,6 +2389,8 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             print(f"  ⚠️ 絵柄判定 失敗(非致命・全候補を目視へ): {type(_e).__name__}: {_e}")
             return cands, []
 
+    _PLLs, _UVs = load_same_verdicts()
+    auto_same = []                  # [(target, [前に「同じ」と確かめた候補])] — 目視に出さず書く
     _scanned = 0
     for t in targets:
         _scanned += 1
@@ -2408,6 +2445,12 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
                 _shown_pending.append((iid, _p["url"]))
         if not cands:
             continue
+        # ★2026-09-29: 前に人が「同じ」と確かめた候補は目視に出さず、そのまま書く分にする
+        _same, cands = split_known_same(cands, t.get("key"), _PLLs, _UVs)
+        if _same:
+            auto_same.append((t, _same))
+            if not cands:
+                continue                                # 見る物が残らない = 画面に出さない
         cn = t["_card_no"]
         idx = len(items)
         # 多変種(同番号で catalog に2変種以上=別アート/色/パラレル/Gold)か → UI に⚠️バッジ出す。
@@ -2501,20 +2544,41 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
               f"候補なし {no_cand} / 絞り込みで全滅 {no_cand_after_filter} / 現物画像なし {no_ref}")
         if no_cardno:
             print(f"       ★探索不能 {no_cardno}件 は catalog/KEY の補完待ち。人手では解消しない")
-    if not items:
+    if auto_same:
+        print(f"  ✔ 前に「同じ」と確かめた候補 {sum(len(s) for _, s in auto_same)}本 "
+              f"({len(auto_same)}出品) は目視に出さず、そのまま書きます")
+    if not items and not auto_same:
         print("  確証対象なし。終了。")
         return {"confirmed": 0, "written_rows": 0, "added_urls": 0}
     if dry_run:
         print("  (dry-run) 確証UI/書込なし。上記件数のみ。")
-        return {"confirmed": 0, "written_rows": 0, "added_urls": 0, "candidates_ready": len(items)}
+        return {"confirmed": 0, "written_rows": 0, "added_urls": 0, "candidates_ready": len(items),
+                "auto_same": len(auto_same)}
 
-    print(f"▶ 補URL補強 視覚確証: {len(items)}件をブラウザ表示。① 現物 と 仕入候補を見比べ、"
-          "**その出品に足す補URL(=正しい変種の在庫)だけチェックを残す**...")
-    res = prc.restock_confirm(items)
-    if res is None:
-        print("⚠ 確証タイムアウト/未確定 — 補URL書込なし(再実行してください)。")
-        return {"confirmed": 0, "written_rows": 0, "added_urls": 0}
-    confirmed = {c["idx"]: c["urls"] for c in res["confirmed"]}
+    n_ui = len(items)                       # 画面に出した分 (見送り等の記録はこの分だけ)
+    res = {"confirmed": [], "diffs": [], "sold": [], "bundle": []}
+    confirmed = {}
+    if items:
+        print(f"▶ 補URL補強 視覚確証: {len(items)}件をブラウザ表示。① 現物 と 仕入候補を見比べ、"
+              "**その出品に足す補URL(=正しい変種の在庫)だけチェックを残す**...")
+        res = prc.restock_confirm(items)
+        if res is None:
+            print("⚠ 確証タイムアウト/未確定 — 画面の分は書きません (前に「同じ」と確かめた分だけ書きます)。")
+            res = {"confirmed": [], "diffs": [], "sold": [], "bundle": []}
+            n_ui = 0                        # 答えが無いので見送り等も記録しない
+        confirmed = {c["idx"]: c["urls"] for c in res["confirmed"]}
+    # 前に「同じ」と確かめた分を、画面の答えに足す (画面に出なかった出品は後ろに足す)
+    _idx_by_iid = {t["itemID"]: i for i, t in enumerate(item_targets)}
+    for _t, _same in auto_same:
+        _i = _idx_by_iid.get(_t["itemID"])
+        if _i is None:
+            _i = len(items)
+            items.append({"idx": _i, "candidates": [], "_auto": list(_same)})
+            item_targets.append(_t)
+            _idx_by_iid[_t["itemID"]] = _i
+        else:
+            items[_i]["_auto"] = list(_same)
+        confirmed[_i] = list(confirmed.get(_i) or []) + [c["url"] for c in _same if c.get("url")]
 
     # --- 確定URL → 補URL(AC-AG)へ冪等書込(既存保持・空き枠のみ) ---
     # ★ 他出品が既に使っている仕入元URLは書かない(2026-07-26)。同じURLを2出品が指すと
@@ -2544,7 +2608,8 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     for _i in confirmed:
         _price_by_idx[_i] = {
             _u: _p for _u, (_n, _p) in
-            cand_info_by_url((items[_i] or {}).get("candidates") if _i < len(items) else None).items()
+            cand_info_by_url(((items[_i] or {}).get("candidates") or []) + ((items[_i] or {}).get("_auto") or [])
+                             if _i < len(items) else None).items()
             if isinstance(_p, int) and _p > 0
         }
     # ★2026-09-21 ユーザー「安いのを捨てたらあかんやろ」: 今付いている補URLは候補から
@@ -2657,7 +2722,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             print(f"  🚫 まとめ売り・複数枚: {len(_bundle_urls)}本 → 以後どの候補画面にも出しません")
         except Exception as _e_b:                               # noqa: BLE001
             print(f"  ⚠ まとめ売りの記録skip ({type(_e_b).__name__})")
-    shown = set(range(len(items)))
+    shown = set(range(n_ui))                # 画面に出した分だけ (前に「同じ」の自動分は含めない)
     not_confirmed = shown - set(confirmed.keys())
     # ★2026-09-20: 確認したのに1本も入らなかった行も「今は手が無い」として記録する。
     #   記録しないと件数が減らず、次回また同じ候補を見せることになる。
