@@ -31,3 +31,11 @@ def test_second_copy_is_caught_with_the_generation_key():
     got = D.dup_candidates(rows, header, index, {"97805202": "one_piece_tcg:OP09-051"})
     assert [c["existing"] for c in got] == [["820165775241"]]
     assert not got[0]["card_key"].startswith("t:")                    # 完全一致 = 物理除外の対象
+
+
+def test_generation_key_wins_over_sheet_key():
+    import inspect
+    src = inspect.getsource(D.pre_upload)
+    # 控えの KEY はシートにある cert でも上書きする (c not in cert_to_key の条件が無い)
+    assert "canonical_keys_for_csv(csv_path).items()" in src
+    assert "c not in cert_to_key" not in src

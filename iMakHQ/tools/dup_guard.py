@@ -824,8 +824,12 @@ def pre_upload(csv_path, use_cache_only=True):
     #   タイトルの番号 (`t:OP09-051`) で照らしていた。出品中の側は KEY で並んでいるので
     #   **番号どうしは永遠に一致しない** = 同じカードの2枚目が毎日素通り。
     #   実害: OP09-051 が 9/24〜27 に4つ、OP02-120_p2 (ウタ) が 9/22・9/23 に2つ出品された。
+    # ★2026-09-29 (2): 控えがあれば **シートより控えを優先**する。控えは「この CSV の行を何として
+    #   作ったか」そのもの。シートの KEY は別の段 (write-keys) が cert から引き直した値で、
+    #   食い違うことがある。実害: EB03-026_p1 として作った行のシート KEY が EB03-026 (通常版) になっていて、
+    #   出品中の EB03-026_p1 と一致せず2つ目が出品された (820185511332 → END 済)。
     for c, k in canonical_keys_for_csv(csv_path).items():
-        if c and k and c not in cert_to_key and not k.startswith(("item:", "shops:")):
+        if c and k and not k.startswith(("item:", "shops:")):
             cert_to_key[c] = k
     if use_cache_only:
         titles, skus, fresh = ensure_fresh_live_cache()
