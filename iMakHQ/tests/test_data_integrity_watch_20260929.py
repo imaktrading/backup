@@ -94,3 +94,14 @@ def test_backup_includes_claude_memory():
     import data_backup as B
     names = [n for _, n, _ in B.pick_extra()]
     assert "_claude/CLAUDE.md" in names and any("/memory/MEMORY.md" in n for n in names)
+
+
+def test_backup_keeps_irreplaceable_media(tmp_path):
+    """2026-09-30: 種類で画像・PDF を外すと、手で入れた元データや料金表 PDF まで落ちていた。"""
+    import data_backup as B
+    for rel in (r"shipping\rate.pdf", r"catalog\_input\a.png", r"catalog\img\card.png", r"hq\x.pdf.bak_1"):
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+    got = {r for _, r, _ in B.pick_files(str(tmp_path))[0]}
+    assert got == {r"shipping\rate.pdf", r"catalog\_input\a.png"}

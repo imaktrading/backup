@@ -46,7 +46,7 @@ STATUS = os.path.join(HERE, "..", "review_logs", "data_backup_last.json")
 # 秘密情報はクラウドに置かない (USB 側だけ)。
 EXCLUDE_DIRS = {
     "chrome_profile_psa", "credentials", "secrets", "secrets_backup",
-    r"catalog\_bak", r"catalog\backups", r"catalog\_raw", r"catalog\_input",
+    r"catalog\_bak", r"catalog\backups", r"catalog\_raw",
     r"catalog\montbell_pdfs", r"catalog\_don_images", r"catalog\_don_pdf_samples",
     r"catalog\_ygo_jp_images", r"catalog\pokemon_translation_cache",
     r"dedupe\img_cache",    # 重複くんの画像キャッシュ 2.3GB / 1.6万件。取り直せる (拡張子が無く種類で外せない)
@@ -59,6 +59,11 @@ EXCLUDE_FILE_PATTERNS = ("*.bak*", "*pre_*", "*.sqlite", "*.sqlite-shm", "*.sqli
 #   zip の中では _claude/ の下に置く
 CLAUDE_HOME = os.path.join(os.path.expanduser("~"), ".claude")
 EXTRA_GLOBS = ("CLAUDE.md", "skills", "agents", os.path.join("projects", "*", "memory"))
+
+# ★2026-09-30: 種類 (画像・PDF) で外すと、取り直せない物まで落ちていた。この下は画像・PDF も入れる
+#   (catalog\_input = 手で入れた元データ / shipping = 運送会社の料金表 PDF / hq・seller_hub = 画面の控え)。計 約0.1GB
+KEEP_MEDIA_DIRS = (r"catalog\_input", "shipping", "hq", "seller_hub")
+MEDIA_PATTERNS = ("*.jpg", "*.jpeg", "*.png", "*.webp", "*.gif", "*.pdf")
 
 MAX_FILE_MB = 50            # これより大きい1ファイルは入れない (件数は結果に残す)
 
@@ -92,6 +97,9 @@ def pick_files(src=SRC):
             except OSError:
                 continue
             why = _excluded_file(n, size)
+            if why == "type" and any(fnmatch.fnmatch(n.lower(), q) for q in MEDIA_PATTERNS) \
+                    and any(rel_root == k or rel_root.startswith(k + os.sep) for k in KEEP_MEDIA_DIRS):
+                why = ""
             if why:
                 skipped[why] += 1
                 if why == "size":
