@@ -114,6 +114,9 @@ iMakAdvisor/.decompile_tmp/
 
 # === 一時 scripts (アンダースコア始まり Python) ===
 **/_*.py
+# ★2026-09-30: 上の行が __init__.py と本番の _モジュールまで巻き込み、各担当のコードが GitHub に載っていなかった。
+#   __init__.py は常に載せる。本番で使う _*.py は git add -f で個別に載せる
+!**/__init__.py
 
 # === decision logs (運用データ、再生成可) ===
 **/decision_logs/
