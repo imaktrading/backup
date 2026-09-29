@@ -332,8 +332,10 @@
     var oj = STRIP.offer, dj = STRIP.order, chips = [STRIP.counts, STRIP.night, STRIP.watch, STRIP.integrity];
     if (oj) chips.push(oj.state === "error" ? ["warn", "オファー 数えられない", ""]
                        : [oj.n ? "warn" : "", "オファー <b>" + (oj.n || 0) + "件</b>", ""]);
-    if (dj) chips.push(["", "注文 " + (dj.note ? esc(dj.note).replace("最後の取り込み ", "最後の取り込み <b>") + "</b>" : "未取り込み"),
-                        dj.n ? "" : jobBtn(dj, "取り込む")]);   // 仕入れ待ちの大きな枠が出ている時はそちらに1つだけ
+    // ★2026-09-29 ユーザー「これに仕入れ待ち件数を表示を追加したら」: [取り込む] はここに1つだけ (常に)
+    if (dj) chips.push([dj.n ? "warn" : "", "注文 仕入れ待ち <b>" + (dj.n == null ? "—" : dj.n) + "件</b>" +
+                        (dj.note ? " · " + esc(dj.note).replace("最後の取り込み ", "最後の取り込み <b>") + "</b>" : " · 未取り込み"),
+                        jobBtn(dj, "取り込む")]);
     $("today-strip").innerHTML = chips.concat(STRIP.errors || []).map(stChip).join("");
     var big = [];
     if (oj && oj.n) {
@@ -346,8 +348,7 @@
       big.push('<div class="u"><span class="k">仕入れ待ち (売れた注文)</span>' +
         '<span class="t"><b>' + num(dj) + "</b>件 まだ仕入れていません</span>" +
         '<span class="d">仕入れたら販売実績シートでチェック</span>' +
-        // ★2026-09-29 ユーザー「そのボタンをシートを開くの横に」: 仕入れたらシートでチェック → 取り込むで件数を更新
-        '<span class="ugo">' + jobBtn(dj, "取り込む").replace("<button", '<button class="run"') +
+        '<span class="ugo">' +
         '<a class="run hot" href="' + SALES_SHEET + '" target="_blank" rel="noopener">シートを開く</a></span></div>');
     }
     $("today-urgent").innerHTML = big.join("");
