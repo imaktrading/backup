@@ -10,6 +10,9 @@
   1. 今の products.sqlite に quick_check (骨組みの壊れ)
   2. 最新と1つ前のバックアップの products.sqlite を行ごとに比べ、**長さが同じで 1〜3 か所が
      各1ビットだけ違う欄** を数える (大文字小文字の違い 0x20 は正当な直しなので数えない)
+     ★どちらが化けたかは2本では決まらない。2つ前のバックアップと比べて向きを決める (2026-09-30:
+     「前」が化けていて「今」が直った値だった10欄に「前に戻せ」と依頼を出した)。
+     2つ前 = 今 → 直った分 (数えない) / 2つ前 = 前 → 今が化けた / どちらでもない → 向き不明
   3. 結果を iMak_data/hq/data_integrity_last.json に書く (神風の状態の1行が読む)
   4. 化け・壊れが1つでもあれば catalog/requests/ に復元の依頼書を置く (同じ日の2通目は置かない)
 
@@ -55,7 +58,25 @@ def bitflips(old_rows, new_rows, cols):
     return out
 
 
-def _rows_from_zip(zp, tmp, name):
+def classify(flips, old_rows, new_rows, refs, cols):
+    """それより前のバックアップ群 (refs = [{rowid: 行}, ...] 新しい順) で化けの向きを決める (純関数)。
+
+    どれかに今と同じ値がある → 前が化けていて今は直った → 外す (化けが数日続いてから直る事がある) /
+    一番新しい ref が前と同じ → 今が化けた → "now" / それ以外 → "unknown" (カタログに公式と比べてもらう)。
+    """
+    out = []
+    for f in flips:
+        ci = cols.index(f["column"])
+        rid = f["rowid"]
+        vals = [r[rid][ci] for r in refs if rid in r and ci < len(r[rid])]
+        if new_rows[rid][ci] in vals:
+            continue
+        f["broken"] = "now" if vals and vals[0] == old_rows[rid][ci] else "unknown"
+        out.append(f)
+    return out
+
+
+def _rows_from_zip(zp, tmp, name, only=None):
     with zipfile.ZipFile(zp) as z:
         n = [x for x in z.namelist() if x.endswith("products.sqlite")][0]
         p = os.path.join(tmp, name)
@@ -64,6 +85,11 @@ def _rows_from_zip(zp, tmp, name):
     con = sqlite3.connect(p)
     con.text_factory = bytes
     cols = [r[1].decode() if isinstance(r[1], bytes) else r[1] for r in con.execute("pragma table_info(products)")]
+    if only is not None:                                       # 向き判定用: 化けた行だけ読む (メモリを食わない)
+        q = ",".join("?" * len(only))
+        rows = {r[0]: r[1:] for r in con.execute(f"select rowid,* from products where rowid in ({q})", list(only))}
+        con.close()
+        return rows, cols, {}
     rows = {r[0]: r[1:] for r in con.execute("select rowid,* from products")}
     ident = {r[0]: (r[1].decode("utf-8", "replace") if isinstance(r[1], bytes) else r[1],
                     r[2].decode("utf-8", "replace") if isinstance(r[2], bytes) else r[2])
@@ -89,16 +115,20 @@ def _write_request(st):
         return ""
     lines = [f"# 自動検出: カタログ DB の化け・壊れ ({today})", "",
              f"- 依頼日: {today} / 依頼者: HQ (data_integrity_watch.py が自動で出した) / 緊急度: 高 / フェーズ: 実装 (復元)",
-             "- 種別: PC のメモリまわりの不具合による化け。値の判断ではなく、1つ前のバックアップの値への復元", "",
+             "- 種別: PC のメモリまわりの不具合による化け。値の判断ではなく、化ける前の値への復元", "",
              "## 既に判明していること (再調査するな)", "",
              f"- quick_check: {st['quick_check']}",
              f"- 比べたバックアップ: {os.path.basename(st['pair'][0])} → {os.path.basename(st['pair'][1])}",
-             f"- 1ビット化け {len(st['flips'])}欄 (rowid / category / product_id / 列 / バイト位置 / 前 → 今):"]
+             f"- それより前のバックアップ {len(st.get('refs', []))}本と比べて向きを決めた。前のどれかに今の値があれば"
+             "「直った分」として外してある。「今が化けた」= 2つ前と前が同じで今だけ違う / 「向き不明」= それ以外",
+             f"- 1ビット化け {len(st['flips'])}欄 (rowid / category / product_id / 列 / バイト位置 / 前 → 今 / 判定):"]
     for f in st["flips"][:200]:
         lines.append(f"  - {f['rowid']} / {f.get('category','')} / {f.get('product_id','')} / {f['column']} / "
-                     f"{f['offsets']} / {f['was']!r} → {f['now']!r}")
+                     f"{f['offsets']} / {f['was']!r} → {f['now']!r} / "
+                     + ("今が化けた" if f.get("broken") == "now" else "向き不明"))
     lines += ["", "## やってほしいこと", "",
-              "1. 上の欄を、前のバックアップ (1つ目の zip) の同じ行・同じ列の値に戻す (バイト位置で合わせる)",
+              "1. 「今が化けた」欄は、前のバックアップ (1つ目の zip) の同じ行・同じ列の値に戻す (バイト位置で合わせる)。"
+              "「向き不明」欄は公式の値と比べて、化けている方を直す",
               "2. quick_check が ok でなければ DB を作り直す",
               "3. 回答は同じ名前 + _response.md に「戻した件数 / 残り0件 / integrity_check」"]
     with open(path, "w", encoding="utf-8") as f:
@@ -113,10 +143,15 @@ def run():
         zs = sorted(os.path.join(DAILY, x) for x in os.listdir(DAILY) if x.endswith(".zip"))
         if len(zs) >= 2:
             st["pair"] = zs[-2:]
+            st["refs"] = [os.path.basename(z) for z in zs[-3::-1]]
             with tempfile.TemporaryDirectory() as tmp:
                 old, cols, _ = _rows_from_zip(zs[-2], tmp, "a.sqlite")
                 new, _, ident = _rows_from_zip(zs[-1], tmp, "b.sqlite")
-            fl = bitflips(old, new, cols)
+                fl = bitflips(old, new, cols)
+                ids = {f["rowid"] for f in fl}
+                refs = [_rows_from_zip(z, tmp, f"r{i}.sqlite", ids)[0]
+                        for i, z in enumerate(zs[-3::-1])] if ids else []
+            fl = classify(fl, old, new, refs, cols)
             for f in fl:
                 f["category"], f["product_id"] = ident.get(f["rowid"], ("", ""))
             st["flips"] = fl
