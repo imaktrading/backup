@@ -52,3 +52,12 @@ def test_snkrdunk_page_with_any_diff_is_not_trusted():
     uv = {base + "1": {"M2a-199": {"v": "same"}}, base + "2": {"M2a-199": {"v": "diff"}}}
     same, rest = H.split_known_same([{"url": base + "3"}], "pokemon_tcg:M2a-199", PLL, uv)
     assert same == [] and len(rest) == 1
+
+
+def test_restock_screen_marks_known_same():
+    """再仕入れ①は買う先を選ぶ画面なので自動にはしない。前に「同じ」の候補に印を出す。"""
+    import inspect
+    import psa_resource_confirm as C
+    import psa_resource_gate as G
+    assert "known_same" in inspect.getsource(G._build_visual_candidates)
+    assert "前に同じと確認済み" in inspect.getsource(C)

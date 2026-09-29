@@ -983,6 +983,8 @@ def build_restock_html(items):
                 f"<label class='cand'><input type='checkbox' class='ck' checked "
                 f"data-idx='{idx}' data-url='{_html.escape(_s(u))}' data-rsn='' onchange='upd({idx})'>{img}"
                 f"<span class='clbl'>{_html.escape(_s(cd.get('channel')))} {pstr} {_v_html}"
+                # ★2026-09-29: 前に「同じ」と確かめた仕入元 (どの画面の答えでも) は印を出す = 見比べ直さない
+                + (f" <span class='axs'>✔ 前に同じと確認済み</span>" if cd.get("known_same") else "") +
                 f"{_ar_html}{_nm_html}"
                 f"<br><a href='{_html.escape(_s(u))}' target='_blank'>開く</a>"
                 f" <button type='button' class='zm' title='拡大'"

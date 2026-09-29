@@ -348,6 +348,15 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
             import psa_label_learned as _PLL
             _uv = _PLL.load(_PLL.URL_PATH)
             out = [x for x in out if _PLL.url_verdict(card_pid, x.get("url"), _uv) != "diff"]
+            # ★2026-09-29 ユーザー「目視が無駄にならないようになった？他の箇所も大丈夫？」:
+            #   前に「同じ」と確かめた仕入元 (スニダンは同じ商品ページも) に印を付ける。
+            #   画面に「✔ 前に同じと確認済み」と出し、見比べ直さなくて済むようにする
+            import psa_hoju_fill as _PHF
+            _same, _ = _PHF.split_known_same(out, card_pid, _PLL, _uv)
+            _ids = {id(x) for x in _same}
+            for x in out:
+                if id(x) in _ids:
+                    x["known_same"] = True
         except Exception:                                      # noqa: BLE001 読めなければ従来どおり
             pass
     return out
