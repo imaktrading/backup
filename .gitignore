@@ -121,6 +121,11 @@ iMakAdvisor/.decompile_tmp/
 
 # === 一時 scripts (アンダースコア始まり Python) ===
 **/_*.py
+# ★パッケージの __init__.py と、本番で使う _モジュール は載せる (2026-09-30)。
+#   5/3 にこの行を足して以来、カタログの取り込みコード9本が GitHub に1行も無かった
+#   (_raw_store.py は25ファイルが import / _pokemon_deck_codes.py は手で足した表)。
+#   本番で使う物は `git add -f` で載せてある。一時スクリプトは従来どおり載せない。
+!**/__init__.py
 
 # === decision logs (運用データ、再生成可) ===
 **/decision_logs/
