@@ -39,3 +39,22 @@ def test_generation_key_wins_over_sheet_key():
     # 控えの KEY はシートにある cert でも上書きする (c not in cert_to_key の条件が無い)
     assert "canonical_keys_for_csv(csv_path).items()" in src
     assert "c not in cert_to_key" not in src
+
+
+def test_sheet_key_is_aligned_to_the_reviewed_key():
+    def row(b, cert, key):
+        r = [""] * 40
+        r[D.B], r[D.CERT], r[D.KEY] = b, cert, key
+        return r
+    sheet = [["h"] * 40,
+             row("", "174855277", "one_piece_tcg:EB03-026"),       # 目視は _p1 → 直す
+             row("", "111", "one_piece_tcg:OP01-001"),              # 一致 → そのまま
+             row("820000000001", "222", "x:old")]                   # 出品済の行は触らない
+    gen = {"174855277": "one_piece_tcg:EB03-026_p1", "111": "one_piece_tcg:OP01-001", "222": "x:new"}
+    assert D.keys_to_fix(sheet, gen) == [(2, "174855277", "one_piece_tcg:EB03-026", "one_piece_tcg:EB03-026_p1")]
+
+
+def test_panel_runs_the_alignment_after_write_keys():
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(here, "control_panel.py"), encoding="utf-8").read()
+    assert src.index("--write-keys-from-csv") < src.index("--keys-from-canonical")

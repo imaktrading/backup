@@ -797,6 +797,47 @@ def canonical_keys_for_csv(csv_path):
         return {}
 
 
+def keys_to_fix(sheet_rows, gen_keys):
+    """目視で決めた KEY (出品データの控え) とシートの KEY が違う行 (純関数)。
+
+    ★2026-09-29 ユーザー「なんでそんな目視をする意味をなくすようなことをするのかな」:
+      シートの KEY は別の段 (重複くん write-keys) が cert から引き直して書いており、目視で決めた
+      KEY と食い違った (EB03-026_p1 と決めた行が EB03-026)。目視 = 出品データなので、控えに合わせる。
+      戻り: [(行番号, cert, 今のKEY, 正しいKEY)]。itemID がある行は、その CSV の行と同じ出品とは
+      限らないので触らない (出品済の行の KEY は出品した時の控えで決まっている)。
+    """
+    out = []
+    for i, r in enumerate(sheet_rows[1:], start=2):
+        c = _cell(r, CERT)
+        want = (gen_keys or {}).get(c)
+        if not (c and want) or want.startswith(("item:", "shops:")):
+            continue
+        if _cell(r, B):
+            continue
+        have = _cell(r, KEY)
+        if have != want:
+            out.append((i, c, have, want))
+    return out
+
+
+def write_keys_from_canonical(csv_path):
+    """シートの KEY を、目視で決めた KEY (CSV と同じ名前の .canonical.json) に合わせて書く (I/O)。"""
+    gen = canonical_keys_for_csv(csv_path)
+    if not gen:
+        print("  (目視で決めた KEY の控えが無いので skip)")
+        return 0
+    ws = sheet_io._product_ws()
+    fixes = keys_to_fix(ws.get_all_values(), gen)
+    for row, cert, have, want in fixes:
+        ws.update_cell(row, KEY + 1, want)
+        print(f"  ✏️ 行{row} cert={cert}: KEY {have or '(空)'} → {want} (目視で決めた KEY)")
+    print(f"■ 目視で決めた KEY をシートに合わせました: {len(fixes)}件 (控え {len(gen)}件)")
+    if fixes:
+        _ledger("keys_from_canonical", {"csv": os.path.basename(csv_path),
+                                        "fixed": [{"row": r, "cert": c, "was": h, "now": w} for r, c, h, w in fixes]})
+    return len(fixes)
+
+
 def pre_upload(csv_path, use_cache_only=True):
     """入稿前 CSV を live と突合。
 
@@ -1056,6 +1097,8 @@ def main():
         # ★判定できなかった時は非ゼロで返す (走行ログに「続行」と出て人が気づける)
         if pre_upload(args[args.index("--pre-upload") + 1]).get("blocked"):
             return 2
+    elif "--keys-from-canonical" in args:
+        write_keys_from_canonical(args[args.index("--keys-from-canonical") + 1])
     elif "--fill-keys" in args:
         fill_keys_from_titles(args[args.index("--fill-keys") + 1], dry_run="--dry" in args)
     else:

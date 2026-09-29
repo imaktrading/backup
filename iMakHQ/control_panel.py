@@ -717,6 +717,21 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
     except Exception as e:
         append_log_func(f"\n⚠️ dedupe hook (write-keys) 失敗: {type(e).__name__}: {e}\n")
         # 失敗しても listing 出力には影響なし
+    # ★2026-09-29 ユーザー「なんでそんな目視をする意味をなくすようなことをするのかな」:
+    #   上の write-keys は cert から KEY を引き直すので、目視で決めた KEY と食い違うことがある
+    #   (EB03-026_p1 と決めた行が EB03-026 → 出品中の _p1 と見分けられず2つ目が出品された)。
+    #   目視 = 出品データ。その控え (.canonical.json) にシートの KEY を合わせ直す
+    try:
+        _dgk = os.path.join(WORKSPACE, "iMakHQ", "tools", "dup_guard.py")
+        r = _run_step([sys.executable, _dgk, "--keys-from-canonical", latest_csv],
+                      capture_output=True, text=True, encoding="utf-8", errors="replace",
+                      timeout=180, env=env)
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode != 0 and r.stderr:
+            append_log_func(r.stderr)
+    except Exception as e:                                     # noqa: BLE001
+        append_log_func(f"\n⚠️ 目視で決めた KEY の書き直し 失敗(続行): {type(e).__name__}: {e}\n")
 
     # Step 4b-2: KEY 補完の取りこぼし救済 + 入稿前 重複ガード (2026-07-26)
     # - write-keys が skipped_no_resolution にする種別(DON!! カード等)は KEY が空のまま出品され、
