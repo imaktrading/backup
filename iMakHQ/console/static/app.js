@@ -335,7 +335,7 @@
     // ★2026-09-29 ユーザー「これに仕入れ待ち件数を表示を追加したら」: [取り込む] はここに1つだけ (常に)
     if (dj) chips.push([dj.n ? "warn" : "", "注文 仕入れ待ち <b>" + (dj.n == null ? "—" : dj.n) + "件</b>" +
                         (dj.note ? " · " + esc(dj.note).replace("最後の取り込み ", "最後の取り込み <b>") + "</b>" : " · 未取り込み"),
-                        jobBtn(dj, "取り込む")]);
+                        jobBtn(dj, "取り込む") + ' <a class="stlink" href="' + SALES_SHEET + '" target="_blank" rel="noopener">シート</a>']);
     $("today-strip").innerHTML = chips.concat(STRIP.errors || []).map(stChip).join("");
     var big = [];
     if (oj && oj.n) {
@@ -344,13 +344,7 @@
         '<span class="d">国・出品価格・仕入値つきの一覧をブラウザで開きます</span>' +
         '<span class="ugo">' + (oj.runnable ? jobBtn(oj, "オファー対応").replace("<button", '<button class="run hot"') : "") + "</span></div>");
     }
-    if (dj && dj.n) {
-      big.push('<div class="u"><span class="k">仕入れ待ち (売れた注文)</span>' +
-        '<span class="t"><b>' + num(dj) + "</b>件 まだ仕入れていません</span>" +
-        '<span class="d">仕入れたら販売実績シートでチェック</span>' +
-        '<span class="ugo">' +
-        '<a class="run hot" href="' + SALES_SHEET + '" target="_blank" rel="noopener">シートを開く</a></span></div>');
-    }
+    // ★2026-09-29 ユーザー「これ自体もいらんかな」: 仕入れ待ちの大きな枠はやめ、状態の1行 (件数・取り込む・シート) だけ
     $("today-urgent").innerHTML = big.join("");
   }
 

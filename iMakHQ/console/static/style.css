@@ -384,3 +384,6 @@ svg.agsp{display:block;width:120px;height:30px}
 .strip .st.crit i{background:var(--crit)}
 
 .urgent .ugo{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+
+.strip .st .stlink{font:600 11.5px var(--f-ui);border:1px solid var(--line-strong);color:var(--ink-2);border-radius:12px;padding:1px 9px;text-decoration:none}
+.strip .st .stlink:hover{border-color:var(--ai);color:var(--ai)}
