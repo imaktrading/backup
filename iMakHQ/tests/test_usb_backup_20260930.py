@@ -21,3 +21,8 @@ def test_plan_has_secrets_and_restore_kit(tmp_path, monkeypatch):
     monkeypatch.setattr(U, "DAILY", str(tmp_path / "daily"))
     rels = {r.replace("\\", "/") for _, r in U.plan()}
     assert rels == {"secrets/cred/k.txt", "secrets/sa.json", "restore_kit/README.md", "iMak_daily_20260930_0500.zip"}
+
+
+def test_gemini_key_is_listed():
+    """監査くんの Gemini 鍵もUSBに写す (コミット文だけで入っていなかった)。"""
+    assert any(p.endswith(r"iMakAudit\gemini_key.txt") for p in U.SECRETS)

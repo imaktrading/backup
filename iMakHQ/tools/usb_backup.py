@@ -4,10 +4,10 @@
 Google ドライブの毎朝の zip に入れていない物 (鍵・パスワード類) を含めて、USB だけに置く。
 USB を差したら1回走らせる:
 
-    python usb_backup.py            # D: に写す
-    python usb_backup.py --drive E
+    python usb_backup.py            # H: (BUFFALO iMak_BK) に写す
+    python usb_backup.py --drive D  # 予備の Verbatim
 
-写す物 (D:/iMak_usb_backup/<日付>/ の下):
+写す物 (H:/iMak_usb_backup/<日付>/ の下):
   secrets/      鍵・トークン・パスワード類 (クラウドには置かない)
   restore_kit/  予約タスクの控え・Python の部品一覧・復旧手順 (iMak_data/hq/restore_kit)
   最新の毎朝の zip (データ・カタログ DB・Claude の記憶)
@@ -26,7 +26,8 @@ import sys
 SECRETS = [r"C:\dev\iMak_data\credentials", r"C:\dev\iMak_data\secrets", r"C:\dev\iMak_data\secrets_backup",
            r"C:\dev\iMak\double-hold-421922-7c0d38d3f73d.json",          # Google スプシ用のサービスアカウント
            r"C:\dev\iMak\iMakeBayAPI\ebay_oauth_token*.json",
-           r"C:\dev\iMak\iMakTCG\API key.txt"]
+           r"C:\dev\iMak\iMakTCG\API key.txt",
+           r"C:\dev\iMak\iMakAudit\gemini_key.txt"]                     # 監査くんの二次監査
 RESTORE_KIT = r"C:\dev\iMak_data\hq\restore_kit"
 DAILY = r"G:\マイドライブ\iMak_backup\daily"
 KEEP = 3
@@ -65,7 +66,7 @@ def plan():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--drive", default="D")
+    ap.add_argument("--drive", default="H")
     a = ap.parse_args()
     root = f"{a.drive}:\\iMak_usb_backup"
     dest = os.path.join(root, datetime.date.today().strftime("%Y%m%d"))
