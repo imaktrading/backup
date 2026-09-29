@@ -29,6 +29,15 @@ JOBS = {
     "psawarm": os.path.join(TOOLS, "run_psa_cache_warm.bat"),
 }
 LOG = r"C:\dev\iMak\iMakHQ\review_logs\night_resume.log"
+# ★2026-09-29 ユーザー確定「夜だね」: 昼に PC が起動し直しても続きを走らせない (23:30 の定刻が続きを拾う)。
+#   9/29 は落ちるたびに昼間に4回再開し、ブラウザの自動操作が何時間も回っていた
+#   (メモリの不具合で様子見中 = 重い負荷をかけない運用と合わない)。
+NIGHT_FROM, NIGHT_UNTIL = 21, 7
+
+
+def is_night(hour):
+    """続きを走らせてよい時間か (純関数)。21時〜翌7時。"""
+    return hour >= NIGHT_FROM or hour < NIGHT_UNTIL
 
 
 def running_batches():
@@ -57,6 +66,10 @@ def main(argv):
     states = {job: NS.load(job) for job in JOBS}
     todo = plan(states, running_batches())
     lines = []
+    if todo and not is_night(NS._now().hour):
+        lines.append(f"{NS._now():%Y-%m-%d %H:%M:%S} [resume] 昼なので再開しません: {', '.join(todo)} "
+                     f"(夜の定刻に続きから走ります)")
+        todo = []
     for job in todo:
         st = states[job]
         done = sum(1 for v in (st.get("steps") or {}).values() if v.get("status") == "done")
@@ -65,7 +78,7 @@ def main(argv):
         if not dry:
             subprocess.Popen(["wscript.exe", "//nologo", RUN_MIN, JOBS[job]],
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    if not todo:
+    if not todo and not lines:
         lines.append(f"{NS._now():%Y-%m-%d %H:%M:%S} [resume] 途中で止まった夜間バッチはありません")
     for ln in lines:
         print(ln)
