@@ -785,6 +785,18 @@ def audit(refresh_titles=True):
             "unkeyed": len(unkeyed)}
 
 
+def canonical_keys_for_csv(csv_path):
+    """CSV と同じ名前の `.canonical.json` の {cert: KEY} (出品を作った時に決めた KEY)。無ければ {}。"""
+    base = re.sub(r"\.csv$", "", str(csv_path or ""), flags=re.I)
+    try:
+        with open(base + ".canonical.json", encoding="utf-8") as f:
+            d = json.load(f) or {}
+        by = d.get("by_cert") if isinstance(d, dict) else None
+        return {str(c): str(k) for c, k in (by or {}).items() if c and k}
+    except (OSError, ValueError):
+        return {}
+
+
 def pre_upload(csv_path, use_cache_only=True):
     """入稿前 CSV を live と突合。
 
@@ -807,6 +819,14 @@ def pre_upload(csv_path, use_cache_only=True):
         c, k = _cell(r, CERT), _cell(r, KEY)
         if c and k and not k.startswith(("item:", "shops:")):
             cert_to_key.setdefault(c, k)
+    # ★2026-09-29: 出品を作った時の KEY の控え (CSV と同じ名前の .canonical.json) も使う。
+    #   シートへの KEY 書込 (write-keys) が「決められず」で飛ばした行は、ここで KEY が引けず
+    #   タイトルの番号 (`t:OP09-051`) で照らしていた。出品中の側は KEY で並んでいるので
+    #   **番号どうしは永遠に一致しない** = 同じカードの2枚目が毎日素通り。
+    #   実害: OP09-051 が 9/24〜27 に4つ、OP02-120_p2 (ウタ) が 9/22・9/23 に2つ出品された。
+    for c, k in canonical_keys_for_csv(csv_path).items():
+        if c and k and c not in cert_to_key and not k.startswith(("item:", "shops:")):
+            cert_to_key[c] = k
     if use_cache_only:
         titles, skus, fresh = ensure_fresh_live_cache()
     else:
