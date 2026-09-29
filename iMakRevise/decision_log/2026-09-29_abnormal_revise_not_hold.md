@@ -23,4 +23,4 @@
 - test_abnormal_revise_yes_when_price_stale 新規。全199 pass。
 
 ## 残
-- シャンクス SEC の実 listing は翌日(9/30)の日次で自動的に値上げ追随される見込み。翌朝の結果で確認する。
+- シャンクス SEC: 9/29 09:54 に日次を手動実行 → GetItem で $132.98 → $366.98 / DDP-A-P22 反映を確認済。
