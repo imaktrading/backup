@@ -221,11 +221,116 @@ def local_agents(now=None):
         rows.append({"name": w.get("name") or s["name"] or sid[:8], "state": st, "now": s["now"],
                      "since": since.isoformat(timespec="seconds") if since else "",
                      "started": started.isoformat(timespec="seconds") if started else "",
-                     "url": s["url"], "act": s["act"],
+                     "url": s["url"], "act": s["act"], "cwd": w.get("cwd") or "",
                      "where": os.path.basename((w.get("cwd") or "").rstrip("\\/"))})
-    order = {"ask": 0, "busy": 1, "idle": 2}
-    rows.sort(key=lambda r: (order.get(r["state"], 3), r["name"]))
+    rows = merge_roster(rows, read_roster())
+    order = {"ask": 0, "busy": 1, "idle": 2, "off": 3}
+    rows.sort(key=lambda r: (order.get(r["state"], 4), r["name"]))
     return rows
+
+
+# ------------------------------------------------------------------ 閉じている担当を起動する (2026-09-29)
+# 担当の一覧 = デスクトップのフォルダ「Claude」のショートカット (ユーザーが普段ダブルクリックする物)。
+# 起動もそのショートカットを開くだけ = 手で押すのと同じ (claude_rc.cmd・版・窓の色がそのまま効く)。
+
+_ROSTER = {"at": 0.0, "rows": []}
+_ROSTER_PS = (
+    "[Console]::OutputEncoding = [Text.Encoding]::UTF8;"
+    "$d = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Claude';"
+    "$ws = New-Object -ComObject WScript.Shell;"
+    "@(Get-ChildItem $d -Filter *.lnk -ErrorAction SilentlyContinue | ForEach-Object {"
+    " $s = $ws.CreateShortcut($_.FullName);"
+    " [pscustomobject]@{label=$_.BaseName; args=$s.Arguments; lnk=$_.FullName} }) | ConvertTo-Json -Compress")
+
+
+def _norm(p):
+    return str(p or "").replace("/", "\\").rstrip("\\").lower()
+
+
+def parse_shortcut(label, args, lnk):
+    """ショートカット1本 → {key, label, folder, lnk}。claude_rc.cmd を呼ばない物は None (純関数)。"""
+    toks = str(args or "").split()
+    for i, t in enumerate(toks):
+        if t.lower().endswith("claude_rc.cmd") and i + 2 < len(toks):
+            name = label[len("Claude "):] if label.startswith("Claude ") else label
+            return {"key": toks[i + 2], "label": name, "folder": toks[i + 1].strip('"'), "lnk": lnk}
+    return None
+
+
+def read_roster(ttl=600):
+    """担当の一覧 (I/O・10分とっておく)。読めなければ []。"""
+    import time
+    if _ROSTER["rows"] and time.time() - _ROSTER["at"] < ttl:
+        return _ROSTER["rows"]
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", _ROSTER_PS], capture_output=True,
+                           text=True, encoding="utf-8", errors="ignore", timeout=20,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        got = json.loads(r.stdout or "[]")
+        got = got if isinstance(got, list) else [got]
+        rows = [x for x in (parse_shortcut(g.get("label", ""), g.get("args", ""), g.get("lnk", "")) for g in got) if x]
+    except Exception:                                          # noqa: BLE001 読めなければ起動ボタンを出さない
+        rows = []
+    _ROSTER.update(at=time.time(), rows=rows)
+    return rows
+
+
+def merge_roster(rows, roster):
+    """開いている窓に担当の key を付け、開いていない担当を「閉じている」行として足す (純関数)。"""
+    by_folder = {_norm(r["folder"]): r for r in roster}
+    seen = set()
+    out = []
+    for r in rows:
+        hit = by_folder.get(_norm(r.get("cwd")))
+        r = dict(r, key=hit["key"] if hit else "")
+        if hit:
+            seen.add(hit["key"])
+        out.append(r)
+    for r in roster:
+        if r["key"] not in seen:
+            out.append({"name": r["label"], "state": "off", "now": "", "since": "", "started": "",
+                        "url": "", "act": [], "cwd": r["folder"], "key": r["key"],
+                        "where": os.path.basename(r["folder"].rstrip("\\/"))})
+    return out
+
+
+def _rc_running(folder):
+    """この担当の起動用の窓 (cmd の claude_rc.cmd <folder>) が動いているか。調べられなければ True (起動しない側に倒す)。"""
+    ps = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8;"
+          "@(Get-CimInstance Win32_Process -Filter \"Name='cmd.exe'\" | ForEach-Object { $_.CommandLine }) | ConvertTo-Json -Compress")
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
+                           encoding="utf-8", errors="ignore", timeout=20,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        lines = json.loads(r.stdout or "[]")
+        lines = lines if isinstance(lines, list) else [lines]
+    except Exception:                                          # noqa: BLE001
+        return True
+    return rc_in_cmdlines(folder, lines)
+
+
+def rc_in_cmdlines(folder, cmdlines):
+    """cmd のコマンド行の中に、この担当の claude_rc.cmd 起動があるか (純関数)。"""
+    f = _norm(folder)
+    for c in cmdlines or []:
+        low = str(c or "").replace("/", "\\").lower()
+        if "claude_rc.cmd" in low and (f + " ") in (low + " "):
+            return True
+    return False
+
+
+def launch(key):
+    """担当 key のショートカットを開く。既に開いていれば開かない。戻り: (ok, 文)。"""
+    hit = [r for r in read_roster() if r["key"] == key]
+    if not hit:
+        return False, "その担当のショートカットが見つかりません (デスクトップのフォルダ「Claude」)"
+    running = {_norm(w.get("cwd")) for w in list_windows()}
+    # ★起動して20〜30秒は claude agents に出てこない → その間に2回押すと2つ開いた (2026-09-29 試験で実際に起きた)。
+    #   起動用の窓 (claude_rc.cmd <folder>) が居るかも見る
+    if _norm(hit[0]["folder"]) in running or _rc_running(hit[0]["folder"]):
+        return False, "%s はもう開いています (起動中を含む)" % hit[0]["label"]
+    os.startfile(hit[0]["lnk"])                                # noqa: S606 手で押すのと同じ
+    return True, "%s を起動しました" % hit[0]["label"]
 
 
 # ------------------------------------------------------------------ 別の PC と受け渡し

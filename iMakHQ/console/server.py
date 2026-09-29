@@ -1269,6 +1269,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, research_run(str(body.get("cmd") or "report")))
             except Exception as e:                       # noqa: BLE001
                 return self._json(200, {"ok": False, "error": str(e)})
+        if u.path == "/api/agents/launch":
+            # 閉じている担当を起動 (デスクトップ「Claude」のショートカットを開くだけ・2026-09-29)
+            try:
+                if TOOLS not in sys.path:
+                    sys.path.insert(0, TOOLS)
+                import agent_board as AB
+                ok, msg = AB.launch(str(body.get("key") or ""))
+                AGENTS["at"] = 0                         # 次の読込で一覧を取り直す
+                return self._json(200, {"ok": ok, "message": msg})
+            except Exception as e:                       # noqa: BLE001 画面に出して知らせる
+                return self._json(200, {"ok": False, "message": str(e)[:200]})
         if u.path == "/api/refresh":
             threading.Thread(target=refresh_counts, daemon=True).start()
             STATE["crew_at"] = 0                     # ホームは数え終わってから読む (refresh_counts)

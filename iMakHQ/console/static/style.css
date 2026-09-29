@@ -322,7 +322,12 @@ button.rw:disabled{opacity:.5;cursor:default}
 .agt{display:flex;align-items:baseline;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 12px}
 .agt b{font:500 20px var(--f-mono);font-variant-numeric:tabular-nums}
 .agt span{font-size:12px;color:var(--ink-2)}
-.agt.busy b{color:var(--good)} .agt.ask b{color:var(--warn)} .agt.idle b{color:var(--ink-3)}
+.agt.busy b{color:var(--good)} .agt.ask b{color:var(--warn)} .agt.idle b{color:var(--ink-3)} .agt.off b{color:var(--line-strong)}
+.ag.off .agbar{background:var(--line)}
+.ag.off .agnm{color:var(--ink-3)}
+.ag.off .agst{background:transparent;border:1px dashed var(--line-strong);color:var(--ink-3)}
+.ag.off .agnow{font-size:12px;color:var(--ink-3)}
+.ag.off .agside{justify-content:center}
 .agfresh{font:12px var(--f-mono);color:var(--ink-3);display:flex;align-items:center;gap:6px}
 .agfresh i{width:6px;height:6px;border-radius:50%;background:var(--good);display:inline-block}
 .aglanes{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}

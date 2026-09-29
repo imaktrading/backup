@@ -737,7 +737,15 @@
       '<path d="' + line + '" fill="none" stroke="var(--ai)" stroke-width="1.5" stroke-linejoin="round"/>' +
       '<circle cx="' + e[0] + '" cy="' + e[1] + '" r="2.6" fill="var(--ai)"/></svg>';
   }
-  function agRow(a, stale) {
+  function agRow(a, stale, canLaunch) {
+    if (a.state === "off") {                   // 閉じている担当 (デスクトップ「Claude」のショートカット)
+      return '<div class="ag off"><span class="agbar"></span>' +
+        '<span class="agtop"><span class="agnm">' + esc(a.name) + '</span><span class="agst"><span class="agdt"></span>閉じている</span>' +
+        '<span class="agwh">' + esc(a.where || "") + "</span></span>" +
+        '<span class="agnow">' + (canLaunch ? "起動すると、この担当の前回の会話の続きから開きます" : "この PC からは起動できません") + "</span>" +
+        '<span class="agside">' + (canLaunch ? '<button type="button" class="run aglaunch" data-key="' + esc(a.key) + '">起動</button>' : "") +
+        "</span></div>";
+    }
     var st = stale ? "idle" : a.state;
     var lead = st === "busy" ? "作業して " : st === "ask" ? "待たせて " : "止まって ";
     var tag = a.url ? "a" : "div";
@@ -751,24 +759,36 @@
       '<span class="agside"><span class="aglab">直近60分</span>' + agSpark(a.act) + "</span></" + tag + ">";
   }
   function paintAgents(d) {
-    var n = { busy: 0, ask: 0, idle: 0 };
+    var n = { busy: 0, ask: 0, idle: 0, off: 0 };
     (d.machines || []).forEach(function (m) { (m.rows || []).forEach(function (a) { if (!m.stale && n[a.state] != null) n[a.state]++; }); });
     $("tab-agents").textContent = n.ask ? String(n.ask) : "";
     $("tab-agents").className = "agdot" + (n.ask ? " on" : "");
     if (d.loading) { $("ag-fresh").textContent = "読込中…"; return; }
-    $("ag-tally").innerHTML = ["busy", "ask", "idle"].map(function (k) {
-      return '<div class="agt ' + k + '"><b>' + n[k] + "</b><span>" + AG_LAB[k] + "</span></div>";
+    $("ag-tally").innerHTML = ["busy", "ask", "idle", "off"].map(function (k) {
+      return '<div class="agt ' + k + '"><b>' + n[k] + "</b><span>" + (AG_LAB[k] || "閉じている") + "</span></div>";
     }).join("");
     $("ag-fresh").innerHTML = "<i></i>更新 " + esc(d.at || "") + (d.error ? " · 読めません: " + esc(d.error) : "");
     $("ag-lanes").innerHTML = (d.machines || []).map(function (m) {
       var note = m.error ? "読めません: " + m.error : m.stale ?
         (m.at ? "最後の書込 " + m.at.slice(11, 16) + " — 15分以上 届いていません" : "まだ一度も届いていません") : m.via;
-      var rows = (m.rows || []).length ? m.rows.map(function (a) { return agRow(a, m.stale); }).join("") :
+      var rows = (m.rows || []).length ? m.rows.map(function (a) { return agRow(a, m.stale, m.label === "この PC"); }).join("") :
         '<div class="empty">開いている窓はありません</div>';
       return '<section class="aglane"><header><h2>' + esc(m.label) + '<span class="aghost">' + esc(m.host) + "</span></h2>" +
         '<span class="agvia' + (m.stale ? " warn" : "") + '">' + esc(note) + "</span></header><div>" + rows + "</div></section>";
     }).join("");
   }
+  $("ag-lanes").addEventListener("click", function (ev) {
+    var b = ev.target.closest ? ev.target.closest(".aglaunch") : null;
+    if (!b) return;
+    ev.preventDefault();
+    b.disabled = true;
+    b.textContent = "起動中…";
+    post("/api/agents/launch", { key: b.dataset.key }).then(function (r) {
+      var d = r.j || {};
+      say(d.message || (d.ok ? "起動しました" : "起動できませんでした"));
+      setTimeout(refreshAgents, 8000);               // 窓が開いて一覧に出るまで少し待つ
+    });
+  });
   function refreshAgents() {
     return getJSON("/api/agents").then(function (d) { paintAgents(d); if (d.loading) setTimeout(refreshAgents, 2000); })
       .catch(function () {});

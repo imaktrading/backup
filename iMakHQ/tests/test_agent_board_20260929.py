@@ -83,3 +83,27 @@ def test_sheet_round_trip_and_stale():
     old = AB.from_sheet_rows(grid, NOW + dt.timedelta(minutes=30))
     assert old["stale"] is True
     assert AB.from_sheet_rows([], NOW)["stale"] is True
+
+
+def test_shortcut_to_roster_entry():
+    args = (r'-w new new-tab --title "ADV-web" -d "C:\dev\iMak\iMakAdvisor" cmd /k '
+            r'C:\dev\iMak_data\tools\claude_rc.cmd C:\dev\iMak\iMakAdvisor ADV')
+    r = AB.parse_shortcut("Claude ADV", args, "C:/x/Claude ADV.lnk")
+    assert r == {"key": "ADV", "label": "ADV", "folder": r"C:\dev\iMak\iMakAdvisor", "lnk": "C:/x/Claude ADV.lnk"}
+    assert AB.parse_shortcut("メモ帳", "notepad.exe", "x") is None
+
+
+def test_merge_roster_marks_open_and_adds_closed():
+    roster = [{"key": "HQ", "label": "HQ", "folder": r"C:\dev\iMak\iMakHQ", "lnk": "a"},
+              {"key": "ADV", "label": "ADV", "folder": r"C:\dev\iMak\iMakAdvisor", "lnk": "b"}]
+    rows = [{"name": "🤖HQ", "state": "busy", "cwd": "C:/dev/iMak/iMakHQ/"}]
+    out = AB.merge_roster(rows, roster)
+    assert out[0]["key"] == "HQ" and out[0]["state"] == "busy"
+    assert [(r["key"], r["state"]) for r in out[1:]] == [("ADV", "off")]
+
+
+def test_rc_in_cmdlines_sees_window_still_starting():
+    lines = [r"cmd /k C:\dev\iMak_data\tools\claude_rc.cmd C:\dev\iMak\iMakAdvisor ADV", None, "cmd /c foo.bat"]
+    assert AB.rc_in_cmdlines(r"C:\dev\iMak\iMakAdvisor", lines) is True
+    assert AB.rc_in_cmdlines(r"C:\dev\iMak\iMakAdv", lines) is False       # 途中まで同じ名前は別物
+    assert AB.rc_in_cmdlines(r"C:\dev\iMak\iMakHQ", lines) is False
