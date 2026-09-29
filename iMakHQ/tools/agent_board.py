@@ -329,7 +329,12 @@ def launch(key):
     #   起動用の窓 (claude_rc.cmd <folder>) が居るかも見る
     if _norm(hit[0]["folder"]) in running or _rc_running(hit[0]["folder"]):
         return False, "%s はもう開いています (起動中を含む)" % hit[0]["label"]
-    os.startfile(hit[0]["lnk"])                                # noqa: S606 手で押すのと同じ
+    # ★os.startfile だと Console サーバーの環境 (Claude から再起動した時は CLAUDE_CODE_CHILD_SESSION 等) を
+    #   そのまま引き継ぎ、開いた担当が「子の会話」扱いで会話を保存しなくなった (2026-09-29 ADV)。
+    #   エクスプローラーに開かせる = デスクトップでダブルクリックしたのと同じ環境になる
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("CLAUDE", "ANTHROPIC"))}
+    subprocess.Popen(["explorer.exe", hit[0]["lnk"]], env=env,
+                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     return True, "%s を起動しました" % hit[0]["label"]
 
 

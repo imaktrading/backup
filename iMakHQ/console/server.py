@@ -28,6 +28,12 @@ from urllib.parse import parse_qs, urlparse
 import version
 import watcher
 
+# ★2026-09-29: Claude の窓から restart.ps1 でサーバーを入れ替えると、その Claude の目印
+#   (CLAUDE_CODE_CHILD_SESSION 等 13個) をサーバーが引き継ぎ、ここから開いた担当 (ADV) が
+#   「子の会話」扱いになって会話を保存しなくなった。サーバーが起こす物に移さないよう、起動時に消す
+for _k in [k for k in os.environ if k.upper().startswith("CLAUDE")]:
+    os.environ.pop(_k, None)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 HQ = os.path.dirname(HERE)
 TOOLS = os.path.join(HQ, "tools")
