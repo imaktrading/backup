@@ -361,3 +361,21 @@ a.ag:hover .agopen{color:var(--ai);text-decoration:underline}
 .aglab{font-size:10.5px;color:var(--ink-3);letter-spacing:.04em}
 svg.agsp{display:block;width:120px;height:30px}
 @media (max-width:520px){ svg.agsp{width:84px} .agwh{display:none} }
+
+/* ---- 今日やること: 状態の1行 + 期限のある物 (2026-09-29 見本 U7fWjFcbdRoKcnL2rfz5fV) ---- */
+.strip{display:flex;flex-wrap:wrap;gap:8px}
+.strip .st{display:inline-flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:4px 12px 4px 10px;font-size:12.5px;color:var(--ink-2)}
+.strip .st i{width:8px;height:8px;border-radius:50%;background:var(--good);flex:none}
+.strip .st.warn i{background:var(--warn)} .strip .st.info i{background:var(--ink-3)}
+.strip .st b{color:var(--ink);font-weight:600}
+.strip .st button{font:600 11.5px var(--f-ui);border:1px solid var(--ai);background:transparent;color:var(--ai);border-radius:12px;padding:1px 9px;cursor:pointer}
+.strip .st button:disabled{opacity:.45;cursor:default}
+.urgent{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.urgent:empty{display:none}
+.urgent .u{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:12px;padding:14px 16px;display:grid;grid-template-columns:1fr auto;gap:4px 14px;align-items:center}
+.urgent .k{font-size:11.5px;color:var(--ink-3);letter-spacing:.04em}
+.urgent .t{font:700 16px var(--f-head)}
+.urgent .t b{font:600 22px var(--f-mono);margin-right:2px}
+.urgent .d{grid-column:1;font-size:12.5px;color:var(--ink-2)}
+.urgent .ugo{grid-row:1/4;grid-column:2}
+.urgent a.run{text-decoration:none;display:inline-block}

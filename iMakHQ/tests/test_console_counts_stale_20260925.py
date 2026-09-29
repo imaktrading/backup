@@ -20,8 +20,10 @@ def test_counts_timeout_has_room():
 def test_stale_counts_are_shown_loudly():
     js = open(os.path.join(HQ, "console", "static", "app.js"), encoding="utf-8").read()
     html = open(os.path.join(HQ, "console", "static", "index.html"), encoding="utf-8").read()
-    assert 'id="counts-alert"' in html
-    assert "counts-alert" in js and "件数が古い" in js
+    # ★2026-09-29 ユーザー「件数が古いと表示されても、何をしたらいいのかわからない」で形を変えた:
+    #   古い・失敗した時は開いた時に1回だけ自動で数え直し、それでもだめな時だけ状態の1行にボタンを出す
+    assert 'id="today-strip"' in html
+    assert "autoRecounted" in js and 'post("/api/refresh")' in js and "数え直せませんでした" in js
 
 
 def test_catalog_variants_are_memoized():

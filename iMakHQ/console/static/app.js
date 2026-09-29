@@ -46,6 +46,10 @@
   var STATE_LABEL = { todo: "要対応", night: "夜間で自動", hold: "止めている", done: "残りなし", error: "数えられない", unknown: "未集計" };
 
   var jobs = {}, jobList = [], buttons = [], running = null, logAfter = 0, toastTimer, drawerHidden = true, schLoaded = false;
+  // 今日やることの「状態の1行」と「期限のある物」(2026-09-29)。各所が材料を入れ、renderStrip が描く
+  var STRIP = { counts: null, night: null, watch: null, errors: [], offer: null, order: null }, autoRecounted = false;
+  var SALES_SHEET = ["https:", "", "docs.google.com", "spreadsheets", "d",   // 販売実績シート (// を文字列に書かない)
+                     "1MufEUweIJcLv-NwT3KZsEJ_k_yl1rKryaqBZjUH7c2U", "edit#gid=1814510799"].join("/");
 
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
@@ -169,18 +173,13 @@
       '<div class="rows" style="border-top:1px solid var(--line)">' + rowsFor(ROWS.shelf) + "</div>";
     // ★2026-09-19: オファーの件数を段の見出しに出す (来ているのに出ていなかった)。
     var oj = job("offer_calc");
-    var ot = oj ? (oj.state === "error" ? "数えられない"
-      : (oj.n ? "来ている <b>" + num(oj) + "</b>件" : "来ていない")) : "件数なし";
-    // ★2026-09-22 ユーザー「オファーは在庫メンテじゃなくて今日やることに。監視くん-巡回状況の上に同じ形で」
-    $("offer-line").innerHTML = "オファー — " + ot;
-    $("offerbar").className = "watch offer" + (oj && oj.n ? " on" : "");
+    // ★2026-09-29: オファーと注文は「今日やること」の状態の1行 + 1件以上の時だけ大きな枠 (renderStrip)。
+    //   ボタン一式はここ (在庫メンテの「オファー・注文」) に置く
+    STRIP.offer = oj;
+    STRIP.order = job("order_sync");
     $("offer-rows").innerHTML = rowsFor(ROWS.offer);
-    // ★2026-09-24 ユーザー「出品くんにボタンを作って、押したら取り込むでいい。夜間自動は要らない」
-    var dj = job("order_sync");
-    $("order-line").innerHTML = "仕入れ待ち — " + (dj && dj.n != null ? (dj.n ? "<b>" + num(dj) + "</b>件" : "なし") : "未取り込み") +
-      (dj && dj.note ? " <small>(" + esc(dj.note) + ")</small>" : "");
-    $("orderbar").className = "watch offer" + (dj && dj.n ? " on" : "");
     $("order-rows").innerHTML = rowsFor(ROWS.order);
+    renderStrip();
     $("fix-rows").innerHTML = rowsFor(ROWS.fix);
 
     var todo = h.todo + r.todo + todoOf(sl).length;
@@ -320,6 +319,38 @@
     return label.replace(/^(PSA|UT|くじ|一番くじ)\s*/, "").replace(/(補URL|再仕入れ)\s*[①②③④⑤]\s*/, "").trim() || label;
   }
 
+  // ---------------------------------------------------------------- 今日: 状態の1行 + 期限のある物
+  function stChip(c) {
+    return c ? '<span class="st ' + (c[0] || "") + '"><i></i>' + c[1] + (c[2] ? " " + c[2] : "") + "</span>" : "";
+  }
+  function jobBtn(j, text) {                       // 小さなボタン (押すと普通の作業と同じく走る)
+    return j && j.runnable ? '<button type="button" data-kind="' + esc(j.kind) + '"' + (j.i != null ? ' data-i="' + j.i + '"' : "") +
+      (running && running.running ? " disabled" : "") + ">" + esc(text) + "</button>" : "";
+  }
+  function renderStrip() {
+    if (!$("today-strip")) return;
+    var oj = STRIP.offer, dj = STRIP.order, chips = [STRIP.counts, STRIP.night, STRIP.watch];
+    if (oj) chips.push(oj.state === "error" ? ["warn", "オファー 数えられない", ""]
+                       : [oj.n ? "warn" : "", "オファー <b>" + (oj.n || 0) + "件</b>", ""]);
+    if (dj) chips.push(["", "注文 " + (dj.note ? esc(dj.note).replace("最後の取り込み ", "最後の取り込み <b>") + "</b>" : "未取り込み"),
+                        jobBtn(dj, "取り込む")]);
+    $("today-strip").innerHTML = chips.concat(STRIP.errors || []).map(stChip).join("");
+    var big = [];
+    if (oj && oj.n) {
+      big.push('<div class="u"><span class="k">オファー (返事の期限は受信から約1日)</span>' +
+        '<span class="t"><b>' + num(oj) + "</b>件 来ています</span>" +
+        '<span class="d">国・出品価格・仕入値つきの一覧をブラウザで開きます</span>' +
+        '<span class="ugo">' + (oj.runnable ? jobBtn(oj, "オファー対応").replace("<button", '<button class="run hot"') : "") + "</span></div>");
+    }
+    if (dj && dj.n) {
+      big.push('<div class="u"><span class="k">仕入れ待ち (売れた注文)</span>' +
+        '<span class="t"><b>' + num(dj) + "</b>件 まだ仕入れていません</span>" +
+        '<span class="d">仕入れたら販売実績シートでチェック</span>' +
+        '<span class="ugo"><a class="run hot" href="' + SALES_SHEET + '" target="_blank" rel="noopener">シートを開く</a></span></div>');
+    }
+    $("today-urgent").innerHTML = big.join("");
+  }
+
   // ---------------------------------------------------------------- 置き場が無いボタン
   function paintLeftovers() {
     var placed = {};
@@ -353,7 +384,21 @@
     var cw = "";
     if (!d.counting && d.counts_error) cw = "件数を数え直せませんでした (" + esc(String(d.counts_error).slice(0, 80)) + ")。表示は " + at + " の古い件数です";
     else if (!d.counting && ageH > 3) cw = "表示の件数は " + at + " のものです (" + Math.floor(ageH) + "時間前)。「残件を数え直す」を押してください";
-    $("counts-alert").innerHTML = cw ? '<div class="alert crit" role="status"><b>件数が古い</b><span>' + cw + "</span></div>" : "";
+    // ★2026-09-29 ユーザー「件数が古いと表示されても、何をしたらいいのかわからない」:
+    //   古い・失敗した時は **開いた時に1回だけ自動で数え直す**。それでも古い時だけボタンを出す
+    if (cw && !autoRecounted && !d.counting) {
+      autoRecounted = true;
+      post("/api/refresh").then(function () { setTimeout(refreshJobs, 4000); });
+      STRIP.counts = ["info", "件数を数え直しています…", ""];
+    } else if (d.counting) {
+      STRIP.counts = ["info", "件数を数え直しています…", ""];
+    } else if (cw) {
+      STRIP.counts = ["warn", "件数 <b>" + esc(at) + "</b> 時点 (数え直せませんでした)",
+                      '<button type="button" data-act="refresh">もう一度</button>'];
+    } else {
+      STRIP.counts = ["", "件数 <b>" + esc(at) + "</b> 時点", ""];
+    }
+    renderStrip();
     $("btn-refresh").disabled = !!d.counting;
     $("btn-refresh").textContent = d.counting ? "数え直し中…" : "残件を数え直す";
     if (!jobList.length) return;
@@ -436,9 +481,12 @@
                   + " — 今夜また走ります" + (nightN ? " (夜が担当する残り " + nightN + "件)" : "")]);
     }
     (h.errors || []).forEach(function (e) { notes.push(["", "読込", e]); });
-    $("alerts").innerHTML = notes.map(function (x) {
-      return '<div class="alert ' + x[0] + '" role="status"><b>' + esc(x[1]) + "</b><span>" + x[2] + "</span></div>";
-    }).join("");
+    // ★2026-09-29 ユーザー「夜間バッチ 途中で止まったと言われても」: 自分がやることの有無まで書く
+    STRIP.night = n.done ? ["", "夜の処理 完走 <b>" + hm(n.end) + "</b>", ""]
+      : ["info", "夜の処理: " + (n.last_step ? esc(n.last_step) + " の途中で止まった" : "途中で止まった") +
+         " → <b>残りは今夜やります</b> (何もしなくてよい)", ""];
+    STRIP.errors = (h.errors || []).map(function (e) { return ["warn", "読込: " + esc(e), ""]; });
+    renderStrip();
   }
 
   function paintTasks(d) {
@@ -511,10 +559,9 @@
   function paintWatcher(d) {
     var rows = d.rows || [];
     var run = rows.filter(function (r) { return r.running; })[0];
-    $("watch").hidden = !rows.length;
-    $("watch").className = "watch" + (run ? " on" : "");
-    $("watch-line").textContent = "監視くん — " + (d.line || "");
-    $("watch-sub").textContent = d.at ? "(" + d.at + " 時点)" : "";
+    // ★2026-09-29: 今日やることでは状態の1行に小さく (巡回表は「定期」タブ)
+    STRIP.watch = rows.length || d.line ? [run ? "warn" : "", "監視くん " + esc((d.line || "").replace(/^監視くん\s*[—-]\s*/, "")), ""] : null;
+    renderStrip();
     $("watch-rows").innerHTML = rows.length ? rows.map(function (r) {
       var now = r.running
         ? "巡回中 " + r.started + "〜" + (r.eta ? " · 終了めやす " + r.eta + " (あと約" + r.left_min + "分)" : "")
@@ -608,6 +655,10 @@
         setTimeout(refreshJobs, 300);
       });
     });
+  });
+  $("today-strip").addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("button[data-act=refresh]") : null;
+    if (b) $("btn-refresh").click();
   });
   $("btn-refresh").addEventListener("click", function () {
     post("/api/refresh").then(function () {

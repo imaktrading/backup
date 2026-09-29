@@ -48,13 +48,10 @@
         <div><label>今の出品くんで押す</label><b id="kp-else">—</b></div>
       </div>
     </div>
-    <div id="counts-alert"></div>
-    <div id="alerts"></div>
-    <div class="watch offer" id="offerbar"><span class="dot"></span><b id="offer-line">オファー — 確認中…</b><span id="offer-sub">受けるか決める / ミラーにも交渉を付ける</span></div>
-    <div class="rows" id="offer-rows"></div>
-    <div class="watch offer" id="orderbar"><span class="dot"></span><b id="order-line">仕入れ待ち — 確認中…</b><span id="order-sub">押すと eBay の注文を販売実績シートに取り込む / 仕入れたらシートでチェック</span></div>
-    <div class="rows" id="order-rows"></div>
-    <div class="watch" id="watch" hidden><span class="dot"></span><b id="watch-line">巡回を確認中…</b><span id="watch-sub"></span></div>
+    <!-- 2026-09-29 ユーザー合意 (見本 https://claude.ai/artifact/U7fWjFcbdRoKcnL2rfz5fV):
+         状態は1行に小さく (何もしなくてよい物はそう書く) / 期限のある物は1件以上の時だけ大きく -->
+    <div class="strip" id="today-strip"><span class="st info"><i></i>読込中…</span></div>
+    <div class="urgent" id="today-urgent"></div>
     <div id="today-lanes"><div class="empty">件数を読込中…</div></div>
     <p class="note" id="today-wait"></p>
   </div>
@@ -102,6 +99,11 @@
     <section class="group" id="g-fix" style="--gc:var(--g-fix)">
       <div class="gh"><h3>在庫あり・直す</h3><span class="target">出品21日以上</span><span class="purpose">見られていない・買われない出品の 値段とタイトルを直す</span><span class="tot">件数なし</span></div>
       <div class="rows" id="fix-rows"></div>
+    </section>
+    <section class="group" id="g-offer" style="--gc:var(--p-other)">
+      <div class="gh"><h3>オファー・注文</h3><span class="purpose">件数がある日は「今日やること」の上に大きく出ます。ミラーの広告・オファーは毎晩自動</span></div>
+      <div class="rows" id="offer-rows"></div>
+      <div class="rows" id="order-rows"></div>
     </section>
     <section class="group" id="g-other" hidden style="--gc:var(--p-other)">
       <div class="gh"><h3>ここに置き場が無いボタン</h3><span class="purpose">出品くんに在るのに、この画面のどこにも出していないもの</span></div>
