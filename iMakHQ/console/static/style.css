@@ -382,3 +382,5 @@ svg.agsp{display:block;width:120px;height:30px}
 
 .strip .st.crit{border-color:var(--crit);background:var(--crit-soft);color:var(--ink)}
 .strip .st.crit i{background:var(--crit)}
+
+.urgent .ugo{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}

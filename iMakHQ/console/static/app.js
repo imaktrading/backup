@@ -346,7 +346,9 @@
       big.push('<div class="u"><span class="k">仕入れ待ち (売れた注文)</span>' +
         '<span class="t"><b>' + num(dj) + "</b>件 まだ仕入れていません</span>" +
         '<span class="d">仕入れたら販売実績シートでチェック</span>' +
-        '<span class="ugo"><a class="run hot" href="' + SALES_SHEET + '" target="_blank" rel="noopener">シートを開く</a></span></div>');
+        // ★2026-09-29 ユーザー「そのボタンをシートを開くの横に」: 仕入れたらシートでチェック → 取り込むで件数を更新
+        '<span class="ugo">' + jobBtn(dj, "取り込む").replace("<button", '<button class="run"') +
+        '<a class="run hot" href="' + SALES_SHEET + '" target="_blank" rel="noopener">シートを開く</a></span></div>');
     }
     $("today-urgent").innerHTML = big.join("");
   }
