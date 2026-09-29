@@ -284,3 +284,11 @@
 - 決定: 9/12 /doctor で削除した古い(実体と乖離した)ディレクトリツリー27行を、レビュー期間を経て commit
 - 変更: CLAUDE.md (dir ツリー27行削除、~176 est tokens/session 削減)
 - 検証: git diff で27行削除のみ・他ルール(worktree/役割/Phase計画/正確性原則)は不変を確認
+
+## 2026-09-29
+
+### write-keys-from-csv は目視で決めた KEY (.canonical.json) を優先 (HQ依頼・中)
+
+- 決定: 引き直した KEY で上書きしない。`<CSV>.canonical.json` の by_cert にある cert はその KEY を写す。控え無し/壊れ → 従来経路 (fail-closed)。実害は 2026-09-29 cert 174855277/169977472 の `_p1` 落ちで同カード2つ目出品 (820185511332 END済)
+- 変更: dedupe/csv_write_keys.py (load_reviewed_keys 追加 + write_canonical_key_to_high で控え優先、採用件数カウンタ3種) / dedupe/checker.py (採用件数ログ1行) / tests/test_write_keys_reviewed_key_20260929.py 新規4件。commit 653fa4a7
+- 検証: offline 480件 緑。控え優先/控えに無い cert/控え無し/壊れた控え の4ケース pass。HQ 側 --keys-from-canonical は二重の網として存置 (HQ 合意済)
