@@ -48,3 +48,17 @@ def test_direction_new_flip_and_unknown():
     ref = {1: (b"p", b"A", b"ja")}                                    # 2 は2つ前に無い
     got = W.classify(W.bitflips(old, new, cols), old, new, [ref], cols)
     assert {f["rowid"]: f["broken"] for f in got} == {1: "now", 2: "unknown"}
+
+
+def test_second_request_same_day_when_content_differs(tmp_path, monkeypatch):
+    """2026-09-30: 朝の1通を閉じた後に骨組みが壊れたが、同じ日の名前が在るので依頼が出なかった。"""
+    monkeypatch.setattr(W, "REQ_DIR", str(tmp_path))
+    a = {"quick_check": "ok", "flips": [{"rowid": 1, "column": "x", "offsets": [0], "was": "a", "now": "b",
+                                         "broken": "now"}], "pair": ["p", "q"], "refs": []}
+    p1 = W._write_request(a)
+    os.rename(p1, p1.replace(".md", "_processed.md"))
+    assert W._write_request(a) == ""                                  # 同じ中身は2通目を出さない
+    b = {"quick_check": "*** broken", "flips": [], "pair": ["p", "q"], "refs": []}
+    p2 = W._write_request(b)
+    assert p2.endswith("_auto_2.md")
+    assert W._write_request(b) == ""

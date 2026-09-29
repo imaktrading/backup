@@ -110,14 +110,25 @@ def quick_check(path=DB):
 
 def _write_request(st):
     today = datetime.date.today().isoformat()
-    path = os.path.join(REQ_DIR, f"{today}_catalog_integrity_auto.md")
-    if os.path.exists(path) or os.path.exists(path.replace(".md", "_processed.md")):
+    # 同じ中身の2通目は置かない。中身が違えば _2, _3 … で置く
+    # (2026-09-30: 朝の1通を閉じた後に DB の骨組みが壊れたが、同じ日の名前が在るので黙っていた)
+    sig = f"quick_check={st['quick_check']!r} flips={sorted((f['rowid'], f['column']) for f in st['flips'])!r}"
+    for n in range(1, 20):
+        stem = f"{today}_catalog_integrity_auto" + (f"_{n}" if n > 1 else "")
+        path = os.path.join(REQ_DIR, stem + ".md")
+        seen = [q for q in (path, path.replace(".md", "_processed.md")) if os.path.exists(q)]
+        if not seen:
+            break
+        if any(sig in open(q, encoding="utf-8").read() for q in seen):
+            return ""
+    else:
         return ""
     lines = [f"# 自動検出: カタログ DB の化け・壊れ ({today})", "",
              f"- 依頼日: {today} / 依頼者: HQ (data_integrity_watch.py が自動で出した) / 緊急度: 高 / フェーズ: 実装 (復元)",
              "- 種別: PC のメモリまわりの不具合による化け。値の判断ではなく、化ける前の値への復元", "",
              "## 既に判明していること (再調査するな)", "",
              f"- quick_check: {st['quick_check']}",
+             f"- 見張りの印 (同じ中身の2通目を出さない用): `{sig}`",
              f"- 比べたバックアップ: {os.path.basename(st['pair'][0])} → {os.path.basename(st['pair'][1])}",
              f"- それより前のバックアップ {len(st.get('refs', []))}本と比べて向きを決めた。前のどれかに今の値があれば"
              "「直った分」として外してある。「今が化けた」= 2つ前と前が同じで今だけ違う / 「向き不明」= それ以外",
