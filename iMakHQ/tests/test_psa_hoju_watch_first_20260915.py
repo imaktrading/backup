@@ -38,7 +38,9 @@ def test_more_watchers_first_within_same_backup_count():
     ])
     ids = [t["itemID"] for t in H.select_backfill_targets(vals, max_backups=5,
                                                           watch={"222": 50, "111": 2})]
-    assert ids == ["333", "222", "111"], ids           # 丸腰が先、その次にウォッチ50
+    # ★2026-09-29 ユーザー確定で並びが「売れた数 → ウォッチ → 補が少ない順 → 新規」に変わった。
+    #   ウォッチ50 が丸腰より先、ウォッチ2 がその次、ウォッチ0 の丸腰が最後
+    assert ids == ["222", "111", "333"], ids
 
 
 def test_same_watch_keeps_newest_first():

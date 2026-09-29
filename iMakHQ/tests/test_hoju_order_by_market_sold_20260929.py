@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""補URL③ の目視の並び: 同じ補の本数の中では 市場で売れた数 → ウォッチ → 新規 (2026-09-29 ユーザー確定)。"""
+"""補URL③ の目視の並び: 市場で売れた数 → ウォッチ → 補が少ない順 → 新規 (2026-09-29 ユーザー確定)。"""
 import os
 import sys
 
@@ -18,19 +18,15 @@ def test_sold_by_key_matches_dash_and_slash_forms():
     assert got == {"pokemon_tcg:SV2a-151": 5, "pokemon_tcg:M2a-230": 7}   # 1文字の弾コードは番号/総数で当てない
 
 
-def test_market_sold_orders_within_same_backup_count():
-    targets = [
-        {"key": "a", "n_backups": 1, "listed_at": "2026-09-29", "row": 2},
-        {"key": "b", "n_backups": 1, "listed_at": "2026-09-01", "row": 3},
-        {"key": "c", "n_backups": 0, "listed_at": "2026-09-01", "row": 4},
-    ]
-    out = sorted(targets, key=lambda t: (t["listed_at"], -t["row"]), reverse=True)
-    sold = {"b": 40}
-    for t in out:
-        t["market_sold"] = sold.get(t["key"], 0)
-    out.sort(key=lambda t: -t["market_sold"])
-    out.sort(key=lambda t: t["n_backups"])
-    assert [t["key"] for t in out] == ["c", "b", "a"]    # 丸腰が先、同じ本数なら売れた数
+def test_order_is_sold_then_watch_then_backups_then_new():
+    # 渡す時点で新規優先 (a が一番新しい)
+    out = [{"key": "a", "itemID": "1", "n_backups": 0},
+           {"key": "b", "itemID": "2", "n_backups": 3},
+           {"key": "c", "itemID": "3", "n_backups": 0},
+           {"key": "d", "itemID": "4", "n_backups": 2}]
+    got = H.order_targets(out, 0, watch={"4": 5}, market_sold={"b": 40})
+    # 売れた b が予備3本でも先頭 → ウォッチの d → 残りは予備が少ない順 (同数は新規優先で a, c)
+    assert [t["key"] for t in got] == ["b", "d", "a", "c"]
 
 
 def test_select_backfill_targets_uses_market_sold():

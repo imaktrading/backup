@@ -150,6 +150,27 @@ def load_market_sold(keys):
         return {}
 
 
+def order_targets(out, min_backups=0, watch=None, market_sold=None):
+    """補URL③の目視に出す順に並べ替える (純関数, test可)。out は新規優先で並んでいる前提。"""
+    # ★2026-09-29 ユーザー確定: 並びは **市場で売れた数 → ウォッチ → 補が少ない順 → 新規**。
+    #   安い予備が入ると仕入値が下がり値段も下がる = 値下げが一番効くのは売れるカード。
+    #   丸腰でも売れないカードは、切れて取り下げになっても失う物が小さい。
+    #   (旧: 2026-09-05 補が少ない順を一番上 / 2026-09-15 同じ本数の中でウォッチ順)
+    #   安定ソートなので、後に並べた物ほど強い: 新規 → 補の本数 → ウォッチ → 売れた数。
+    # ★2026-09-15: 入れ替え (補4本以上) は本数で並べない。どれも「1本切れても死なない」状態。
+    if min_backups < CONFIRM_MAX_BACKUPS:
+        out.sort(key=lambda t: t["n_backups"])
+    if watch:
+        for t in out:
+            t["watch"] = watch.get(t["itemID"], 0)
+        out.sort(key=lambda t: -t["watch"])
+    if market_sold:
+        for t in out:
+            t["market_sold"] = market_sold.get(t.get("key"), 0)
+        out.sort(key=lambda t: -t["market_sold"])
+    return out
+
+
 def select_backfill_targets(rows2d, max_backups=1, min_backups=0, watch=None, market_sold=None):
     """HIGH rows2d(header含む) → 補が min_backups以上 max_backups未満 の live PSA 行。純関数。
 
@@ -204,25 +225,7 @@ def select_backfill_targets(rows2d, max_backups=1, min_backups=0, watch=None, ma
     #   同じ補の本数の中では **ウォッチの多い出品を先**に出す (新規優先はその次)。
     #   見つけた安い仕入元は監視くんの最安 (M) に入り、値段が下がる = 欲しい人が居る出品ほど効く。
     #   実測 (9/15 ファネル): 落とす候補の PSA 177件のうちウォッチ3以上が16件 (最多はブラッキー ex の50)。
-    if watch:
-        for t in out:
-            t["watch"] = watch.get(t["itemID"], 0)
-        out.sort(key=lambda t: -t["watch"])
-    # ★2026-09-29 ユーザー確定「売れた実績の多いカードを先に」: 予備が効くのは注文が来て買う時
-    #   = 売れるカードほど早く要る。ウォッチより確かな目印なので、同じ補の本数の中では
-    #   **市場で売れた数 → ウォッチ → 新規** の順。台帳に無いカードは 0 扱い (今までどおりの並び)。
-    if market_sold:
-        for t in out:
-            t["market_sold"] = market_sold.get(t.get("key"), 0)
-        out.sort(key=lambda t: -t["market_sold"])
-    # ★2026-09-05: **補が少ない順**を上に置く (安定ソートなので同数の中は新規優先のまま)。
-    #   目視の対象を満杯未満まで広げたので、これが無いと 補4本の出品が
-    #   丸腰(補0本)より先に出てしまう。丸腰の方が死ぬ。
-    # ★2026-09-15: 入れ替え (補4本以上) は本数で並べない。どれも「1本切れても死なない」状態で、
-    #   目的は安い仕入元に替えること = ウォッチの多い出品から見る (実測: ウォッチ10のカビゴンが補5本で後ろに居た)。
-    if min_backups < CONFIRM_MAX_BACKUPS:
-        out.sort(key=lambda t: t["n_backups"])
-    return out
+    return order_targets(out, min_backups, watch, market_sold)
 
 
 def watch_by_item_from_rows(rows):
