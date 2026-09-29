@@ -164,15 +164,16 @@ class TestShouldRevise:
         assert not ok and reason == "no_cost"
 
     def test_abnormal_delta_mismatch(self):
-        # AH=1000 → N=4000 (+300%) で eBay 実価格が N 計算値と不一致 → abnormal (scrape 誤り疑い)
+        # AH=1000 → N=4000 (+300%) で eBay 実価格が N 計算値と不一致
+        # 2026-09-29: 保留やめ → 価格更新する (放置=安値で売れて赤字 を回避) + is_abnormal で要目視
         ok, reason, extras = should_revise(
             item_id=ITEM_ID, sold_flag="", n_jpy=4000, ah_jpy=1000,
             current_usd=10, current_policy="DDP-A-P01",
             v7_usd=99, v7_policy="DDP-A-P09",  # eBay($10) ≠ N計算値($99)
             abnormal_delta_threshold=200,
         )
-        assert not ok and reason == "abnormal_delta"
-        assert extras["is_abnormal"] is True
+        assert ok and reason == "abnormal_delta"  # 価格更新する (旧: not ok で保留)
+        assert extras["is_abnormal"] is True       # ただし要目視 alert に載る
         assert extras["delta_pct"] == 300.0
 
     def test_abnormal_delta_reconciled(self):
@@ -188,7 +189,7 @@ class TestShouldRevise:
         assert extras["delta_pct"] == 300.0
 
     def test_abnormal_delta_not_in_snapshot(self):
-        # 急騰だが snapshot 不在 → 整合確認できず fail-closed で abnormal
+        # 急騰だが snapshot 不在 = 取下げ済で revise 先が無い → skip (2026-09-29: not_in_snapshot)
         ok, reason, extras = should_revise(
             item_id=ITEM_ID, sold_flag="", n_jpy=4000, ah_jpy=1000,
             current_usd=None, current_policy=None,
@@ -196,8 +197,7 @@ class TestShouldRevise:
             in_snapshot=False,
             abnormal_delta_threshold=200,
         )
-        assert not ok and reason == "abnormal_delta"
-        assert extras["is_abnormal"] is True
+        assert not ok and reason == "not_in_snapshot"  # revise 先が無いので skip
 
     def test_no_snapshot(self):
         # current_usd/policy 両方 None
@@ -251,14 +251,16 @@ class TestShouldRevise:
         assert ok and reason == "policy_change"
 
     def test_abnormal_takes_priority_over_diff(self):
-        """異常 delta が price_diff/policy_change より優先される"""
-        ok, reason, _ = should_revise(
+        """異常 delta は reason=abnormal_delta で分類される (price_diff より優先)。
+        2026-09-29: 保留やめ → 価格更新する (ok=True) が reason は abnormal_delta のまま。"""
+        ok, reason, extras = should_revise(
             item_id=ITEM_ID, sold_flag="", n_jpy=4000, ah_jpy=1000,  # +300% (異常)
             current_usd=10, current_policy="OLD",
             v7_usd=99, v7_policy="DDP-A-P10",  # diff あり
             abnormal_delta_threshold=200,
         )
-        assert not ok and reason == "abnormal_delta"
+        assert ok and reason == "abnormal_delta"
+        assert extras["is_abnormal"] is True
 
     def test_official_sheet_no_url_still_eligible(self):
         """公式 sheet (URL 列なし) でも ItemID + N があれば eligible (= 2026-05-22 公式対応)"""
@@ -354,6 +356,19 @@ class TestDetectCandidates:
         assert len(c) == 1
         assert c[0].is_abnormal is False
         assert c[0].delta_pct < 0
+
+    def test_abnormal_revise_yes_when_price_stale(self):
+        """2026-09-29: 急騰 + eBay価格が古い → 価格更新する (ok=True) + is_abnormal で要目視。
+        旧価格のまま放置 (= 安値で売れて赤字) を防ぐため、保留やめて revise 側に倒した。"""
+        ok, reason, extras = should_revise(
+            item_id=ITEM_ID, sold_flag="", n_jpy=29999, ah_jpy=8780,  # +242% (実例: シャンクスSEC)
+            current_usd=100, current_policy="DDP-A-P10",
+            v7_usd=350, v7_policy="DDP-A-P22",  # eBay($100) が古い、新価格($350)に上げる
+            abnormal_delta_threshold=200,
+        )
+        assert ok is True
+        assert reason == "abnormal_delta"
+        assert extras["is_abnormal"] is True
 
 
 # ============================================================================

@@ -101,7 +101,7 @@ def _build_summary_body(result, uploads: list, dry_run: bool) -> str:
         f"■ 生成",
         f"  revise 対象   : {n_revise} 件 (single {n_single} / variation {n_var})",
         f"    └ 内訳      : 価格変更 {n_usd} / 送料のみ {n_pol} / 価格+送料 {n_both}",
-        f"  異常保留      : {n_abn} 件  ← UP せず。要目視",
+        f"  急騰で値上げ   : {n_abn} 件  ← 価格更新済・要目視 (誤検知なら翌日戻る)",
         f"  その他 skip   : {n_skip} 件",
         "",
         f"■ 自動UP",
@@ -135,7 +135,7 @@ def _build_summary_body(result, uploads: list, dry_run: bool) -> str:
         lines.append("  (本日は価格変動なし = 送料profile変更のみ)")
 
     if n_abn:
-        lines += ["", "■ 異常保留 (自動UPせず、人手確認要) 上位:"]
+        lines += ["", "■ 急騰で値上げした項目 (UP済・要目視) 上位:"]
         for c in result.abnormal[:10]:
             lines.append(f"  - [{c.source_sheet}] item={c.item_id} {c.decision_details}")
 
@@ -225,7 +225,7 @@ def run_daily(dry_run: bool = False) -> int:
     mail_rc = _send_summary(result, uploads, dry_run=dry_run)
 
     all_ok = all(u["success"] for u in uploads)
-    _log(f"[daily] === 完了 revise={len(result.revisable)} 異常保留={len(result.abnormal)} "
+    _log(f"[daily] === 完了 revise={len(result.revisable)} 急騰値上げ={len(result.abnormal)} "
          f"UP成功={sum(1 for u in uploads if u['success'])}/{len(uploads)} "
          f"mail_rc={mail_rc} ===")
     # UP 失敗 or メール失敗があれば非ゼロ (タスク履歴で気づけるように)

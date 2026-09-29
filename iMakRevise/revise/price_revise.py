@@ -514,16 +514,26 @@ def should_revise(
         abnormal = delta_pct > abnormal_delta_threshold
 
     if abnormal:
-        # RESTOCK 整合 reconciliation (2026-06-25):
-        # AH↔N が急騰でも、eBay 実価格が N 計算値 (= v7_usd/v7_policy) と一致するなら
-        # RESTOCK 時に監視くん側で既に値上げ反映済 = 整合 = aligned (alert 不要)。
-        # 一致しない場合のみ scrape 誤り疑いとして従来通り abnormal alert (fail-closed)。
+        # 急騰検出 (AH↔N が threshold 超)。
+        # 2026-09-29 変更 (ユーザー明示 go): 従来は skip+hold していたが、**旧価格のまま出続ける =
+        # 安値で売れて赤字** のリスクがあるため保留をやめ、価格更新側に倒す。
+        # ・snapshot 不在 (取下げ済で revise 先が無い) → 従来どおり skip
+        # ・在庫0 / 現価格取得不能 → 比較不能で skip
+        # ・eBay 実価格 = N 計算値 (RESTOCK 反映済) → aligned (更新不要)
+        # ・それ以外 (=eBay 価格が古い) → **価格更新する + is_abnormal で要目視 alert**
+        #   (誤検知でも「高く出て売れない=損なし・翌日戻る」で、放置=安値で売れて赤字 より安全)
         base = f"AH=¥{ah_jpy:,.0f} → N=¥{n_jpy:,.0f} (+{delta_pct:.0f}%)"
+        if not in_snapshot:
+            extras["details"] = base + " | snapshot 不在 (取下げ済 listing 想定)"
+            return False, "not_in_snapshot", extras
+        if available_qty is not None and available_qty < 1:
+            extras["details"] = base + f" | Available quantity={available_qty}"
+            return False, "out_of_stock", extras
+        if current_usd is None or current_policy is None:
+            extras["details"] = base + " | 現価格取得失敗で比較不能"
+            return False, "no_snapshot", extras
         reconciled = (
-            in_snapshot
-            and current_usd is not None and current_policy is not None
-            and (available_qty is None or available_qty >= 1)
-            and _normalize.normalize_usd(current_usd) == _normalize.normalize_usd(v7_usd)
+            _normalize.normalize_usd(current_usd) == _normalize.normalize_usd(v7_usd)
             and _normalize.normalize_policy_name(current_policy)
             == _normalize.normalize_policy_name(v7_policy)
         )
@@ -532,8 +542,8 @@ def should_revise(
             extras["details"] = base + " | eBay価格=N計算値で整合 (RESTOCK反映済)"
             return False, "aligned", extras
         extras["is_abnormal"] = True
-        extras["details"] = base
-        return False, "abnormal_delta", extras
+        extras["details"] = base + " | 急騰だが価格更新 (放置=赤字回避)"
+        return True, "abnormal_delta", extras
 
     # snapshot 在籍 check (= 取下げ済 listing 想定)
     if not in_snapshot:
@@ -1434,13 +1444,14 @@ def run_price_revise(
             elif usd_diff:
                 c.revise_content = "USD のみ"
             result.revisable.append(c)
+            # 急騰 (abnormal) は価格更新するが、要目視として alert にも載せる (2026-09-29)
+            c.is_abnormal = extras.get("is_abnormal", False)
+            if c.is_abnormal:
+                result.abnormal.append(c)
         else:
             c.basis = "skip"
             # RESTOCK 整合照合の結果を反映 (2026-06-25)
             c.is_abnormal = extras.get("is_abnormal", False)
-            if reason == "abnormal_delta":
-                c.skip_reason = "ABNORMAL_DELTA"
-                result.abnormal.append(c)
             result.skipped.append(c)
 
     # === Step 6: 大量検出 警告 (= 上限 cap なし、新 logic 設計) ===
