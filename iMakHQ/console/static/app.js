@@ -333,7 +333,7 @@
     if (oj) chips.push(oj.state === "error" ? ["warn", "オファー 数えられない", ""]
                        : [oj.n ? "warn" : "", "オファー <b>" + (oj.n || 0) + "件</b>", ""]);
     if (dj) chips.push(["", "注文 " + (dj.note ? esc(dj.note).replace("最後の取り込み ", "最後の取り込み <b>") + "</b>" : "未取り込み"),
-                        jobBtn(dj, "取り込む")]);
+                        dj.n ? "" : jobBtn(dj, "取り込む")]);   // 仕入れ待ちの大きな枠が出ている時はそちらに1つだけ
     $("today-strip").innerHTML = chips.concat(STRIP.errors || []).map(stChip).join("");
     var big = [];
     if (oj && oj.n) {
