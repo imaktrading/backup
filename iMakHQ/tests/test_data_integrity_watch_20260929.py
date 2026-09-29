@@ -62,3 +62,17 @@ def test_second_request_same_day_when_content_differs(tmp_path, monkeypatch):
     p2 = W._write_request(b)
     assert p2.endswith("_auto_2.md")
     assert W._write_request(b) == ""
+
+
+def test_hourly_logs_marks_and_requests_when_broken(tmp_path, monkeypatch):
+    """2026-09-30: いつ壊れたかを1時間の幅に絞る。壊れていたら依頼書、毎回 変更カウンタ等を1行残す。"""
+    import json
+    db = tmp_path / "p.sqlite"
+    db.write_bytes(b"\0" * 24 + (19).to_bytes(4, "big") + b"\0" * 72)
+    monkeypatch.setattr(W, "DB", str(db))
+    monkeypatch.setattr(W, "HOURLY_LOG", str(tmp_path / "h.jsonl"))
+    monkeypatch.setattr(W, "REQ_DIR", str(tmp_path))
+    monkeypatch.setattr(W, "quick_check", lambda path=None: "*** broken")
+    st = W.run_hourly()
+    assert st["change_counter"] == 19 and st["request"].endswith("_auto.md")
+    assert json.loads((tmp_path / "h.jsonl").read_text(encoding="utf-8"))["quick_check"] == "*** broken"

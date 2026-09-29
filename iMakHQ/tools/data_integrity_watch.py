@@ -17,6 +17,10 @@
   4. 化け・壊れが1つでもあれば catalog/requests/ に復元の依頼書を置く (同じ日の2通目は置かない)
 
     python data_integrity_watch.py          # 1回
+    python data_integrity_watch.py --hourly # 1時間ごと (予約 iMakHQ_DataIntegrity_Hourly): quick_check だけ
+★--hourly (2026-09-30 ユーザー確定): 「いつ壊れたか」を1時間の幅に絞るため。読むだけ (mode=ro)。
+  毎回 hourly.jsonl に quick_check / ヘッダの変更カウンタ / -wal の大きさ・時刻 を1行残す
+  (変更カウンタが動いていれば、その1時間に誰かが DB ファイルに書いた証拠)。壊れていたら依頼書を置く
 """
 from __future__ import annotations
 
@@ -31,6 +35,7 @@ import zipfile
 DB = r"C:\dev\iMak_data\catalog\products.sqlite"
 DAILY = r"G:\マイドライブ\iMak_backup\daily"
 STATUS = r"C:\dev\iMak_data\hq\data_integrity_last.json"
+HOURLY_LOG = r"C:\dev\iMak_data\hq\data_integrity_hourly.jsonl"
 REQ_DIR = r"C:\dev\iMak_data\catalog\requests"
 
 
@@ -180,9 +185,40 @@ def run():
     return st
 
 
+def file_marks(path=DB):
+    """DB ファイルの「書かれた印」: ヘッダの変更カウンタ (24〜27バイト目) / 本体と -wal の大きさ・更新時刻。"""
+    m = {}
+    try:
+        with open(path, "rb") as f:
+            m["change_counter"] = int.from_bytes(f.read(28)[24:28], "big")
+    except Exception as e:                                     # noqa: BLE001
+        m["change_counter"] = f"{type(e).__name__}"
+    for k, q in (("db", path), ("wal", path + "-wal")):
+        try:
+            st = os.stat(q)
+            m[k] = [st.st_size, datetime.datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds")]
+        except OSError:
+            m[k] = None
+    return m
+
+
+def run_hourly():
+    st = {"at": datetime.datetime.now().isoformat(timespec="seconds"), "quick_check": quick_check(),
+          **file_marks(), "request": ""}
+    if st["quick_check"] != "ok":
+        st["request"] = _write_request({"quick_check": st["quick_check"], "flips": [], "pair": ["(1時間ごとの検査)", ""]})
+    with open(HOURLY_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(st, ensure_ascii=False) + "\n")
+    print(f"データの見張り(1時間): quick_check={st['quick_check'][:60]} 変更カウンタ={st['change_counter']}"
+          + (f" → 依頼書 {st['request']}" if st["request"] else ""))
+    return st
+
+
 if __name__ == "__main__":
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:                                          # noqa: BLE001
         pass
+    if "--hourly" in sys.argv:
+        sys.exit(0 if run_hourly()["quick_check"] == "ok" else 1)
     sys.exit(0 if run().get("ok") else 1)
