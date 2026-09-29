@@ -21,6 +21,7 @@ slice2 = 夜間検索(無人・throttle・キャッシュ書込のみ。補URL�
   - 補URL(AC-AG) 実数 < max_backups
   - KEY(AI) or cert あり = 供給検索の起点が要る
 """
+import collections
 import io
 import json
 import os
@@ -176,10 +177,49 @@ def split_known_same(cands, key, pll=None, uv=None):
         pid = ""
     if not pid:
         return [], list(cands or [])
+    ok_prod = snkr_same_products(uv).get(pid.split(":")[-1], set())
     same, rest = [], []
     for c in cands or []:
-        (same if pll.url_verdict(pid, c.get("url") or "", uv) == "same" else rest).append(c)
+        u = c.get("url") or ""
+        hit = pll.url_verdict(pid, u, uv) == "same"
+        if not hit:
+            # ★2026-09-29 ユーザー確定「スニダンは、そうしてもらえると助かる」: スニダンは同じカードの
+            #   出品が全部 **同じ商品ページ** (apparels/<番号>) の下に並ぶ。そのページの出品を一度
+            #   「同じ」と確かめたら、新しく出た出品も同じカード。実例: コダック AR M2a-199 (729387) は
+            #   9/21〜27 に予備を28本足しても売れて消え、毎回新しい出品を目視していた。
+            #   (そのページで「違う」が1本でもあれば使わない = snkr_same_products が外している)
+            m = _SNKR_PROD.search(u)
+            hit = bool(m and m.group(1) in ok_prod)
+        (same if hit else rest).append(c)
     return same, rest
+
+
+_SNKR_PROD = re.compile(r"snkrdunk\.com/(?:en/)?apparels/(\d+)")
+_SNKR_MEMO = {}
+
+
+def snkr_same_products(uv):
+    """{カード pid: スニダンの商品ページ番号の集合} — 人が「同じ」と確かめ、「違う」が1本も無いページ。"""
+    if not uv:
+        return {}
+    k = id(uv)
+    if k in _SNKR_MEMO:
+        return _SNKR_MEMO[k]
+    same, diff = collections.defaultdict(set), collections.defaultdict(set)
+    for url, by_pid in uv.items():
+        m = _SNKR_PROD.search(url or "")
+        if not m:
+            continue
+        for p, e in (by_pid or {}).items():
+            v = (e or {}).get("v")
+            if v == "same":
+                same[p].add(m.group(1))
+            elif v == "diff":
+                diff[p].add(m.group(1))
+    out = {p: s - diff.get(p, set()) for p, s in same.items()}
+    _SNKR_MEMO.clear()
+    _SNKR_MEMO[k] = out
+    return out
 
 
 def order_targets(out, min_backups=0, watch=None, market_sold=None):
@@ -2516,7 +2556,10 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     _ready = len(items)
     if limit is not None:
         items, item_targets = split_fill_and_swap(items, item_targets, limit, swap_limit)
-        remember_shown([t.get("itemID") for t in item_targets], today)
+        # ★2026-09-29: 書き込まない試走 (--dry-run) では記録しない。画面に出していないのに
+        #   「今日出した」と記録すると、次の本番でその出品が後ろに回ってしまう
+        if not dry_run:
+            remember_shown([t.get("itemID") for t in item_targets], today)
         for n, it in enumerate(items):
             it["idx"] = n
         _rest = _ready - len(items)

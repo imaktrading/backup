@@ -34,3 +34,21 @@ def test_confirm_writes_known_same_and_counts_skip_them():
     src = inspect.getsource(H.run_daytime_confirm)
     assert "split_known_same(" in src and "auto_same" in src and "n_ui" in src
     assert "split_known_same(" in inspect.getsource(H.count_workload)
+
+
+def test_snkrdunk_same_product_page_counts_as_same():
+    # 729387 のページの出品を1本「同じ」と確かめていれば、同じページの新しい出品も同じカード
+    uv = {U.replace("103771", "729387") + "10": {"M2a-199": {"v": "same"}}}
+    cands = [{"url": "https://snkrdunk.com/apparels/729387/used/99"},
+             {"url": "https://snkrdunk.com/apparels/111111/used/5"},
+             {"url": "https://jp.mercari.com/item/m1"}]
+    same, rest = H.split_known_same(cands, "pokemon_tcg:M2a-199", PLL, uv)
+    assert [c["url"] for c in same] == ["https://snkrdunk.com/apparels/729387/used/99"]
+    assert len(rest) == 2                                          # 別ページ・メルカリは目視へ
+
+
+def test_snkrdunk_page_with_any_diff_is_not_trusted():
+    base = "https://snkrdunk.com/apparels/729387/used/"
+    uv = {base + "1": {"M2a-199": {"v": "same"}}, base + "2": {"M2a-199": {"v": "diff"}}}
+    same, rest = H.split_known_same([{"url": base + "3"}], "pokemon_tcg:M2a-199", PLL, uv)
+    assert same == [] and len(rest) == 1
