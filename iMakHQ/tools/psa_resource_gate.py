@@ -362,7 +362,21 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
     return out
 
 
-def combine(mercari, snkrdunk, mercari_cands=None, max_aux=5):
+_NOT_BUYABLE_MEMO = {}
+
+
+def _not_buyable_urls():
+    """一度開いて「買えない」と分かった仕入元 URL の set (走行中は1回だけ読む)。読めなければ空。"""
+    if "urls" not in _NOT_BUYABLE_MEMO:
+        try:
+            import mercari_psa_resource as _mpn
+            _NOT_BUYABLE_MEMO["urls"] = set(_mpn.load_not_buyable() or {})
+        except Exception:                                      # noqa: BLE001
+            _NOT_BUYABLE_MEMO["urls"] = set()
+    return _NOT_BUYABLE_MEMO["urls"]
+
+
+def combine(mercari, snkrdunk, mercari_cands=None, max_aux=5, not_buyable=None):
     """2チャネル結果を束ねる純関数。
 
     Args:
@@ -398,6 +412,22 @@ def combine(mercari, snkrdunk, mercari_cands=None, max_aux=5):
         except Exception:                                      # noqa: BLE001
             return True                    # 判定器が無い環境では従来どおり (後段の門が拾う)
         return cost_sanity(price) is None
+
+    # ★2026-09-30: 「買えない」と登録済みの仕入元 (まとめ売り・オークション等) を最安にも補URLにも使わない。
+    #   実例 820153270215 ジンベエ ST01-005: 唯一の候補が 9/28 に目視で「まとめ売り」と判定済みなのに
+    #   最安として採られ「再仕入れ可◎」→ 照合の画面では外れて候補0本 → 黙って飛ばされ、
+    #   コンソールには「目視 1件」が残り続けた。見せる側 (_build_visual_candidates) と同じ台帳で外す。
+    _nb = _not_buyable_urls() if not_buyable is None else set(not_buyable)
+
+    def _nu(u):
+        return (u or "").strip().split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    _nb = {_nu(u) for u in _nb}
+    if mercari and len(mercari) > 1 and _nu(mercari[1]) in _nb:
+        _alt = sorted((c for c in (mercari_cands or [])
+                       if c and len(c) > 1 and isinstance(c[0], int) and c[0] > 0
+                       and c[1] and _nu(c[1]) not in _nb and _sane(c[0])), key=lambda c: c[0])
+        mercari = tuple(_alt[0]) if _alt else None
+    mercari_cands = [c for c in (mercari_cands or []) if not (c and len(c) > 1 and _nu(c[1]) in _nb)]
 
     m_price = mercari[0] if (mercari and isinstance(mercari[0], int) and mercari[0] > 0) else None
     if m_price is not None and not _sane(m_price):
@@ -442,7 +472,7 @@ def combine(mercari, snkrdunk, mercari_cands=None, max_aux=5):
         #   URL を1本も持たない形 (harvest shape の件数のみ) は触らない —
         #   価格が無い=判定していないので、件数を勝手に0にしない。
         if snkrdunk_urls:
-            _kept = [d for d in snkrdunk_urls if _sane(d.get("price"))]
+            _kept = [d for d in snkrdunk_urls if _sane(d.get("price")) and _nu(d.get("url")) not in _nb]
             if len(_kept) != len(snkrdunk_urls):
                 snkrdunk_urls = _kept
                 s_count = len(_kept)
@@ -1465,15 +1495,20 @@ def count_ng_blocked(uniq_iids, cache, ng_by_iid, combine_fn, build_cands_fn):
 
     判らないもの (今日のキャッシュが無い / 候補が取れない) は数えない = そのまま
     「作業できる」に残す (押せば探索して出るかもしれないため)。
+    ★2026-09-30: 仕入元が全部「買えない」登録済み (まとめ売り等) の札も同じく出ない。
+      実例 820153270215: 候補1本が買えない台帳に在り、画面では候補0本で飛ばされるのに
+      「目視 1件」と出続けた。**キャッシュに候補は在るのに、見せる関門を通すと0本**なら塞がれている。
     戻り: 出せない itemID の set。
     """
     blocked = set()
     for iid in uniq_iids:
         ng = (ng_by_iid or {}).get(iid)
-        if not ng:
-            continue                       # NG 台帳に無い = 塞がれていない
         entry = (cache or {}).get(iid) or {}
         mr = entry.get("mercari") or {}
+        raw = bool(mr.get("all_cands") or mr.get("cands") or mr.get("best")
+                   or ((entry.get("snkrdunk") or {}).get("psa10_listings")))
+        if not ng and not raw:
+            continue                       # 候補が判らない = 判定しない
         try:
             c = combine_fn(mr.get("best"), entry.get("snkrdunk"),
                            mercari_cands=mr.get("cands"), max_aux=5)
@@ -1481,7 +1516,11 @@ def count_ng_blocked(uniq_iids, cache, ng_by_iid, combine_fn, build_cands_fn):
         except Exception:                                      # noqa: BLE001
             continue
         if not cands:
-            continue                       # 候補が判らない = 判定しない
+            if raw:
+                blocked.add(iid)           # 候補は在るが、見せる関門で全部外れる
+            continue
+        if not ng:
+            continue                       # NG 台帳に無い = 塞がれていない
         import psa_hoju_fill as _hf
         keep, _ = _hf.filter_candidates_rejected(cands, ng)
         if not keep:
@@ -1702,6 +1741,7 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
     except Exception:
         _ng_by_iid, _hf0 = {}, None
     _n_ng = 0
+    _nocand = []          # ★2026-09-30: 候補が0本で飛ばした itemID (黙って飛ばさず件数を出す)
     for n, rc in enumerate(restock_cands):
         iid = rc.get("itemID")
         if iid and iid in _done_iids:
@@ -1710,6 +1750,9 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
         if iid and iid in _skip_iids:
             _skipped_review += 1
             continue   # 既にレビュー済(違う/見送り) → 再確証しない
+        if not rc.get("candidates"):
+            _nocand.append(iid or "?")
+            continue   # 買えない/上限超え等で候補が全部外れた → 見せる物が無い
         if _ng_by_iid and _hf0 and iid:
             _keep, _drop = _hf0.filter_candidates_rejected(rc.get("candidates") or [],
                                                            _ng_by_iid.get(iid))
@@ -1717,6 +1760,7 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
                 _n_ng += len(_drop)
                 rc["candidates"] = _keep
             if not _keep:
+                _nocand.append(iid)
                 continue          # 全部が既に「違う」判定済 → 見せる意味がない
         v8 = _v8_label(rc.get("cost"), rc.get("cur"), mp)
         if _is_high_cost(v8):
@@ -1739,8 +1783,11 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
         print(f"  ⏭ 既にRESTOCK確定済 {_skipped_done}件は視覚確証スキップ(再作業防止)")
     if _skipped_review:
         print(f"  ⏭ レビュー済(違う/見送り) {_skipped_review}件は視覚確証スキップ(再表示しない・{REVIEW_SKIP_TAB}タブ)")
+    if _nocand:
+        print(f"  ⏭ 候補0本 {len(_nocand)}件は照合に出せない (仕入元が買えない/違う判定済/上限超え): "
+              f"{', '.join(_nocand[:10])}")
     if not items:
-        print("  照合対象なし(新規の再仕入れ可ゼロ=全て確定/レビュー済)→ RESTOCK確定 変更なし")
+        print("  照合対象なし (見せる候補がある再仕入れ可が0件) → RESTOCK確定 変更なし")
         return
     if _n_ng:
         print(f"  🚫 過去に「違う」と判定済の候補 {_n_ng}件を除外(補URL側と共有の台帳)")
