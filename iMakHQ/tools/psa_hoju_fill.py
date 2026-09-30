@@ -2271,6 +2271,28 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
             "swap": {"ready": swap_ready, "unjudged": swap_unjudged}}
 
 
+# ★2026-09-30 ユーザー確定: 入れ替え (補4〜5本) は「表示が多いのにクリックされない」出品から先に回す。
+#   トラフィックレポート 9/30: PSA は1件あたり表示が最多なのにクリック率 0.15% で最低、表示3,000回以上で
+#   閲覧2回以下が45件 (42件が PSA)。値段は仕入値から決まるので、安い仕入元に替えれば値段が下がる。
+#   一覧は exposure_watch/swap_priority.json (レポートを取り直したら作り直す)。読めなければ今までどおり。
+SWAP_PRIORITY_PATH = r"C:/dev/iMak_data/hq/exposure_watch/swap_priority.json"
+
+
+def load_swap_priority(path=SWAP_PRIORITY_PATH):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return [str(x).strip() for x in (json.load(f).get("iids") or []) if str(x).strip()]
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
+def put_priority_first(targets, prio):
+    """prio の itemID を先頭へ (prio の順)。それ以外は元の並びのまま (純関数)。"""
+    rank = {iid: k for k, iid in enumerate(prio or [])}
+    first = sorted((t for t in targets if t.get("itemID") in rank), key=lambda t: rank[t["itemID"]])
+    return first + [t for t in targets if t.get("itemID") not in rank]
+
+
 def split_fill_and_swap(items, item_targets, limit, swap_limit=0):
     """目視に出す分を 補充 (補<4) は limit 件・入れ替え (補4以上) は swap_limit 件で切る (純関数)。
 
@@ -2310,6 +2332,8 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     # ★2026-09-19: **前に出した順**に回す (ユーザー「全部に順番が回るようにしたい」)。
     #   並びが毎回同じで、1回に見る件数を超えた分は毎回同じ顔ぶれしか出ていなかった。
     targets = rotate_by_last_shown(targets, load_last_shown())
+    if min_backups >= CONFIRM_MAX_BACKUPS:             # 入れ替えボタン単独: クリックされない出品から先に
+        targets = put_priority_first(targets, load_swap_priority())
     # ★2026-09-29 ユーザー「補充のついでに、高い予備を安い候補に替えるところまで1回で済ませて」。
     #   補充 (補0〜3本) の後ろに 入れ替え (補4〜5本) の出品も並べ、同じ目視で片づける。
     #   補充を先に置くのは 9/9 の理由 (丸腰の補充が入れ替えに埋もれない) を守るため。
@@ -2319,7 +2343,8 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         _swap_t = select_backfill_targets(vals, max_backups=AUXN + 1,
                                           min_backups=CONFIRM_MAX_BACKUPS, watch=load_watch_by_item(),
                                           market_sold=_msold)
-        _swap_t = rotate_by_last_shown(_swap_t, load_last_shown())
+        _swap_t = put_priority_first(rotate_by_last_shown(_swap_t, load_last_shown()),
+                                     load_swap_priority())
         targets = list(targets) + [t for t in _swap_t if t["itemID"] not in _have_iid]
     cache = _load_cache()
 
