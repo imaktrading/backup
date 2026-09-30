@@ -30,7 +30,7 @@ SECRETS = [r"C:\dev\iMak_data\credentials", r"C:\dev\iMak_data\secrets", r"C:\de
            r"C:\dev\iMak\iMakAudit\gemini_key.txt"]                     # 監査くんの二次監査
 RESTORE_KIT = r"C:\dev\iMak_data\hq\restore_kit"
 DAILY = r"G:\マイドライブ\iMak_backup\daily"
-KEEP = 3
+KEEP = 7                    # ★2026-09-30: 差しっぱなしなので毎朝 5:30 に自動 (iMakHQ_UsbBackup_0530)。1日 約235MB
 
 
 def _md5(p):
@@ -69,8 +69,15 @@ def main():
     ap.add_argument("--drive", default="H")
     a = ap.parse_args()
     root = f"{a.drive}:\\iMak_usb_backup"
+    if not os.path.isdir(f"{a.drive}:\\"):
+        print(f"⚠️要対応: USB ({a.drive}:) が見えない。抜けているか、ドライブの文字が変わった")
+        return 1
     dest = os.path.join(root, datetime.date.today().strftime("%Y%m%d"))
     items = plan()
+    if os.path.isdir(dest):                  # 同じ日に2回走ると前の zip が残って倍になる (9/30 に 360MB)
+        for f in os.listdir(dest):
+            if f.startswith("iMak_daily_") and f.endswith(".zip") and f not in {r for _, r in items}:
+                os.remove(os.path.join(dest, f))
     bad = []
     for src, rel in items:
         dst = os.path.join(dest, rel)
