@@ -33,6 +33,12 @@ def test_pick_worktrees_names(tmp_path):
     assert got == {"_worktrees/revise/csv_output/a/x.csv"}
 
 
+def test_claude_settings_in_but_login_out():
+    """Claude の許可・hook の設定は戻す。ログイン情報は入れない。"""
+    assert "settings.json" in B.EXTRA_GLOBS and "settings.local.json" in B.EXTRA_GLOBS
+    assert not any("credentials" in g for g in B.EXTRA_GLOBS)
+
+
 def test_revise_csv_output_is_listed():
     """リバイスくんの回答 (2026-09-30): 値付けの履歴 csv_output を zip に入れる。"""
     assert B.WORKTREE_DIRS["revise/csv_output"].endswith(r"iMakRevise\csv_output")

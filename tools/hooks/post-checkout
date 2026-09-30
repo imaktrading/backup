@@ -1,0 +1,41 @@
+#!/bin/sh
+# 2026-05-09 制定: branch 切替後の uncommitted detect 警告
+#
+# 同型事故再発防止 (4/30 / 5/3 / 5/9 で 3 回発生):
+#   uncommitted な編集が branch 切替で working tree から消える事故
+#
+# git に pre-checkout hook は存在しないため、post-checkout で事後検知。
+# 変な状態を検出して、人間/AI に異常を気付かせるための保険。
+#
+# 関連 memory:
+#   - inventory_known_good_state.md (4/30 事故)
+#   - branch_usage_policy.md (worktree 分離原則)
+
+prev=$1
+new=$2
+flag=$3
+
+# flag=1 は branch checkout (file checkout は flag=0、対象外)
+if [ "$flag" = "1" ]; then
+    if [ "$prev" != "$new" ]; then
+        # branch が変わった
+        if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            echo ""
+            echo "⚠️  WARNING: branch 切替後に uncommitted な変更を検出"
+            echo "   切替前: $prev"
+            echo "   切替後: $new"
+            echo ""
+            echo "   もしこの変更が切替前にはなかったものなら、"
+            echo "   何かが working tree から消失した可能性があります"
+            echo "   (= 4/30 / 5/3 / 5/9 と同型の事故)"
+            echo ""
+            echo "   git status:"
+            git status --short
+            echo ""
+            echo "   関連 memory: inventory_known_good_state.md / branch_usage_policy.md"
+            echo ""
+        fi
+    fi
+fi
+
+exit 0

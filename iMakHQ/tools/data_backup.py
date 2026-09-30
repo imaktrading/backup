@@ -58,7 +58,49 @@ EXCLUDE_FILE_PATTERNS = ("*.bak*", "*pre_*", "*.sqlite", "*.sqlite-shm", "*.sqli
 #   (どこにも複製が無く、SSD が壊れたら消える状態だった)。会話の記録 (*.jsonl, 約900MB) は入れない。
 #   zip の中では _claude/ の下に置く
 CLAUDE_HOME = os.path.join(os.path.expanduser("~"), ".claude")
-EXTRA_GLOBS = ("CLAUDE.md", "skills", "agents", os.path.join("projects", "*", "memory"))
+EXTRA_GLOBS = ("CLAUDE.md", "skills", "agents", os.path.join("projects", "*", "memory"),
+               "settings.json", "settings.local.json")    # 許可・hook の設定 (ログイン情報 .credentials.json は入れない)
+
+# ★2026-09-30: 復旧一式 (予約タスクの控え・Python 部品・入っているソフト) は手で1回作っただけで古くなる。毎朝作り直す
+RESTORE_KIT = os.path.join(SRC, "hq", "restore_kit")
+
+
+def refresh_restore_kit(kit=RESTORE_KIT):
+    """予約タスク (名前に iMak) の xml / pip freeze / winget export を作り直す → 失敗の一覧 (空なら全部できた)。"""
+    import subprocess
+    bad = []
+    tdir = os.path.join(kit, "scheduled_tasks")
+    os.makedirs(tdir, exist_ok=True)
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                              "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+                              "(Get-ScheduledTask | Where-Object TaskName -match 'iMak').TaskName"],
+                             capture_output=True, text=True, encoding="utf-8", timeout=120).stdout
+        names = [n.strip() for n in out.splitlines() if n.strip()]   # 名前に空白を含むタスクがある
+        if not names:
+            bad.append("tasks 0件")
+        for n in names:
+            x = subprocess.run(["schtasks", "/query", "/tn", n, "/xml"], capture_output=True, timeout=60)
+            if x.returncode == 0 and x.stdout:
+                with open(os.path.join(tdir, n + ".xml"), "wb") as f:
+                    f.write(x.stdout)
+            else:
+                bad.append(f"task {n}")
+    except Exception as e:                                     # noqa: BLE001
+        bad.append(f"tasks {type(e).__name__}")
+    for fname, cmd in (("pip_freeze.txt", [sys.executable, "-m", "pip", "freeze"]),
+                       ("installed_apps.json", ["winget", "export", "-o", os.path.join(kit, "installed_apps.json"),
+                                                "--accept-source-agreements"])):
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=300)
+            if fname == "pip_freeze.txt" and r.returncode == 0:
+                with open(os.path.join(kit, fname), "wb") as f:
+                    f.write(r.stdout)
+            elif not os.path.exists(os.path.join(kit, fname)):
+                bad.append(fname)
+        except Exception as e:                                 # noqa: BLE001
+            bad.append(f"{fname} {type(e).__name__}")
+    return bad
 
 # ★2026-09-30: 種類 (画像・PDF) で外すと、取り直せない物まで落ちていた。この下は画像・PDF も入れる
 #   (catalog\_input = 手で入れた元データ / shipping = 運送会社の料金表 PDF / hq・seller_hub = 画面の控え)。計 約0.1GB
@@ -245,6 +287,8 @@ def main():
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     st = {"at": datetime.datetime.now().isoformat(timespec="seconds"), "ok": False, "dest": DEST}
     try:
+        if not a.dry_run:
+            st["restore_kit_bad"] = refresh_restore_kit()
         files, skipped = pick_files()
         extra = pick_extra()
         repo = pick_repo()
