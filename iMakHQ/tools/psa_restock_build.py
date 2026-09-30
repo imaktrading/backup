@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """PSA再仕入れ RESTOCK — 最後の配線(orchestrator)。
 
+★2026-09-30 から既定は「今ある出品の在庫を 0→1 に戻す」だけ (main)。下の作り直しの流れは `--csv` (main_csv)。
+
 「RESTOCK確定」タブ → cert/KEY 解決 → psa_to_csv(RESTOCK入力モード)で Add CSV生成(新規と完全同一)
  → Add→Revise 変換 → Revise CSV(手動アップロード用)。
 
@@ -372,7 +374,133 @@ def count_workload(rows=None, itemid_to_cert=None):
         return {"error": "%s: %s" % (type(e).__name__, e)}
 
 
+def restock_items(rows, inp, skipped, itemid_to_cert):
+    """門を通った RESTOCK確定の行 → [(itemID, 仕入値¥)] (純関数)。同じ cert は1回だけ。"""
+    skip_ids = {str(i).strip() for i, _ in skipped}
+    ok_certs = set(inp.get("certs") or [])
+    out, seen = [], set()
+    for r in rows:
+        iid = (r.get("itemID") or "").strip()
+        cert = str(itemid_to_cert.get(iid) or "")
+        if not iid or iid in skip_ids or cert not in ok_certs or cert in seen:
+            continue
+        seen.add(cert)
+        out.append((iid, (inp.get("cost") or {}).get(cert)))
+    return out
+
+
 def main():
+    """★2026-09-30 ユーザー確定: 再仕入れは **今ある出品の在庫を 0→1 に戻すだけ** にする。
+
+    それまでは新規と同じ作り方 (PSA のページを1件15秒 + 画像AI でタイトル) で作り直し、
+    Revise CSV で Item Specifics ごと入れ替えていた。9/30 の6件で比べると、タイトル・Item Specifics・値段は
+    今の出品と同じで、変わるのは写真と鑑定番号だけ。鑑定番号が個体ごとに変わることは説明文に書いてあるので
+    写真も鑑定番号も変える必要がない = 作り直しは資源の無駄 (ユーザー「リソースの無駄使いだよね」)。
+    値段と送料は、売れた分の補充と同じく **今の仕入値 (RESTOCK確定の最安¥)** から出して一緒に送る
+    (数量だけ戻すと古い値段のまま並ぶ)。終わった出品 (Completed) は戻さず要対応に出す。
+    戻した後は ③ (psa_restock_writeback) を続けて回し、商品管理シートと「実行済」を揃える。
+    旧来の作り直しは `--csv` で動く。
+    """
+    if "--csv" in sys.argv:
+        return main_csv()
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, here)
+    from sheet_io import product_index, build_cert_map, _product_ws
+    import sold_restock as SR
+    max_send = next((int(a.split("=", 1)[1]) for a in sys.argv if a.startswith("--max=")), 20)
+    write = "--dry-run" not in sys.argv
+
+    try:
+        reset_dead_confirmed()
+    except Exception as _e:                                    # noqa: BLE001
+        print(f"  ⚠ 売り切れ確定の差し戻しskip ({type(_e).__name__}: {_e})")
+    rows = _read_restock_confirmed()
+    if not rows:
+        print("「RESTOCK確定」タブに戻す分がありません。先に ① 目視で仕入元を確定してください。")
+        return 0
+    keymap, _itemrow, _certmap = product_index()
+    _pv = _product_ws().get_all_values()
+    itemid_to_cert = build_cert_map(_pv)
+    inp, skipped = build_restock_input(rows, itemid_to_cert, keymap,
+                                       sold_out_supply=sold_out_supply_by_item(_pv),
+                                       undeliverable_ids=undeliverable())
+    items = restock_items(rows, inp, skipped, itemid_to_cert)
+    print(f"RESTOCK確定 {len(rows)}件 → 在庫を戻す対象 {len(items)}件 / 見送り {len(skipped)}件"
+          f" / {'本番' if write else '確認だけ (--dry-run)'} / 1回の上限 {max_send}件")
+    for s in skipped[:10]:
+        print("  ⏭", s)
+    if not items:
+        return 0
+
+    import ebay_upload_csv as U
+    import fix_de_speedpak_shipping as fx
+    fx.refresh()
+    tok = fx.token()
+    sent, failed, ended, held, already = [], [], [], 0, []
+    for iid, cost in items:
+        price, profile = SR.price_for(cost, "TCG(PSA10)")
+        status, qty, site = SR.ebay_status(fx, U, iid, tok)
+        act = SR.plan_action(status, qty)
+        head = f"  {iid} (仕入¥{int(cost):,})" if cost else f"  {iid}"
+        if site != "US":
+            print(f"{head} → 出品サイトが {site} (US 以外/不明) → 触らない")
+            held += 1
+            continue
+        if act == "noop":
+            print(f"{head} → もう在庫 {qty} (戻っている) → ③ で実行済にする")
+            already.append(iid)
+            continue
+        if act == "relist":
+            print(f"{head} → ⚠️要対応: 出品が終わっている (Completed)。在庫を戻すだけでは出せない")
+            ended.append(iid)
+            continue
+        if act != "revise":
+            print(f"{head} → 状態が読めない ({status}) → 触らない")
+            held += 1
+            continue
+        if not price:
+            print(f"{head} → 仕入値が無いので止める (古い値段のまま並べない)")
+            held += 1
+            continue
+        if not write:
+            print(f"{head} → 在庫1 / ${price} / {profile} で戻す予定")
+            continue
+        if len(sent) >= max_send:
+            print(f"{head} → 1回の上限 {max_send}件に達したので次の回に回す")
+            held += 1
+            continue
+        resp = fx.post("ReviseFixedPriceItem", SR.build_item_xml(iid, price, profile), tok, U.SITE_US)
+        ack, _new, err = U.parse_ack(resp)
+        if ack not in ("Success", "Warning"):
+            print(f"{head} → ❌ 失敗: {err[:120]}")
+            failed.append(iid)
+            continue
+        v_status, v_qty, _ = SR.ebay_status(fx, U, iid, tok)       # 送れた ≠ 戻った。読み直す
+        if v_status == "Active" and v_qty >= 1:
+            print(f"{head} → ✅ 在庫{v_qty} / ${price} / {profile}")
+            sent.append(iid)
+        else:
+            print(f"{head} → ⚠️要対応: 送れたが読み直すと 状態={v_status} 在庫={v_qty}")
+            failed.append(iid)
+    if write and (sent or already):
+        record_built(sent + already)
+    ng = len(failed) + len(ended)
+    print(f"\n在庫を戻した {len(sent)}件 / もう戻っていた {len(already)}件 / 見送り {held}件" + (f" / ⚠️要対応 {ng}件 {failed + ended}" if ng else "")
+          + ("" if ng else " → ✅ 正常"))
+    if write and (sent or already):
+        print("\n▶ ③ 確認を続けて回します (商品管理シートの仕入元・売り切れ・「実行済」を揃える)")
+        r = subprocess.run([sys.executable, os.path.join(here, "psa_restock_writeback.py")], cwd=here)
+        if r.returncode != 0:
+            print(f"⚠️要対応: ③ が異常終了 (returncode={r.returncode})。③ ボタンを押し直してください")
+            return 1
+    return 1 if ng else 0
+
+
+def main_csv():
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
@@ -448,4 +576,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

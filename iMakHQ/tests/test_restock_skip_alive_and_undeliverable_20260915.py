@@ -44,4 +44,4 @@ def test_gates_off_when_materials_missing():
 
 def test_main_and_hint_pass_undeliverable():
     src = open(b.__file__, encoding="utf-8").read()
-    assert src.count("undeliverable_ids=undeliverable()") == 2
+    assert src.count("undeliverable_ids=undeliverable()") == 3   # main (在庫を戻す) / main_csv / ヒント

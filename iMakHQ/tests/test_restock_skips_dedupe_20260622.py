@@ -24,11 +24,13 @@ def _entry(cmd_tail):
             if isinstance(s.get("cmd"), list) and any(str(c).endswith(cmd_tail) for c in s["cmd"])]
 
 
-def test_restock_entry_has_restock_revise_flag():
-    """♻RESTOCK ボタンは restock_revise=True を持つ (= dedupe skip の判定軸)。"""
+def test_restock_entry_skips_postprocess():
+    """♻RESTOCK ボタンは後処理 (新規用の重複くん・監査) を走らせない。
+    ★2026-09-30: CSV を作らず在庫を戻すだけになったので restock_revise ではなく skip_postprocess。"""
     e = _entry("psa_restock_build.py")
     assert len(e) == 1, "psa_restock_build エントリが1つであること"
-    assert e[0].get("restock_revise") is True
+    assert e[0].get("skip_postprocess") is True
+    assert not e[0].get("restock_revise")
 
 
 def test_restock_skips_new_listing_dedupe():

@@ -1712,26 +1712,27 @@ SCRIPTS = [
         
     },
     {
-        # RESTOCK後工程① 視覚確証で確定したカードを 新コア生成→Revise CSV化(手動UL用)。2026-06-18
+        # RESTOCK後工程① 視覚確証で確定したカードの **今ある出品の在庫を 0→1 に戻す**。
+        # ★2026-09-30 ユーザー確定: 作り直し (新コア生成→Revise CSV) はやめた。タイトル・Item Specifics・値段は
+        #   今の出品と同じで、変わるのは写真と鑑定番号だけ (個体ごとに変わるのは説明文に書いてある)。
+        #   旧来の作り直しは psa_restock_build.py --csv (restock_revise の後処理は付かないので手動変換)。
         "category": None, "type": "utility",
-        "label": "🛒 PSA 再仕入れ ② CSV",
+        "label": "🛒 PSA 再仕入れ ② 在庫を戻す",
         "badge": "restock_build",
-        "tip": "🃏 で仕入元が確定した分を、出品しなおすCSVにします (手でアップロードする用)。"
-               "一度出した分は自動で除きます。",
+        "tip": "🃏 で仕入元が確定した分の出品を、在庫1に戻します (値段と送料は今の仕入値で合わせる)。"
+               "戻した後に eBay を読み直して確かめ、続けて ③ を回して商品管理シートを揃えます。"
+               "押すと実際に戻します (1回20件まで)。",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "psa_restock_build.py"],
         "params": [],
-        # post-chain(excluder/title-fix/dedup)の **後** に Add→Revise 変換する(順序保証)。
-        # psa_restock_build は Add CSV 生成までで、Revise 化は control_panel が最終CSVに対して実施。
-        "restock_revise": True,
-        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/RESTOCK_revise_*.csv",
+        "skip_postprocess": True,             # CSV を作らないので後処理 (重複くん・監査) は無い
     },
     {
         # RESTOCK後工程② アップロード反映後、実eBay qty を verify してスプシ書戻し(状態同期)。2026-06-18
         "category": None, "type": "utility",
         "label": "🛒 PSA 再仕入れ ③ 確認",
         "badge": "restock_wb",
-        "tip": "♻ のCSVをアップロードした後に押します。eBayの実際の在庫数を見て、"
+        "tip": "② が最後に自動で回します。単独で押すのは、② が途中で止まった時など。eBayの実際の在庫数を見て、"
                "本当に戻っている物だけ「実行済」にします。戻っていない物は残るので、"
                "取りこぼしになりません。",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",

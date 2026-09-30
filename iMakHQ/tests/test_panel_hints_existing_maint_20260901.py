@@ -37,7 +37,7 @@ def _fn_body(src, name):
 
 SIX = [
     ("PSA 再仕入れ ① 目視", "psa_gate", "pg_txt"),
-    ("PSA 再仕入れ ② CSV", "restock_build", "rb_txt"),
+    ("PSA 再仕入れ ② 在庫を戻す", "restock_build", "rb_txt"),
     ("PSA 再仕入れ ③ 確認", "restock_wb", "rw_txt"),
     ("補URL 件数感 (全系統)", "hoju_status", "hs_txt"),
     ("くじ 再仕入れ ① 目視", "kuji_supply", "kv_txt"),
