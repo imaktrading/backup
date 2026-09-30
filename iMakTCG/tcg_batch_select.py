@@ -372,8 +372,14 @@ def balanced_sample(certs, title_map, limit, shuffle=None, cost_of=None,
         #   人気キャラの根拠: 自社出品で 1出品あたり販売 3.4% vs 2.2%・ウォッチ 0.84 vs 0.51。
         n_explore = max(0, int(round(limit * explore)))
         for name, g in groups.items():
-            keep_random = g[:n_explore]              # ランダムのまま残す分 (順位で永久に殺さない)
             _known = getattr(popular_of, "known", None)
+            # ★2026-09-30 ユーザー確定: ランダム枠は **鑑定データが取れている物の中から** 選ぶ。
+            #   9/30 18:00 の走行で、鑑定データの無い物が枠を使ってから「既に出品中」で 19件落ちた
+            #   (前段の除外は鑑定データが無いと効かない)。取れている物が足りなければ残りから埋める。
+            #   夜の先貯め (psa_cache_warm) は下の順位と同じ順で取るので、順位側は前夜に揃う。
+            if _known:
+                g = [c for c in g if _known(c)] + [c for c in g if not _known(c)]
+            keep_random = g[:n_explore]              # ランダムのまま残す分 (順位で永久に殺さない)
             _treasure = getattr(popular_of, "treasure", None)
             _sold = getattr(popular_of, "market_sold", None)
             rest = sorted(g[n_explore:], key=lambda c: (

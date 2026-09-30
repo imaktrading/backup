@@ -113,6 +113,27 @@ def pending_certs(all_certs, is_cached):
     return out
 
 
+def order_like_listing(todo, title_map, cost_map, sample=None, popular=None):
+    """取る順番を、自動出品が枠を選ぶ順 (人気キャラ → 仕入値の安い順・ポケモン7割) にそろえる。
+
+    ★2026-09-30 ユーザー確定: 夜に取った分が翌日の枠に入らず、枠を使ってから「既に出品中」で落ちていた
+      (9/30 18:00 の 19件は全部、走行の時点で鑑定データが無かった)。同じ関数で並べ、ランダムは入れない。
+    落とさない: 並べ替えで消えた cert は後ろに足す。並べられなければ元の順のまま。
+    """
+    try:
+        if sample is None or popular is None:
+            from tcg_batch_select import balanced_sample, build_popular_of
+            sample, popular = sample or balanced_sample, popular or build_popular_of
+        ordered = sample(list(todo), title_map or {}, len(todo), shuffle=lambda g: None, explore=0,
+                         cost_of=(cost_map or {}).get, popular_of=popular(list(todo), title_map or {}),
+                         card_of=lambda c: "")
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 取る順番をそろえられず元の順 ({type(e).__name__}: {e})")
+        return list(todo)
+    seen = set(ordered)
+    return list(ordered) + [c for c in todo if c not in seen]
+
+
 def has_everything_we_need(meta):
     """保存分だけで出品判断まで足りるか (純関数)。
 
@@ -150,6 +171,7 @@ def main() -> int:
     _nf = _load_not_found()
     todo = pending_certs(certs, lambda c: has_everything_we_need(psa_api.get_cached(c))
                          or recently_not_found(c, _nf))
+    todo = order_like_listing(todo, _title, _cost)
     _n_nf = sum(1 for c in set(map(str, certs)) if recently_not_found(c, _nf))
     print(f"=== PSA データの先貯め ===")
     # ★飛ばした分 (PSA にページが無い) を「データ揃い」に混ぜない (揃っていないのに揃ったと読める)
