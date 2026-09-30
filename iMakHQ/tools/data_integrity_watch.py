@@ -185,8 +185,9 @@ def run():
     return st
 
 
-def file_marks(path=DB):
+def file_marks(path=None):
     """DB ファイルの「書かれた印」: ヘッダの変更カウンタ (24〜27バイト目) / 本体と -wal の大きさ・更新時刻。"""
+    path = path or DB          # 既定値に DB を焼くと差し替えが効かず本物を読む (9/30 テストが本物の値 21 を拾った)
     m = {}
     try:
         with open(path, "rb") as f:

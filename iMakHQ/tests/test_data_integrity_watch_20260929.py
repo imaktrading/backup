@@ -73,6 +73,7 @@ def test_hourly_logs_marks_and_requests_when_broken(tmp_path, monkeypatch):
     monkeypatch.setattr(W, "HOURLY_LOG", str(tmp_path / "h.jsonl"))
     monkeypatch.setattr(W, "REQ_DIR", str(tmp_path))
     monkeypatch.setattr(W, "quick_check", lambda path=None: "*** broken")
+    monkeypatch.setattr(W, "retry_backup_if_missing", lambda: "")   # テストで本物のバックアップを走らせない
     st = W.run_hourly()
     assert st["change_counter"] == 19 and st["request"].endswith("_auto.md")
     assert json.loads((tmp_path / "h.jsonl").read_text(encoding="utf-8"))["quick_check"] == "*** broken"
