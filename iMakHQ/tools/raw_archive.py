@@ -4,7 +4,7 @@
 毎朝の zip には入れていない (大きすぎる)。9/30 朝に 1.8GB を1本で圧縮していてブルースクリーンになったので、
 1本 100MB まで・一晩 3本まで・低い優先度で送る。送り済みは manifest.json に記録し、次の晩は新しい物と変わった物だけ送る。
 
-    python raw_archive.py            # 一晩分を送る (予約タスク iMakHQ_RawArchive_0200)
+    python raw_archive.py            # 一晩分を送る (順番待ち job_queue.py の raw_archive が起動する・2026-10-01)
     python raw_archive.py --dry-run  # 残りを数えるだけ
 
 戻す時: G:/マイドライブ/iMak_backup/raw の zip を**名前の順に全部**展開して上書きする (後の本が新しい)。

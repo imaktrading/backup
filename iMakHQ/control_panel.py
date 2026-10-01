@@ -2470,7 +2470,9 @@ def _read_pending_tasks():
 
 
 
-_NIGHTLY_TASK = r"\iMakHQ_HojuSearch_2330"
+# ★2026-10-01: 夜の束は時刻の予約ではなく、順番待ち (job_queue.py) が 22時以降・PC が空いた時に起動する。
+#   見るのは順番待ちの見回りの予約 (これが無効なら夜の束も動かない)。
+_NIGHTLY_TASK = r"\iMakHQ_JobQueue_Tick"
 _NIGHTLY_CACHE = {}
 
 
@@ -2539,7 +2541,9 @@ def nightly_search_state(task=_NIGHTLY_TASK):
                 out["why"] = "無効になっています"
             else:
                 out["ok"] = True
-                if " " in nxt:
+                if "JobQueue" in task:
+                    out["at"] = "22:00〜"   # 見回りは10分おき。夜の束が動き始めるのは 22時以降・PC が空いた時
+                elif " " in nxt:
                     out["at"] = nxt.split(" ")[1][:5]
     except Exception as e:                                    # noqa: BLE001
         out["why"] = "%s" % type(e).__name__

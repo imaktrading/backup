@@ -45,12 +45,13 @@ NL = chr(10)
 BS = chr(92)          # タスク名の先頭の \ (エスケープ警告を出さないため)
 
 OK_CSV = ('"タスク名","次回の実行時刻","状態"' + NL
-          + '"' + BS + 'iMakHQ_HojuSearch_2330","2026/08/21 23:30:00","準備完了"' + NL)
+          + '"' + BS + 'iMakHQ_JobQueue_Tick","2026/08/21 23:30:00","準備完了"' + NL)
 
 
 def test_動いていれば時刻を返す(monkeypatch):
     got = _run(monkeypatch, 0, OK_CSV)
-    assert got["ok"] is True and got["at"] == "23:30"
+    # 2026-10-01: 夜の束は順番待ちが 22時以降に起動する (時刻の予約ではない)
+    assert got["ok"] is True and got["at"] == "22:00〜"
 
 
 def test_無効なら止まっていると返す(monkeypatch):
