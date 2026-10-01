@@ -514,6 +514,11 @@ def _code_files():
     # ★2026-10-02: 一番くじ等が使う eBay の部品 (ebay_getitem_images / credentials 等)
     ebay = os.path.join(REPO, "iMakeBayAPI")
     files += [os.path.join("iMakeBayAPI", f) for f in os.listdir(ebay) if f.endswith(".py")]
+    # 値段の計算 (pricing_engine) が読む設定 (リバイスくんの KAGOYA 影で全件失敗・2026-10-02)
+    cdir = os.path.join(ebay, "config")
+    if os.path.isdir(cdir):
+        files += [os.path.join("iMakeBayAPI", "config", f) for f in os.listdir(cdir)
+                  if f.endswith((".yaml", ".yml", ".json"))]
     cat = os.path.join(REPO, "iMakCatalog")
     for dp, dn, fn in os.walk(cat):
         dn[:] = [d for d in dn if d not in ("tests", "__pycache__")]
