@@ -87,10 +87,24 @@ def load_variation_skus(variations_json: Optional[Path]) -> dict:
     return out
 
 
+def load_current_profiles(snapshot_csv: Optional[Path]) -> dict:
+    """snapshot (ebay_active_*.csv) の US 行 → {item_id: 送料ポリシー名}."""
+    if not snapshot_csv or not Path(snapshot_csv).exists():
+        return {}
+    with open(snapshot_csv, encoding="utf-8-sig", newline="") as f:
+        return {r["Item number"].strip(): (r.get("Shipping profile name") or "").strip()
+                for r in csv.DictReader(f)
+                if (r.get("Listing site") or "").strip() == "US" and r.get("Item number")}
+
+
 def build_plan(single_csv: Optional[Path], var_price_csv: Optional[Path],
                var_shipping_csv: Optional[Path], variations_json: Optional[Path],
-               policy_ids: dict) -> ApiPlan:
-    """revise CSV 3本 → API で送る中身. 引けない行は problems に入れ、推測で埋めない."""
+               policy_ids: dict, current_profiles: Optional[dict] = None) -> ApiPlan:
+    """revise CSV 3本 → API で送る中身. 引けない行は problems に入れ、推測で埋めない.
+
+    current_profiles ({item_id: 今の送料ポリシー名}, snapshot の US 行) を渡すと、
+    送料は「今と違う物だけ」送る (CSV は変わっていない行も毎回書いているため)。
+    """
     plan = ApiPlan()
     var_skus = load_variation_skus(variations_json)
 
@@ -131,6 +145,9 @@ def build_plan(single_csv: Optional[Path], var_price_csv: Optional[Path],
         if item_id and prof:
             plan.shippings.append(ShippingChange(item_id, prof, policy_ids.get(prof)))
 
+    if current_profiles is not None:
+        plan.shippings = [s for s in plan.shippings
+                          if current_profiles.get(s.item_id) != s.profile_name]
     for s in plan.shippings:
         if not s.profile_id:
             plan.problems.append(f"{s.item_id}: 送料ポリシー名 {s.profile_name} の ID が eBay に無い")

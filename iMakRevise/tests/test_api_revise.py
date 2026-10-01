@@ -58,3 +58,12 @@ def test_xml_carries_only_price_or_shipping_profile():
     y = build_inventory_status_xml([PriceChange("111", 12.5)])
     assert_only_allowed_tags(y)
     assert "<StartPrice>12.50</StartPrice>" in y and "Quantity" not in y
+
+
+def test_shipping_sent_only_when_different(tmp_path):
+    single = _w(tmp_path / "s.csv", HDR_SINGLE + '"Revise","111","DDP-A-P22","10.98","",""\n'
+                + '"Revise","112","DDP-A-P23","11.98","",""\n')
+    plan = build_plan(single, None, None, None, {"DDP-A-P22": "1", "DDP-A-P23": "2"},
+                      current_profiles={"111": "DDP-A-P22", "112": "DDP-A-P10"})
+    assert [s.item_id for s in plan.shippings] == ["112"]
+    assert len(plan.prices) == 2

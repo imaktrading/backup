@@ -21,7 +21,8 @@ if str(PKG_ROOT) not in sys.path:
     sys.path.insert(0, str(PKG_ROOT))
 
 from revise.api_revise import (_norm_specifics, _read_csv, build_all_xml,  # noqa: E402
-                               build_plan, fetch_shipping_policy_ids)
+                               build_plan, fetch_shipping_policy_ids,
+                               load_current_profiles)
 
 CSV_DIR = PKG_ROOT / "csv_output"
 SNAPSHOT_DIR = Path(r"C:/dev/iMak_data/snapshots")
@@ -85,6 +86,10 @@ def shadow_one(ts: str, policy_ids: dict) -> dict:
     snap = _snapshot_before(ts)
     plan = build_plan(single, var_price, var_ship, snap, policy_ids)
     xmls = build_all_xml(plan)  # 許可外タグがあれば例外で止まる
+    snap_csv = snap.with_name(snap.name.replace(".variations.json", ".csv")) if snap else None
+    cur = load_current_profiles(snap_csv)
+    slim = build_plan(single, var_price, var_ship, snap, policy_ids, current_profiles=cur)
+    slim_calls = len(build_all_xml(slim))
 
     want_p, want_s = _csv_intent(single, var_price, var_ship)
     got_p = {(c.item_id, _norm_specifics(c.specifics) if c.specifics else None): c.price
@@ -99,7 +104,8 @@ def shadow_one(ts: str, policy_ids: dict) -> dict:
         "price_want": len(want_p), "price_ok": p_ok,
         "ship_want": len(want_s), "ship_ok": s_ok, "extra": extra,
         "match_pct": round(100 * (p_ok + s_ok) / total, 2) if total else 100.0,
-        "api_calls": len(xmls), "problems": plan.problems,
+        "api_calls": len(xmls), "api_calls_slim": slim_calls,
+        "ship_slim": len(slim.shippings), "problems": plan.problems,
     }
 
 
@@ -116,7 +122,7 @@ def main() -> int:
         worst = min(worst, r["match_pct"])
         line = (f"{datetime.now():%Y-%m-%d %H:%M:%S} [shadow] {r['ts']} 一致 {r['match_pct']}% "
                 f"値段 {r['price_ok']}/{r['price_want']} 送料 {r['ship_ok']}/{r['ship_want']} "
-                f"余分 {r['extra']} API呼出 {r['api_calls']} 組めない {len(r['problems'])} "
+                f"余分 {r['extra']} API呼出 {r['api_calls']}→絞込後 {r['api_calls_slim']} (送料 {r['ship_slim']}) 組めない {len(r['problems'])} "
                 f"snapshot={r['snapshot']}")
         print(line)
         for p in r["problems"][:20]:
