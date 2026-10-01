@@ -36,3 +36,30 @@ def test_parse_cond_ship_reads_shops_buyer_pays():
     assert ir._parse_cond_ship(_PAGE_SHOPS_SELLER)[1] == "送料込み"
     # 送料別は候補に入らない
     assert mp.candidate_passes_filter("", "送料別", None, True) is False
+
+
+def test_api_detail_maps_item_and_shops(monkeypatch):
+    """一番くじの詳細を API で読む (2026-10-02)。控えと同じ形・同じ言葉で返す。"""
+    import asyncio
+    import types
+    NS = types.SimpleNamespace
+
+    class FakeApi:
+        async def item(self, i):
+            return NS(item_condition=NS(name="新品、未使用"), shipping_payer=NS(code="seller"),
+                      seller=NS(name="柴", num_ratings=277, star_rating_score="5"),
+                      shipping_duration=NS(name="1~2日で発送"), status="on_sale", auction_info=None)
+
+        async def product(self, p):
+            pd = NS(condition=NS(display_name="目立った傷や汚れなし"), shipping_payer=NS(code="BUYER"),
+                    variants=[NS(quantity="1")], shipping_duration=NS(display_name="4〜7日で発送"))
+            return NS(product_detail=pd)
+
+    monkeypatch.setattr(mp, "_API_ONE", {"api": FakeApi(), "loop": asyncio.new_event_loop()})
+    monkeypatch.setattr(mp, "_API_SLEEP", 0)
+    a = mp.api_detail("https://jp.mercari.com/item/m123")
+    assert a == {"cond": "新品、未使用", "ship": "送料込み", "reviews": 277, "buyable": True,
+                 "seller": "柴", "star": 5.0, "ship_days": "1~2日で発送"}
+    s = mp.api_detail("https://jp.mercari.com/shops/product/ABC")
+    assert s["ship"] == "送料別" and s["buyable"] is True and s["reviews"] is None
+    assert mp.api_detail("https://snkrdunk.com/x") is None

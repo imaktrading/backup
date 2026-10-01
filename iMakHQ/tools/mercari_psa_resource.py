@@ -1658,6 +1658,70 @@ def api_stock_check(urls, budget_sec=None, now=None, sleep=None):
     return ok, titles, unknown
 
 
+_API_ONE = {}
+
+
+def api_detail(url):
+    """メルカリの詳細を API で → {cond, ship, reviews, buyable, seller, star, ship_days}。読めなければ None。
+
+    ★2026-10-02: 一番くじの詳細の先取りを KAGOYA で回すと、Chrome の詳細ページが遅く 40分で20件しか進まなかった。
+      詳細ページから読んでいた項目は API に全部ある (実物4件で控えの中身と一致を確認)。
+      送料: 個人は shipping_payer.code seller=送料込み / それ以外=着払い。Shops は SELLER=送料込み / それ以外=送料別
+    """
+    import asyncio
+    m_item = re.search(r"jp\.mercari\.com/item/(m\w+)", url or "")
+    m_shop = re.search(r"jp\.mercari\.com/shops/product/(\w+)", url or "")
+    if not (m_item or m_shop):
+        return None
+    try:
+        if "api" not in _API_ONE:
+            try:
+                import certifi
+                os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+            except Exception:                                  # noqa: BLE001
+                pass
+            import logging as _lg
+            _lg.getLogger().setLevel(_lg.ERROR)
+            from mercapi import Mercapi
+            _API_ONE["api"], _API_ONE["loop"] = Mercapi(), asyncio.new_event_loop()
+        api, loop = _API_ONE["api"], _API_ONE["loop"]
+        if m_item:
+            d = loop.run_until_complete(api.item(m_item.group(1)))
+            time.sleep(_API_SLEEP)
+            if d is None:
+                return {"cond": "", "ship": "", "reviews": None, "buyable": False,
+                        "seller": "", "star": None, "ship_days": ""}
+            s = getattr(d, "seller", None)
+            code = str(getattr(getattr(d, "shipping_payer", None), "code", "") or "").lower()
+            try:
+                star = float(getattr(s, "star_rating_score", None))
+            except (TypeError, ValueError):
+                star = None
+            return {"cond": getattr(getattr(d, "item_condition", None), "name", "") or "",
+                    "ship": "送料込み" if code == "seller" else ("着払い" if code else ""),
+                    "reviews": getattr(s, "num_ratings", None),
+                    "buyable": (str(getattr(d, "status", "") or "").lower() in ("on_sale", "item_status_on_sale")
+                                and getattr(d, "auction_info", None) is None),
+                    "seller": getattr(s, "name", "") or "", "star": star,
+                    "ship_days": getattr(getattr(d, "shipping_duration", None), "name", "") or ""}
+        p = loop.run_until_complete(api.product(m_shop.group(1)))
+        time.sleep(_API_SLEEP)
+        if p is None:
+            return {"cond": "", "ship": "", "reviews": None, "buyable": False,
+                    "seller": "", "star": None, "ship_days": ""}
+        pd = getattr(p, "product_detail", None)
+        _ok, _s, buy = api_shops_verdict(
+            getattr(getattr(pd, "shipping_payer", None), "code", None),
+            [getattr(v, "quantity", 0) for v in (getattr(pd, "variants", None) or [])])
+        code = str(getattr(getattr(pd, "shipping_payer", None), "code", "") or "").upper()
+        return {"cond": getattr(getattr(pd, "condition", None), "display_name", "") or "",
+                "ship": "送料込み" if code == "SELLER" else ("送料別" if code else ""),
+                "reviews": None, "buyable": buy, "seller": "", "star": None,
+                "ship_days": getattr(getattr(pd, "shipping_duration", None), "display_name", "") or ""}
+    except Exception:                                          # noqa: BLE001  読めない = Chrome で見る
+        return None
+
+
 def api_shops_verdict(shipping_payer_code, quantities, min_reviews=100):
     """Shops API の商品情報 → (ok, ship, buyable) (純関数)。
 

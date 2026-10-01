@@ -759,6 +759,23 @@ def _make_driver(headless=False):
     raise last
 
 
+class _LazyDriver:
+    """最初に使われた時だけ Chrome を起こす (詳細を API で読めた分は Chrome を使わない)。"""
+
+    def __init__(self):
+        self._d = None
+
+    def __getattr__(self, name):
+        if self._d is None:
+            self._d = _make_driver()
+            self._d.set_page_load_timeout(50)
+        return getattr(self._d, name)
+
+    def quit(self):
+        if self._d is not None:
+            self._d.quit()
+
+
 def _href_to_image(src):
     """検索結果HTMLの各item-cellから href→実画像src を作る (item=mercdn / shops=mercari-shops 両対応)。
 
@@ -973,6 +990,17 @@ def _cond_ship(drv, url, cache=None):
         e = cache.get(url)
         if detail_cache_fresh(e):
             return (e.get("cond", ""), e.get("ship", ""), e.get("reviews"))
+    # ★2026-10-02: まず API (Chrome の詳細ページは遅い・KAGOYA で40分20件)。読めない時だけ下の Chrome
+    try:
+        import mercari_psa_resource as _mpa
+        if _mpa.mercari_source_name() != "chrome":
+            ent = _mpa.api_detail(url)
+            if ent is not None:
+                if cache is not None and ent["cond"]:
+                    cache[url] = {**ent, "date": _today()}
+                return (ent["cond"], ent["ship"], ent["reviews"])
+    except Exception:                                          # noqa: BLE001
+        pass
     try:
         drv.get(url)
         time.sleep(3)
@@ -2086,9 +2114,8 @@ def main():
         print(f"候補の詳細を先読み: {len(urls)}件 (キャッシュ済は開かない)")
         if not urls:
             print("対象なし"); return
-        drv = _make_driver()
+        drv = _LazyDriver()            # ★2026-10-02: API で読めない物が出た時だけ Chrome を起こす
         try:
-            drv.set_page_load_timeout(50)
             for i, u in enumerate(urls, 1):
                 _cond_ship(drv, u, cache)
                 if i % 10 == 0:
