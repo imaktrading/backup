@@ -378,3 +378,54 @@ def collect_gshock_products(
         if page < max_pages:
             _sleep_jitter(rate_min, rate_max)
     return {"products": products, "pages_scanned": pages_scanned, "blocked": blocked}
+
+
+# ============================================================================
+# 軽い確認 (2026-10-01 HQ依頼: 毎日は軽く・変化があった日だけ全部集める)
+# ============================================================================
+_HIT_COUNT_RE = re.compile(r"([\d,]+)件ヒット")
+
+
+def parse_hit_count(html_text: str) -> Optional[int]:
+    """検索結果 HTML の 「NNN件ヒット」 表示から総件数を取る (純関数)。 取れなければ None."""
+    m = _HIT_COUNT_RE.search(html_text or "")
+    if not m:
+        return None
+    try:
+        return int(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def light_check(session: requests.Session, base_url: str) -> dict:
+    """page1 だけ取って 「総件数」 と 「1ページ目の商品ID集合」 を返す (1 HTTP リクエストのみ)。
+
+    Returns: {"ok": bool, "count": int|None, "page1_ids": list[str]}
+    ok=False = 取得失敗/件数も1ページ目も読めない (= 当てにならない。 呼出側は
+    fail-closed で全件収集に倒すこと)。
+    """
+    try:
+        res = session.get(base_url, timeout=DEFAULT_TIMEOUT)
+        text = res.text if res.status_code == 200 else ""
+    except Exception:  # noqa: BLE001
+        text = ""
+    if not text:
+        return {"ok": False, "count": None, "page1_ids": []}
+    count = parse_hit_count(text)
+    tiles = parse_product_tiles(text)
+    ids = [t["product_id"] for t in tiles]
+    if count is None and not ids:
+        return {"ok": False, "count": None, "page1_ids": []}
+    return {"ok": True, "count": count, "page1_ids": ids}
+
+
+def light_check_unchanged(today: dict, prev: Optional[dict]) -> bool:
+    """今日の light_check 結果が前回の控えと同じか (純関数)。
+
+    件数と1ページ目の商品ID集合の両方が一致した時だけ True。 件数だけでは
+    (入替わりで総数が変わらない事故を) 見逃す。 prev が無い/壊れている → False (全件収集)。
+    """
+    if not isinstance(prev, dict) or not today.get("ok"):
+        return False
+    return (today.get("count") == prev.get("count")
+            and set(today.get("page1_ids") or []) == set(prev.get("page1_ids") or []))

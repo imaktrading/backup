@@ -39,10 +39,25 @@ DEFAULT_SEARCH_URL = (
 DUMP_DIR = Path(r"c:\dev\iMak_data\catalog\_amazon_jp_dumps")
 STAMP_PATH = Path(r"c:\dev\iMak_data\harvest\yodobashi_harvest_stamp.json")
 STAMP_STALE_HOURS = 25  # cron cadence=1日1回 → 25h 超で warn (依頼書 §3)
+LIGHT_SIGNAL_PATH = Path(r"c:\dev\iMak_data\harvest\yodobashi_light_signal.json")
 
 
 def _log(m: str) -> None:
     print(f"[{datetime.now():%H:%M:%S}] {m}", flush=True)
+
+
+def _load_light_signal() -> dict | None:
+    try:
+        return json.loads(LIGHT_SIGNAL_PATH.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - 初回/壊れている → 無いのと同じ (全件収集に倒す)
+        return None
+
+
+def _save_light_signal(light: dict) -> None:
+    LIGHT_SIGNAL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LIGHT_SIGNAL_PATH.write_text(
+        json.dumps({"date": datetime.now().date().isoformat(), **light},
+                   ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _load_amazon_models(label: str) -> dict:
@@ -80,6 +95,8 @@ def main(argv=None) -> int:
                     help="詳細fetchを省略 (画像/説明/色/ポイントなし、 高速確認用)")
     ap.add_argument("--detail-rate-min", type=float, default=1.5)
     ap.add_argument("--detail-rate-max", type=float, default=3.0)
+    ap.add_argument("--force-full", action="store_true",
+                    help="軽い確認を飛ばして毎回全件収集する (確認・検証用)")
     args = ap.parse_args(argv)
 
     _log(f"開始: label={args.label!r} dry_run={args.dry_run}")
@@ -89,6 +106,27 @@ def main(argv=None) -> int:
     check_previous_stamp(STAMP_PATH, STAMP_STALE_HOURS, label="yodobashi_harvest")
 
     session = Y.create_session()
+
+    # 軽い確認 (2026-10-01 HQ依頼): page1 だけ見て、件数+1ページ目の商品IDが前回と
+    # 同じなら全件収集を飛ばす。 前日 20走行中19走行が新規0件だった実測を踏まえ、
+    # 「毎日は軽く・変化があった日だけ全部」にして無駄な14分走行を減らす。
+    # light_check 自体が失敗/当てにならない時は fail-closed で全件収集に倒す。
+    light = Y.light_check(session, args.url)
+    _log(f"[light] ok={light['ok']} count={light.get('count')} page1={len(light.get('page1_ids') or [])}件")
+    prev_light = _load_light_signal()
+    if (not args.force_full and not args.dry_run
+            and Y.light_check_unchanged(light, prev_light)):
+        _log(f"[light] 変化なし (前回 {prev_light.get('date')} と件数・1ページ目が同じ) "
+             "→ 全件収集は飛ばす (スプシは前日のまま=そのまま使える)")
+        _save_light_signal(light)
+        stamp = write_stamp(STAMP_PATH, {
+            "light_check_only": True, "count": light.get("count"), "label": args.label,
+        })
+        _log(f"[stamp] wrote {STAMP_PATH.name} ok_at={stamp['ok_at']} (light-check only)")
+        return 0
+    if light["ok"] and not Y.light_check_unchanged(light, prev_light):
+        _log("[light] 変化あり、または前回の控えが無い → 全件収集する")
+
     res = Y.collect_gshock_products(
         session, args.url, max_pages=args.max_pages,
         progress_callback=lambda p, n, m: _log(f"  {m}"),
@@ -216,6 +254,8 @@ def main(argv=None) -> int:
             "dry_run": False,
         })
         _log(f"[stamp] wrote {STAMP_PATH.name} ok_at={stamp['ok_at']}")
+        if light["ok"]:
+            _save_light_signal(light)  # 明日の軽い確認の比較元を更新
     return 0
 
 

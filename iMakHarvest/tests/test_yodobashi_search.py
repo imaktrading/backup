@@ -9,6 +9,8 @@ from scrapers.yodobashi_search_http import (
     extract_points_jpy,
     extract_point_rate,
     is_in_stock,
+    light_check_unchanged,
+    parse_hit_count,
     parse_product_tiles,
 )
 
@@ -134,3 +136,43 @@ def test_parse_product_tiles_container_scoped():
     assert a["in_stock"] is True
     assert a["is_gshock"] is True
     assert b["in_stock"] is False  # 販売終了 → skip 対象
+
+
+# ============================================================================
+# 軽い確認 (2026-10-01 HQ依頼: 毎日は軽く・変化があった日だけ全部集める)
+# ============================================================================
+def test_parse_hit_count():
+    assert parse_hit_count("あいまい 258件ヒット その他") == 258
+    assert parse_hit_count("1,234件ヒット") == 1234
+    assert parse_hit_count("該当なし") is None
+    assert parse_hit_count("") is None
+
+
+def test_light_check_unchanged_same_count_and_ids():
+    today = {"ok": True, "count": 258, "page1_ids": ["a", "b", "c"]}
+    prev = {"count": 258, "page1_ids": ["c", "b", "a"]}  # 順不同でも同じ集合
+    assert light_check_unchanged(today, prev) is True
+
+
+def test_light_check_unchanged_count_differs():
+    today = {"ok": True, "count": 259, "page1_ids": ["a", "b"]}
+    prev = {"count": 258, "page1_ids": ["a", "b"]}
+    assert light_check_unchanged(today, prev) is False
+
+
+def test_light_check_unchanged_same_count_different_ids():
+    """件数が同じでも中身が入れ替わっていたら変化あり扱い (件数だけで判定しない)."""
+    today = {"ok": True, "count": 258, "page1_ids": ["a", "b", "new"]}
+    prev = {"count": 258, "page1_ids": ["a", "b", "old"]}
+    assert light_check_unchanged(today, prev) is False
+
+
+def test_light_check_unchanged_no_prev():
+    today = {"ok": True, "count": 258, "page1_ids": ["a"]}
+    assert light_check_unchanged(today, None) is False
+
+
+def test_light_check_unchanged_today_not_ok():
+    today = {"ok": False, "count": None, "page1_ids": []}
+    prev = {"count": 258, "page1_ids": ["a"]}
+    assert light_check_unchanged(today, prev) is False
