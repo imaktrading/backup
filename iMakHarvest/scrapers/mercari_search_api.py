@@ -171,3 +171,72 @@ def collect_multi_keyword_urls_api(
     finally:
         if own_client:
             cli.close()
+
+
+# ---------------------------------------------------------------------------
+# 段階②(詳細取得もAPI) — 2026-10-02 HQ依頼 (`2026-10-02_harvest_api_stage2_detail_go.md`)
+# まだ比較用の実装のみ。本番(_process_one)への配線はしていない (並べて比べてから)。
+# ---------------------------------------------------------------------------
+ITEM_STATUS_MAP = {
+    "item_status_on_sale": "ON_SALE", "on_sale": "ON_SALE",
+    "item_status_sold_out": "SOLD_OUT", "sold_out": "SOLD_OUT",
+    "item_status_trading": "SOLD_OUT",  # 取引中 = 実質買えない。Chrome版も in_stock=False 扱い
+}
+SHIP_PAYER_SELLER_ID = 2
+
+
+def map_item_to_detail(d) -> dict:
+    """`Mercapi().item(id)` の戻り値 → Chrome版 `fetch_detail` と同じ形に正規化 (純関数)。
+
+    対応表 (実機1件で確認済み・2026-10-02):
+      price → price_jpy / photos → image_urls / name → title / description → description
+      status/auction_info → in_stock, status (auction_info が有る = オークション = 買えない)
+      shipping_payer.id_ → 2 なら送料込み (Chrome版は検索URLの shipping_payer_id=2 で
+        既に絞っているので detail側では見ていなかった項目。 API版は検索で絞れないので
+        ここで見る)
+
+    ★未確認: `identity_verified` (本人確認済み) に当たるAPI項目が無い。
+      `seller.register_sms_confirmation` は SMS認証であって本人確認(識別)とは別物の
+      可能性があり、安易に対応づけない。 `rating_count` と違って確証が無いので
+      **identity_verified は常に None** (= 未確認) を返す。 本人確認必須ゲート
+      (no_identity=False) を使う収集にこの関数を配線する前に、実際の「本人確認済」
+      バッジが付いたセラーで `register_sms_confirmation` の値を突き合わせて確認すること。
+    """
+    status_raw = str(getattr(d, "status", "") or "").lower()
+    has_auction = getattr(d, "auction_info", None) is not None
+    status = "SOLD_OUT" if has_auction else ITEM_STATUS_MAP.get(status_raw, "SOLD_OUT")
+    in_stock = status == "ON_SALE"
+    payer = getattr(d, "shipping_payer", None)
+    ship_included = getattr(payer, "id_", None) == SHIP_PAYER_SELLER_ID
+    seller = getattr(d, "seller", None)
+    return {
+        "title": getattr(d, "name", "") or "",
+        "price_jpy": int(getattr(d, "price", 0) or 0),
+        "condition": "",  # Chrome版も item_condition の文字列をそのまま使っておらず未使用
+        "description": getattr(d, "description", "") or "",
+        "image_urls": list(getattr(d, "photos", None) or []),
+        "in_stock": in_stock,
+        "status": status,
+        "shipping_included": ship_included,
+        "seller_quality": {
+            "rating_count": getattr(seller, "num_ratings", None),
+            "star": getattr(seller, "star_rating_score", None),
+            "identity_verified": None,  # ★未確認 (上記docstring参照)
+        },
+    }
+
+
+def fetch_detail_api(client: ApiSearchClient, url: str) -> Optional[dict]:
+    """`url` (`https://jp.mercari.com/item/mXXXX`) の詳細をAPIで取る。
+
+    404 (出品が消えた) は None。 それ以外の例外は呼出側がChromeに戻す判断ができるよう
+    re-raise する (HQ回答と同じ方針: 404以外の失敗はChromeにフォールバック)。
+    """
+    item_id = url.rstrip("/").rsplit("/", 1)[-1]
+    try:
+        d = client._run(client.api.item(item_id))
+    except Exception as e:  # noqa: BLE001
+        if "404" in str(e) or type(e).__name__ in ("ItemNotFoundError",):
+            return None
+        raise
+    return map_item_to_detail(d)
