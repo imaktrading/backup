@@ -208,7 +208,35 @@ def split_key(key):
     return "", k
 
 
-def card_meta_for_key(key, _cache={}, _db=r"C:/dev/iMak_data/catalog/products.sqlite"):
+OP_VARIANT_MAP_PATH = r"C:/dev/iMak_data/catalog/op_variant_official_map.json"
+_OP_VARIANT_MAP = {}
+
+
+def official_variant_key(key, _path=None):
+    """ワンピースの bandai 側の行 (OP06-022_p / EB01-057_OP11 等) → 同じ絵の公式の行の KEY。
+
+    ★2026-10-01: カタログの版の対応表 (絵を比べて1つに決まった物だけ・決まらない物は載らない)。
+      bandai 側の行は入手元が英語のセット名で、版 (SP/パラレル) も KEY から読めないため、
+      検索語に版が乗らず通常版ばかり拾っていた (KAGOYA の仕事 135件中 41件)。
+      表に無い / 読めない → そのまま返す (今までどおり)。
+    """
+    if not key:
+        return key
+    cat, pid = split_key(key)
+    if cat != "one_piece_tcg" or not pid:
+        return key
+    path = _path or OP_VARIANT_MAP_PATH
+    if path not in _OP_VARIANT_MAP:
+        try:
+            with open(path, encoding="utf-8") as f:
+                _OP_VARIANT_MAP[path] = json.load(f).get("map") or {}
+        except Exception:
+            _OP_VARIANT_MAP[path] = {}
+    off = _OP_VARIANT_MAP[path].get(pid)
+    return f"{cat}:{off}" if off else key
+
+
+def card_meta_for_key(key, _cache={}, _db=r"C:/dev/iMak_data/catalog/products.sqlite", _resolve=True):
     """canonical product_id(固有KEY) → {name_jp, image, set, get_info, variant_type, rarity, hint}。
 
     Step6 P2/P3: KEY が指す**その1枚の変種**の識別属性を catalog 共有DB から厳密引き。
@@ -228,6 +256,19 @@ def card_meta_for_key(key, _cache={}, _db=r"C:/dev/iMak_data/catalog/products.sq
         return _cache[key]
     import json
     import sqlite3
+    # ★2026-10-01: bandai 側の行は、カタログの版の対応表で公式の行に読み替えて引く
+    #   (入手元が日本語・版が rarity / KEY に出る)。公式の行は set 列が空なので、元の行の set を残す。
+    _off = official_variant_key(key) if _resolve else key
+    if _off != key:
+        out = card_meta_for_key(_off, _cache, _db)
+        if out is not None:
+            out = dict(out)
+            if not out.get("set"):
+                _orig = card_meta_for_key(key, {}, _db, _resolve=False)   # 読み替えずに元の行を引く
+                out["set"] = (_orig or {}).get("set") or ""
+            out["official_key"] = _off
+            _cache[key] = out
+            return out
     out = None
     cat, pid = split_key(key)
     if not pid:
@@ -528,14 +569,16 @@ def print_word_for_key(key, hint=None):
         return ""
     if not re.search(r"_p\d*$", pid, re.I):
         return ""
-    if any(str(h).strip().upper() in ("SP", "SPカード") for h in (hint or [])):   # rarity の値だけ見る
+    if any(str(h).strip().upper() in ("SP", "SPカード", "SP P") for h in (hint or [])):   # rarity の値だけ見る (SP P = プロモの SP)
         return "SP"
     # ★2026-10-01: 記念セット・大会配布・雑誌の応募者全員サービス・再録などの版は、売り手が
     #   「パラレル」と書かない。付けると検索結果が0件になっていた (実測 ST17-003_p3 / P-106_p2)。
     #   入手元 (hint[1] = get_info) がブースター (パック) の版だけ「パラレル」を付ける。
     #   (hint は card_meta_for_key の6項目 [set, get_info, set_ebay, variant_type, rarity, name] の時だけ読む)
     _gi = str(hint[1]) if isinstance(hint, (list, tuple)) and len(hint) >= 5 and hint[1] else ""
-    if _gi and not re.search(r"ブースター|BOOSTER", _gi, re.I):
+    # 公式の入手元は「双璧の覇者【OP-06】」「ONE PIECE CARD THE BEST【PRB-01】」と「ブースター」を書かない物が多い
+    # → 弾コード【OP-/EB-/PRB-】もパックとして読む (2026-10-01・版の対応表で公式の行を引くようになって表面化)
+    if _gi and not re.search(r"ブースター|BOOSTER|【(?:OP|EB|PRB)-?\d+】", _gi, re.I):
         return ""
     return "パラレル"
 
@@ -601,7 +644,7 @@ def build_card_query(title, set_no, key=None):
     kw_no = market_no or card_no
     _snj = search_name(nj)
     kw = f"PSA10 {_snj} {kw_no}" if _snj else f"PSA10 {kw_no}"
-    _pw = print_word_for_key(key, hint)
+    _pw = print_word_for_key((meta or {}).get("official_key") or key, hint)   # 版は公式の行で読む
     if _pw:
         kw = f"{kw} {_pw}"
         # スニダン側 (snkrdunk_psa_resource._print_signal) も hint で版を見る。`_p1` の hint は
