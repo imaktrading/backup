@@ -160,7 +160,10 @@ class TestOtherCategoriesUnchanged(unittest.TestCase):
         #   38セット (387行)。8/22 に「eBay に値が無い = 天井」と決めた分が 8/23 のルール
         #   (無ければ英語表記を自由入力・空欄にしない) で対象に戻っていた分の清算。
         #   ★残る 1行 は set_name_official 自体が空 = セットが特定できない行。これは空欄が正しい
-        "pokemon_tcg": 1,
+        # ★2026-10-02: 1 → 0。残り1行だった `cardID-36256` (弾の無い基本闘エネルギー) を
+        #   消した (依頼 2026-10-02_pokemon_basic_energy_row_delete_go.md・ユーザー許可)。
+        #   公式にも収録弾の記載が無く埋める手が無い行で、毎月 仕上げが赤を出す元だった。
+        "pokemon_tcg": 0,
         # 2026-09-02: ユーザー指示で dragonball / gundam の空も埋めた (6 -> 0 / 136 -> 0)。
         #   eBay master の Game 別一覧を実引きし、Fusion World のプロモ商品も Gundam も
         #   eBay 側に値が無いことを確認したうえで規約②の自由入力で決めた
