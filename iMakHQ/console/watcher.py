@@ -60,7 +60,9 @@ def remote_line(last, now):
         return "巡回は LAPTOP で動いています (最後に見た時刻が読めません)"
     mins = int((now - last).total_seconds() // 60)
     ago = "%d分前" % mins if mins < 120 else "%.1f時間前" % (mins / 60)
-    warn = " — ⚠️ 3時間以上 止まっています。LAPTOP を確認" if mins >= 180 else ""
+    # ★2026-10-01: O列は巡回の **最後に** まとめて書かれる (LAPTOP 回答)。巡回は6時間おきに始まり1回3.5〜4時間かかるので、
+    #   正常でも最大10時間ほど進まない。3時間で「止まっている」と出すと毎回の誤報になる (実例 10:56 → 16時に警告)
+    warn = " — ⚠️ 11時間以上 進んでいません。LAPTOP を確認" if mins >= 660 else ""
     return "巡回は LAPTOP で動いています (最後に仕入元を見た %s・%s)%s" % (last.strftime("%H:%M"), ago, warn)
 
 

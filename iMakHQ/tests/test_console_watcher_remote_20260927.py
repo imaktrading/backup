@@ -15,7 +15,9 @@ def test_latest_check_parses_unpadded_dates():
 def test_remote_line():
     now = datetime.datetime(2026, 9, 27, 8, 0)
     assert "07:31" in watcher.remote_line(datetime.datetime(2026, 9, 27, 7, 31), now)
-    assert "⚠️" in watcher.remote_line(datetime.datetime(2026, 9, 27, 4, 0), now)
+    # 2026-10-01: O列は巡回の最後にまとめて書くので、正常でも最大10時間ほど進まない → 11時間で警告
+    assert "⚠️" not in watcher.remote_line(datetime.datetime(2026, 9, 27, 4, 0), now)
+    assert "⚠️" in watcher.remote_line(datetime.datetime(2026, 9, 26, 20, 0), now)
     assert "読めません" in watcher.remote_line(None, now)
 
 
