@@ -1276,8 +1276,12 @@ def _parse_cond_ship(s):
     『商品の状態』『配送料の負担』ラベル直後の値を非貪欲マッチで取る。取れねば '' (fail-closed)。
     ichibankuji_restock._parse_cond_ship と同一規約(検証: 実レンダHTMLで('新品、未使用','送料込み'))。
     """
+    # ★2026-10-01: メルカリShops は「送料別(購入者負担)」と書く。この語を知らなかったため、
+    #   本当のラベルを読み飛ばし、ページ後方の翻訳用の文字列「送料込み(出品者負担)」を拾って
+    #   **送料別の Shops を送料込みと判定**していた (実測 2JUsfu…: 画面は送料別 ¥200)。
+    #   送料別 は送料込みではない = 候補から外れる側。
     cm = re.search(r"商品の状態.{0,120}?" + _COND_VALUES, s or "", re.S)
-    sm = re.search(r"配送料の負担.{0,120}?(送料込み|着払い)", s or "", re.S)
+    sm = re.search(r"配送料の負担.{0,120}?(送料込み|着払い|送料別)", s or "", re.S)
     return (cm.group(1) if cm else "", sm.group(1) if sm else "")
 
 
@@ -1519,7 +1523,7 @@ def new_scrape_driver():
 #   照合 (PSA10・番号・版) は読み方に関係なく同じ関数を通す。変えるのは「検索結果の取り方」と
 #   「詳細 (買えるか・送料込みか・評価数) の確かめ方」だけ。
 #   - 個人の出品: API の商品情報 (販売中か / オークションでないか / 送料の負担 / 出品者の評価数)
-#   - メルカリ Shops: API で送料・在庫が取れない → 今までどおり Chrome で詳細ページを開く
+#   - メルカリ Shops: shops/products の API で送料の負担・在庫数 (2026-10-01〜。読めない時だけ Chrome)
 #   - API が使えない時 (仕様変更・弾かれた) は、その回の残りを Chrome で読む (止めない)
 #   切り替え: C:/dev/iMak_data/hq/mercari_source.json {"source": "api" | "chrome"} (無ければ api)
 # ---------------------------------------------------------------------------
@@ -1579,8 +1583,29 @@ def api_supply_verdict(status, has_auction, shipping_payer_id, num_ratings, min_
     return ok, ship, num_ratings, buyable
 
 
+def api_shops_verdict(shipping_payer_code, quantities, min_reviews=100):
+    """Shops API の商品情報 → (ok, ship, buyable) (純関数)。
+
+    送料: shipping_payer.code SELLER = 送料込み(出品者負担) / BUYER = 送料別 (2026-10-01 実物で確認。
+          個人の出品の id とは番号が違うので code で見る)。
+    買えるか: バリエーションの在庫数の合計が 1 以上。数が読めない物は 0 と数える (買えない側)。
+    """
+    n = 0
+    for q in quantities or []:
+        try:
+            n += int(q)
+        except (TypeError, ValueError):
+            pass
+    buyable = n > 0
+    code = str(shipping_payer_code or "").upper()
+    ship = "送料込み" if code == "SELLER" else ("着払い" if code else "")
+    ok = candidate_passes_filter("", ship, None, True, min_reviews=min_reviews,
+                                 require_freeship=True, buyable=buyable)
+    return ok, ship, buyable
+
+
 class _ApiSource:
-    """API で読む。Shops の詳細と画像検索だけ Chrome (必要になった時に起動)。"""
+    """API で読む。画像検索だけ Chrome (必要になった時に起動)。Shops の詳細も API (読めない時は Chrome)。"""
 
     def __init__(self):
         import asyncio
@@ -1632,7 +1657,25 @@ class _ApiSource:
             href = c[1] if len(c) > 1 else ""
             if not href:
                 continue
-            if self.kind.get(href) != "item":
+            if self.kind.get(href) == "shops":
+                # ★2026-10-01 (総点検 ⑨): Shops も API (shops/products) で送料の負担と在庫数が取れる
+                #   (実物2件で確認)。読めない時だけ Chrome で詳細ページを開く。
+                try:
+                    p = self._run(self.api.product(href.rsplit("/", 1)[-1]))
+                    time.sleep(_API_SLEEP)
+                except Exception:                              # noqa: BLE001
+                    p = None
+                pd = getattr(p, "product_detail", None) if p is not None else None
+                if pd is None:
+                    ok, _s, _r = _detail_supply_check(self.chrome.driver(), href, min_reviews=min_reviews)
+                else:
+                    ok, _s, buyable = api_shops_verdict(
+                        getattr(getattr(pd, "shipping_payer", None), "code", None),
+                        [getattr(v, "quantity", 0) for v in (getattr(pd, "variants", None) or [])],
+                        min_reviews)
+                    if not buyable:
+                        remember_not_buyable(href, "売り切れ (Shops API で判定)")
+            elif self.kind.get(href) != "item":
                 ok, _s, _r = _detail_supply_check(self.chrome.driver(), href, min_reviews=min_reviews)
             else:
                 try:

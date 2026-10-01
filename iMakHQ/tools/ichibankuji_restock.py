@@ -907,8 +907,10 @@ def _parse_cond_ship(s):
     出るため、全ページ grep は誤判定(2026-06-25 着払い混入バグ)。商品詳細の『商品の状態』
     『配送料の負担』の **直後の値**(=その商品の実値)を非貪欲マッチで取る。取れねば '' (fail-closed=除外)。
     """
+    # ★2026-10-01: Shops の「送料別(購入者負担)」を知らず、後方の翻訳文字列の「送料込み」を拾っていた
+    #   (mercari_psa_resource._parse_cond_ship と同じ直し)。送料別 = 送料込みではない = 外れる側。
     cm = re.search(r"商品の状態.{0,120}?" + _COND_VALUES, s, re.S)
-    sm = re.search(r"配送料の負担.{0,120}?(送料込み|着払い)", s, re.S)
+    sm = re.search(r"配送料の負担.{0,120}?(送料込み|着払い|送料別)", s, re.S)
     return (cm.group(1) if cm else "", sm.group(1) if sm else "")
 
 

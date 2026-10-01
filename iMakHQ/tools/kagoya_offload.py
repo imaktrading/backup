@@ -54,6 +54,11 @@ REMOTE_PY = r"C:\Program Files\Python311\python.exe"
 REMOTE_CODE_ROOT = r"C:\dev\iMak"
 REMOTE_DB = r"C:\dev\iMak_data\catalog\products.sqlite"
 LOCAL_DB = r"C:/dev/iMak_data/catalog/products.sqlite"
+# DB の外にある、探す時に読むカタログのデータ (家の置き場, サーバーの置き場)
+DATA_FILES = [
+    (r"C:/dev/iMak_data/catalog/op_variant_official_map.json",
+     r"C:\dev\iMak_data\catalog\op_variant_official_map.json"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +461,23 @@ def sync_code_and_db(cfg, st):
             raise RuntimeError(f"DB の置き換えに失敗: {out[:200]}")
         st["db_mtime"] = m
         print("  📦 カタログ DB の写しを送った")
+    # ★2026-10-01: 探す時に読むカタログのデータファイル (DB の外にある物) も送る。
+    #   版の対応表を送っておらず、サーバーでは読み替えずに探していた (無ければ今までどおりの作り)。
+    for local, remote in DATA_FILES:
+        if not os.path.exists(local):
+            continue
+        m = os.path.getmtime(local)
+        sk = "mtime:" + os.path.basename(local)
+        if st.get(sk) == m:
+            continue
+        tmp = REMOTE_ROOT + "\\" + os.path.basename(local)
+        if _scp_to(cfg, local, tmp) != 0:
+            raise RuntimeError(f"{os.path.basename(local)} を送れなかった")
+        rc, out = _ssh(cfg, f'Copy-Item {tmp} {remote} -Force; "ok"')
+        if rc != 0 or "ok" not in out:
+            raise RuntimeError(f"{os.path.basename(local)} の置き換えに失敗: {out[:200]}")
+        st[sk] = m
+        print(f"  📦 {os.path.basename(local)} を送った")
 
 
 def build_job(today):
