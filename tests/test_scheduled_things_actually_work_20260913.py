@@ -42,9 +42,12 @@ def test_demand_uses_psa_data_when_sheet_key_is_missing(tmp_path, capsys):
 
 
 def test_nightly_restock_batch_is_not_the_default_ten():
+    """2026-10-01: 40 → 0。直前の search-restock (--limit=0) が全件探すので、照合側は当日の結果を使うだけ
+    (40 のままだと同じ53件を2回探し、3晩空振りで外した分まで毎晩探し直していた)。"""
     bat = io.open(ROOT / "iMakHQ" / "tools" / "run_hoju_search.bat", encoding="ascii").read()
-    assert "set RESTOCK_SCRAPE_BATCH=40" in bat
-    i = bat.index("set RESTOCK_SCRAPE_BATCH=40")
+    assert "set RESTOCK_SCRAPE_BATCH=0" in bat
+    assert "search-restock --limit=0" in bat
+    i = bat.index("set RESTOCK_SCRAPE_BATCH=0")
     j = bat.index("python -u psa_resource_gate.py --nightly")   # 先頭の説明コメントではなく実際の呼び出し
     assert i < j, "照合を呼ぶ前に件数を設定していない"
 

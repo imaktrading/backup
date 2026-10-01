@@ -86,15 +86,24 @@ python -u night_step.py hoju ut_key_backfill.--write --done %errorlevel% >> "%LO
 :skip3
 
 REM --- 1) zero-backup listings (a listing whose only supplier died = instant death)
+REM        2026-10-01: wrapped in night_step like every other step. Without it, each resume
+REM        after a PC crash searched the same 30 listings again (10/01: 30/30/24 again at
+REM        2:13/2:29/2:54 = about 1 hour wasted), because "searched today" is judged by the
+REM        calendar date and the night crosses midnight.
+python -u night_step.py hoju psa_hoju_fill.search.--limit=30 --check >> "%LOG%" 2>&1 || goto :topup
 for %%i in (1 2 3) do (
     echo [try %%i] zero-backup %date% %time% >> "%LOG%"
     python -u psa_hoju_fill.py search --limit=30 >> "%LOG%" 2>&1
-    if not errorlevel 1 goto :topup
+    if not errorlevel 1 goto :zero_ok
     echo [try %%i] failed, retry in 120s >> "%LOG%"
     timeout /t 120 /nobreak > nul
 )
+python -u night_step.py hoju psa_hoju_fill.search.--limit=30 --done 1 >> "%LOG%" 2>&1
 echo [warn] zero-backup step failed 3 times >> "%LOG%"
 goto :done
+
+:zero_ok
+python -u night_step.py hoju psa_hoju_fill.search.--limit=30 --done 0 >> "%LOG%" 2>&1
 
 :topup
 REM --- 2) keep stocking listings that are not yet full (fewer than 5 backups).
@@ -144,8 +153,14 @@ REM         2026-09-13: the mercari re-check used the default batch of 10 per ni
 REM         so 34-41 cards were carried over EVERY night and "restockable" stayed at
 REM         14-16 of 68 for a week (never converged). Raise the nightly batch to 40
 REM         (the per-run safety cap in psa_resource_gate is 60, so this stays inside it).
+REM         2026-10-01: batch 40 -> 0 (reuse only what step 3 just searched). Step 3
+REM         (search-restock --limit=0) already searches every restock card and skips the
+REM         cards that came up empty 3 nights running (retried every few days). This step
+REM         then searched those skipped cards again every night (10/01: 35 cards re-searched,
+REM         14-31 min twice over the same 53 cards). Cards step 3 did not reach stay "pending"
+REM         and are searched by step 3 the next night (never treated as out of stock).
 set RESTOCK_TARGET_NEW=0
-set RESTOCK_SCRAPE_BATCH=40
+set RESTOCK_SCRAPE_BATCH=0
 python -u night_step.py hoju psa_resource_gate.--nightly --check >> "%LOG%" 2>&1 || goto :skip6
 python -u psa_resource_gate.py --nightly >> "%LOG%" 2>&1
 python -u night_step.py hoju psa_resource_gate.--nightly --done %errorlevel% >> "%LOG%" 2>&1

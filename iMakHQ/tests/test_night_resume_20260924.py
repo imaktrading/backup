@@ -68,7 +68,12 @@ def test_every_top_level_step_is_guarded_and_ebay_steps_are_no_retry():
     for s in ("mirror_promo_bestoffer", "sold_restock", "supply_card_mismatch"):
         line = next(l for l in b.splitlines() if "night_step.py hoju " + s in l and "--check" in l)
         assert "--no-retry" in line, s
-    assert sum("--check" in l for l in b.splitlines() if l.startswith("python")) == b.count("--done %errorlevel%")
+    # 手順ごとに --check と --done が対になっていること (2026-10-01: 補0本の探索は再試行の輪の外で
+    #   --done 0 / --done 1 を書くので、行の数ではなく手順名の集合で比べる)
+    import re as _re
+    checks = set(_re.findall(r"night_step\.py hoju (\S+) --check", b))
+    dones = set(_re.findall(r"night_step\.py hoju (\S+) --done ", b))
+    assert checks and checks == dones, checks ^ dones
     w = _bat("run_psa_cache_warm.bat")
     assert "night_step.py psawarm psa_cache_warm --check" in w
 
