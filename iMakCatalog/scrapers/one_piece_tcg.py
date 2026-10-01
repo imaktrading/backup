@@ -289,14 +289,32 @@ def card_config_to_specs(card_config: list[dict], lang: str = "EN") -> dict:
     return specs
 
 
-def detect_language(en_card: dict | None, ja_card: dict | None) -> str | None:
-    """EN/JA list-card の有無から言語フラグを判定."""
-    if en_card and ja_card:
-        return "both"
-    if en_card:
-        return "en"
-    if ja_card:
-        return "ja"
+def detect_language(en_card: dict | None, ja_card: dict | None,
+                    image_url_en: str = "", image_url_ja: str = "") -> str | None:
+    """`language` を **証拠 (絵の置き場)** から決める.
+
+    ★2026-10-01 改訂 (依頼 `2026-10-01_onepiece_language_redecide_go.md`)。
+      前の作りは EN/JA 2つの一覧の突き合わせだけで決めていたので、
+      突き合わせの鍵 (画像ファイル名由来) が外れると「JA に無い」= `en` になった。
+      実測: `en` 1,778行のうち **英語版の絵 (`card_image/OP-EN/`) を持つ行は 0**。
+      1,570行は日本語版の絵を持ち、336行は日本公式サイトに在った
+      (EB03-053_p2 は日本公式に 200 / `OP-EN/EB03-053.png` は 403 = 英語版が無い)。
+      = `en` は「英語版」ではなく「鍵が外れた」の意味になっていた。
+
+    今の決め方 (証拠が無ければ空欄 = fail-closed):
+
+        英語版の絵がある   -> en   (日本語版の絵もあれば both)
+        日本語版の絵がある -> both (英語版の一覧にも在る) / ja (無い)
+        どちらも無い       -> None
+
+    ★英語版の一覧が **日本語版の絵を返す**ことがあるので、絵の置き場で見る。
+    """
+    en_img = "card_image/OP-EN/" in (image_url_en or "")
+    ja_img = any("card_image/OP-JA/" in (u or "") for u in (image_url_ja, image_url_en))
+    if en_img:
+        return "both" if ja_img else "en"
+    if ja_img or ja_card:
+        return "both" if en_card else "ja"
     return None
 
 
@@ -457,7 +475,7 @@ def build_and_upsert(
             card_set_id = None
 
     images = [u for u in [image_url_en, image_url_ja] if u]
-    language = detect_language(en_card, ja_card)
+    language = detect_language(en_card, ja_card, image_url_en, image_url_ja)
 
     # clean set_name_ebay を取り込み時に確定保存 (SSOT: 出品は参照のみ・無ければ空欄fail-closed)
     specs["set_name_ebay"] = api.derive_set_name_ebay(CATEGORY, set_official or None, product_id) or ""

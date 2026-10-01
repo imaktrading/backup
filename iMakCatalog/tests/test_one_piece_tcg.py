@@ -230,14 +230,31 @@ class TestCardConfigToSpecs:
 
 
 class TestDetectLanguage:
+    """★2026-10-01 改訂: 一覧の在処ではなく **絵の置き場**で決める.
+
+    英語版の一覧が日本語版の絵を返すので、一覧に在るだけでは `en` と言えない
+    (実測で `en` 1,778行のうち英語版の絵を持つ行は0。依頼
+    `2026-10-01_onepiece_language_redecide_go.md`)。詳しい判定は
+    `test_onepiece_language_from_evidence_20261001.py`。
+    """
+    _JA = "https://files.bandai-tcg-plus.com/card_image/OP-JA/OP06/OP06-022.png"
+    _EN = "https://files.bandai-tcg-plus.com/card_image/OP-EN/OP06/OP06-022.png"
+
     def test_both(self):
         assert ot.detect_language({"id": 1}, {"id": 2}) == "both"
 
-    def test_en_only(self):
-        assert ot.detect_language({"id": 1}, None) == "en"
+    def test_en_list_only_but_japanese_art_is_both(self):
+        """英語版の一覧にだけ在っても、絵が日本語版なら `en` にしない."""
+        assert ot.detect_language({"id": 1}, None, image_url_en=self._JA) == "both"
+
+    def test_en_only_needs_english_art(self):
+        assert ot.detect_language({"id": 1}, None, image_url_en=self._EN) == "en"
 
     def test_ja_only(self):
         assert ot.detect_language(None, {"id": 2}) == "ja"
+
+    def test_no_evidence_is_blank(self):
+        assert ot.detect_language(None, None) is None
 
 
 # ============================================================================
