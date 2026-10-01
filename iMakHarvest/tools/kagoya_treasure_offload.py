@@ -1,31 +1,20 @@
-"""kagoya_chara_offload - キャラ軸トレジャーハント収集を KAGOYA サーバーで回す.
+"""kagoya_treasure_offload - トレジャーハント収集を KAGOYA サーバーで回す.
 
-2026-10-01 [IMPLEMENT-GO] (`2026-10-01_kagoya_chara_harvest_go.md`)。
-HQ の `iMakHQ/tools/kagoya_offload.py` と同じ形 (置き場・鍵の扱いは別)。
+2026-10-01 [IMPLEMENT-GO] (`2026-10-01_move_heavy_jobs_to_kagoya.md`)。
+`kagoya_chara_offload.py` と同じ形 (家/サーバーの分担・席の取り方は同一)。差分は2つ:
+  ① 検索語 = `demand_market.csv` (eBay実売台帳) + カードごとの仕入上限 (card_limits)
+  ② 書込先 = 中間スプシの `mercari_psa10_treasure` タブ (末尾に上限判定列)
 
-家とサーバーの分担:
-  - 家   : 対象キーワード (`chara_market.csv`) とスプシの既知キー (dedupe用) を読んで
-           仕事のファイルを作り送る → サーバーの結果 (ダンプJSON) を取りに行き、
-           `sheet_writer_mercari_seller.append_chara_items()` でスプシに書く。
-           **スプシ・eBay の鍵はサーバーに置かない**
-  - 鯖   : 仕事のファイル (キーワード一覧・既知キー・仕入上限) を受け取り、未ログインの
-           Chrome (`chrome_profile_mercari_seller_anon` 相当) で検索・詳細取得・ラベルVision判定
-           をして、結果をダンプJSONに逐次保存する (`run_harvest_mercari_psa10.collect` の
-           `_save()` が元から1語/10件ごとに書く)。**スプシへは書かない** (`--no-dedupe` 相当で
-           Google Sheets 関連コードを呼ばない)
-
-サーバー側の置き場は HQ の `C:\\setup\\offload` とは別 (`C:\\setup\\harvest_offload`)。
-コードの展開先も別 (`C:\\dev\\iMak_harvest_offload`)。接続情報 (host/user/鍵) は HQ と同じ
-サーバーなので `C:/dev/iMak_data/hq/offload.json` を読むだけ (mode フィールドは使わない)。
-
-メモリ4GBのサーバーで HQ の補探索 (Chrome 1本) と重ならないよう、起動前に
-サーバー側で kagoya_offload.py run / chara の python が動いていないか見て、動いていれば待つ。
+コード展開先・SEAT_DIR・HQとの関係は kagoya_chara_offload.py と共有 (同じサーバー・
+同じ owner="HARVEST")。 仕事ファイルの置き場だけ別サブフォルダにして、 キャラ収集の
+job.json/result.json と混ざらないようにする (`C:\\setup\\harvest_offload\\treasure`)。
+席は1担当1つなので、 キャラ収集とトレジャーハントは元々同時には動かない。
 
 使い方 (家):
-  python tools/kagoya_chara_offload.py cycle     # 結果を取りに行く → 空いていれば今週の分を送って開始
-  python tools/kagoya_chara_offload.py status
+  python tools/kagoya_treasure_offload.py cycle
+  python tools/kagoya_treasure_offload.py status
 使い方 (サーバー。家の cycle が起動する):
-  python tools/kagoya_chara_offload.py run C:\\setup\\harvest_offload\\job.json
+  python tools/kagoya_treasure_offload.py run C:\\setup\\harvest_offload\\treasure\\job.json
 """
 from __future__ import annotations
 
@@ -36,7 +25,6 @@ import os
 import subprocess
 import sys
 import tarfile
-import time
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -47,31 +35,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)  # iMakHarvest/
 
 HQ_OFFLOAD_CONFIG = r"C:/dev/iMak_data/hq/offload.json"
-STATE_PATH = r"C:/dev/iMak_data/harvest/kagoya_chara_state.json"
-WORK = r"C:/dev/iMak_data/harvest/kagoya_chara_work"
+STATE_PATH = r"C:/dev/iMak_data/harvest/kagoya_treasure_state.json"
+WORK = r"C:/dev/iMak_data/harvest/kagoya_treasure_work"
 
-REMOTE_ROOT = r"C:\setup\harvest_offload"
+REMOTE_ROOT = r"C:\setup\harvest_offload\treasure"
 REMOTE_PY = r"C:\Program Files\Python311\python.exe"
-REMOTE_CODE_ROOT = r"C:\dev\iMak_harvest_offload"
+REMOTE_CODE_ROOT = r"C:\dev\iMak_harvest_offload"  # キャラ収集と共有 (同じコード一式)
 
-# サーバー1本の体力(メモリ4GB)に合わせ、HQ の補探索と同時に走らせない。
-# (ファイル名のみで判定。 コマンドラインはファイル名の直後に閉じ引用符が入るため
-# " run" まで含めると絶対に一致しない。 "kagoya_chara_offload.py" に
-# "kagoya_offload.py" は部分一致しない(間に "chara_" が挟まる)ので自分には誤反応しない)
-REMOTE_BUSY_MARKERS = ("kagoya_offload.py",)
+REMOTE_BUSY_MARKERS = ("kagoya_offload.py",)  # HQの補探索と重ならない (chara版と同じ判定)
 
 
 # ---------------------------------------------------------------------------
-# サーバーの席 (2026-10-01 ユーザー確定 `C:/dev/iMak_data/hq/kagoya_server_rules.md` 改訂版
-#   「負荷を見ながら、順番と並走を考えて、リソース有効活用して」)。
-#   席は空きメモリで取る (札1枚ではない)。 参照実装は HQ の
-#   `iMakHQ/tools/kagoya_offload.py` の acquire_server_seat/release_server_seat
-#   (担当ごとに置き場が別なので、 ここにそのまま写す。 共有importはしない)。
+# サーバーの席 (kagoya_chara_offload.py と同じ実装。 担当ごとに置き場が別なのでコピー)
 # ---------------------------------------------------------------------------
 SEAT_DIR = r"C:\setup\seats"
-HARVEST_NEED_GB = 1.2  # Chrome を使う仕事
-MEM_RESERVE_GB = 0.4   # 席を取る時に残す余裕 (kagoya_server_rules.md と同じ値)
-PAUSE_RESERVE_GB = 0.3  # 動いている最中、これを切ったら区切って止まる (同上)
+HARVEST_NEED_GB = 1.2
+MEM_RESERVE_GB = 0.4
+PAUSE_RESERVE_GB = 0.3
 HQ_OFFLOAD_REMOTE_ROOT = r"C:\setup\offload"
 HQ_WAIT_PATH = os.path.join(SEAT_DIR, "HQ.wait")
 HQ_WAIT_MAX_HOURS = 2.0
@@ -109,19 +89,16 @@ def free_gb_win() -> float:
 
 
 def seat_is_free(seat, pid_alive):
-    """席が空いているか (純関数)。無い/壊れている/持ち主が死んでいる → 空き。"""
     if not isinstance(seat, dict) or not seat.get("pid"):
         return True
     return not pid_alive(seat["pid"])
 
 
 def can_take_seat(need_gb, free_gb, reserve_gb=MEM_RESERVE_GB) -> bool:
-    """空きメモリで席を取れるか (純関数)。"""
     return free_gb - need_gb >= reserve_gb
 
 
 def acquire_server_seat(owner, need_gb=HARVEST_NEED_GB, seat_dir=SEAT_DIR, free_gb=None, pid_alive=None):
-    """席を取る。取れたら True。同じ担当の席が生きていれば取らない。空きメモリが足りなければ取らない。"""
     pid_alive = pid_alive or _pid_alive_win
     os.makedirs(seat_dir, exist_ok=True)
     path = os.path.join(seat_dir, owner + ".json")
@@ -180,13 +157,10 @@ def hq_today_done() -> bool:
 
 
 def may_start() -> bool:
-    """優先順③の開始条件: HQ の席がある (今日の分が動いている) か、 今日の分が終わった。"""
     return _hq_seat_alive() or hq_today_done()
 
 
 def should_pause_now() -> bool:
-    """1件ごとに見る区切り条件 (kagoya_server_rules.md): HQ.wait がある (2時間以内)、
-    または空きメモリが 0.3GB を切った。 どちらかで True → 呼出側がそこで打ち切る。"""
     if os.path.exists(HQ_WAIT_PATH):
         try:
             since = json.load(open(HQ_WAIT_PATH, encoding="utf-8")).get("since")
@@ -194,7 +168,7 @@ def should_pause_now() -> bool:
             if age_h <= HQ_WAIT_MAX_HOURS:
                 return True
         except Exception:  # noqa: BLE001
-            return True  # 読めない印は「ある」扱い (待つ側に倒す)
+            return True
     return free_gb_win() < PAUSE_RESERVE_GB
 
 
@@ -202,12 +176,6 @@ def should_pause_now() -> bool:
 # サーバー側
 # ---------------------------------------------------------------------------
 def run_job(job_path: str) -> None:
-    """仕事のファイルを受け取り、収集してダンプJSONへ逐次保存する (スプシへは書かない)。
-
-    優先順③ (キャラ収集など): HQ の席がある/今日の分が終わった時だけ始め、
-    空きメモリで自分の席 (`seats/HARVEST.json`) を取れた時だけ動く。
-    取れなければ何もせず終わる (結果は壊さない。 次回の呼出で続きから)。
-    """
     if not may_start():
         print("[run] HQ の今日の分がまだ動いていない/終わっていない → 今回は動かない (次の回に続きから)",
               flush=True)
@@ -237,16 +205,16 @@ def _run_job_body(job_path: str) -> None:
         try:
             resume = json.loads(open(dump_path_str, encoding="utf-8").read())
             print(f"[run] 前回の続きから再開 (候補 {len(resume.get('candidates') or [])}件)", flush=True)
-        except Exception:  # noqa: BLE001 - 壊れていたら最初から
+        except Exception:  # noqa: BLE001
             resume = None
 
     from pathlib import Path  # noqa: PLC0415
-    chara_args = _server_chara_args(job)
+    treasure_args = _server_treasure_args(job)
 
     kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
     kill_orphan_chromedriver()
     try:
-        payload = psa10.collect(chara_args, dump_path=Path(dump_path_str), resume=resume, on_flush=None,
+        payload = psa10.collect(treasure_args, dump_path=Path(dump_path_str), resume=resume, on_flush=None,
                                 should_pause=should_pause_now)
     finally:
         kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
@@ -256,28 +224,22 @@ def _run_job_body(job_path: str) -> None:
     print(f"[run] {'区切って終了' if unfinished else '完了'}: 候補 {len(payload['candidates'])}件 / "
           f"番号読めず {len(payload.get('unreadable') or [])}件", flush=True)
     if unfinished:
-        return  # done.json は書かない (全語終わっていない。 続きは次回 run_job が resume する)
+        return
     json.dump({"finished": datetime.datetime.now().isoformat(timespec="seconds")},
               open(os.path.join(d, "done.json"), "w", encoding="utf-8"))
 
 
-def _server_chara_args(job):
-    """家から受け取った job (keywords/known_keys/cost_max_jpy) から collect() 用の引数を作る.
-
-    `no_dedupe=True` にして Google Sheets 関連コード (sheet_writer.load_claimed_supply、
-    鍵が要る) を呼ばない。 既に押さえてある分の除外は、家が取り込み時に
-    `append_chara_items(known_keys=...)` でやる (二重に落ちても正しさは変わらない。
-    サーバー側でVision代を少し余計に使うだけ)。
-    """
+def _server_treasure_args(job):
+    """`no_dedupe=True` でスプシの鍵が要る処理を呼ばない (chara版と同じ考え方)。"""
     import argparse  # noqa: PLC0415
 
     return argparse.Namespace(
         keywords=job["keywords"], games=None, from_demand=False, demand_only=False, demand_limit=0,
         headless=True, manual=False, price_min=3000, price_max=70000, min_rating=100,
         no_identity=False, cap_per_keyword=100, keyword_interval=8.0, max_details=0,
-        no_dedupe=True, save_every=10, sheet_every=10_000_000,  # サーバーではスプシ書込しない
+        no_dedupe=True, save_every=10, sheet_every=10_000_000,
         max_consecutive_errors=3, strict_gates=True,
-        cost_cfg={"max_jpy": job["cost_max_jpy"]}, card_limits={},
+        cost_cfg={"max_jpy": job["cost_max_jpy"]}, card_limits=job.get("card_limits") or {},
     )
 
 
@@ -323,7 +285,7 @@ def _scp_from(cfg, remote, local, timeout=600):
 
 
 def _code_files():
-    """同期する .py 一覧 (iMakHarvest 直下 + scrapers/ 配下 + このファイル自身)。"""
+    """同期する .py 一覧 (iMakHarvest 直下 + scrapers/ 配下 + 両offloadスクリプト)。"""
     files = [f for f in os.listdir(REPO) if f.endswith(".py")]
     out = list(files)
     scrapers_dir = os.path.join(REPO, "scrapers")
@@ -368,30 +330,22 @@ def sync_code(cfg, st):
 
 
 def build_job(today: str) -> dict:
-    """今日の仕事を作る (家で。 スプシ・共有領域を読むだけ)。"""
     sys.path.insert(0, REPO)
-    from scrapers import chara_keywords  # noqa: PLC0415
+    from scrapers import treasure_keywords  # noqa: PLC0415
     import run_harvest_mercari_psa10 as psa10  # noqa: PLC0415
     from sheet_writer_mercari_search import load_keys_all_tabs  # noqa: PLC0415
     from sheet_writer_mercari_seller import open_seller_staging_sheet  # noqa: PLC0415
 
-    rows = chara_keywords.load_rows()
-    keywords = chara_keywords.build_keywords(rows)
+    rows = treasure_keywords.load_rows()
+    keywords = treasure_keywords.build_keywords(rows)
+    limits = treasure_keywords.build_cost_limits(rows)
     cost_cfg = psa10.load_cost_sanity()
     known = load_keys_all_tabs(open_seller_staging_sheet())
-    return {"job_id": f"chara-{today}", "keywords": keywords,
+    return {"job_id": f"treasure-{today}", "keywords": keywords, "card_limits": limits,
             "cost_max_jpy": cost_cfg["max_jpy"], "known_keys": sorted(known)}
 
 
 def remote_busy(cfg) -> bool:
-    """サーバーで HQ の補探索か、このジョブが既に動いているか。 分からない時は True (待つ側)。
-
-    ★2026-10-01 事故: コマンドラインには `kagoya_offload.py" run` のように
-    ファイル名の直後に閉じ引用符が入るため、 Python 側の単純な部分文字列一致
-    (`"kagoya_offload.py run" in out`) は絶対に一致しなかった (HQの補探索と
-    キャラ収集が同時に動きサーバーのメモリを使い切った)。 `-like '*...*'` の
-    ワイルドカードで PowerShell 側で判定する (remote_status と同じ方式)。
-    """
     conds = " -or ".join(f"$_.CommandLine -like '*{m}*'" for m in REMOTE_BUSY_MARKERS)
     ps = (f'$n = @(Get-CimInstance Win32_Process -Filter "Name=\'python.exe\'" | '
           f'Where-Object {{ {conds} }}).Count; "$n"')
@@ -400,14 +354,14 @@ def remote_busy(cfg) -> bool:
         return True
     try:
         return int(out.strip().splitlines()[-1]) > 0
-    except Exception:  # noqa: BLE001 - 読めなければ待つ側に倒す
+    except Exception:  # noqa: BLE001
         return True
 
 
 def remote_status(cfg) -> dict:
     ps = (f'$d = Test-Path {REMOTE_ROOT}\\done.json; '
           f'$p = @(Get-CimInstance Win32_Process -Filter "Name=\'python.exe\'" | '
-          f'Where-Object {{ $_.CommandLine -like \'*kagoya_chara_offload.py*run*\' }}).Count; "$d|$p"')
+          f'Where-Object {{ $_.CommandLine -like \'*kagoya_treasure_offload.py*run*\' }}).Count; "$d|$p"')
     rc, out = _ssh(cfg, ps)
     if rc != 0:
         return {"ok": False, "err": out[:200]}
@@ -417,9 +371,6 @@ def remote_status(cfg) -> dict:
 
 
 def start_remote(cfg, job):
-    """仕事を送って起動する。 `result.json` は消さない — 落ちた後の再送で `run_job` が
-    これを読んで続きから再開する (2026-10-01 事故対応: 殺した後の再送で消すと
-    収集済み分が丸ごと消える)。 `done.json` だけ消す (前回「完了」の印を残さない)。"""
     os.makedirs(WORK, exist_ok=True)
     jp = os.path.join(WORK, "job.json")
     json.dump(job, open(jp, "w", encoding="utf-8"), ensure_ascii=False)
@@ -429,7 +380,7 @@ def start_remote(cfg, job):
         raise RuntimeError(f"サーバーに入れない: {out[:200]}")
     if _scp_to(cfg, jp, REMOTE_ROOT + r"\job.json") != 0:
         raise RuntimeError("仕事のファイルを送れなかった")
-    script = rf"{REMOTE_CODE_ROOT}\tools\kagoya_chara_offload.py"
+    script = rf"{REMOTE_CODE_ROOT}\tools\kagoya_treasure_offload.py"
     cmdline = (f'cmd /c set PYTHONIOENCODING=utf-8 && "{REMOTE_PY}" -u "{script}" run '
                f'{REMOTE_ROOT}\\job.json > {REMOTE_ROOT}\\run.log 2>&1')
     ps = ("$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
@@ -440,14 +391,13 @@ def start_remote(cfg, job):
 
 
 def pull_and_write(cfg, st) -> int:
-    """結果 (ダンプJSON) を取りに行き、スプシへ書く。 書けた件数を返す。"""
+    """結果 (ダンプJSON) を取りに行き、mercari_psa10_treasure タブへ書く。"""
     os.makedirs(WORK, exist_ok=True)
     lp = os.path.join(WORK, "result.json")
     if _scp_from(cfg, REMOTE_ROOT + r"\result.json", lp) != 0:
         return 0
     sys.path.insert(0, REPO)
-    import run_harvest_mercari_chara as chara  # noqa: PLC0415
-    import run_harvest_mercari_psa10 as psa10  # noqa: PLC0415
+    import run_harvest_mercari_treasure as treasure  # noqa: PLC0415
     from sheet_writer_mercari_search import load_keys_all_tabs  # noqa: PLC0415
     from sheet_writer_mercari_seller import open_seller_staging_sheet  # noqa: PLC0415
 
@@ -456,14 +406,21 @@ def pull_and_write(cfg, st) -> int:
     unreadable = dump.get("unreadable") or []
     if not cands and not unreadable:
         return 0
+    job = json.load(open(os.path.join(WORK, "job.json"), encoding="utf-8"))
+    limits = job.get("card_limits") or {}
     known = load_keys_all_tabs(open_seller_staging_sheet())
-    res = chara.append_chara_items(psa10.build_sheet_items(cands, unreadable), known_keys=known)
+    items = treasure._treasure_items(cands, unreadable, limits)
+    res = treasure.append_treasure_items(items, known_keys=known)
     print(f"  [SHEET] {res}")
     return res.get("appended", 0)
 
 
 def cycle() -> int:
-    """取りに行く → サーバーが空いていて今週の分が未だなら、送って開始する。"""
+    """取りに行く → サーバーが空いていて今日の分が未だなら、送って開始する。
+
+    頻度は毎日 (治療ハントは7時間前後かかるが、1件ごとの区切り判定で
+    サーバーが混む時は途中で止まり、次のcycleで続きから進む)。
+    """
     cfg = _cfg()
     st = _state()
     today = datetime.date.today().isoformat()
@@ -478,23 +435,19 @@ def cycle() -> int:
         if n:
             print(f"📥 {n}件をスプシに書いた")
         _ssh(cfg, f'Remove-Item {REMOTE_ROOT}\\result.json,{REMOTE_ROOT}\\done.json -ErrorAction SilentlyContinue')
-        st["job_week"] = st.get("pending_week")
-        st.pop("pending_week", None)
+        st["job_date"] = st.get("pending_date")
+        st.pop("pending_date", None)
         _save_state(st)
         return 0
     if rs["running"]:
         print("⏳ サーバーで実行中")
         return 0
-    # 週1回だけ起動 (ISO週番号が変わったら次の週)
-    this_week = datetime.date.today().isocalendar()[:2]
-    this_week_key = f"{this_week[0]}-W{this_week[1]:02d}"
-    if st.get("job_week") == this_week_key:
-        print("✅ 今週の分は済み")
+    if st.get("job_date") == today:
+        print("✅ 今日の分は済み")
         return 0
-    if st.get("pending_week") == this_week_key:
-        # 起動済のはずが実行中でも完了でもない = 起動に失敗して即死した。 作り直して再送
+    if st.get("pending_date") == today:
         print("⚠️ 前回の起動が続いていない (即死の可能性) → 作り直して再送")
-        st.pop("pending_week", None)
+        st.pop("pending_date", None)
     if remote_busy(cfg):
         print("⏸ サーバーでHQの補探索が動いている → 今回は待つ")
         return 0
@@ -502,11 +455,11 @@ def cycle() -> int:
     job = build_job(today)
     if not job["keywords"]:
         print("一覧が空 → 何もしない")
-        st["job_week"] = this_week_key
+        st["job_date"] = today
         _save_state(st)
         return 0
     start_remote(cfg, job)
-    st["pending_week"] = this_week_key
+    st["pending_date"] = today
     st["started"] = datetime.datetime.now().isoformat(timespec="seconds")
     st.pop("last_error", None)
     _save_state(st)
