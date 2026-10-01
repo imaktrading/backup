@@ -473,8 +473,34 @@ def is_dead_shelf(row):
     return _f(row.get("watch")) == 0 and _f(row.get("age_days")) > DEAD_SHELF_AGE
 
 
+# ★2026-10-01 ユーザー「落とす前に、価格改定が何回行われたかを判定基準にできない？」「そそ、値下げ履歴ね」:
+#   ②(仕入元は活きている・30日超・未販売) は、**一度も値下げしていない出品は落とさない**。
+#   値下げ候補に回し、値下げしても売れなかった物だけ落とす。表示やウォッチの線ではない (2026-08-26 の決定と両立)。
+#   値下げの履歴はリバイスくんの台帳 (毎日更新)。台帳が読めない時は判断できないので ② は落とさない (壊す側に倒さない)。
+PRICE_CHANGES_PATH = r"C:/dev/iMak_data/revise/price_change_counts.json"
+MIN_PRICE_DOWNS = 1          # この回数以上 値下げしても売れなければ落とす (まず1回。様子を見て変える)
+PRICE_DOWN_FIRST_PATH = r"C:/dev/iMak_data/hq/price_down_before_evict.json"
+
+
+def load_price_downs(path=PRICE_CHANGES_PATH):
+    """itemID → 値下げした回数。台帳が無い/読めない時は None (= 判断できない)。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            items = (json.load(f) or {}).get("items") or {}
+        return {str(k): int((v or {}).get("downs") or 0) for k, v in items.items()}
+    except Exception:
+        return None
+
+
+def needs_price_down_first(item_id, price_downs, min_downs=MIN_PRICE_DOWNS):
+    """② を落とす前に、まず値下げを試すべきか (純関数)。台帳が無い (None) 時も True = 落とさない。"""
+    if price_downs is None:
+        return True
+    return price_downs.get(str(item_id), 0) < min_downs
+
+
 def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=None,
-         no_demand=None):
+         no_demand=None, price_downs=False, held=None):
     """目標額に届くまで、順位の上から選ぶ。戻り: (選んだ行, 空く額) 純関数, test可。
 
     ① は 空く額の大きい順 (買えないので、少ない回数で目標に届くのが正しい)。
@@ -500,6 +526,11 @@ def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=No
         #   ②(在庫はあるが期限超え)は「売れるかもしれない物を捨てる」判断で、重さが違う。
         #   混ぜて1つのボタンにすると、重い方を軽い気持ちで押すことになる。
         if only_tier is not None and t != only_tier:
+            continue
+        # price_downs=False は「値下げ履歴の判定をしない」(ラベルの件数など表示用の呼び出し)
+        if t == TIER_STALE and price_downs is not False and needs_price_down_first(r.get("item_id"), price_downs):
+            if held is not None:
+                held.append(r)
             continue
         if t == TIER_OOS:
             rank = (0, 0, -shelf_of(r))              # ① 空く額の大きい順
@@ -969,9 +1000,27 @@ def main():
     _nd = no_demand_ids(rows)
     print(f"  🛡 ①は「生涯ずっと需要ゼロ」の {len(_nd)}件 に限ります "
           f"(需要があった分は再仕入れへ)")
+    _downs = load_price_downs()
+    _held = []
     picked, total = pick(rows, target, shelf_of, cat_of,
                          only_tier=(int(a.tier) if getattr(a, "tier", None) else None),
-                         restock_pending=_keep, no_demand=_nd)
+                         restock_pending=_keep, no_demand=_nd, price_downs=_downs, held=_held)
+    if _downs is None:
+        print("  🛡 値下げの履歴 (リバイスくんの台帳) が読めない → ② は今回落としません (判断できない)")
+    if _held:
+        print(f"  🛡 まだ値下げしていない ② {len(_held)}件 は落とさず「値下げ候補」に回します"
+              f" ({MIN_PRICE_DOWNS}回以上 値下げしても売れない物だけ落とす)")
+        try:
+            os.makedirs(os.path.dirname(PRICE_DOWN_FIRST_PATH), exist_ok=True)
+            with open(PRICE_DOWN_FIRST_PATH, "w", encoding="utf-8") as f:
+                json.dump({"at": datetime.datetime.now().isoformat(timespec="seconds"),
+                           "items": [{"item_id": r.get("item_id"), "title": r.get("title"),
+                                      "price": r.get("price"), "age_days": r.get("age_days"),
+                                      "watch": r.get("watch"), "impr_total": r.get("impr_total")}
+                                     for r in _held]}, f, ensure_ascii=False, indent=1)
+            print(f"     → {PRICE_DOWN_FIRST_PATH}")
+        except Exception as e:                                 # noqa: BLE001
+            print(f"  ⚠ 値下げ候補を書けず ({type(e).__name__})")
     if not picked:
         print("  落とせる候補がありません")
         return 0
