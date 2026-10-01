@@ -237,12 +237,24 @@ def send(with_db: bool = True) -> bool:
     return True
 
 
-def start(job: str) -> bool:
+def start(job: str, wait: bool = True) -> bool:
+    """1本 回す。既定は **終わるまで待つ**.
+
+    ★`Start-Process -WindowStyle Hidden` で投げっぱなしにすると、走らずに終わることが
+      あった (2026-10-01 実測: 4本投げて結果ファイルが1つも出なかった)。
+      待つ形なら結果が確かに返るので、既定を待つ方にした。
+    """
+    if wait:
+        rc, out = _ssh('& "%s" "%s\\tools\\kagoya_catalog.py" run %s'
+                       % (REMOTE_PY, REMOTE_CODE, job), 6 * 3600 + 60)
+        last = (out.strip().splitlines() or ["(出力なし)"])[-1]
+        print("  %s: %s" % (job, last))
+        return rc == 0
     ps = ('Start-Process -WindowStyle Hidden -FilePath "%s" '
           '-ArgumentList "%s\\tools\\kagoya_catalog.py","run","%s"; "started"'
           % (REMOTE_PY, REMOTE_CODE, job))
     rc, out = _ssh(ps)
-    print("  %s: %s" % (job, "開始" if rc == 0 else "✗ " + out[:120]))
+    print("  %s: %s" % (job, "投げた" if rc == 0 else "✗ " + out[:120]))
     return rc == 0
 
 
@@ -265,7 +277,7 @@ def status() -> None:
     print(out.strip() or ("(つながらない rc=%s)" % rc))
 
 
-def cycle(jobs, skip_send: bool = False) -> int:
+def cycle(jobs, skip_send: bool = False, detach: bool = False) -> int:
     LOCAL_OUT.mkdir(parents=True, exist_ok=True)
     got = 0
     for job in jobs:                       # 先に前回の結果を取る
@@ -276,8 +288,8 @@ def cycle(jobs, skip_send: bool = False) -> int:
     if not skip_send and not send():
         return 1
     for job in jobs:                       # ★1本ずつ。落ちても後ろを止めない
-        start(job)
-        time.sleep(2)
+        if start(job, wait=not detach):
+            collect(job)                   # 1本ごとに結果を取る (途中で切れても残る)
     STATE.write_text(json.dumps({"last_start": datetime.now().isoformat(timespec="seconds"),
                                  "jobs": list(jobs)}, ensure_ascii=False), encoding="utf-8")
     print("開始した。結果は次の cycle で取り込む (status で様子が見える)")
@@ -290,6 +302,8 @@ def main() -> int:
     ap.add_argument("job", nargs="?")
     ap.add_argument("--jobs", nargs="*", default=list(JOBS))
     ap.add_argument("--skip-send", action="store_true")
+    ap.add_argument("--detach", action="store_true",
+                    help="終わるのを待たずに投げる (既定は待つ)")
     a = ap.parse_args()
     if a.action == "run":
         return server_run(a.job or "")
@@ -302,7 +316,7 @@ def main() -> int:
         for j in ([a.job] if a.job else a.jobs):
             print(j, "取り込んだ" if collect(j) else "まだ無い")
         return 0
-    return cycle(a.jobs, a.skip_send)
+    return cycle(a.jobs, a.skip_send, a.detach)
 
 
 if __name__ == "__main__":
