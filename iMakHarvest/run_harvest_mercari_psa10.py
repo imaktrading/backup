@@ -101,7 +101,7 @@ def retry_urls_from(payload: dict, exclude: set | None = None) -> list[str]:
 
 
 def collect(args, dump_path=None, resume=None, urls_override=None,
-            on_flush=None) -> dict:
+            on_flush=None, should_pause=None) -> dict:
     """収集 → 詳細 → Vision。
 
     ★途中で落ちても作業を捨てない (2026-08-17 の事故対策)。
@@ -112,6 +112,11 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
     → `--save-every` 件ごとに JSON へ保存し、 1 件の失敗はその 1 件だけ落とす。
       連続で失敗したらドライバを作り直し、 それでも駄目なら **そこまでを保存して
       「途中まで」と明示して**終わる (黙って正常終了しない)。
+
+    `should_pause`: 引数無しで呼べる callable。 1 件処理するたびに見て、 True なら
+    その場で打ち切る (`finally` で保存される。 続きは次回 `resume=` で)。
+    サーバーの席を他の仕事に譲る時など、 呼出側の都合で区切りたい時に渡す
+    (2026-10-01 kagoya_server_rules.md の「1件ごとに見て区切る」対応)。
     """
     keywords = args.keywords or psa_search_terms.build_keywords(args.games)
     # 需要実証済 (ファネル分析 RESTOCK = 在庫切れ ∩ 需要あり) のカードを検索語に足す。
@@ -252,6 +257,10 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                 (cands if kept.get("cert_readable", True) else unreadable).append(kept)
             if len(processed) % args.save_every == 0:
                 _save()
+            if should_pause and should_pause():
+                state["truncated"] = True
+                _log(f"  一時停止の条件に合致 ({i}/{len(urls)}) → ここで区切って終了 (続きは次回)")
+                break
             # ★スプシへも走行中に書く。 最後にまとめて書くと、 プロセスが落ちた時に
             # その走行の成果が 1 行も残らない (2026-08-18 user 指示「途中で保存してよ」)。
             if on_flush and len(processed) % args.sheet_every == 0:

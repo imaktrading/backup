@@ -62,13 +62,19 @@ REMOTE_BUSY_MARKERS = ("kagoya_offload.py",)
 
 
 # ---------------------------------------------------------------------------
-# サーバーの札 (2026-10-01 ユーザー確定 `C:/dev/iMak_data/hq/kagoya_server_rules.md`)
-#   メモリ4GBのサーバーは担当をまたいで同時に1本だけ。 参照実装は HQ の
-#   `iMakHQ/tools/kagoya_offload.py` の acquire_server_lock/release_server_lock/lock_is_free
+# サーバーの席 (2026-10-01 ユーザー確定 `C:/dev/iMak_data/hq/kagoya_server_rules.md` 改訂版
+#   「負荷を見ながら、順番と並走を考えて、リソース有効活用して」)。
+#   席は空きメモリで取る (札1枚ではない)。 参照実装は HQ の
+#   `iMakHQ/tools/kagoya_offload.py` の acquire_server_seat/release_server_seat
 #   (担当ごとに置き場が別なので、 ここにそのまま写す。 共有importはしない)。
 # ---------------------------------------------------------------------------
-SERVER_LOCK = r"C:\setup\server.lock"
+SEAT_DIR = r"C:\setup\seats"
+HARVEST_NEED_GB = 1.2  # Chrome を使う仕事
+MEM_RESERVE_GB = 0.4   # 席を取る時に残す余裕 (kagoya_server_rules.md と同じ値)
+PAUSE_RESERVE_GB = 0.3  # 動いている最中、これを切ったら区切って止まる (同上)
 HQ_OFFLOAD_REMOTE_ROOT = r"C:\setup\offload"
+HQ_WAIT_PATH = os.path.join(SEAT_DIR, "HQ.wait")
+HQ_WAIT_MAX_HOURS = 2.0
 
 
 def _pid_alive_win(pid):
@@ -85,59 +91,111 @@ def _pid_alive_win(pid):
         return False
 
 
-def lock_is_free(lock, pid_alive):
-    """札が空いているか (純関数)。無い/壊れている/持ち主が死んでいる → 空き。"""
-    if not isinstance(lock, dict) or not lock.get("pid"):
+def free_gb_win() -> float:
+    try:
+        import ctypes  # noqa: PLC0415
+
+        class MS(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("total", ctypes.c_ulonglong), ("avail", ctypes.c_ulonglong),
+                        ("a", ctypes.c_ulonglong), ("b", ctypes.c_ulonglong), ("c", ctypes.c_ulonglong),
+                        ("d", ctypes.c_ulonglong), ("e", ctypes.c_ulonglong)]
+        m = MS()
+        m.dwLength = ctypes.sizeof(m)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
+        return m.avail / 1024 ** 3
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def seat_is_free(seat, pid_alive):
+    """席が空いているか (純関数)。無い/壊れている/持ち主が死んでいる → 空き。"""
+    if not isinstance(seat, dict) or not seat.get("pid"):
         return True
-    return not pid_alive(lock["pid"])
+    return not pid_alive(seat["pid"])
 
 
-def acquire_server_lock(owner, path=SERVER_LOCK):
-    """札を取る。取れたら True。同時に取りに来ても1人だけが取れる (排他作成)。"""
-    for _ in range(2):
+def can_take_seat(need_gb, free_gb, reserve_gb=MEM_RESERVE_GB) -> bool:
+    """空きメモリで席を取れるか (純関数)。"""
+    return free_gb - need_gb >= reserve_gb
+
+
+def acquire_server_seat(owner, need_gb=HARVEST_NEED_GB, seat_dir=SEAT_DIR, free_gb=None, pid_alive=None):
+    """席を取る。取れたら True。同じ担当の席が生きていれば取らない。空きメモリが足りなければ取らない。"""
+    pid_alive = pid_alive or _pid_alive_win
+    os.makedirs(seat_dir, exist_ok=True)
+    path = os.path.join(seat_dir, owner + ".json")
+    if os.path.exists(path):
         try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump({"owner": owner, "pid": os.getpid(),
-                           "started": datetime.datetime.now().isoformat(timespec="seconds")}, f)
-            return True
-        except FileExistsError:
-            try:
-                cur = json.load(open(path, encoding="utf-8"))
-            except Exception:  # noqa: BLE001
-                cur = None
-            if not lock_is_free(cur, _pid_alive_win):
-                return False
-            try:
-                os.remove(path)  # 持ち主が死んだ札は捨てて取り直す
-            except OSError:
-                return False
-    return False
+            cur = json.load(open(path, encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            cur = None
+        if not seat_is_free(cur, pid_alive):
+            return False
+        try:
+            os.remove(path)
+        except OSError:
+            return False
+    fg = free_gb_win() if free_gb is None else free_gb
+    if not can_take_seat(need_gb, fg):
+        print(f"[seat] 空きメモリ {fg:.2f}GB / 要る {need_gb}GB + 余裕 {MEM_RESERVE_GB}GB → 今は始めない",
+              flush=True)
+        return False
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"owner": owner, "pid": os.getpid(), "need_gb": need_gb,
+                   "started": datetime.datetime.now().isoformat(timespec="seconds")}, f)
+    return True
 
 
-def release_server_lock(owner, path=SERVER_LOCK):
+def release_server_seat(owner, seat_dir=SEAT_DIR):
+    path = os.path.join(seat_dir, owner + ".json")
     try:
         cur = json.load(open(path, encoding="utf-8"))
-        if cur.get("owner") == owner and cur.get("pid") == os.getpid():
+        if cur.get("pid") == os.getpid():
             os.remove(path)
     except Exception:  # noqa: BLE001
         pass
 
 
-def hq_job_done_today() -> bool:
-    """その日のHQの分 (補探索・番号読み・UT) が終わっているか (優先順③の開始条件)。
+def _hq_seat_alive() -> bool:
+    try:
+        seat = json.load(open(os.path.join(SEAT_DIR, "HQ.json"), encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return False
+    return not seat_is_free(seat, _pid_alive_win)
 
-    判定: `C:\\setup\\offload\\job.json` の `date` が今日 かつ
-    `C:\\setup\\offload\\done.json` がある。 読めなければ False (= 待つ側)。
-    """
+
+def hq_today_done() -> bool:
     try:
         job = json.load(open(os.path.join(HQ_OFFLOAD_REMOTE_ROOT, "job.json"), encoding="utf-8"))
-        today = datetime.date.today().isoformat()
-        if job.get("date") != today:
+        if job.get("date") != datetime.date.today().isoformat():
             return False
         return os.path.exists(os.path.join(HQ_OFFLOAD_REMOTE_ROOT, "done.json"))
     except Exception:  # noqa: BLE001
         return False
+
+
+def may_start() -> bool:
+    """優先順③の開始条件: HQ の席がある (今日の分が動いている) か、 今日の分が終わった。"""
+    return _hq_seat_alive() or hq_today_done()
+
+
+def should_pause_now() -> bool:
+    """1件ごとに見る区切り条件 (kagoya_server_rules.md): HQ.wait がある (2時間以内)、
+    または空きメモリが 0.3GB を切った。 どちらかで True → 呼出側がそこで打ち切る。"""
+    if os.path.exists(HQ_WAIT_PATH):
+        try:
+            since = json.load(open(HQ_WAIT_PATH, encoding="utf-8")).get("since")
+            age_h = (datetime.datetime.now() - datetime.datetime.fromisoformat(since)).total_seconds() / 3600
+            if age_h <= HQ_WAIT_MAX_HOURS:
+                return True
+        except Exception:  # noqa: BLE001
+            return True  # 読めない印は「ある」扱い (待つ側に倒す)
+    return free_gb_win() < PAUSE_RESERVE_GB
 
 
 # ---------------------------------------------------------------------------
@@ -146,20 +204,22 @@ def hq_job_done_today() -> bool:
 def run_job(job_path: str) -> None:
     """仕事のファイルを受け取り、収集してダンプJSONへ逐次保存する (スプシへは書かない)。
 
-    優先順③ (キャラ収集など) : その日のHQの分 (①②) が終わってから、かつ
-    サーバーの札 (担当をまたいで1本だけ) を取れた時だけ動く。 取れなければ
-    何もせず終わる (結果は壊さない。 次回の呼出で続きから)。
+    優先順③ (キャラ収集など): HQ の席がある/今日の分が終わった時だけ始め、
+    空きメモリで自分の席 (`seats/HARVEST.json`) を取れた時だけ動く。
+    取れなければ何もせず終わる (結果は壊さない。 次回の呼出で続きから)。
     """
-    if not hq_job_done_today():
-        print("[run] その日のHQの分がまだ → 今回は動かない (次の回に続きから)", flush=True)
+    if not may_start():
+        print("[run] HQ の今日の分がまだ動いていない/終わっていない → 今回は動かない (次の回に続きから)",
+              flush=True)
         return
-    if not acquire_server_lock("HARVEST"):
-        print("[run] サーバーの札をほかの担当が持っている → 今回は動かない (次の回に続きから)", flush=True)
+    if not acquire_server_seat("HARVEST"):
+        print("[run] 席が取れない (空きメモリ不足/自分の席が残っている) → 今回は動かない (次の回に続きから)",
+              flush=True)
         return
     try:
         _run_job_body(job_path)
     finally:
-        release_server_lock("HARVEST")
+        release_server_seat("HARVEST")
 
 
 def _run_job_body(job_path: str) -> None:
@@ -186,13 +246,17 @@ def _run_job_body(job_path: str) -> None:
     kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
     kill_orphan_chromedriver()
     try:
-        payload = psa10.collect(chara_args, dump_path=Path(dump_path_str), resume=resume, on_flush=None)
+        payload = psa10.collect(chara_args, dump_path=Path(dump_path_str), resume=resume, on_flush=None,
+                                should_pause=should_pause_now)
     finally:
         kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
         kill_orphan_chromedriver()
 
-    print(f"[run] 完了: 候補 {len(payload['candidates'])}件 / 番号読めず {len(payload.get('unreadable') or [])}件",
-          flush=True)
+    unfinished = bool(payload.get("truncated"))
+    print(f"[run] {'区切って終了' if unfinished else '完了'}: 候補 {len(payload['candidates'])}件 / "
+          f"番号読めず {len(payload.get('unreadable') or [])}件", flush=True)
+    if unfinished:
+        return  # done.json は書かない (全語終わっていない。 続きは次回 run_job が resume する)
     json.dump({"finished": datetime.datetime.now().isoformat(timespec="seconds")},
               open(os.path.join(d, "done.json"), "w", encoding="utf-8"))
 
