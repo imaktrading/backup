@@ -97,6 +97,46 @@ def _card_type_map(db, cat: str) -> dict:
     return {k: v.most_common(1)[0][0] for k, v in m.items()}
 
 
+SETTLED_PATH = ROOT / "ebay_filter_map" / "_settled_unmapped.yaml"
+_KEY = re.compile(r"^([a-z_]+)=(.*)$")
+
+
+def _settled_table() -> dict:
+    """決着済みの値の表 (無ければ空)."""
+    try:
+        import yaml
+        return yaml.safe_load(SETTLED_PATH.read_text(encoding="utf-8")) or {}
+    except Exception as e:
+        print(f"  ⚠️ 決着済みの表が読めない ({type(e).__name__}) → 全部 赤で数えます")
+        return {}
+
+
+def split_unmapped(cat: str, unmapped) -> tuple[dict, dict, dict]:
+    """変換表に無い値を **決着済み / 件数だけ出す / 新しい未決着** に分ける.
+
+    依頼 `2026-10-02_monthly_settled_values_exclude_go.md`。
+    決着済みは終了コードに数えない (毎月 NG が出て「失敗」と読まれていた)。
+    ★表に載っていない値は今までどおり **赤**。
+    """
+    t = _settled_table()
+    rules = (t.get(cat) or {})
+    quiet_fields = (t.get("_fields_reported_not_red") or {})
+    settled, reported, open_ = {}, {}, {}
+    for key, n in unmapped.items():
+        m = _KEY.match(key)
+        field, raw = (m.group(1), m.group(2).strip("'\"")) if m else ("", "")
+        if field in quiet_fields:
+            reported[key] = n
+            continue
+        r = rules.get(field) or {}
+        if raw in (r.get("values") or []) or any(
+                raw.endswith(x) for x in (r.get("suffixes") or [])):
+            settled[key] = n
+            continue
+        open_[key] = n
+    return settled, reported, open_
+
+
 def run(cat: str, commit: bool) -> int:
     # ★変換表は **書き込みを始める前に**まとめて読む (2026-09-04)。
     #   書き込みトランザクション中に api.derive_* が別コネクションで読みに行くと
@@ -242,13 +282,20 @@ def run(cat: str, commit: bool) -> int:
 
     for k, v in filled.most_common():
         print(f"  + {k:24s} {v}行")
-    if unmapped:
-        print(f"  ★変換表に無い (空欄のまま。ここに1行足す):")
-        for k, v in unmapped.most_common(10):
+    settled, reported, open_ = split_unmapped(cat, unmapped)
+    if settled:
+        print(f"  決着済み (足さないと決めた値。_settled_unmapped.yaml): "
+              f"{sum(settled.values())}行 / {len(settled)}種")
+    if reported:
+        print(f"  今は埋められない (英語版が出ていない等): "
+              f"{sum(reported.values())}行 / {len(reported)}種")
+    if open_:
+        print("  ★変換表に無い (空欄のまま。ここに1行足す):")
+        for k, v in sorted(open_.items(), key=lambda x: -x[1])[:10]:
             print(f"      {v:5d}行  {k}")
     print("")
     print(f"{'適用' if commit else '(dry-run — --commit で適用)'}")
-    return len(unmapped)
+    return len(open_)
 
 
 def main() -> None:
