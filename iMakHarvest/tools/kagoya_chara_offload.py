@@ -69,7 +69,13 @@ REMOTE_BUSY_MARKERS = ("kagoya_offload.py",)
 #   (担当ごとに置き場が別なので、 ここにそのまま写す。 共有importはしない)。
 # ---------------------------------------------------------------------------
 SEAT_DIR = r"C:\setup\seats"
-HARVEST_NEED_GB = 1.2  # Chrome を使う仕事
+# ★2026-10-01 [IMPLEMENT-GO] フェーズ①: 検索(キーワード→URL)だけ mercari API 版に切替。
+# 詳細取得(写真URL等)はまだ Chrome のまま (フェーズ②で検討)。 そのため Chrome は
+# 依然起動する = メモリの頭 (Chrome本体) は変わらない。 1.2→1.0 は「検索の待ち・scroll分の
+# 重さが無くなった」分の控えめな引下げで、 0.2 まで下げるのはフェーズ②でChromeを
+# 使わなくなってから (HQへの回答に明記)。
+HARVEST_NEED_GB = 1.0
+SEARCH_BACKEND = "api"  # "api" | "chrome" — 切り戻しはここを "chrome" に戻すだけ
 MEM_RESERVE_GB = 0.4   # 席を取る時に残す余裕 (kagoya_server_rules.md と同じ値)
 PAUSE_RESERVE_GB = 0.3  # 動いている最中、これを切ったら区切って止まる (同上)
 HQ_OFFLOAD_REMOTE_ROOT = r"C:\setup\offload"
@@ -243,11 +249,24 @@ def _run_job_body(job_path: str) -> None:
     from pathlib import Path  # noqa: PLC0415
     chara_args = _server_chara_args(job)
 
+    urls_override = None
+    if SEARCH_BACKEND == "api":
+        from scrapers.mercari_search_api import collect_multi_keyword_urls_api  # noqa: PLC0415
+        api_res = collect_multi_keyword_urls_api(
+            job["keywords"], price_min=chara_args.price_min, price_max=chara_args.price_max,
+            cap_per_keyword=chara_args.cap_per_keyword,
+            progress_callback=lambda n, m: print(f"  {m}", flush=True))
+        urls_override = api_res["urls"]
+        print(f"[run] 検索(API版): {len(urls_override)} URL (dedup後) "
+              f"/ 失敗語 {len(api_res.get('errors') or {})}", flush=True)
+        if api_res.get("errors"):
+            print(f"  ⚠ API失敗語: {list(api_res['errors'].items())[:5]}", flush=True)
+
     kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
     kill_orphan_chromedriver()
     try:
         payload = psa10.collect(chara_args, dump_path=Path(dump_path_str), resume=resume, on_flush=None,
-                                should_pause=should_pause_now)
+                                should_pause=should_pause_now, urls_override=urls_override)
     finally:
         kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
         kill_orphan_chromedriver()
