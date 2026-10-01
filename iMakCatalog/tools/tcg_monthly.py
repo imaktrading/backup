@@ -55,9 +55,11 @@ STEPS = (
      for c in ("pokemon_tcg", "one_piece_tcg", "dragonball_scg", "gundam_tcg")]
     + [(f"仕上げ ({c})", ["tools/finish_ingest.py", "--cat", c, "--commit"]) for c in CATS]
     + [
-        ("公式突合 (ポケモン)",       ["tools/official_drift_pokemon.py", "--all"]),
-        ("公式突合 (ワンピース)",     ["tools/official_drift_check.py", "--n", "200"]),
-        ("公式突合 (バンダイ2種)",    ["tools/official_drift_bandai.py"]),
+        # ★公式突合3本は **KAGOYA に移した** (2026-10-01)。
+        #   ここで走らせると二重に公式を読む。結果は
+        #   `C:/dev/iMak_data/catalog/_kagoya/drift_*.out` に入る。
+        #   回すのは job_runner の `drift_kagoya` (間隔30日)。
+        ("公式突合 (KAGOYA で回す)",  ["tools/kagoya_catalog.py", "cycle"]),
         ("公式の絵の控え",            ["tools/mirror_blocked_images.py", "--commit"]),
         ("検収",                     ["tools/claim_check.py"]),
     ]

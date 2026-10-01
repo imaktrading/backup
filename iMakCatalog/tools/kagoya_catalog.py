@@ -55,6 +55,16 @@ OWNER = "CATALOG"
 NEED_GB = 0.2          # Chrome を使わない仕事 (共通ルールの目安)
 RESERVE_GB = 0.4
 
+# ★突合の「どこまで見たか」の控え。サーバーで進んだ分を家に持ち帰らないと、
+#   家の検収が古い控えを見て「差分が残っている」と出し続ける (2026-10-01)
+STATE_FILES = {
+    # ★ポケモンの --all は控えを書かない作り (全弾まとめて見るので持ち越す物が無い)
+    "drift_pokemon": [],
+    "drift_opcg": ["_official_drift_state.json"],
+    "drift_bandai": ["_official_drift_bandai_state.json"],
+    "drift_uniqlo": [],
+}
+
 # 読むだけの仕事 (DB を書かないことを 2026-10-01 に実測で確かめた)
 JOBS = {
     "drift_pokemon": ["tools/official_drift_pokemon.py", "--all"],
@@ -263,6 +273,11 @@ def collect(job: str) -> bool:
     if _scp_from(REMOTE_ROOT + "\\" + job + ".out", str(LOCAL_OUT / (job + ".out"))) != 0:
         return False
     _scp_from(REMOTE_ROOT + "\\" + job + ".done.json", str(LOCAL_OUT / (job + ".done.json")))
+    # 控え (どこまで見たか) も家に戻す
+    for name in STATE_FILES.get(job, []):
+        rc = _scp_from("C:/dev/iMak_data/catalog/" + name,
+                       "C:/dev/iMak_data/catalog/" + name)
+        print("    控え %s %s" % (name, "戻した" if rc == 0 else "戻せなかった"))
     return True
 
 
