@@ -62,10 +62,107 @@ REMOTE_BUSY_MARKERS = ("kagoya_offload.py",)
 
 
 # ---------------------------------------------------------------------------
+# サーバーの札 (2026-10-01 ユーザー確定 `C:/dev/iMak_data/hq/kagoya_server_rules.md`)
+#   メモリ4GBのサーバーは担当をまたいで同時に1本だけ。 参照実装は HQ の
+#   `iMakHQ/tools/kagoya_offload.py` の acquire_server_lock/release_server_lock/lock_is_free
+#   (担当ごとに置き場が別なので、 ここにそのまま写す。 共有importはしない)。
+# ---------------------------------------------------------------------------
+SERVER_LOCK = r"C:\setup\server.lock"
+HQ_OFFLOAD_REMOTE_ROOT = r"C:\setup\offload"
+
+
+def _pid_alive_win(pid):
+    try:
+        import ctypes  # noqa: PLC0415
+        h = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+        ctypes.windll.kernel32.CloseHandle(h)
+        return code.value == 259
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def lock_is_free(lock, pid_alive):
+    """札が空いているか (純関数)。無い/壊れている/持ち主が死んでいる → 空き。"""
+    if not isinstance(lock, dict) or not lock.get("pid"):
+        return True
+    return not pid_alive(lock["pid"])
+
+
+def acquire_server_lock(owner, path=SERVER_LOCK):
+    """札を取る。取れたら True。同時に取りに来ても1人だけが取れる (排他作成)。"""
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump({"owner": owner, "pid": os.getpid(),
+                           "started": datetime.datetime.now().isoformat(timespec="seconds")}, f)
+            return True
+        except FileExistsError:
+            try:
+                cur = json.load(open(path, encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                cur = None
+            if not lock_is_free(cur, _pid_alive_win):
+                return False
+            try:
+                os.remove(path)  # 持ち主が死んだ札は捨てて取り直す
+            except OSError:
+                return False
+    return False
+
+
+def release_server_lock(owner, path=SERVER_LOCK):
+    try:
+        cur = json.load(open(path, encoding="utf-8"))
+        if cur.get("owner") == owner and cur.get("pid") == os.getpid():
+            os.remove(path)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def hq_job_done_today() -> bool:
+    """その日のHQの分 (補探索・番号読み・UT) が終わっているか (優先順③の開始条件)。
+
+    判定: `C:\\setup\\offload\\job.json` の `date` が今日 かつ
+    `C:\\setup\\offload\\done.json` がある。 読めなければ False (= 待つ側)。
+    """
+    try:
+        job = json.load(open(os.path.join(HQ_OFFLOAD_REMOTE_ROOT, "job.json"), encoding="utf-8"))
+        today = datetime.date.today().isoformat()
+        if job.get("date") != today:
+            return False
+        return os.path.exists(os.path.join(HQ_OFFLOAD_REMOTE_ROOT, "done.json"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# ---------------------------------------------------------------------------
 # サーバー側
 # ---------------------------------------------------------------------------
 def run_job(job_path: str) -> None:
-    """仕事のファイルを受け取り、収集してダンプJSONへ逐次保存する (スプシへは書かない)。"""
+    """仕事のファイルを受け取り、収集してダンプJSONへ逐次保存する (スプシへは書かない)。
+
+    優先順③ (キャラ収集など) : その日のHQの分 (①②) が終わってから、かつ
+    サーバーの札 (担当をまたいで1本だけ) を取れた時だけ動く。 取れなければ
+    何もせず終わる (結果は壊さない。 次回の呼出で続きから)。
+    """
+    if not hq_job_done_today():
+        print("[run] その日のHQの分がまだ → 今回は動かない (次の回に続きから)", flush=True)
+        return
+    if not acquire_server_lock("HARVEST"):
+        print("[run] サーバーの札をほかの担当が持っている → 今回は動かない (次の回に続きから)", flush=True)
+        return
+    try:
+        _run_job_body(job_path)
+    finally:
+        release_server_lock("HARVEST")
+
+
+def _run_job_body(job_path: str) -> None:
     sys.path.insert(0, REMOTE_CODE_ROOT)
     import run_harvest_mercari_psa10 as psa10  # noqa: PLC0415
     from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver  # noqa: PLC0415
