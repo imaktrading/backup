@@ -941,6 +941,9 @@ def build_restock_html(items):
             #   変種バッジより強い警告として、こちらを優先表示する。
             if cd.get("number_ok") is False:
                 _v_html = "<span class='nng'>🔴番号未確認 — 別カードの可能性あり</span>"
+            elif cd.get("variant_unconfirmed"):
+                # ★2026-10-01: 同じ番号に別の絵 (パラレル/SP/再録) がある。版は絵柄で決める
+                _v_html = "<span class='nng'>🟠版未確認 — 同じ番号に別の絵あり。絵柄で決める</span>"
             elif cd.get("desc_no"):
                 # ★2026-09-24: タイトルに番号は無いが、商品説明に同じ番号が書いてある (mercari_desc_numbers)
                 _v_html = "<span class='vok'>📝商品説明に同じ番号あり</span>" + _v_html

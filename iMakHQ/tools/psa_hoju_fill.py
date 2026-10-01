@@ -1640,6 +1640,8 @@ def _cache_candidate_urls(entry):
         #   番号未確認である事実は _build_visual_candidates が number_ok=False で持ち回り、UI が明示する。
         rows = m.get("all_cands") or m.get("cands") or m.get("loose_cands") or []
         out += [t[1] for t in rows if t and len(t) > 1 and t[1]]
+        # ★2026-10-01: 版未確認の枠 (目視で決める) も「新しい仕入元が出たか」に数える
+        out += [t[1] for t in (m.get("variant_cands") or []) if t and len(t) > 1 and t[1]]
     out += _cache_snkrdunk_urls(entry)
     return out
 

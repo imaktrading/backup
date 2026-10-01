@@ -113,6 +113,10 @@ GENERIC_SET_TOKENS = frozenset({
     "PROMOTIONALCARD", "PROMOTIONALCARDS", "PROMOTIONCARD", "PROMOTIONCARDS",
     "PROMOTIONAL", "PROMOTION", "PROMO", "SPECIALEDITION", "BOX", "VOL", "ISSUE",
     "POKEMONCARD", "POKEMONCARDGAME",
+    # ★2026-10-01: ワンピースの出品なら必ず書いてある語。セットを言い当てられないのに
+    #   確証に数えていた (実測: PSA10 ではない別の出品が「セット一致2点」で通っていた)。
+    "ONEPIECE", "ワンピース", "ワンピースカード", "ワンピースカードゲーム", "カードゲーム",
+    "PROMOCARDS", "PROMOCARD",
 })
 
 
@@ -202,10 +206,19 @@ def _item_print(name):
     # Dragon Ball 等の rarity-asterisk(例 'L*'/'SR*'/'R*' [SB02-033])= パラレル。base(*無)と区別。
     if re.search(r"[A-Z]{1,3}\*", n):
         return "P"
-    if "パラレル" in (name or "") or "PARALLEL" in n:
-        return "P"
-    if "スーパーパラレル" in (name or "") or "SPカード" in (name or ""):
+    # ★2026-10-01: SP の印を **パラレルより先に** 見る。以前は「スーパーパラレル」が
+    #   「パラレル」に先に当たって P と読まれていた。売り手の書き方 (手配書 / スペシャル /
+    #   単独の SP) も読めていなかった (実測 OP09-051「PSA10 バギー 手配書 WANTED SP」が通常扱い)。
+    #   コミパラ・シクパラ (漫画/シークレットのパラレル) は SP とは別の版なので MANGA と読む。
+    raw = name or ""
+    # (英語の MANGA は見ない: ドラゴンボールのセット名「MANGA BOOSTER」に当たる)
+    if "コミパラ" in raw or "コミックパラレル" in raw or "シクパラ" in raw:
+        return "MANGA"
+    if ("スーパーパラレル" in raw or "SPカード" in raw or "スペシャルカード" in raw
+            or "手配書" in raw or re.search(r"(?<![A-Z0-9])SP(?![A-Z0-9])", n)):
         return "SPC"
+    if "パラレル" in raw or "PARALLEL" in n:
+        return "P"
     return ""
 
 

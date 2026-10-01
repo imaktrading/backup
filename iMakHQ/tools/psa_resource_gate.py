@@ -250,6 +250,22 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
             out.append({"channel": "mercari", "url": url, "price": _p,
                         "name": (t[2] if len(t) > 2 else ""),
                         "variant_ok": url in verified})
+    # ★2026-10-01 ユーザー「目視で決めたらいい」: 絵柄が複数ある番号で版を確かめられなかった候補。
+    #   探す側 (variant_unconfirmed_candidates) が番号・PSA10・版の印の食い違いまでは見てある。
+    #   版は人が絵柄で決める (variant_unconfirmed=True で画面に「版未確認」と出す)。
+    _vc = [t for t in (mr.get("variant_cands") or [])
+           if t and len(t) > 1 and _nu(t[1]) not in _excl
+           and not _skip_out(t[1], t[0] if isinstance(t[0], int) else None)]
+    _vc.sort(key=lambda t: _price_key(t[0] if isinstance(t[0], int) else None))
+    for t in _vc[:max_mercari]:
+        url = t[1]
+        _p = t[0] if isinstance(t[0], int) else None
+        if (url not in seen and url not in _ng_urls and _ok(_p)
+                and not _is_lot(t[2] if len(t) > 2 else "")):
+            seen.add(url)
+            out.append({"channel": "mercari", "url": url, "price": _p,
+                        "name": (t[2] if len(t) > 2 else ""),
+                        "variant_ok": False, "variant_unconfirmed": True})
     # ★2026-08-01: 番号未確認 (名前一致のみ) の候補を **最後に** 足す。
     #   厳密一致が0件のときだけ mercari 側が積む枠。「候補なし」で終わらせず、
     #   目視で弾ける形にして人に見せる (ユーザー方針: 最終は目視なので近しいのも出す)。

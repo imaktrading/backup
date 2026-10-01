@@ -530,6 +530,13 @@ def print_word_for_key(key, hint=None):
         return ""
     if any(str(h).strip().upper() in ("SP", "SPカード") for h in (hint or [])):   # rarity の値だけ見る
         return "SP"
+    # ★2026-10-01: 記念セット・大会配布・雑誌の応募者全員サービス・再録などの版は、売り手が
+    #   「パラレル」と書かない。付けると検索結果が0件になっていた (実測 ST17-003_p3 / P-106_p2)。
+    #   入手元 (hint[1] = get_info) がブースター (パック) の版だけ「パラレル」を付ける。
+    #   (hint は card_meta_for_key の6項目 [set, get_info, set_ebay, variant_type, rarity, name] の時だけ読む)
+    _gi = str(hint[1]) if isinstance(hint, (list, tuple)) and len(hint) >= 5 and hint[1] else ""
+    if _gi and not re.search(r"ブースター|BOOSTER", _gi, re.I):
+        return ""
     return "パラレル"
 
 
@@ -970,6 +977,36 @@ def pick_psa10_candidates(items, card_no, variant_hint=None, limit=5, market_no=
     """
     return [(it["price"], it["href"], it["name"])
             for it in _variant_matches(items, card_no, variant_hint, market_no)[:limit]]
+
+
+def variant_unconfirmed_candidates(items, card_no, variant_hint=None, market_no=None, limit=4):
+    """絵柄が複数ある番号で **版を確かめられなかった** 候補 → 目視で決める枠 (純関数)。
+
+    ★2026-10-01 ユーザー「目視で決めたらいい」。それまでは版を確かめられないと候補を全部捨てていた
+      (8晩で322回・135種類。売り手はセット名をほとんど書かないため)。
+      ここに入れるのは「PSA10 + 番号が合う + まとめ売りでない + 書いてある版の印が欲しい版と食い違わない」物。
+      **自動では使わない** (best / 値段の判定 / 補URLの自動保存には入れない)。画面に「版未確認」と出して人が決める。
+    """
+    from snkrdunk_psa_resource import _item_print, _print_signal
+    target = _print_signal(variant_hint)
+    code = _slash_set_code(card_no, market_no)
+
+    def _pr(name):
+        if code and market_no:
+            name = re.sub(re.escape(market_no), " ", name or "", flags=re.I)
+        return _item_print(name)
+    out = []
+    for it in items:                       # DOM順 = 価格昇順
+        if not (it["price"] > 0 and is_psa10(it["name"]) and not _is_lot(it["name"])
+                and _name_matches_card(it["name"], card_no, market_no)):
+            continue
+        p = _pr(it["name"])
+        if target is not None and p not in ("", target):
+            continue                       # 違う版だと書いてある = 確実に別物
+        out.append((it["price"], it["href"], it["name"]))
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _norm_name(s):
@@ -1486,6 +1523,7 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
                 best = cands[0] if cands else None
                 via = "kw"
                 _failclosed = False
+                variant_cands = []
                 # keyword で変種を確証できない(0件 or set語不一致=違うカードを掴むリスク)→ 画像検索。
                 # 画像検索は自社PSAスラブ画像で視覚一致 → 番号+PSA10検証なので別カード混入を防ぐ。
                 _unconfident = best is None or not kw_variant_confident(best[2], c.get("hint"))
@@ -1498,7 +1536,15 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
                     all_cands = []      # 目視枠も出さない(OP01-061 の扱いに揃える・2026-08-28)
                     via = "多変種fail-closed(画像検索skip)"
                     _failclosed = True                 # 下の救済枠も出さない (2026-09-20)
-                    print(f"  [{i+1}/{len(cards)}] {card_no}: 多変種で変種確証不可→候補出さず(手動仕入れ)", flush=True)
+                    # ★2026-10-01 ユーザー「目視で決めたらいい」: 捨てずに「版未確認」の枠に入れる。
+                    #   best / cands / all_cands には入れない = 自動の判定には一切使わない。
+                    variant_cands = variant_unconfirmed_candidates(
+                        items, card_no, c.get("hint"), market_no=c.get("market_no"))
+                    if variant_cands and freeship_min_reviews is not None:
+                        variant_cands = _filter_candidates_supply(drv, variant_cands,
+                                                                  min_reviews=freeship_min_reviews)
+                    print(f"  [{i+1}/{len(cards)}] {card_no}: 多変種で変種確証不可→版未確認で目視へ"
+                          f"{len(variant_cands)}件", flush=True)
                 elif _unconfident and eid:
                     img = image_search_fallback(drv, eid, card_no)
                     if img:
@@ -1560,7 +1606,7 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
                     if loose:
                         via += f"+番号未確認{len(loose)}件"
                 out[i] = {"best": best, "cands": cands, "all_cands": all_cands,
-                          "loose_cands": loose}
+                          "loose_cands": loose, "variant_cands": variant_cands}
                 tag = f"¥{best[0]} ({via}, 候補{len(cands)})" if best else "PSA10在庫なし"
                 print(f"  [{i+1}/{len(cards)}] {card_no or kw}: {tag}", flush=True)
             except Exception as e:

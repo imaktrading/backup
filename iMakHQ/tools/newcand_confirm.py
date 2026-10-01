@@ -230,7 +230,7 @@ def url_title_map(cache):
     out = {}
     for _iid, v in (cache or {}).items():
         m = (v or {}).get("mercari") or {}
-        buckets = [m.get(k) or [] for k in ("cands", "all_cands", "loose_cands")]
+        buckets = [m.get(k) or [] for k in ("cands", "all_cands", "loose_cands", "variant_cands")]
         b = m.get("best")
         if isinstance(b, (list, tuple)):
             buckets.append([b])
