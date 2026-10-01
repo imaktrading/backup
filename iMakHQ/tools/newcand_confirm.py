@@ -815,6 +815,37 @@ def fill_titles(items, titles):
     return n
 
 
+STOCK_SEEN_PATH = r"C:/dev/iMak_data/hq/mercari_stock_seen.json"   # kagoya_offload が書く
+STOCK_SEEN_MAX_AGE_H = 12
+
+
+def stock_seen_status(urls, led=None, now=None, max_age_h=STOCK_SEEN_MAX_AGE_H):
+    """KAGOYA が先に確かめた在庫 → ({url: "sold"|"in_stock"}, {url: 出品名})。古い分は使わない (純関数寄り)。"""
+    import datetime as _dt
+    if led is None:
+        try:
+            with open(STOCK_SEEN_PATH, encoding="utf-8") as f:
+                led = json.load(f) or {}
+        except Exception:                                      # noqa: BLE001
+            led = {}
+    now = now or _dt.datetime.now()
+    st, titles = {}, {}
+    for u in urls or []:
+        e = led.get(u)
+        if not isinstance(e, dict) or not isinstance(e.get("ok"), bool):
+            continue
+        try:
+            age_h = (now - _dt.datetime.fromisoformat(e.get("at") or "")).total_seconds() / 3600
+        except ValueError:
+            continue
+        if age_h < 0 or age_h > max_age_h:
+            continue
+        st[u] = "in_stock" if e["ok"] else "sold"
+        if e.get("title"):
+            titles[u] = e["title"]
+    return st, titles
+
+
 def drop_sold_before_review(items, write=True):
     """目視の前に売り切れの候補を外す (I/O)。外した分は NG タブに理由つきで残す = 次回も出さない。"""
     urls = []
@@ -835,6 +866,14 @@ def drop_sold_before_review(items, write=True):
     #   捨てた候補は巡回していないので **5件とも判定不能** だった (売り切れを1件も外せない)。
     #   → 補URL の書込み直前と同じ確認 (詳細ページを開いて購入ボタンを見る) を使う。
     #   判定がメルカリのボタンなので **メルカリの URL だけ** 開く。他 (スニダン等) は判らない = 見せる。
+    # ★2026-10-01 (総点検 34): KAGOYA が先に確かめた分 (STOCK_SEEN_MAX_AGE_H 時間以内) はそれを使う。
+    #   売り切れは確定 (NG へ)、買えるは見せる。古い・無い分だけ下でその場確認する。
+    _seen, _seen_titles = stock_seen_status(urls)
+    if _seen:
+        status.update({u: s for u, s in _seen.items() if u not in status})
+        if _seen_titles:
+            fill_titles(items, _seen_titles)
+        print(f"  🛰 KAGOYA が先に確かめた在庫を使う: {len(_seen)}件")
     rest = mercari_urls(u for u in urls if u not in status)
     if rest:
         try:

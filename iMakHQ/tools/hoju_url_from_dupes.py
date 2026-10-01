@@ -143,6 +143,31 @@ def verify_alive(urls, verbose=True, budget_sec=VERIFY_BUDGET_SEC, now=None):
         return [], []
     urls = verify_order(urls, load_pending_verify())           # 前回 溢れた分から確認する
     _t0 = now()
+    # ★2026-10-01 (総点検 34): まず API で確かめ (Chrome を開かない)、判らなかった分だけ下の Chrome で見る。
+    #   切り替えは補URL探索と同じ mercari_source.json ("chrome" なら今までどおり全部 Chrome)。
+    alive, dead = [], []
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import mercari_psa_resource as mp
+        if mp.mercari_source_name() != "chrome":
+            st, tts, rest = mp.api_stock_check(urls, budget_sec=budget_sec, now=now)
+            LAST_TITLES.update(tts)
+            for u in urls:
+                if st.get(u) is True:
+                    alive.append(u)
+                elif st.get(u) is False:
+                    dead.append((u, "API で『買えない』(売切/オークション/削除)"))
+                    mp.remember_not_buyable(u, "補URL書込み直前の確認で売切/オークション/削除 (API)")
+            if verbose:
+                print(f"  🔎 在庫を API で確認: 買える {len(alive)} / 買えない {len(dead)} / "
+                      f"判らず Chrome へ {len(rest)}")
+            if not rest:
+                save_pending_verify([])
+                return alive, dead
+            urls = rest
+    except Exception as e:                                     # noqa: BLE001  API が使えない = 全部 Chrome
+        if verbose:
+            print(f"  ⚠ API で在庫を確認できず ({type(e).__name__}) → Chrome で見ます")
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import mercari_psa_resource as mp
@@ -150,8 +175,7 @@ def verify_alive(urls, verbose=True, budget_sec=VERIFY_BUDGET_SEC, now=None):
     except Exception as e:                                     # noqa: BLE001
         if verbose:
             print(f"  ⚠ 在庫のその場確認は skip ({type(e).__name__}) — 今までどおり書きます")
-        return urls, []
-    alive, dead = [], []
+        return alive + urls, dead
     try:
         for n, u in enumerate(urls):
             if now() - _t0 > budget_sec:

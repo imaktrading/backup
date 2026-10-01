@@ -195,6 +195,7 @@ def _run_job_body(job, job_path, mp, sp):
         print(f"  💾 {min(s + MERCARI_BATCH, len(todo))}/{len(todo)} ({round(time.time() - t0)}秒)", flush=True)
     _run_desc(job, os.path.dirname(job_path))
     _run_ut(job, os.path.dirname(job_path))
+    _run_stock(job, os.path.dirname(job_path))
     json.dump({"job_id": job["job_id"], "finished": datetime.datetime.now().isoformat(timespec="seconds"),
                "sec": round(time.time() - t0)}, open(done_path, "w", encoding="utf-8"))
     print("[run] 完了", flush=True)
@@ -372,6 +373,25 @@ def _run_ut(job, d):
             pass
 
 
+def _run_stock(job, d):
+    """🌱 (捨てた候補→新規出品の種) の目視待ちの在庫を API で先に確かめる (Chrome を使わない)。"""
+    urls = job.get("stock_urls") or []
+    if not urls:
+        return
+    import mercari_psa_resource as mp
+    rp = os.path.join(d, "stock_result.jsonl")
+    done = _done_keys(rp, "url")
+    todo = [u for u in urls if u not in done]
+    print(f"[stock] 全{len(urls)}件 / 済{len(done)} / 残り{len(todo)}", flush=True)
+    for s in range(0, len(todo), 20):
+        st, tts, _rest = mp.api_stock_check(todo[s:s + 20])
+        with open(rp, "a", encoding="utf-8") as f:
+            for u, ok in st.items():                       # 判らなかった分は書かない (家で確かめる)
+                f.write(json.dumps({"url": u, "ok": ok, "title": tts.get(u, ""),
+                                    "at": datetime.datetime.now().isoformat(timespec="seconds")},
+                                   ensure_ascii=False) + "\n")
+
+
 # ---------------------------------------------------------------------------
 # 家の側: 送る・起動・取りに行く
 # ---------------------------------------------------------------------------
@@ -496,7 +516,10 @@ def build_job(today):
         print(f"  ⚠ 再仕入れ候補を読めず ({type(e).__name__}) — 今日は補だけ")
         restock = []
     cache = H._load_cache() if _mode() == "live" else _merged_view(H)
-    targets, counts = plan_job(fill, swap, restock, cache, H.load_dry(), today, H.should_skip_dry)
+    # ★2026-10-01 (総点検 ⑧): 入れ替え (補4〜5本) の間隔は offload.json の "swap_every_days" で変えられる
+    #   (無ければ SWAP_EVERY_DAYS=2)。KAGOYA の空き時間に余裕があれば 1 にして毎日探す。
+    targets, counts = plan_job(fill, swap, restock, cache, H.load_dry(), today, H.should_skip_dry,
+                               swap_every=swap_every_days(_cfg()))
     out, no_q = [], 0
     for t in targets:
         q = H.build_search_query(t, mp)
@@ -522,7 +545,38 @@ def build_job(today):
             except Exception as e:                               # noqa: BLE001
                 print(f"  ⚠ UT の対象を作れず ({type(e).__name__}) — 今日は家の夜に任せる")
         counts["ut"] = sum(len(v) for v in (job.get("ut") or {}).values())
+        # 🌱 の目視待ちの在庫 (切り替え: offload.json の "newcand_stock": true。既定は切)
+        if (_cfg().get("newcand_stock") is True):
+            try:
+                job["stock_urls"] = newcand_stock_urls()
+            except Exception as e:                               # noqa: BLE001
+                print(f"  ⚠ 🌱 の在庫確認の対象を作れず ({type(e).__name__}) — 昼のボタンで確かめる")
+        counts["stock"] = len(job.get("stock_urls") or [])
     return job
+
+
+def swap_every_days(cfg):
+    """入れ替えを何日に1回探すか (純関数)。読めない・1未満 → 既定 SWAP_EVERY_DAYS。"""
+    try:
+        v = int((cfg or {}).get("swap_every_days", SWAP_EVERY_DAYS))
+    except (TypeError, ValueError):
+        return SWAP_EVERY_DAYS
+    return v if v >= 1 else SWAP_EVERY_DAYS
+
+
+STOCK_SEEN_PATH = r"C:/dev/iMak_data/hq/mercari_stock_seen.json"
+STOCK_LIMIT = 1500
+
+
+def newcand_stock_urls(limit=STOCK_LIMIT):
+    """🌱 の目視待ち (未処理) の候補の URL (家で。スプシを読むだけ・書かない)。"""
+    import newcand_confirm as NC
+    items = NC.load_items(limit=0, write=False, resolve=False)
+    urls = []
+    for it in items:
+        urls.append(it.get("url"))
+        urls.extend(dd.get("url") for dd in (it.get("dups") or []))
+    return [u for u in dict.fromkeys(NC.mercari_urls(u for u in urls if u))][:limit]
 
 
 def ut_due(last, today, every):
@@ -559,7 +613,8 @@ def start_remote(cfg, job):
     json.dump(job, open(jp, "w", encoding="utf-8"), ensure_ascii=False, default=str)
     rc, out = _ssh(cfg, f'New-Item -ItemType Directory -Force {REMOTE_ROOT} | Out-Null; '
                         f'Remove-Item {REMOTE_ROOT}\\result.jsonl,{REMOTE_ROOT}\\desc_result.jsonl,'
-                        f'{REMOTE_ROOT}\\ut_result.jsonl,{REMOTE_ROOT}\\done.json -ErrorAction SilentlyContinue; "ok"')
+                        f'{REMOTE_ROOT}\\ut_result.jsonl,{REMOTE_ROOT}\\stock_result.jsonl,'
+                        f'{REMOTE_ROOT}\\done.json -ErrorAction SilentlyContinue; "ok"')
     if rc != 0:
         raise RuntimeError(f"サーバーに入れない: {out[:200]}")
     if _scp_to(cfg, jp, REMOTE_ROOT + r"\job.json") != 0:
@@ -651,8 +706,25 @@ def pull_and_merge(cfg, st):
     # 古い job の記録は捨てる (今の job だけ持つ)
     st["merged_ids"] = {k: v for k, v in st["merged_ids"].items() if k == job.get("job_id")}
     if live:
-        n += _pull_desc(cfg, st, job) + _pull_ut(cfg, st, job)
+        n += _pull_desc(cfg, st, job) + _pull_ut(cfg, st, job) + _pull_stock(cfg, st, job)
     return n
+
+
+def _pull_stock(cfg, st, job):
+    """🌱 の在庫の確認結果を家の台帳に書く。同じ URL は新しい方で上書き。"""
+    if not job.get("stock_urls"):
+        return 0
+    rows = _pull_lines(cfg, "stock_result.jsonl")
+    if not rows:
+        return 0
+    led = _load_json(STOCK_SEEN_PATH)
+    for r in rows:
+        if r.get("url") and isinstance(r.get("ok"), bool):
+            led[r["url"]] = {"ok": r["ok"], "title": r.get("title") or "", "at": r.get("at") or ""}
+    tmp = STOCK_SEEN_PATH + ".tmp"
+    json.dump(led, open(tmp, "w", encoding="utf-8"), ensure_ascii=False)
+    os.replace(tmp, STOCK_SEEN_PATH)
+    return len(rows)
 
 
 def _pull_lines(cfg, name):

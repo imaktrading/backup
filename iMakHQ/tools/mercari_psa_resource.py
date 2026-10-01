@@ -1583,6 +1583,81 @@ def api_supply_verdict(status, has_auction, shipping_payer_id, num_ratings, min_
     return ok, ship, num_ratings, buyable
 
 
+def api_stock_check(urls, budget_sec=None, now=None, sleep=None):
+    """メルカリの URL が **今そのまま買えるか** を API で確かめる (Chrome を開かない)。
+
+    戻り: ({url: True|False}, {url: 出品名}, [確かめられなかった url])。
+      - 個人 (/item/m…): 販売中 かつ オークションでない → True。消えている (404) → False
+      - Shops (/shops/product/…): 在庫数の合計が 1 以上 → True。消えている (404) → False
+      - それ以外の URL / 通信の失敗 / 時間切れ → 確かめられなかった側 (呼び出し側が Chrome で見る)
+    ★2026-10-01 (総点検 34): 🌱 の目視前の在庫確認が Chrome で1件ずつ詳細を開き、最大49分かかっていた。
+    """
+    import asyncio
+    import time as _t
+    now = now or _t.monotonic
+    sleep = _API_SLEEP if sleep is None else sleep
+    ok, titles, unknown = {}, {}, []
+    urls = list(dict.fromkeys(u for u in (urls or []) if u))
+    try:
+        try:
+            import certifi
+            os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+        except Exception:                                      # noqa: BLE001
+            pass
+        import logging as _lg
+        _lg.getLogger().setLevel(_lg.ERROR)                    # mercapi の項目の警告を出さない
+        from mercapi import Mercapi
+        api = Mercapi()
+        loop = asyncio.new_event_loop()
+    except Exception:                                          # noqa: BLE001  部品が無い = 全部 Chrome
+        return ok, titles, urls
+    t0 = now()
+    try:
+        for i, u in enumerate(urls):
+            if budget_sec is not None and now() - t0 > budget_sec:
+                unknown.extend(urls[i:])
+                break
+            m_item = re.search(r"jp\.mercari\.com/item/(m\w+)", u)
+            m_shop = re.search(r"jp\.mercari\.com/shops/product/(\w+)", u)
+            try:
+                if m_item:
+                    d = loop.run_until_complete(api.item(m_item.group(1)))
+                    if d is None:
+                        ok[u] = False
+                    else:
+                        ok[u] = (str(getattr(d, "status", "") or "").lower()
+                                 in ("on_sale", "item_status_on_sale")
+                                 and getattr(d, "auction_info", None) is None)
+                        if getattr(d, "name", ""):
+                            titles[u] = d.name
+                elif m_shop:
+                    p = loop.run_until_complete(api.product(m_shop.group(1)))
+                    if p is None:
+                        ok[u] = False
+                    else:
+                        pd = getattr(p, "product_detail", None)
+                        _ok, _s, buy = api_shops_verdict(
+                            getattr(getattr(pd, "shipping_payer", None), "code", None),
+                            [getattr(v, "quantity", 0) for v in (getattr(pd, "variants", None) or [])])
+                        ok[u] = buy
+                        if getattr(p, "display_name", ""):
+                            titles[u] = p.display_name
+                else:
+                    unknown.append(u)
+                    continue
+            except Exception:                                  # noqa: BLE001  判らない = Chrome で見る
+                unknown.append(u)
+                continue
+            if sleep:
+                _t.sleep(sleep)
+    finally:
+        try:
+            loop.close()
+        except Exception:                                      # noqa: BLE001
+            pass
+    return ok, titles, unknown
+
+
 def api_shops_verdict(shipping_payer_code, quantities, min_reviews=100):
     """Shops API の商品情報 → (ok, ship, buyable) (純関数)。
 
