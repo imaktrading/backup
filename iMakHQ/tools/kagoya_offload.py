@@ -139,13 +139,22 @@ def run_job(job_path):
     import snkrdunk_psa_resource as sp
 
     job = json.load(open(job_path, encoding="utf-8"))
-    if not acquire_server_lock("HQ"):
-        print("[run] サーバーの札をほかの担当が持っている → 今回は動かない (次の回に続きから)", flush=True)
+    wait_path = os.path.join(SEAT_DIR, "HQ.wait")
+    if not acquire_server_seat("HQ"):
+        # 優先順の低い仕事 (抽出くん等) はこの印を見たら区切りの良い所で止まって席を空ける (続きは後で)
+        os.makedirs(SEAT_DIR, exist_ok=True)
+        json.dump({"since": datetime.datetime.now().isoformat(timespec="seconds")},
+                  open(wait_path, "w", encoding="utf-8"))
+        print("[run] 席が取れない (同じ仕事が動いている / 空きメモリ不足) → 待ちの印を置いて今回は動かない", flush=True)
         return
+    try:
+        os.remove(wait_path)
+    except OSError:
+        pass
     try:
         _run_job_body(job, job_path, mp, sp)
     finally:
-        release_server_lock("HQ")
+        release_server_seat("HQ")
 
 
 def _run_job_body(job, job_path, mp, sp):
@@ -187,14 +196,18 @@ def _run_job_body(job, job_path, mp, sp):
 
 
 # ---------------------------------------------------------------------------
-# サーバーの札 (2026-10-01 ユーザー「今の4Gで、動かす順番とか組み直せよ」)
-#   メモリ 4GB なので、サーバーで動く仕事は **担当をまたいで1本だけ**。札を取れた仕事だけが動く。
-#   優先順: ①監視くんの予備 (割り込み可。ほかの仕事を止めて先に回す。止められた仕事は続きから再開)
-#           ②HQ の補探索・番号読み・UT (毎日、日付が変わったら最初・朝7時までに)
-#           ③抽出くんのキャラ収集など (その日の HQ の分が終わってから)
-#   札: SERVER_LOCK に {"owner", "pid", "started"}。持ち主の pid が死んでいれば札は無効 (取り直せる)
+# サーバーの席 (2026-10-01 ユーザー「負荷を見ながら、順番と並走を考えて、リソース有効活用して」
+#   「ただ動かすだけなら、メモリいくつあっても足りない」「24時間専用マシーンなんだから」)
+#   仕事は始める時に「席」を取る。席が取れるのは **空きメモリが need_gb + 余裕 以上ある時だけ**。
+#   空きがあれば担当をまたいで並べて動き、無ければ待つ (次の回に続きから)。
+#   実測 (4GB): Windows 約2GB / Chrome を使う仕事1本 約1.1GB → 今の大きさでは Chrome の仕事は実質1本ずつ。
+#   24時間あるので時間で分ける: HQ の補探索は日付が変わったら最初 (約5時間)、ほかの担当はその後の約19時間。
+#   優先順: ①監視くんの予備 (割り込み可) ②HQ ③抽出くんのキャラ収集など (HQ が席を取った後・終わった後)
+#   席: SEAT_DIR/<担当>.json = {"owner", "pid", "need_gb", "started"}。pid が死んだ席は無効。
 # ---------------------------------------------------------------------------
-SERVER_LOCK = r"C:\setup\server.lock"
+SEAT_DIR = r"C:\setup\seats"
+HQ_NEED_GB = 1.2
+MEM_RESERVE_GB = 0.4
 
 
 def _pid_alive_win(pid):
@@ -211,40 +224,70 @@ def _pid_alive_win(pid):
         return False
 
 
+def free_gb_win():
+    try:
+        import ctypes
+
+        class MS(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("total", ctypes.c_ulonglong), ("avail", ctypes.c_ulonglong),
+                        ("a", ctypes.c_ulonglong), ("b", ctypes.c_ulonglong), ("c", ctypes.c_ulonglong),
+                        ("d", ctypes.c_ulonglong), ("e", ctypes.c_ulonglong)]
+        m = MS()
+        m.dwLength = ctypes.sizeof(m)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
+        return m.avail / 1024 ** 3
+    except Exception:
+        return 0.0
+
+
 def lock_is_free(lock, pid_alive):
-    """札が空いているか (純関数)。無い / 壊れている / 持ち主が死んでいる → 空き。"""
+    """席が空いているか (純関数)。無い / 壊れている / 持ち主が死んでいる → 空き。"""
     if not isinstance(lock, dict) or not lock.get("pid"):
         return True
     return not pid_alive(lock["pid"])
 
 
-def acquire_server_lock(owner, path=SERVER_LOCK):
-    """札を取る。取れたら True。同時に取りに来ても1人だけが取れる (排他作成)。"""
-    for _ in range(2):
+def can_take_seat(need_gb, free_gb, reserve_gb=MEM_RESERVE_GB):
+    """空きメモリで席を取れるか (純関数)。"""
+    return free_gb - need_gb >= reserve_gb
+
+
+def acquire_server_seat(owner, need_gb=HQ_NEED_GB, seat_dir=SEAT_DIR, free_gb=None, pid_alive=None):
+    """席を取る。取れたら True。同じ担当の席が生きていれば取らない。空きメモリが足りなければ取らない。"""
+    pid_alive = pid_alive or _pid_alive_win
+    os.makedirs(seat_dir, exist_ok=True)
+    path = os.path.join(seat_dir, owner + ".json")
+    if os.path.exists(path):
         try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump({"owner": owner, "pid": os.getpid(),
-                           "started": datetime.datetime.now().isoformat(timespec="seconds")}, f)
-            return True
-        except FileExistsError:
-            try:
-                cur = json.load(open(path, encoding="utf-8"))
-            except Exception:
-                cur = None
-            if not lock_is_free(cur, _pid_alive_win):
-                return False
-            try:
-                os.remove(path)          # 持ち主が死んだ札は捨てて取り直す
-            except OSError:
-                return False
-    return False
+            cur = json.load(open(path, encoding="utf-8"))
+        except Exception:
+            cur = None
+        if not lock_is_free(cur, pid_alive):
+            return False
+        try:
+            os.remove(path)
+        except OSError:
+            return False
+    fg = free_gb_win() if free_gb is None else free_gb
+    if not can_take_seat(need_gb, fg):
+        print(f"[seat] 空きメモリ {fg:.2f}GB / 要る {need_gb}GB + 余裕 {MEM_RESERVE_GB}GB → 今は始めない", flush=True)
+        return False
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"owner": owner, "pid": os.getpid(), "need_gb": need_gb,
+                   "started": datetime.datetime.now().isoformat(timespec="seconds")}, f)
+    return True
 
 
-def release_server_lock(owner, path=SERVER_LOCK):
+def release_server_seat(owner, seat_dir=SEAT_DIR):
+    path = os.path.join(seat_dir, owner + ".json")
     try:
         cur = json.load(open(path, encoding="utf-8"))
-        if cur.get("owner") == owner and cur.get("pid") == os.getpid():
+        if cur.get("pid") == os.getpid():
             os.remove(path)
     except Exception:
         pass
@@ -672,20 +715,12 @@ def cycle():
         return 0
     if st.get("job_date") == today and not rs["done"]:
         # 今日の仕事が途中で止まった (サーバー再起動など) → 続きから再開
-        if rs.get("others"):
-            print("⏸ サーバーでほかの担当の仕事が動いている → 再開は次の回 (メモリ 4GB で重ねない)")
-            _save_state(st)
-            return 0
         print("↻ 今日の仕事が途中で止まっていた → 続きから再開")
         start_remote_resume(cfg)
         _save_state(st)
         return 0
     if st.get("job_date") == today:
         print("✅ 今日の分は済み")
-        _save_state(st)
-        return 0
-    if rs.get("others"):
-        print("⏸ サーバーでほかの担当の仕事が動いている → 今日の分は次の回に始める (メモリ 4GB で重ねない)")
         _save_state(st)
         return 0
     sync_code_and_db(cfg, st)

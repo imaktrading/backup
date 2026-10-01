@@ -98,14 +98,20 @@ def test_lock_is_free():
     assert not K.lock_is_free({"owner": "X", "pid": 5}, lambda p: True)
 
 
-def test_acquire_and_release_server_lock(tmp_path):
-    p = str(tmp_path / "server.lock")
-    assert K.acquire_server_lock("HQ", p) is True
-    assert K.acquire_server_lock("HARVEST", p) is False                 # 自分 (生きている pid) が持っている
-    K.release_server_lock("HARVEST", p)                                  # 他人の名前では外れない
-    assert os.path.exists(p)
-    K.release_server_lock("HQ", p)
-    assert not os.path.exists(p)
-    with open(p, "w", encoding="utf-8") as f:                           # 死んだ持ち主の札は取り直せる
-        json.dump({"owner": "HARVEST", "pid": 999999}, f)
-    assert K.acquire_server_lock("HQ", p) is True
+def test_can_take_seat_by_free_memory():
+    assert K.can_take_seat(1.2, 2.0) is True          # 2.0 - 1.2 = 0.8 >= 0.4
+    assert K.can_take_seat(1.2, 1.5) is False         # 余裕が足りない
+    assert K.can_take_seat(0.2, 0.7) is True          # 軽い仕事なら並べられる
+
+
+def test_acquire_and_release_server_seat(tmp_path):
+    d = str(tmp_path / "seats")
+    assert K.acquire_server_seat("HQ", 1.2, d, free_gb=3.0) is True
+    assert K.acquire_server_seat("HQ", 1.2, d, free_gb=3.0) is False              # 同じ仕事は二重に取らない
+    assert K.acquire_server_seat("HARVEST", 1.2, d, free_gb=1.0) is False         # 空きが足りない
+    assert K.acquire_server_seat("HARVEST", 1.2, d, free_gb=2.5) is True          # 空きがあれば並べる
+    K.release_server_seat("HQ", d)
+    assert not os.path.exists(os.path.join(d, "HQ.json"))
+    with open(os.path.join(d, "HQ.json"), "w", encoding="utf-8") as f:            # 死んだ持ち主の席は取り直せる
+        json.dump({"owner": "HQ", "pid": 999999}, f)
+    assert K.acquire_server_seat("HQ", 1.2, d, free_gb=3.0, pid_alive=lambda p: False) is True
