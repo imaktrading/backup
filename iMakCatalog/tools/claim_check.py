@@ -165,19 +165,54 @@ def check_tests(_):
     return (f is None), f"{m.group(1) if m else '?'} passed / {f.group(1) if f else 0} failed"
 
 
+# 公式突合は KAGOYA で回す (2026-10-01 HQ [IMPLEMENT-GO])。検収は**その結果を読む**。
+#   古さの線 = KAGOYA の間隔 30日 + 余裕 15日 = **45日** (job_runner の deadline_days と同じ)
+_KAGOYA_OUT = Path("C:/dev/iMak_data/catalog/_kagoya")
+_DRIFT_JOBS = ("drift_pokemon", "drift_opcg", "drift_bandai", "drift_uniqlo")
+_DRIFT_MAX_AGE_DAYS = 45
+
+
 def check_official_drift(quick):
-    """公式との突合が **どれだけ古いか**。走らせていない = 確かめていない."""
-    state_p = Path("C:/dev/iMak_data/catalog/_official_drift_state.json")
-    state = json.loads(state_p.read_text(encoding="utf-8")) if state_p.exists() else {}
+    """KAGOYA が出した公式突合の結果を読む。**古い / 無い / 読めないは赤**.
+
+    自分で公式を読み直さない (2026-10-01 まではここでも読んでいたので、突合が1日2回
+    走っていた)。KAGOYA が止まった時に家で読み直すには:
+
+        python tools/official_drift_check.py --n 200     # ワンピ
+        python tools/official_drift_pokemon.py --all     # ポケモン
+        python tools/official_drift_bandai.py            # ドラゴンボール + ガンダム
+        python tools/official_drift_uniqlo.py            # UNIQLO
+        python tools/kagoya_catalog.py cycle             # サーバーで回し直す
+    """
     if quick:
-        return True, f"(--quick のため未実行) これまでに見た弾 {len(state)}"
-    out = subprocess.run([sys.executable, str(ROOT / "tools" / "official_drift_check.py"),
-                          "--n", "2"], capture_output=True, text=True,
-                         encoding="utf-8", errors="replace").stdout
-    m = re.search(r"突合 (\d+)枚 / 差分 (\d+)件", out)
-    if not m:
-        return False, "突合が完走しなかった"
-    return m.group(2) == "0", f"{m.group(1)}枚 突合 / 差分 {m.group(2)}件 (累計で見た弾 {len(state)})"
+        return True, "(--quick のため未確認)"
+    lines, bad = [], []
+    for job in _DRIFT_JOBS:
+        done = _KAGOYA_OUT / (job + ".done.json")
+        out = _KAGOYA_OUT / (job + ".out")
+        if not done.exists() or not out.exists():
+            bad.append(f"{job}: 結果が無い")
+            continue
+        try:
+            info = json.loads(done.read_text(encoding="utf-8"))
+            at = datetime.fromisoformat(info["at"])
+            body = out.read_text(encoding="utf-8", errors="replace")
+        except (ValueError, KeyError, OSError) as e:
+            bad.append(f"{job}: 読めない ({type(e).__name__})")
+            continue
+        age = (datetime.now() - at).days
+        if age > _DRIFT_MAX_AGE_DAYS:
+            bad.append(f"{job}: {age}日前 (期限 {_DRIFT_MAX_AGE_DAYS}日)")
+            continue
+        # 差分の件数を本文から拾う (書式は突合ツールごとに違う)
+        m = (re.search(r"差分 (\d+)件", body)
+             or re.search(r"\*\*欠落 (\d+)枚", body)
+             or re.search(r"catalog に無い (\d+)件", body))
+        n = m.group(1) if m else "?"
+        if n != "0":
+            bad.append(f"{job}: 差分 {n} ({age}日前)")
+        lines.append(f"{job}={n}/{age}日前")
+    return not bad, (" ".join(lines) + ("  ★" + " / ".join(bad) if bad else "")) or "結果が無い"
 
 
 def check_table_matches_data(_):
