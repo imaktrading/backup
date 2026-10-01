@@ -196,6 +196,7 @@ def _run_job_body(job, job_path, mp, sp):
     _run_desc(job, os.path.dirname(job_path))
     _run_ut(job, os.path.dirname(job_path))
     _run_stock(job, os.path.dirname(job_path))
+    _run_kuji(job, os.path.dirname(job_path))
     json.dump({"job_id": job["job_id"], "finished": datetime.datetime.now().isoformat(timespec="seconds"),
                "sec": round(time.time() - t0)}, open(done_path, "w", encoding="utf-8"))
     print("[run] 完了", flush=True)
@@ -373,6 +374,83 @@ def _run_ut(job, d):
             pass
 
 
+# ★2026-10-02: 一番くじの夜の検索 (run_kuji_night.py・家で約8分・Chrome) を KAGOYA で回す。
+#   読み書きする控え (家の置き場 = サーバーの置き場)。送る時の写しを base に取っておき、
+#   戻ってきた時は「サーバーで変わった項目だけ」を家の今のファイルに書く (昼にボタンで書いた分を消さない)。
+KUJI_FILES = [
+    r"C:/dev/iMak_data/dedupe/ichibankuji_identify_cache.json",
+    r"C:/dev/iMak_data/dedupe/ichibankuji_detail_cache.json",
+    r"C:/dev/iMak_data/dedupe/ichibankuji_candidate_wait.json",
+    r"C:/dev/iMak_data/hq/not_buyable_urls.json",
+]
+KUJI_BASE = os.path.join(WORK, "kuji_base")
+
+
+def merge_changed(base, srv, home):
+    """サーバーで変わった (足された / 中身が変わった) 項目だけを home に書く。純関数 (home の写しを返す)。
+
+    消えた項目は消さない (サーバーで消したのか、送る前から無かったのか区別しない = 消さない側)。
+    """
+    out = dict(home or {})
+    for k, v in (srv or {}).items():
+        if k not in (base or {}) or base[k] != v:
+            out[k] = v
+    return out
+
+
+def _run_kuji(job, d):
+    """一番くじの夜の検索 (候補を集める + 詳細を取る)。画面なしの Chrome で。"""
+    if not job.get("kuji"):
+        return
+    mark = os.path.join(d, "kuji_done.json")
+    if os.path.exists(mark):
+        return
+    print("[kuji] 一番くじの夜の検索", flush=True)
+    t0 = time.time()
+    r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(HERE, "run_kuji_night.py")],
+                       cwd=HERE, env=dict(os.environ, PYTHONIOENCODING="utf-8", IMAK_HEADLESS="1"))
+    json.dump({"job_id": job["job_id"], "rc": r.returncode, "sec": round(time.time() - t0)},
+              open(mark, "w", encoding="utf-8"))
+
+
+def _push_kuji_files(cfg):
+    """一番くじの控えをサーバーへ送り、送った時点の写しを base に残す。"""
+    os.makedirs(KUJI_BASE, exist_ok=True)
+    for p in KUJI_FILES:
+        b = os.path.join(KUJI_BASE, os.path.basename(p))
+        data = _load_json(p)
+        json.dump(data, open(b, "w", encoding="utf-8"), ensure_ascii=False)
+        rp = p.replace("/", "\\")
+        rc, _ = _ssh(cfg, f'New-Item -ItemType Directory -Force "{os.path.dirname(rp)}" | Out-Null; "ok"')
+        if _scp_to(cfg, b, rp) != 0:
+            raise RuntimeError(f"{os.path.basename(p)} を送れなかった")
+
+
+def _pull_kuji(cfg, st, job):
+    """一番くじの結果を取りに行き、変わった項目だけ家の控えに書く。1つの仕事につき1回だけ。"""
+    if not job.get("kuji") or st.get("kuji_merged") == job.get("job_id"):
+        return 0
+    lp = os.path.join(WORK, "kuji_done.json")
+    if _scp_from(cfg, REMOTE_ROOT + r"\kuji_done.json", lp) != 0:
+        return 0                                   # まだ終わっていない
+    n = 0
+    for p in KUJI_FILES:
+        tmp = os.path.join(WORK, "kuji_srv_" + os.path.basename(p))
+        if _scp_from(cfg, p.replace("/", "\\"), tmp) != 0:
+            continue
+        base = _load_json(os.path.join(KUJI_BASE, os.path.basename(p)))
+        srv, home = _load_json(tmp), _load_json(p)
+        out = merge_changed(base, srv, home)
+        n += sum(1 for k in out if home.get(k) != out[k])
+        t = p + ".tmp"
+        json.dump(out, open(t, "w", encoding="utf-8"), ensure_ascii=False)
+        os.replace(t, p)
+    st["kuji_merged"] = job.get("job_id")
+    st.setdefault("covered", {})["kuji"] = job.get("date")
+    print(f"  🎯 一番くじ: 家の控えに {n}項目を書いた ({_load_json(lp)})")
+    return n
+
+
 def _run_stock(job, d):
     """🌱 (捨てた候補→新規出品の種) の目視待ちの在庫を API で先に確かめる (Chrome を使わない)。"""
     urls = job.get("stock_urls") or []
@@ -433,6 +511,9 @@ def _scp_from(cfg, remote, local, timeout=600):
 
 def _code_files():
     files = [os.path.join("iMakHQ", "tools", f) for f in os.listdir(HERE) if f.endswith(".py")]
+    # ★2026-10-02: 一番くじ等が使う eBay の部品 (ebay_getitem_images / credentials 等)
+    ebay = os.path.join(REPO, "iMakeBayAPI")
+    files += [os.path.join("iMakeBayAPI", f) for f in os.listdir(ebay) if f.endswith(".py")]
     cat = os.path.join(REPO, "iMakCatalog")
     for dp, dn, fn in os.walk(cat):
         dn[:] = [d for d in dn if d not in ("tests", "__pycache__")]
@@ -552,6 +633,9 @@ def build_job(today):
             except Exception as e:                               # noqa: BLE001
                 print(f"  ⚠ 🌱 の在庫確認の対象を作れず ({type(e).__name__}) — 昼のボタンで確かめる")
         counts["stock"] = len(job.get("stock_urls") or [])
+        # 一番くじの夜の検索 (切り替え: offload.json "kuji_night": true。既定は切 = 鍵を置いてから入れる)
+        if _cfg().get("kuji_night") is True:
+            job["kuji"] = True
     return job
 
 
@@ -614,9 +698,12 @@ def start_remote(cfg, job):
     rc, out = _ssh(cfg, f'New-Item -ItemType Directory -Force {REMOTE_ROOT} | Out-Null; '
                         f'Remove-Item {REMOTE_ROOT}\\result.jsonl,{REMOTE_ROOT}\\desc_result.jsonl,'
                         f'{REMOTE_ROOT}\\ut_result.jsonl,{REMOTE_ROOT}\\stock_result.jsonl,'
+                        f'{REMOTE_ROOT}\\kuji_done.json,'
                         f'{REMOTE_ROOT}\\done.json -ErrorAction SilentlyContinue; "ok"')
     if rc != 0:
         raise RuntimeError(f"サーバーに入れない: {out[:200]}")
+    if job.get("kuji"):
+        _push_kuji_files(cfg)
     if _scp_to(cfg, jp, REMOTE_ROOT + r"\job.json") != 0:
         raise RuntimeError("仕事のファイルを送れなかった")
     script = rf"{REMOTE_CODE_ROOT}\iMakHQ\tools\kagoya_offload.py"
@@ -706,7 +793,8 @@ def pull_and_merge(cfg, st):
     # 古い job の記録は捨てる (今の job だけ持つ)
     st["merged_ids"] = {k: v for k, v in st["merged_ids"].items() if k == job.get("job_id")}
     if live:
-        n += _pull_desc(cfg, st, job) + _pull_ut(cfg, st, job) + _pull_stock(cfg, st, job)
+        n += (_pull_desc(cfg, st, job) + _pull_ut(cfg, st, job) + _pull_stock(cfg, st, job)
+              + _pull_kuji(cfg, st, job))
     return n
 
 
@@ -803,6 +891,10 @@ def cycle():
         cov = st.setdefault("covered", {})
         if job0.get("desc_urls"):
             cov["desc"] = job0.get("date")
+        # ★2026-10-02: 補URL探索 (補0〜3・5本・再仕入れ) も今日済み → 家の夜の束の探索3つを飛ばす。
+        #   その日に出たばかりの出品は、1時間おきの見回り (start_urgent_restock) が KAGOYA で探す
+        if job0.get("targets") and "urgent" not in str(job0.get("job_id", "")):
+            cov["hoju"] = job0.get("date")
     if rs["running"]:
         print(f"⏳ サーバーで実行中 ({rs['lines']}件済み)")
         _save_state(st)
@@ -877,13 +969,24 @@ def start_urgent_restock(cfg, st, today):
         return
     seen = set(st["sold_seen"])
     new = newly_sold(vals[1:], seen, H._cell, cols)
-    if not new:
-        return
     cache = H._load_cache()
     targets = []
+    # ★2026-10-02: 補URL が0本で、今日まだ探していない出品 (= 今朝の KAGOYA の仕事の後に出した物)。
+    #   家の夜の束の補探索をやめた分を、ここで1時間以内に拾う
+    _ids = set()
+    dry = H.load_dry()
+    for t in H.select_backfill_targets(vals, max_backups=1):
+        if (cache.get(t["itemID"]) or {}).get("date") == today:
+            continue
+        if H.should_skip_dry(dry.get(t["itemID"]), today):
+            continue                                   # 空振り続き (朝の仕事と同じ基準で間を空ける)
+        q = H.build_search_query(t, mp)
+        if q.get("card_no"):
+            targets.append({"itemID": t["itemID"], "kind": "fill", "q": q})
+            _ids.add(t["itemID"])
     for r in new:
         iid = H._cell(r, H.B)
-        if (cache.get(iid) or {}).get("date") == today:
+        if (cache.get(iid) or {}).get("date") == today or iid in _ids:
             continue                                   # 今日もう探した
         t = {"itemID": iid, "key": H._cell(r, H.KEY), "cert": H._cell(r, H.CERT), "title": H._cell(r, H.C)}
         q = H.build_search_query(t, mp)
@@ -891,10 +994,11 @@ def start_urgent_restock(cfg, st, today):
             targets.append({"itemID": iid, "kind": "restock", "q": q})
     if targets:
         sync_code_and_db(cfg, st)
+        nf = sum(1 for t in targets if t["kind"] == "fill")
         job = {"job_id": f"{today}-urgent-{int(time.time())}", "date": today, "targets": targets,
-               "counts": {"restock": len(targets), "urgent": True}}
+               "counts": {"restock": len(targets) - nf, "fill": nf, "urgent": True}}
         start_remote(cfg, job)
-        print(f"🚀 売り切れに変わった {len(new)}件のうち {len(targets)}件の次の仕入元を探し始めた")
+        print(f"🚀 急ぎの探索 {len(targets)}件 (売り切れの次の仕入元 {len(targets) - nf} / 補0本の新しい出品 {nf})")
     st["sold_seen"] = sorted(seen | {H._cell(r, H.B) for r in new})
 
 

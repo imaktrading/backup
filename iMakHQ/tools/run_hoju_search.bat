@@ -89,6 +89,8 @@ REM        2026-10-01: wrapped in night_step like every other step. Without it, 
 REM        after a PC crash searched the same 30 listings again (10/01: 30/30/24 again at
 REM        2:13/2:29/2:54 = about 1 hour wasted), because "searched today" is judged by the
 REM        calendar date and the night crosses midnight.
+REM 2026-10-02: KAGOYA searched today's backups/restock (0:20). New listings after that are searched hourly by kagoya_offload cycle.
+python -u kagoya_offload.py covered hoju >> "%LOG%" 2>&1 && goto :skip5
 python -u night_step.py hoju psa_hoju_fill.search.--limit=30 --check >> "%LOG%" 2>&1 || goto :topup
 for %%i in (1 2 3) do (
     echo [try %%i] zero-backup %date% %time% >> "%LOG%"
@@ -330,6 +332,7 @@ python -u night_step.py hoju ut_demand_words.--write --done %RC% >> "%LOG%" 2>&1
 REM --- 6d) ichibankuji nightly search (was a manual button only; nothing else
 REM          ran it, so the daytime press had to do the searching itself).
 echo [kuji-night] %date% %time% >> "%LOG%"
+python -u kagoya_offload.py covered kuji >> "%LOG%" 2>&1 && goto :skip23
 python -u night_step.py hoju run_kuji_night --check >> "%LOG%" 2>&1 || goto :skip23
 python -u run_kuji_night.py >> "%LOG%" 2>&1
 python -u night_step.py hoju run_kuji_night --done %errorlevel% >> "%LOG%" 2>&1

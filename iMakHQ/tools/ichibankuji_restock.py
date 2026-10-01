@@ -746,7 +746,8 @@ def _make_driver(headless=False):
         try:
             opts = uc.ChromeOptions()   # uc は options を消費するので毎回生成
             opts.add_argument(f"--user-data-dir={MERCARI_PROFILE_DIR}")   # ログイン済セッション
-            if headless:
+            # ★2026-10-02: KAGOYA (画面の無いサーバー) では IMAK_HEADLESS=1 で画面なしにする
+            if headless or os.environ.get("IMAK_HEADLESS") == "1":
                 opts.add_argument("--headless=new")
             for a in ("--no-sandbox", "--lang=ja-JP", "--window-size=1280,1400"):
                 opts.add_argument(a)

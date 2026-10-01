@@ -25,3 +25,13 @@ def test_newly_sold_picks_only_new_psa_sold_rows():
     ]
     got = K.newly_sold(rows, {"222"}, _cell, COLS)
     assert [r[1] for r in got] == ["111"]
+
+
+def test_merge_changed_writes_only_server_changes():
+    """一番くじを KAGOYA で回した結果は、サーバーで変わった項目だけ家に書く (2026-10-02)。"""
+    base = {"a": 1, "b": 2, "c": 3}
+    srv = {"a": 1, "b": 20, "d": 4}          # b が変わり d が足され c が消えた
+    home = {"a": 9, "b": 2, "c": 3, "e": 5}  # 家では昼に a を書き換え e を足した
+    out = K.merge_changed(base, srv, home)
+    assert out == {"a": 9, "b": 20, "c": 3, "d": 4, "e": 5}
+    assert K.merge_changed({}, {}, {"x": 1}) == {"x": 1}
