@@ -140,3 +140,4 @@ iMakHQ/rarara_reports/
 # 注意: 新 worktree は別 path (C:/dev/iMak_inventory etc) で管理、元 monorepo の同名フォルダは古いものなので ignore
 iMakInventory/
 iMakHarvest/
+.claude/settings.local.json
