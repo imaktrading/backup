@@ -56,6 +56,7 @@ from sheet_updater import (  # noqa: E402
     HIGH_SHEET_ID,
     LOW_SHEET_ID,
     LISTINGS_GID,
+    NOT_LISTED_ITEM_ID,
     open_sheet_by_id,
     get_listings_worksheet,
     read_listings_rows,
@@ -254,6 +255,7 @@ def collect_from_pending_queue(
 
     Returns: (candidates, skipped_pending)
     """
+    prune_not_listed_pending_revise()
     queue = read_pending_queue()
     if not queue:
         return [], []
@@ -372,6 +374,24 @@ def _ebay_current_qty(iid: str, token: str) -> Optional[int]:
         sold = int(sold_m.group(1)) if sold_m else 0
         return max(0, total_qty - sold)
     return None
+
+
+def prune_not_listed_pending_revise() -> int:
+    """itemID="9999" (= 出品しないと決めた行) の entry を取下げ待ちから退避する (2026-10-01).
+
+    eBay に出品が無いので状態が取れず、取下げ待ちに「未完了」として永久に残っていた。
+    入口 (monitor_listings.append_pending_revise) でも弾くが、既存分と取りこぼしをここで掃除する。
+    証跡は discarded_revise.jsonl に残す (silent drop 禁止)。再出品側の prune_not_listed_pending_revive と対。
+    """
+    if not PENDING_REVISE_FILE.exists():
+        return 0
+    return remove_entries(
+        PENDING_REVISE_FILE,
+        lambda e: (e.get("item_id") or "").strip() == NOT_LISTED_ITEM_ID,
+        archive_path=DISCARDED_REVISE_FILE,
+        stamp_field="discarded_at",
+        stamp_extra={"discard_reason": "not_listed_item_id_9999"},
+    )
 
 
 def prune_discarded_entries(skipped: list[dict]) -> dict:

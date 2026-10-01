@@ -859,7 +859,12 @@ def read_pending_item_ids() -> set:
 def append_pending_revise(sheet_label: str, result: dict, dry_run: bool) -> None:
     """delta="newly_sold" の行を pending queue に append.
     dry_run でも記録する (queue 状態の追跡用、ただし Phase 3 側で dry_run flag を尊重)。
+
+    ★ 2026-10-01: itemID="9999" (= 出品しないと決めた行、2026-09-21 ユーザー決定) は積まない。
+      eBay に出品が無いので状態が取れず、取下げ待ちに毎時「未完了」として残り続けていた。
     """
+    if str(result.get("item_id") or "").strip() == NOT_LISTED_ITEM_ID:
+        return
     DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
     entry = {
         "ts":           datetime.now().isoformat(timespec="seconds"),

@@ -83,6 +83,12 @@ def main() -> int:
     p.add_argument("--item-id", action="append", help="対象を絞る (複数可)")
     args = p.parse_args()
 
+    # ★ 2026-10-01: itemID="9999" (出品しないと決めた行) は eBay に出品が無く、毎時「未完了」に
+    #   残り続けていた。送る前に取下げ待ちから外す (証跡は discarded_revise.jsonl)。
+    from ebay_actions.revise_csv_generator import prune_not_listed_pending_revise  # noqa: PLC0415
+    pruned = prune_not_listed_pending_revise()
+    if pruned:
+        print(f"出品しない行 (itemID=9999) {pruned} 件を取下げ待ちから外しました")
     entries = _read_pending()
     if args.item_id:
         want = set(args.item_id)
