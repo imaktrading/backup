@@ -90,6 +90,12 @@ def _slug(path: str) -> str:
 _load_uniqlo_steps()
 
 
+def _append(rec: dict) -> None:
+    RUNS.parent.mkdir(parents=True, exist_ok=True)
+    with RUNS.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
 def _runs() -> list[dict]:
     if not RUNS.exists():
         return []
@@ -109,7 +115,9 @@ def last_ok(job: str) -> datetime | None:
     """最後に rc=0 で終わった時刻 (無ければ None)."""
     best = None
     for r in _runs():
-        if r.get("owner") != OWNER or r.get("job") != job or r.get("rc") != 0:
+        # ★`end` が無い行は「開始だけ」= 途中で落ちた工程なので、済みにしない
+        if (r.get("owner") != OWNER or r.get("job") != job or r.get("rc") != 0
+                or not r.get("end")):
             continue
         try:
             t = datetime.fromisoformat(r["end"])
@@ -145,6 +153,12 @@ def run(job: str) -> int:
     start = datetime.now()
     t0 = time.time()
     print(f"=== {job} 開始 {start:%Y-%m-%d %H:%M:%S} ===", flush=True)
+    # ★開始も1行 残す (2026-10-02)。終わりだけ書いていたので、**途中で機械が落ちた工程は
+    #   記録に1行も残らなかった** (10/02 03:00 の ut05 がそれ。予約の結果は wscript の
+    #   ラッパーが 0 を返すので、落ちたことが分からなかった)。
+    _append({"owner": OWNER, "job": job, "state": "start",
+             "start": start.isoformat(timespec="seconds"),
+             "chrome": spec["chrome"], "log": str(log)})
     try:
         r = subprocess.run([sys.executable] + [str(x) for x in spec["cmd"]],
                            cwd=str(ROOT), capture_output=True, text=True,
@@ -158,13 +172,11 @@ def run(job: str) -> int:
         f.write(f"=== {job} {start:%Y-%m-%d %H:%M:%S} → {end:%H:%M:%S} ({sec}秒) rc={rc} ===\n")
         f.write(body + "\n")
     RUNS.parent.mkdir(parents=True, exist_ok=True)
-    with RUNS.open("a", encoding="utf-8") as f:
-        f.write(json.dumps({
-            "owner": OWNER, "job": job, "start": start.isoformat(timespec="seconds"),
-            "end": end.isoformat(timespec="seconds"), "sec": sec, "rc": rc,
-            "chrome": spec["chrome"], "every_days": spec["every_days"],
-            "deadline_days": spec["deadline_days"], "log": str(log),
-        }, ensure_ascii=False) + "\n")
+    _append({"owner": OWNER, "job": job, "state": "end",
+             "start": start.isoformat(timespec="seconds"),
+             "end": end.isoformat(timespec="seconds"), "sec": sec, "rc": rc,
+             "chrome": spec["chrome"], "every_days": spec["every_days"],
+             "deadline_days": spec["deadline_days"], "log": str(log)})
     print(f"=== {job} 終わり {end:%H:%M:%S} ({sec}秒) rc={rc} / 記録 {log} ===", flush=True)
     return rc
 
