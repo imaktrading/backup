@@ -89,12 +89,18 @@ def main() -> None:
     a = ap.parse_args()
 
     started = datetime.now()
-    lines = [f"=== UNIQLO 月次 {started:%Y-%m-%d %H:%M} ==="]
-    print(lines[0], flush=True)
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+
+    def note(text: str) -> None:
+        """★工程ごとにその場で書く。最後にまとめて書くと、途中で機械が落ちた時に
+        **1行も残らない** (2026-10-01 の 4:00 の走行がそれで消えた)。"""
+        print(text, flush=True)
+        with LOG.open("a", encoding="utf-8") as f:
+            f.write(text + chr(10))
+
+    note(f"=== UNIQLO 月次 {started:%Y-%m-%d %H:%M} ===")
     for name, cmd in STEPS:
-        head = f"--- {name}: {' '.join(cmd)}"
-        print(head, flush=True)
-        lines.append(head)
+        note(f"--- {name}: {' '.join(cmd)}")
         if a.dry_run:
             continue
         t0 = time.time()
@@ -106,20 +112,12 @@ def main() -> None:
             ok = "OK " if r.returncode == 0 else f"NG({r.returncode})"
         except Exception as e:
             tail, ok = [f"{type(e).__name__}: {str(e)[:120]}"], "NG"
-        msg = f"    {ok} {int(time.time() - t0)}秒"
-        print(msg, flush=True)
-        lines.append(msg)
+        note(f"    {ok} {int(time.time() - t0)}秒")
         for x in tail:
-            print("      " + x, flush=True)
-            lines.append("      " + x)
+            note("      " + x)
         # ★1本落ちても後ろを止めない (止めると次の月まで何も進まない)
 
-    end = f"=== 終わり {datetime.now():%H:%M} (かかった時間 {datetime.now() - started}) ==="
-    print(end, flush=True)
-    lines.append(end)
-    LOG.parent.mkdir(parents=True, exist_ok=True)
-    with LOG.open("a", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n\n")
+    note(f"=== 終わり {datetime.now():%H:%M} (かかった時間 {datetime.now() - started}) ===")
 
 
 if __name__ == "__main__":

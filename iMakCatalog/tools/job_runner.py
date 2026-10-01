@@ -65,10 +65,29 @@ JOBS: dict[str, dict] = {
     "tcg_monthly": {
         "cmd": ["tools/tcg_monthly.py"], "every_days": 30, "deadline_days": 45,
         "chrome": False, "note": "TCG の新弾取り込み + 公式突合 + 検収 (約60分)"},
-    "uniqlo_monthly": {
-        "cmd": ["tools/uniqlo_monthly.py"], "every_days": 30, "deadline_days": 45,
-        "chrome": True, "note": "UT/GU の取り込み・実寸表・在庫 (Selenium。単独で流す)"},
 }
+
+# ★UNIQLO 月次は **1本に通さない**。20工程を1本で走らせると、途中で機械が落ちた分から
+#   先が翌月まで動かない (2026-10-01 の 4:00 の走行がそれで消えた)。
+#   `uniqlo_monthly.STEPS` を1工程=1ジョブに割って、1つずつ記録しながら流す。
+#   ユーザー指示 2026-10-01「途中で落ちるで」。
+def _load_uniqlo_steps() -> None:
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_um", ROOT / "tools" / "uniqlo_monthly.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    for i, (name, cmd) in enumerate(m.STEPS, 1):
+        JOBS[f"ut{i:02d}_{_slug(cmd[0])}"] = {
+            "cmd": list(cmd), "every_days": 30, "deadline_days": 45,
+            "chrome": "sizechart" in cmd[0] or "discover" in cmd[0],
+            "note": f"UNIQLO 月次 {i}/{len(m.STEPS)}: {name}"}
+
+
+def _slug(path: str) -> str:
+    return path.rsplit("/", 1)[-1].replace(".py", "")
+
+
+_load_uniqlo_steps()
 
 
 def _runs() -> list[dict]:
@@ -155,6 +174,10 @@ def main() -> int:
     ap.add_argument("job", nargs="?")
     ap.add_argument("--list", action="store_true", help="表を JSON で出す")
     ap.add_argument("--due", action="store_true", help="間隔が来ている物の名前")
+    ap.add_argument("--run-due", metavar="接頭辞",
+                    help="間隔が来ている物を **1つずつ** 走らせる (例 ut)")
+    ap.add_argument("--budget-min", type=int, default=120,
+                    help="--run-due の持ち時間 (分)。使い切ったらそこで止める")
     a = ap.parse_args()
 
     if a.list:
@@ -172,6 +195,24 @@ def main() -> int:
         for k in JOBS:
             if due(k):
                 print(k)
+        return 0
+    if a.run_due:
+        # ★1工程ずつ。1本落ちても後ろを止めない。持ち時間を使い切ったら残りは次回。
+        #   どこまで済んだかは _job_runs.jsonl が持つので、落ちても同じ所からは繰り返さない。
+        names = [k for k in JOBS if k.startswith(a.run_due) and due(k)]
+        print(f"{a.run_due}* で間隔が来ているもの {len(names)}件 / 持ち時間 {a.budget_min}分")
+        t0 = time.time()
+        done = ng = 0
+        for k in names:
+            if (time.time() - t0) / 60 >= a.budget_min:
+                print(f"持ち時間を使い切った。残り {len(names) - done - ng}件 は次回")
+                break
+            rc = run(k)
+            if rc == 0:
+                done += 1
+            else:
+                ng += 1
+        print(f"済み {done} / 落ちた {ng} / 残り {len(names) - done - ng}")
         return 0
     if not a.job or a.job not in JOBS:
         print("名前: " + " / ".join(JOBS))
