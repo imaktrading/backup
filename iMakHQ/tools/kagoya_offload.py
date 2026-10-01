@@ -234,6 +234,10 @@ def _code_hash(files):
 def sync_code_and_db(cfg, st):
     """コードと DB の写しを、変わった時だけ送る。"""
     os.makedirs(WORK, exist_ok=True)
+    rc, out = _ssh(cfg, f'New-Item -ItemType Directory -Force {REMOTE_ROOT},{REMOTE_CODE_ROOT},'
+                        f'{os.path.dirname(REMOTE_DB)} | Out-Null; "ok"')
+    if rc != 0 or "ok" not in out:
+        raise RuntimeError(f"サーバーに置き場を作れない: {out[:200]}")
     files = _code_files()
     ch = _code_hash(files)
     if st.get("code_hash") != ch:
