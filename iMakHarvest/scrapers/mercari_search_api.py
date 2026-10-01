@@ -35,6 +35,18 @@ def _ensure_certifi() -> None:
         pass
 
 
+def item_url_or_none(item_id: str, item_type) -> Optional[str]:
+    """API検索結果1件 → URL (純関数)。 Shops (BEYOND) は対象外で None を返す.
+
+    既存の Chrome版検索がそもそも /shops/product/ を拾わない (mercari_seller の
+    抽出が /item/m\\d+ のみ) のと、 下流の detail fetch が /item/ 前提なのに合わせる。
+    """
+    shops = "BEYOND" in str(item_type or "").upper()
+    if shops:
+        return None
+    return "https://jp.mercari.com/item/" + item_id
+
+
 class ApiSearchClient:
     """mercapi の非同期クライアントを使い回す薄いラッパー (1 プロセスで複数キーワードに使い回す)。"""
 
@@ -86,12 +98,11 @@ class ApiSearchClient:
             pages += 1
             for it in res.items:
                 total_seen += 1
-                shops = "BEYOND" in str(getattr(it, "item_type", "") or "").upper()
-                base = "https://jp.mercari.com/shops/product/" if shops else "https://jp.mercari.com/item/"
-                href = base + it.id_
-                if href not in seen:
-                    seen.add(href)
-                    ordered.append(href)
+                href = item_url_or_none(it.id_, getattr(it, "item_type", ""))
+                if href is None or href in seen:
+                    continue
+                seen.add(href)
+                ordered.append(href)
             if len(ordered) >= cap or pages >= max_pages:
                 break
             if not getattr(res.meta, "next_page_token", ""):
