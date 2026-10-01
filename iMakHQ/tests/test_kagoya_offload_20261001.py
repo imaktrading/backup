@@ -65,3 +65,10 @@ def test_has_candidate():
     assert K.has_candidate({"cands": [[1000, "u", "n"]]}, {}) is True
     assert K.has_candidate({}, {"available": True}) is True
     assert K.has_candidate(None, {"available": False}) is False
+
+
+def test_search_running_in_detects_home_search_only():
+    assert K.search_running_in(["python -u psa_hoju_fill.py search --limit=30"]) is True
+    assert K.search_running_in(["python psa_hoju_fill.py search-restock --limit=0"]) is True
+    assert K.search_running_in(["python psa_hoju_fill.py confirm --limit=20", None, ""]) is False
+    assert K.search_running_in(["python kagoya_offload.py cycle"]) is False

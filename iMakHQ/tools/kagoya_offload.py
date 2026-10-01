@@ -345,6 +345,24 @@ def remote_status(cfg):
     return {"ok": True, "done": d == "True", "lines": int(n), "running": int(p) > 0}
 
 
+def search_running_in(cmdlines):
+    """動いているプロセスのコマンド行の中に、家の補探索 (控えに書く物) があるか。純関数。"""
+    return any("psa_hoju_fill.py" in c and (" search" in c or " search-restock" in c)
+               for c in cmdlines if c)
+
+
+def home_search_running():
+    """家で補探索 (psa_hoju_fill.py search / search-restock) が動いているか。分からない時は True (書かない側)。"""
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command",
+                            "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+                            "ForEach-Object { $_.CommandLine }"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+        return search_running_in(r.stdout.splitlines())
+    except Exception:                                            # noqa: BLE001
+        return True
+
+
 def pull_and_merge(cfg, st):
     """結果を取りに行き、控えに書く。shadow は別ファイル、live は本番の控え + 空振り台帳。"""
     os.makedirs(WORK, exist_ok=True)
@@ -402,9 +420,13 @@ def cycle():
         _save_state(st)
         return 1
     if rs["lines"]:
-        n = pull_and_merge(cfg, st)
-        if n:
-            print(f"📥 結果 {n}件を控えに書いた ({_mode()})")
+        if _mode() == "live" and home_search_running():
+            # 家の夜の検索は控えを丸ごと読み書きするので、その最中に書くと消し合う。終わってから取り込む
+            print("⏸ 家の補探索が動いている → 今回は取り込まない (結果はサーバーに残っている)")
+        else:
+            n = pull_and_merge(cfg, st)
+            if n:
+                print(f"📥 結果 {n}件を控えに書いた ({_mode()})")
     if rs["running"]:
         print(f"⏳ サーバーで実行中 ({rs['lines']}件済み)")
         _save_state(st)
