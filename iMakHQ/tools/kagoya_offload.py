@@ -440,13 +440,15 @@ def remote_status(cfg):
     ps = (f'$d = Test-Path {REMOTE_ROOT}\\done.json; '
           f'$n = if (Test-Path {REMOTE_ROOT}\\result.jsonl) {{ (Get-Content {REMOTE_ROOT}\\result.jsonl | Measure-Object -Line).Lines }} else {{ 0 }}; '
           f'$p = @(Get-CimInstance Win32_Process -Filter "Name=\'python.exe\'" | Where-Object {{ $_.CommandLine -like \'*kagoya_offload.py*run*\' }}).Count; '
-          '"$d|$n|$p"')
+          # ★2026-10-01: ほかの担当 (抽出くんのキャラ収集など) の仕事。メモリ 4GB なので重ねない
+          f'$o = @(Get-CimInstance Win32_Process -Filter "Name=\'python.exe\'" | Where-Object {{ $_.CommandLine -like \'*_offload.py*run*\' -and $_.CommandLine -notlike \'*kagoya_offload.py*\' }}).Count; '
+          '"$d|$n|$p|$o"')
     rc, out = _ssh(cfg, ps)
     if rc != 0:
         return {"ok": False, "err": out[:200]}
     last = out.strip().splitlines()[-1]
-    d, n, p = last.split("|")
-    return {"ok": True, "done": d == "True", "lines": int(n), "running": int(p) > 0}
+    d, n, p, o = (last.split("|") + ["0"])[:4]
+    return {"ok": True, "done": d == "True", "lines": int(n), "running": int(p) > 0, "others": int(o or 0)}
 
 
 def search_running_in(cmdlines):
@@ -596,12 +598,20 @@ def cycle():
         return 0
     if st.get("job_date") == today and not rs["done"]:
         # 今日の仕事が途中で止まった (サーバー再起動など) → 続きから再開
+        if rs.get("others"):
+            print("⏸ サーバーでほかの担当の仕事が動いている → 再開は次の回 (メモリ 4GB で重ねない)")
+            _save_state(st)
+            return 0
         print("↻ 今日の仕事が途中で止まっていた → 続きから再開")
         start_remote_resume(cfg)
         _save_state(st)
         return 0
     if st.get("job_date") == today:
         print("✅ 今日の分は済み")
+        _save_state(st)
+        return 0
+    if rs.get("others"):
+        print("⏸ サーバーでほかの担当の仕事が動いている → 今日の分は次の回に始める (メモリ 4GB で重ねない)")
         _save_state(st)
         return 0
     sync_code_and_db(cfg, st)
