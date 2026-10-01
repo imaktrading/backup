@@ -76,6 +76,6 @@ def test_mercari_multivariant_flag_in_card_query():
     assert mp._is_multi_variant("P-066") is True
     # 仕組み: catalog の変種が 2件以上なら True、1件なら False
     mp._is_multi_variant.__defaults__[1].clear()          # 番号ごとの cache を空にする
-    mp.catalog_variants_for_cardno = lambda cn, category="": [1, 2] if cn == "MULTI" else [1]
+    mp.catalog_variants_for_cardno = lambda cn, category="", **kw: [1, 2] if cn == "MULTI" else [1]
     assert mp._is_multi_variant("MULTI") is True
     assert mp._is_multi_variant("SINGLE") is False

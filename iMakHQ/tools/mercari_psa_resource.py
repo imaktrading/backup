@@ -362,7 +362,7 @@ _VARIANTS_TTL = 600          # 秒。長く動く画面でも、カタログの�
 
 
 def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products.sqlite",
-                                limit=12, title_hint="", category=""):
+                                limit=12, title_hint="", category="", exclude_langs=("en",)):
     """_catalog_variants_for_cardno の結果を覚えて使い回す (同じ番号を何度も引かない)。
 
     ★2026-09-25: 補URL の件数の数え直しで 962回 引き直し (1回 0.12秒・計117秒)、コンソールの
@@ -370,11 +370,12 @@ def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products
       戻り値は呼び出し側が書き換えても覚えた値が変わらないよう、写しを返す。
     """
     import time as _t
-    key = (card_no, _db, limit, title_hint, category)
+    exclude_langs = tuple(exclude_langs)
+    key = (card_no, _db, limit, title_hint, category, exclude_langs)
     hit = _VARIANTS_CACHE.get(key)
     if hit and _t.time() - hit[0] < _VARIANTS_TTL:
         return [dict(x) for x in hit[1]]
-    res = _catalog_variants_for_cardno(card_no, _db, limit, title_hint, category)
+    res = _catalog_variants_for_cardno(card_no, _db, limit, title_hint, category, exclude_langs)
     _VARIANTS_CACHE[key] = (_t.time(), [dict(x) for x in res])
     return res
 
@@ -443,7 +444,7 @@ def _rows_by_rowid(con, cols, ids):
 
 
 def _catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products.sqlite",
-                                 limit=12, title_hint="", category=""):
+                                 limit=12, title_hint="", category="", exclude_langs=("en",)):
     """card番号 → その番号の catalog 変種候補 [{product_id,name_jp,set,image}]。
 
     KEY未解決の行で「正しい変種をユーザーが選ぶ」ための候補(確認ゲート②)。完全一致を先頭、
@@ -513,9 +514,11 @@ def _catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/product
     for pid, nj, sn, imgs, specs, lang, nen in rows:
         if "dummy" in (pid or "").lower():     # catalog内部のダミー行は候補から除外(実在変種でない)
             continue
-        # 英語版は別カード(=100%違う)。Japanese PSA再仕入れなので en / both(英語表記併合) を除外。
-        # ja / None(=onepiece-cardgame等 JP公式サイト由来) のみ残す。
-        if (lang or "").strip().lower() in ("en", "both"):
+        # 英語版は別カード(=100%違う)。Japanese PSA再仕入れなので en を除外。
+        # ★2026-10-01: both (日本語版・英語版の両方) は日本語版でもあるので残す。以前は both も外しており、
+        #   9/27〜29 にカタログが ワンピース等 3,022行を both にした後、版が複数ある番号 1,115 が
+        #   「1種類」と数えられ、名前だけの救済枠・画像検索 (版を見ない) に流れていた (EB03-053 ナミ)。
+        if (lang or "").strip().lower() in exclude_langs:
             continue
         try:
             a = json.loads(imgs) if imgs else []
@@ -684,7 +687,9 @@ def _is_multi_variant(card_no, category="", _cache={}):
     if ck in _cache:
         return _cache[ck]
     try:
-        n = len(catalog_variants_for_cardno(cn, category=(category or "").strip()))
+        # ★2026-10-01: 数える時は言語で外さない (en の行も同じ番号の別の絵として数える)。
+        #   多めに数える = 確かめられない時に候補を出さない側 (fail-closed) に倒れる。
+        n = len(catalog_variants_for_cardno(cn, category=(category or "").strip(), exclude_langs=()))
     except Exception:
         n = 0
     _cache[ck] = n > 1
