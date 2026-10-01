@@ -18,7 +18,6 @@ REM   3) restock prefetch            : search-restock --limit=0 (all)
 REM   3b) restock stock re-check     : psa_resource_gate.py --nightly (ledger only)
 REM   3c) spare supply from newcand   : psa_hoju_fill.py newcand-aux
 REM   4) ichibankuji prefetch        : ichibankuji_restock.py prefetch 10
-REM   5) ichibankuji live aux        : ichibankuji_restock.py prefetch-live 10
 REM   5c) UT aux-supply              : ut_hoju_fill.py search (all)
 REM   5d) UT restock                 : ut_hoju_fill.py restock-search (all)
 REM   6c) funnel + analyses           : listing_funnel / funnel_diff / demand_winners
@@ -195,25 +194,9 @@ python -u ichibankuji_restock.py prefetch 10 >> "%LOG%" 2>&1
 python -u night_step.py hoju ichibankuji_restock.prefetch.10 --done %errorlevel% >> "%LOG%" 2>&1
 :skip9
 
-REM --- 5) prefetch for ichibankuji LIVE listings that are thin on aux URLs
-REM        2026-08-16: step 4 fills out-of-stock rows first and there are ~50 of
-REM        them, so live listings never got a slot. Aux URLs are insurance and
-REM        must be stocked BEFORE the supplier dies, so give live its own step.
-echo [ichibankuji] prefetch-live %date% %time% >> "%LOG%"
-python -u night_step.py hoju ichibankuji_restock.prefetch-live.10 --check >> "%LOG%" 2>&1 || goto :skip10
-python -u ichibankuji_restock.py prefetch-live 10 >> "%LOG%" 2>&1
-python -u night_step.py hoju ichibankuji_restock.prefetch-live.10 --done %errorlevel% >> "%LOG%" 2>&1
-:skip10
-
-REM --- 5b) pre-open the candidate detail pages (condition / shipping / seller
-REM         reviews). 2026-08-16: this was most of the 22 minutes the ichibankuji
-REM         restock button took (9 items x 10 candidates, 3s wait each). Those
-REM         fields never change, so cache them here and the button only shows.
-echo [ichibankuji] prefetch-detail %date% %time% >> "%LOG%"
-python -u night_step.py hoju ichibankuji_restock.prefetch-detail.120 --check >> "%LOG%" 2>&1 || goto :skip11
-python -u ichibankuji_restock.py prefetch-detail 120 >> "%LOG%" 2>&1
-python -u night_step.py hoju ichibankuji_restock.prefetch-detail.120 --done %errorlevel% >> "%LOG%" 2>&1
-:skip11
+REM --- 5) / 5b) removed 2026-10-01 (full review). Step 6d (run_kuji_night.py) already runs
+REM         prefetch-live 40 and prefetch-detail 200 later in the same night; 5 (live 10) was a
+REM         strict subset of it and 5b (detail 120) did the same detail pages twice (~10 min).
 
 REM --- 5c) UT (Uniqlo/GU collab tee) aux-supply candidates. Collect only; the
 REM         sheet is written after a human check in the daytime.

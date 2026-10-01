@@ -99,7 +99,9 @@ def test_button_and_nightly_are_wired():
     panel = open(r"C:\dev\iMak\iMakHQ\control_panel.py", encoding="utf-8").read()
     assert '"ichibankuji_restock.py", "hoju", "10"' in panel, "目視ボタンが無い"
     bat = open(os.path.join(_TOOLS, "run_hoju_search.bat"), encoding="ascii").read()
-    assert "ichibankuji_restock.py prefetch-live" in bat, "夜間の候補集めが無い"
+    # 2026-10-01: 夜の束から重複を外し、run_kuji_night.py (live 40 / detail 200) の1回に寄せた
+    kn = open(os.path.join(_TOOLS, "run_kuji_night.py"), encoding="utf-8").read()
+    assert "python -u run_kuji_night.py" in bat and '"prefetch-live"' in kn, "夜間の候補集めが無い"
 
 
 def test_title_must_keep_character_form():
@@ -152,4 +154,5 @@ def test_detail_prefetch_runs_at_night():
     src = open(os.path.join(_TOOLS, "ichibankuji_restock.py"), encoding="utf-8").read()
     assert 'mode == "prefetch-detail"' in src
     bat = open(os.path.join(_TOOLS, "run_hoju_search.bat"), encoding="ascii").read()
-    assert "ichibankuji_restock.py prefetch-detail" in bat
+    kn = open(os.path.join(_TOOLS, "run_kuji_night.py"), encoding="utf-8").read()
+    assert "python -u run_kuji_night.py" in bat and '"prefetch-detail"' in kn

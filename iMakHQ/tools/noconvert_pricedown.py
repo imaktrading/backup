@@ -203,14 +203,29 @@ def main():
             continue            # 仕入不可=対象外 (fail-closed)
         targets.append((r, d))
 
-    print(f"  仕入可 {len(targets)}件 → eBay GetItem で現価格(USD換算)をライブ取得中...", flush=True)
+    # ★2026-10-01 全体点検: 現価格は **出品一覧のキャッシュ** (itemid_writeback_audit、2時間以内なら API 0回) から引く。
+    #   夜の束では直前の cull_live が同じ一覧を取っており、ここで GetItem を 439回 (約20分) 叩き直していた。
+    #   一覧に無い物 (キャッシュ後に出した等) だけ GetItem で取る。値は同じ ConvertedCurrentPrice (USD)。
+    try:
+        import itemid_writeback_audit as _A
+        _live = _A._fetch_live(use_cache=True)
+    except Exception as _e:                                    # noqa: BLE001 取れなければ従来どおり全部 GetItem
+        print(f"  ⚠ 出品一覧を使えず GetItem で取ります ({type(_e).__name__})")
+        _live = {}
+
+    def _price(iid):
+        e = _live.get(str(iid or "").strip())
+        if e and e.get("usd"):
+            return float(e["usd"]), (e.get("cur") or "USD")
+        return fetch_listing_price(iid)
+    print(f"  仕入可 {len(targets)}件 → 現価格(USD換算)は出品一覧から / 無い物だけ GetItem", flush=True)
     out = [["利益率%(=値下げ余地・据置)", "値下pp(既定5/手動で8等可)", "カテゴリ", "商品名", "現価格$", "通貨", "最新仕入¥",
             "V8推奨$", "込み利益$", "利益率%(プロモ外)", "現価格÷V8(乖離)",
             "在庫", "仕入元URL", "eBay URL"]]
     rows_calc = []
     n_noprice = 0
     for i, (r, d) in enumerate(targets, 1):
-        cur, ccy = fetch_listing_price(r.get("item_id"))
+        cur, ccy = _price(r.get("item_id"))
         if cur is None or cur <= 0:
             n_noprice += 1
             continue            # ライブ価格取れない(ended等)→ 除外 (fail-closed)
