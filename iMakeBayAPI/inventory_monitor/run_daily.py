@@ -416,15 +416,19 @@ def main():
         step_results.append(("uuid_sync", False))
         step_results.append(("qty_sync", False))
     after_steps.append(("zero",    [PY, "auto_qty_zero.py", "--mode=zero", "--execute"]))
-    after_steps.append(("restore", [PY, "auto_qty_zero.py", "--mode=restore", "--execute"]))
-    # 2026-05-29 cycle 末 audit + 自動修復 (= silent fail 検知 + heal、 課題 #2 拡張版)
-    # 「ヘンだったら 自動で やり直す」 仕組み。 audit のみ → 不整合 0 件で silent、
-    # 1+ で 自動 revise CSV 生成 + upload + 15 分後 反映検証。
-    # --no-verify で 待機 skip も可能 (= cron 時間短縮)
-    if latest_report:
-        after_steps.append(("audit_heal",
-                            [PY, "audit_and_heal.py", "--report", latest_report,
-                             "--no-verify"]))   # daily 内では verify skip、 別 cron で
+    # ★ 2026-10-02 ユーザー判断: 「eBay を 1 に戻す」自動処理 (restore と audit_heal) を、対応づけを
+    #   直すまで止める。シートの行と eBay の枠を サイズ・色 で正しく対応させていないため、
+    #   10/02 03:08 の audit_heal が ウインドブラスト Men's の 公式「M-R ◎」を eBay「JP M」に当てて、
+    #   公式で入荷時期未定の枠を含む 18 枠を eBay で 1 に戻していた (= 買えない物を出品)。
+    #   止めている間は audit_buyable が仕入元と eBay を直接突合せ、人が確かめてから戻す。
+    # after_steps.append(("restore", [PY, "auto_qty_zero.py", "--mode=restore", "--execute"]))
+    # if latest_report:
+    #     after_steps.append(("audit_heal",
+    #                         [PY, "audit_and_heal.py", "--report", latest_report,
+    #                          "--no-verify"]))
+    # 2026-10-02: 実 eBay × 仕入元 を サイズ・色 で突合せる (読むだけ)。
+    #   仕入元✕ なのに eBay で買える枠があれば step NG + メール/デスクトップで知らせる。
+    after_steps.append(("audit_buyable", [PY, "audit_buyable_vs_supplier.py"]))
     # 2026-05-29 scrape 精度 audit (= 10 件 sample re-scrape)
     after_steps.append(("scrape_audit",
                         [PY, "audit_scrape_accuracy.py", "--sample", "10"]))
