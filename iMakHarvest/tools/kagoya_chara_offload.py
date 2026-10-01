@@ -54,8 +54,11 @@ REMOTE_ROOT = r"C:\setup\harvest_offload"
 REMOTE_PY = r"C:\Program Files\Python311\python.exe"
 REMOTE_CODE_ROOT = r"C:\dev\iMak_harvest_offload"
 
-# サーバー1本の体力(メモリ4GB)に合わせ、HQ の補探索と同時に走らせない
-REMOTE_BUSY_MARKERS = ("kagoya_offload.py run", "kagoya_chara_offload.py run")
+# サーバー1本の体力(メモリ4GB)に合わせ、HQ の補探索と同時に走らせない。
+# (ファイル名のみで判定。 コマンドラインはファイル名の直後に閉じ引用符が入るため
+# " run" まで含めると絶対に一致しない。 "kagoya_chara_offload.py" に
+# "kagoya_offload.py" は部分一致しない(間に "chara_" が挟まる)ので自分には誤反応しない)
+REMOTE_BUSY_MARKERS = ("kagoya_offload.py",)
 
 
 # ---------------------------------------------------------------------------
@@ -219,13 +222,24 @@ def build_job(today: str) -> dict:
 
 
 def remote_busy(cfg) -> bool:
-    """サーバーで HQ の補探索か、このジョブが既に動いているか。 分からない時は True (待つ側)。"""
-    ps = ('$p = Get-CimInstance Win32_Process -Filter "Name=\'python.exe\'" | '
-          'ForEach-Object { $_.CommandLine }; $p -join "`n"')
+    """サーバーで HQ の補探索か、このジョブが既に動いているか。 分からない時は True (待つ側)。
+
+    ★2026-10-01 事故: コマンドラインには `kagoya_offload.py" run` のように
+    ファイル名の直後に閉じ引用符が入るため、 Python 側の単純な部分文字列一致
+    (`"kagoya_offload.py run" in out`) は絶対に一致しなかった (HQの補探索と
+    キャラ収集が同時に動きサーバーのメモリを使い切った)。 `-like '*...*'` の
+    ワイルドカードで PowerShell 側で判定する (remote_status と同じ方式)。
+    """
+    conds = " -or ".join(f"$_.CommandLine -like '*{m}*'" for m in REMOTE_BUSY_MARKERS)
+    ps = (f'$n = @(Get-CimInstance Win32_Process -Filter "Name=\'python.exe\'" | '
+          f'Where-Object {{ {conds} }}).Count; "$n"')
     rc, out = _ssh(cfg, ps)
     if rc != 0:
         return True
-    return any(m in out for m in REMOTE_BUSY_MARKERS)
+    try:
+        return int(out.strip().splitlines()[-1]) > 0
+    except Exception:  # noqa: BLE001 - 読めなければ待つ側に倒す
+        return True
 
 
 def remote_status(cfg) -> dict:
@@ -241,12 +255,14 @@ def remote_status(cfg) -> dict:
 
 
 def start_remote(cfg, job):
+    """仕事を送って起動する。 `result.json` は消さない — 落ちた後の再送で `run_job` が
+    これを読んで続きから再開する (2026-10-01 事故対応: 殺した後の再送で消すと
+    収集済み分が丸ごと消える)。 `done.json` だけ消す (前回「完了」の印を残さない)。"""
     os.makedirs(WORK, exist_ok=True)
     jp = os.path.join(WORK, "job.json")
     json.dump(job, open(jp, "w", encoding="utf-8"), ensure_ascii=False)
     rc, out = _ssh(cfg, f'New-Item -ItemType Directory -Force {REMOTE_ROOT} | Out-Null; '
-                        f'Remove-Item {REMOTE_ROOT}\\result.json,{REMOTE_ROOT}\\done.json '
-                        f'-ErrorAction SilentlyContinue; "ok"')
+                        f'Remove-Item {REMOTE_ROOT}\\done.json -ErrorAction SilentlyContinue; "ok"')
     if rc != 0:
         raise RuntimeError(f"サーバーに入れない: {out[:200]}")
     if _scp_to(cfg, jp, REMOTE_ROOT + r"\job.json") != 0:
