@@ -136,5 +136,8 @@ def test_naked_list_is_sorted_action_first():
 
 
 def test_naked_list_runs_every_night():
+    """2026-10-01 全体点検で夜の束から外した (書いていたタブを読むプログラムもボタンも無かった)。
+    道具そのものは残す (手で走らせれば同じタブを作る)。"""
     bat = open(os.path.join(_TOOLS, "run_hoju_search.bat"), encoding="ascii").read()
-    assert "hoju_naked_sheet.py" in bat
+    assert "python -u hoju_naked_sheet.py" not in bat
+    assert os.path.exists(os.path.join(_TOOLS, "hoju_naked_sheet.py"))

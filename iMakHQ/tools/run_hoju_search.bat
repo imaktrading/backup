@@ -229,19 +229,13 @@ python -u psa_hoju_fill.py confirm --dry-run >> "%LOG%" 2>&1
 python -u night_step.py hoju psa_hoju_fill.confirm.--dry-run --done %errorlevel% >> "%LOG%" 2>&1
 :skip14
 
-REM --- 6b) mark which unlisted rows can actually be listed (AP column), so the
-REM         master sheet stops looking like "plenty of candidates left".
-REM         2026-08-17: of 58 rows with a blank itemID and not sold out, only 13
-REM         could ever be listed; the other 45 are a second copy of a card that
-REM         is already live. The blank itemID read as "candidate", so the call
-REM         "no need to restock yet" was made on a false picture. A grey cell in
-REM         the itemID column now means "this row will never become a listing".
-echo [listable-flag] %date% %time% >> "%LOG%"
-python -u night_step.py hoju sheet_listable_flag.--write --check >> "%LOG%" 2>&1 || goto :skip15
-python -u sheet_listable_flag.py --write >> "%LOG%" 2>&1
-python -u night_step.py hoju sheet_listable_flag.--write --done %errorlevel% >> "%LOG%" 2>&1
-:skip15
+REM --- 6b) removed 2026-10-01 (full review): sheet_listable_flag is repainted on every
+REM         listing run (control_panel Step 4e), so the nightly copy was a second write.
 
+REM --- 2026-10-01 (full review): funnel_diff / demand_winners / restock_worklist /
+REM          ut_demand_words / noclick_targets run once a week (weekly_gate.py: 6 days since
+REM          the last success). They only feed tabs/files a human opens, each has a button that
+REM          rebuilds it on demand, and their content changes weekly. The funnel itself stays nightly.
 REM --- 6c) refresh the funnel and the analyses that read it. These only read
 REM          reports and write spreadsheet tabs, so they are safe unattended.
 REM          2026-09-03: doing this at night means the morning buttons (shelf /
@@ -257,18 +251,33 @@ python -u night_step.py hoju listing_funnel --done %errorlevel% >> "%LOG%" 2>&1
 :skip16
 echo [funnel-diff] %date% %time% >> "%LOG%"
 python -u night_step.py hoju funnel_diff --check >> "%LOG%" 2>&1 || goto :skip17
+set RC=0
+python -u weekly_gate.py funnel_diff --check >> "%LOG%" 2>&1 || goto :wk17
 python -u funnel_diff.py >> "%LOG%" 2>&1
-python -u night_step.py hoju funnel_diff --done %errorlevel% >> "%LOG%" 2>&1
+set RC=%errorlevel%
+python -u weekly_gate.py funnel_diff --done %RC% >> "%LOG%" 2>&1
+:wk17
+python -u night_step.py hoju funnel_diff --done %RC% >> "%LOG%" 2>&1
 :skip17
 echo [demand] %date% %time% >> "%LOG%"
 python -u night_step.py hoju demand_winners --check >> "%LOG%" 2>&1 || goto :skip18
+set RC=0
+python -u weekly_gate.py demand_winners --check >> "%LOG%" 2>&1 || goto :wk18
 python -u demand_winners.py >> "%LOG%" 2>&1
-python -u night_step.py hoju demand_winners --done %errorlevel% >> "%LOG%" 2>&1
+set RC=%errorlevel%
+python -u weekly_gate.py demand_winners --done %RC% >> "%LOG%" 2>&1
+:wk18
+python -u night_step.py hoju demand_winners --done %RC% >> "%LOG%" 2>&1
 :skip18
 echo [restock-worklist] %date% %time% >> "%LOG%"
 python -u night_step.py hoju restock_worklist --check >> "%LOG%" 2>&1 || goto :skip19
+set RC=0
+python -u weekly_gate.py restock_worklist --check >> "%LOG%" 2>&1 || goto :wk19
 python -u restock_worklist.py >> "%LOG%" 2>&1
-python -u night_step.py hoju restock_worklist --done %errorlevel% >> "%LOG%" 2>&1
+set RC=%errorlevel%
+python -u weekly_gate.py restock_worklist --done %RC% >> "%LOG%" 2>&1
+:wk19
+python -u night_step.py hoju restock_worklist --done %RC% >> "%LOG%" 2>&1
 :skip19
 
 REM --- 6c1) sold listings: put the quantity back to 1 at today's cost.
@@ -305,8 +314,13 @@ REM          catalog's sold-out collab names by count. This hands it the demand 
 REM          instead (sales x3 + watchers + shown). Writes one json in the shared area.
 echo [ut-demand] %date% %time% >> "%LOG%"
 python -u night_step.py hoju ut_demand_words.--write --check >> "%LOG%" 2>&1 || goto :skip22
+set RC=0
+python -u weekly_gate.py ut_demand_words --check >> "%LOG%" 2>&1 || goto :wk22
 python -u ut_demand_words.py --write >> "%LOG%" 2>&1
-python -u night_step.py hoju ut_demand_words.--write --done %errorlevel% >> "%LOG%" 2>&1
+set RC=%errorlevel%
+python -u weekly_gate.py ut_demand_words --done %RC% >> "%LOG%" 2>&1
+:wk22
+python -u night_step.py hoju ut_demand_words.--write --done %RC% >> "%LOG%" 2>&1
 :skip22
 
 REM --- 6d) ichibankuji nightly search (was a manual button only; nothing else
@@ -331,8 +345,13 @@ python -u night_step.py hoju noconvert_pricedown --done %errorlevel% >> "%LOG%" 
 :skip24
 echo [title-rework] %date% %time% >> "%LOG%"
 python -u night_step.py hoju noclick_targets --check >> "%LOG%" 2>&1 || goto :skip25
+set RC=0
+python -u weekly_gate.py noclick_targets --check >> "%LOG%" 2>&1 || goto :wk25
 python -u noclick_targets.py >> "%LOG%" 2>&1
-python -u night_step.py hoju noclick_targets --done %errorlevel% >> "%LOG%" 2>&1
+set RC=%errorlevel%
+python -u weekly_gate.py noclick_targets --done %RC% >> "%LOG%" 2>&1
+:wk25
+python -u night_step.py hoju noclick_targets --done %RC% >> "%LOG%" 2>&1
 :skip25
 
 REM --- 6f) find listings whose supplier is a DIFFERENT card.
@@ -351,14 +370,8 @@ python -u supply_card_mismatch.py --mail >> "%LOG%" 2>&1
 python -u night_step.py hoju supply_card_mismatch.--mail --done %errorlevel% >> "%LOG%" 2>&1
 :skip26
 
-REM --- 7) write the "no backup URL at all" listings into one tab so they can be
-REM        seen at a glance (they are scattered rows in the master sheet).
-REM        Writes only that tab; never touches the master sheet.
-echo [naked-list] %date% %time% >> "%LOG%"
-python -u night_step.py hoju hoju_naked_sheet --check >> "%LOG%" 2>&1 || goto :skip27
-python -u hoju_naked_sheet.py >> "%LOG%" 2>&1
-python -u night_step.py hoju hoju_naked_sheet --done %errorlevel% >> "%LOG%" 2>&1
-:skip27
+REM --- 7) removed 2026-10-01 (full review): hoju_naked_sheet wrote a tab that no program
+REM        and no button read (the panel counts the same thing itself).
 
 :done
 python -u night_step.py hoju --end >> "%LOG%" 2>&1

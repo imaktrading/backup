@@ -330,6 +330,18 @@ def main():
             st.update(zip=dst, zip_mb=round(os.path.getsize(dst) / 1e6, 1), zip_entries=n)
         st["pruned"] = prune()
         st["ok"] = True
+        # ★2026-10-01 全体点検: USB への写しは **この zip ができた直後に続けて** 呼ぶ。
+        #   別の予約 (5:30) だと、朝のバックアップが遅れた日 (10/1 は落ちて 6:00 に取り直し) に前日の zip を写していた。
+        #   USB が無い / 失敗しても、こちらのバックアップは成功のまま (結果は st["usb"] に残す)。
+        try:
+            import subprocess
+            _u = subprocess.run([sys.executable, "-X", "utf8", os.path.join(HERE, "usb_backup.py")],
+                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
+            st["usb"] = ((_u.stdout or "").strip().splitlines() or ["(出力なし)"])[-1][:200]
+            print(st["usb"])
+        except Exception as _ue:                               # noqa: BLE001
+            st["usb"] = f"⚠️要対応 USB へ写せず: {type(_ue).__name__}"
+            print(st["usb"])
         print(f"✅ 正常: {st['zip']} ({st['zip_mb']}MB / {n}件 / DB {rows}行) 残り世代 {KEEP}")
         return 0
     except Exception as e:                                     # noqa: BLE001

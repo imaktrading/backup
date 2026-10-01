@@ -30,7 +30,7 @@ SECRETS = [r"C:\dev\iMak_data\credentials", r"C:\dev\iMak_data\secrets", r"C:\de
            r"C:\dev\iMak\iMakAudit\gemini_key.txt"]                     # 監査くんの二次監査
 RESTORE_KIT = r"C:\dev\iMak_data\hq\restore_kit"
 DAILY = r"G:\マイドライブ\iMak_backup\daily"
-KEEP = 7                    # ★2026-09-30: 差しっぱなしなので毎朝 5:30 に自動 (iMakHQ_UsbBackup_0530)。1日 約235MB
+KEEP = 7                    # ★2026-10-01: 毎朝の data_backup.py が zip を作った直後に続けて呼ぶ (5:30 の別予約は無効化)。1日 約250MB
 
 
 def _md5(p):

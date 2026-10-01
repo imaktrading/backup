@@ -36,3 +36,34 @@ def test_kuji_detail_runs_once():
     assert "ichibankuji_restock.py prefetch-detail 120" not in b
     assert "python -u run_kuji_night.py" in b
     assert "python -u ichibankuji_restock.py prefetch 10" in b      # 在庫切れの候補集め (別物) は残す
+
+
+def test_weekly_gate_runs_every_six_days(tmp_path):
+    import sys
+    from datetime import datetime
+    sys.path.insert(0, os.path.dirname(BAT))
+    import weekly_gate as W
+    p = str(tmp_path / "w.json")
+    t0 = datetime(2026, 10, 1, 23, 40)
+    assert W.main(["demand_winners", "--check"], path=p, now=t0) == 0        # 初回は走る
+    W.main(["demand_winners", "--done", "1"], path=p, now=t0)               # 失敗は記録しない
+    assert W.main(["demand_winners", "--check"], path=p, now=t0) == 0
+    W.main(["demand_winners", "--done", "0"], path=p, now=t0)
+    assert W.main(["demand_winners", "--check"], path=p, now=datetime(2026, 10, 2, 2, 0)) == 1   # 0時またぎの再開でも飛ばす
+    assert W.main(["demand_winners", "--check"], path=p, now=datetime(2026, 10, 7, 23, 40)) == 0
+
+
+def test_weekly_steps_and_removed_steps():
+    b = _bat()
+    for name in ("funnel_diff", "demand_winners", "restock_worklist", "ut_demand_words", "noclick_targets"):
+        assert f"weekly_gate.py {name} --check" in b, name
+    assert "python -u listing_funnel.py" in b and "listing_funnel --check" in b    # ファネル本体は毎晩
+    assert "python -u hoju_naked_sheet.py" not in b                              # 読み手なし
+    assert "python -u sheet_listable_flag.py --write" not in b                   # 出品くんが毎回塗り直す
+
+
+def test_usb_copy_runs_right_after_daily_zip():
+    """USB へは毎朝の zip ができた直後に続けて写す (別予約 5:30 だと、遅れた日に前日の zip を写していた)。"""
+    src = io.open(os.path.join(os.path.dirname(BAT), "data_backup.py"), encoding="utf-8").read()
+    i = src.index('st["pruned"] = prune()')
+    assert 'usb_backup.py' in src[i:i + 1200] and 'st["usb"]' in src[i:i + 1200]
