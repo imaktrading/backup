@@ -776,7 +776,9 @@ def _watcher_probe():
         "$p = Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | "
         "  Where-Object { $_.CommandLine -match 'run_cycle|monitor' } | "
         "  ForEach-Object { @{ cmd = $_.CommandLine; start = $_.CreationDate.ToString('s') } };"
-        "$t = Get-ScheduledTask | Where-Object { $_.TaskName -like 'iMakInventory*' } | "
+        # ★2026-10-01: 無効にした予約は数えない (監視くんは LAPTOP に移った。無効の予約にも次回時刻が付いて返り、
+        #   画面に「次の巡回 11:00」と出続け、LAPTOP 用の表示に一度も切り替わらなかった)
+        "$t = Get-ScheduledTask | Where-Object { $_.TaskName -like 'iMakInventory*' -and $_.State -ne 'Disabled' } | "
         "  Get-ScheduledTaskInfo | ForEach-Object { @{ name = $_.TaskName; "
         "    next = $(if ($_.NextRunTime) { $_.NextRunTime.ToString('s') } else { '' }) } };"
         "@{ procs = @($p); tasks = @($t) } | ConvertTo-Json -Depth 4 -Compress"
@@ -818,7 +820,8 @@ def _watcher_worker():
                     STATE["remote_last"] = None
                 STATE["remote_at"] = time.time()
             line = watcher.remote_line(STATE["remote_last"], now)
-        STATE["watcher"] = {"rows": rows, "line": line, "at": now.strftime("%H:%M")}
+        STATE["watcher"] = {"rows": rows, "line": line, "at": now.strftime("%H:%M"),
+                            "local": bool(running or any(nexts.values()))}
     except Exception as e:                                     # noqa: BLE001
         STATE["watcher"] = {"rows": [], "line": "巡回の状況が取れません (%s)" % e, "at": ""}
     STATE["watcher_at"] = time.time()
@@ -882,7 +885,9 @@ def _watcher_loop():
             _watcher_worker()
         except Exception:                                      # noqa: BLE001
             pass
-        time.sleep(120)
+        # ★2026-10-01: この PC に監視くんの予約が無い (LAPTOP に移った) 間は、30分おきに確かめるだけ。
+        #   2分ごと (1日720回) に PowerShell を起こしていた
+        time.sleep(120 if (STATE.get("watcher") or {}).get("local") else 1800)
 
 
 def get_tasks():
