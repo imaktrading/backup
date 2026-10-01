@@ -478,25 +478,41 @@ def is_dead_shelf(row):
 #   値下げ候補に回し、値下げしても売れなかった物だけ落とす。表示やウォッチの線ではない (2026-08-26 の決定と両立)。
 #   値下げの履歴はリバイスくんの台帳 (毎日更新)。台帳が読めない時は判断できないので ② は落とさない (壊す側に倒さない)。
 PRICE_CHANGES_PATH = r"C:/dev/iMak_data/revise/price_change_counts.json"
-MIN_PRICE_DOWNS = 1          # この回数以上 値下げしても売れなければ落とす (まず1回。様子を見て変える)
+# ★2026-10-01 リバイスくん回答: 値段は仕入値に合わせて毎日上下するので、「下げた回数」は 1,636件中1,510件が1以上
+#   (= 回数では見分けがつかない)。**出品した時の値段から差し引きでどれだけ下がったか** で見る。
+NET_DOWN_MIN = 0.05          # 出品時より 5% 以上 下がっていれば「値下げ済み」= 売れなければ落とす
 PRICE_DOWN_FIRST_PATH = r"C:/dev/iMak_data/hq/price_down_before_evict.json"
 
 
-def load_price_downs(path=PRICE_CHANGES_PATH):
-    """itemID → 値下げした回数。台帳が無い/読めない時は None (= 判断できない)。"""
+def net_change(entry):
+    """台帳の1件 → 出品時からの値段の変化率 (今 / 最初 - 1)。分からなければ None (純関数)。"""
     try:
-        with open(path, encoding="utf-8") as f:
-            items = (json.load(f) or {}).get("items") or {}
-        return {str(k): int((v or {}).get("downs") or 0) for k, v in items.items()}
+        first, now = float(entry.get("first_price")), float(entry.get("now_price"))
+        return (now - first) / first if first > 0 else None
     except Exception:
         return None
 
 
-def needs_price_down_first(item_id, price_downs, min_downs=MIN_PRICE_DOWNS):
-    """② を落とす前に、まず値下げを試すべきか (純関数)。台帳が無い (None) 時も True = 落とさない。"""
+def load_price_downs(path=PRICE_CHANGES_PATH):
+    """itemID → 出品時からの値段の変化率 (None = その出品は分からない)。台帳が読めない時は None。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            items = (json.load(f) or {}).get("items") or {}
+        return {str(k): net_change(v or {}) for k, v in items.items()}
+    except Exception:
+        return None
+
+
+def needs_price_down_first(item_id, price_downs, min_down=NET_DOWN_MIN):
+    """② を落とす前に、まず値下げを試すべきか (純関数)。
+
+    出品時より min_down 以上 下がっていれば False (= 値下げ済みなので落としてよい)。
+    台帳が無い / その出品が載っていない / 変化率が分からない時は True (= 判断できないので落とさない)。
+    """
     if price_downs is None:
         return True
-    return price_downs.get(str(item_id), 0) < min_downs
+    ch = price_downs.get(str(item_id))
+    return ch is None or ch > -min_down
 
 
 def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=None,
@@ -1009,7 +1025,7 @@ def main():
         print("  🛡 値下げの履歴 (リバイスくんの台帳) が読めない → ② は今回落としません (判断できない)")
     if _held:
         print(f"  🛡 まだ値下げしていない ② {len(_held)}件 は落とさず「値下げ候補」に回します"
-              f" ({MIN_PRICE_DOWNS}回以上 値下げしても売れない物だけ落とす)")
+              f" (出品時より {NET_DOWN_MIN:.0%} 以上 下げても売れない物だけ落とす)")
         try:
             os.makedirs(os.path.dirname(PRICE_DOWN_FIRST_PATH), exist_ok=True)
             with open(PRICE_DOWN_FIRST_PATH, "w", encoding="utf-8") as f:
