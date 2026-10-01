@@ -148,7 +148,7 @@ def test_op_emotion_luffy_resolves_p041():
 # --- Gundam: PB01 premium goods parallel ---
 def test_pb01_premium_goods_heero_resolves_variant():
     assert _gd("GUNDAM JAPANESE PB01-PREMIUM GOODS SET -MOBILE SUIT GUNDAM WING-",
-               "010", "HEERO YUY") == "ST02-010_PB01"
+               "010", "HEERO YUY") == "ST02-010_p4"
 
 
 def test_gundam_normal_st02_still_base():

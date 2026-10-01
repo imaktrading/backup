@@ -1,6 +1,10 @@
 """PB01 プレミアムグッズセット (ガンダムW) の resolve 回帰テスト (2026-07-23).
 
 依頼: requests/2026-07-23_auto_catalog_add_gundam_tcg.md (cert154708671 #100)。
+★2026-10-01 改訂: 公式を取り直したら PB01 の行は公式に在った (`_p4`、画像つき)。
+2026-07 に作った画像なしの複製 `*_PB01` は消し、`_p4` を返すようにした
+(依頼 2026-09-30_gundam_pb01_resolver_returns_imageless_clone.md)。
+
 PB01 は複数 base セット (GD01-100 / ST02-010) の再録のため、brand→set_code 逆引き
 (PREMIUM GOODS+WING→ST02) では #100 が ST02-100 に化けて miss していた。
 番号→base pid の明示 map (_PB01_BASE_BY_NUMBER) で解決。
@@ -23,7 +27,7 @@ _BRAND = "GUNDAM JAPANESE PB01-PREMIUM GOODS SET -MOBILE SUIT GUNDAM WING-"
 
 class TestPb01Resolve(unittest.TestCase):
     def test_cert154708671_show_of_resolve_100(self):
-        """#100 → GD01-100_PB01。旧実装は ST02-100 を探して skip していた.
+        """#100 → GD01-100_p4 (公式の行)。旧実装は ST02-100 を探して skip していた.
 
         2026-08-13 是正: rarity は生値 'U+' ではなく canonical 'Uncommon' を返す。
         '+' は公式 rarity 語彙 (C/U/R/LR/LKC/LKU/LKR/P) に無い刷り違いマーカーで、
@@ -31,15 +35,15 @@ class TestPb01Resolve(unittest.TestCase):
         """
         r = pc.lookup_gundam(_BRAND, "100", "A SHOW OF RESOLVE", verbose=False)
         self.assertIsNotNone(r)
-        self.assertEqual(r.get("card_id"), "GD01-100_PB01")
+        self.assertEqual(r.get("card_id"), "GD01-100_p4")
         self.assertEqual(r.get("rarity"), "Uncommon")
         self.assertIn("Alternative Art", r.get("features") or [])
 
     def test_cert154708676_heero_yuy_010_regression(self):
-        """#010 → ST02-010_PB01 (7/10 経路の回帰) + rarity 空だった穴が埋まっている."""
+        """#010 → ST02-010_p4 (公式の行) + rarity 空だった穴が埋まっている."""
         r = pc.lookup_gundam(_BRAND, "010", "HEERO YUY", verbose=False)
         self.assertIsNotNone(r)
-        self.assertEqual(r.get("card_id"), "ST02-010_PB01")
+        self.assertEqual(r.get("card_id"), "ST02-010_p4")
         self.assertEqual(r.get("rarity"), "Common")
         self.assertIn("Alternative Art", r.get("features") or [])
 

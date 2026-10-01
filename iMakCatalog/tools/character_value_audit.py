@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import subprocess
+import time
 import sys
 from collections import Counter
 from datetime import date
@@ -56,7 +57,26 @@ def _load_rules():
     return mod
 
 
+# ★一覧 (eBay の aspect) は毎日は変わらない。**7日より新しければ取り直さない**
+#   (2026-10-01 HQ [IMPLEMENT-GO] `2026-10-01_night_jobs_slimming_go.md` 項2)。
+LATEST = Path(r"C:\dev\iMak_data\catalog\_input\ebay_aspects_183454_latest.json")
+MAX_AGE_DAYS = 7
+
+
+def _fresh_enough() -> bool:
+    try:
+        age = (time.time() - LATEST.stat().st_mtime) / 86400.0
+    except OSError:
+        return False
+    if age <= MAX_AGE_DAYS:
+        print(f"一覧は {age:.1f}日前に取ったものなので取り直しません (期限 {MAX_AGE_DAYS}日)")
+        return True
+    return False
+
+
 def refetch() -> None:
+    if _fresh_enough():
+        return
     try:
         r = subprocess.run([sys.executable, str(ROOT / "tools" / "fetch_ebay_aspects.py")],
                            capture_output=True, text=True, timeout=300)

@@ -31,7 +31,9 @@ import api  # noqa: E402
 import clone_rows  # noqa: E402
 
 # 2026-08-23 実測。増える分には構わないが、減ったら行が消えている。
-KNOWN_MIN = 5
+KNOWN_MIN = 4   # ★2026-10-01: PB01 の複製2行 (ST02-010_PB01 / GD01-100_PB01) は
+                #   公式に対応する行 (_p4) が在ったので消した (6→4)。
+                #   依頼 2026-09-30_gundam_pb01_resolver_returns_imageless_clone.md
 
 _SQL = (r"SELECT id, category, product_id, source, source_url, images, specs "
         r"FROM products WHERE source LIKE '%clone\_%' ESCAPE '\' "

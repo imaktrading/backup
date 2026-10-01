@@ -1387,13 +1387,27 @@ def lookup_gundam(
     if record is None and "PREMIUM GOODS" in (brand or "").upper():
         _pb01_base = _PB01_BASE_BY_NUMBER.get(card_number.zfill(3))
         pb_base = _pb01_base or base_pid
-        for pid_try in (f"{pb_base}_PB01", f"{pb_base}_P"):
+        # ★2026-10-01: PB01 の行は **公式に在る** (`_p4`)。公式を取り直して確かめた
+        #   (detail.php の「入手情報」= プレミアムグッズセット-新機動戦記ガンダムW-[PB01])。
+        #   2026-07 に作った `_PB01` は画像なしの複製で、これを返していたため出品くんが
+        #   毎回 NO-IMAGE で落としていた (4日/6回)。複製行は
+        #   migrations/2026-10-01_gundam_pb01_official_setname.py で消した。
+        # 公式の行 (`_p4`) は **番号が map に在る時だけ** 試す。知らない番号で `_p4` を
+        #   引くと別の収録 (リミテッドBOX 等) を返しかねないので、
+        #   `set_name_official` に `[PB01]` が入っていることも確かめる (fail-closed)。
+        tries = [f"{pb_base}_PB01", f"{pb_base}_P"]
+        if _pb01_base:
+            tries.insert(0, f"{pb_base}_p4")
+        for pid_try in tries:
             cand = api.lookup(GUNDAM_CATEGORY, pid_try)
-            if cand and _record_name_matches_subject(cand, subject):
-                record = cand
-                if verbose:
-                    print(f"    🎯 iMakCatalog (Gundam) hit (PB01 premium goods): {pid_try}")
-                break
+            if not (cand and _record_name_matches_subject(cand, subject)):
+                continue
+            if pid_try.endswith("_p4") and "[PB01]" not in (cand.get("set_name_official") or ""):
+                continue
+            record = cand
+            if verbose:
+                print(f"    🎯 iMakCatalog (Gundam) hit (PB01 premium goods): {pid_try}")
+            break
 
     if record is None:
         record = api.lookup(GUNDAM_CATEGORY, base_pid)
