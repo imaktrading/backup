@@ -442,16 +442,10 @@ def main() -> int:
     #   事務員は「異常を見つける係」なので、**事務員自身が死ぬと誰も気づけない**。
     #   増員しても解決しない (同じ仕事の人数が増えるだけ) ので、外側から生存を見る。
     #   7/28-7/30 の夜間 cron が exit 0 のまま空振りしていた件と同型の失敗を防ぐ。
-    reports = sorted((DATA_ROOT / "clerk" / "reports").glob("*_patrol.md"),
-                     key=lambda p: p.stat().st_mtime) if (DATA_ROOT / "clerk" / "reports").is_dir() else []
-    if not reports:
-        print("⚠️ 事務巡回のレポートが1件も無い — 事務員が動いていない疑い\n")
-    else:
-        last = reports[-1]
-        hours = (time.time() - last.stat().st_mtime) / 3600
-        mark = "⚠️ " if hours > 24 else ""
-        print(f"{mark}事務巡回: 最終 {_age(last.stat().st_mtime)} ({last.name})"
-              + (" — **24h 以上動いていない**" if hours > 24 else "") + "\n")
+    # ★2026-10-01 ユーザー判断「存在すらわすれていたくらいだから、不要としよう」: 事務員は廃止
+    #   (予約タスク iMakHQ_ClerkPatrol は無効)。依頼は担当を起動して呼び鈴を鳴らす運用 (9/29〜) になり、
+    #   滞留の集計は worktree_board / status_now で足りる。1日8回の Claude 起動が夜の束と重なっていた。
+    #   止まっているのが正常なので、死活の警告は出さない。
 
     # ★2026-08-02: dispatch watcher の死活。**死んでも誰も気づかない**のが本当の問題だった
     #   (8/1 に 9時間 / 8/2 に2回、人が偶然気づいて手で再起動している)。
