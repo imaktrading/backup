@@ -135,6 +135,8 @@ REM         2026-09-24 user: "some sellers write the number in the description".
 REM         Same-name cards with several numbers hide number-less candidates; a number found
 REM         in the description shows (same) or drops (other) them. Login-free pages only.
 echo [desc-numbers] %date% %time% >> "%LOG%"
+REM 2026-10-01: KAGOYA server reads descriptions daily (kagoya_offload.py). Skip when it already did today.
+python -u kagoya_offload.py covered desc >> "%LOG%" 2>&1 && goto :skip5a
 python -u night_step.py hoju mercari_desc_numbers --check >> "%LOG%" 2>&1 || goto :skip5a
 python -u mercari_desc_numbers.py --limit=200 >> "%LOG%" 2>&1
 python -u night_step.py hoju mercari_desc_numbers --done %errorlevel% >> "%LOG%" 2>&1
@@ -203,6 +205,8 @@ REM         sheet is written after a human check in the daytime.
 REM         2026-09-03: the tee line stalled because the single supplier sold out
 REM         and the listing work was wasted. Same fix as PSA: keep spares.
 echo [ut] hoju search %date% %time% >> "%LOG%"
+REM 2026-10-01: KAGOYA server searches UT every few days. Skip both UT steps while it owns them.
+python -u kagoya_offload.py covered ut >> "%LOG%" 2>&1 && goto :skip13
 python -u night_step.py hoju ut_hoju_fill.search --check >> "%LOG%" 2>&1 || goto :skip12
 python -u ut_hoju_fill.py search >> "%LOG%" 2>&1
 python -u night_step.py hoju ut_hoju_fill.search --done %errorlevel% >> "%LOG%" 2>&1

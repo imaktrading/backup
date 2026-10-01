@@ -72,3 +72,20 @@ def test_search_running_in_detects_home_search_only():
     assert K.search_running_in(["python psa_hoju_fill.py search-restock --limit=0"]) is True
     assert K.search_running_in(["python psa_hoju_fill.py confirm --limit=20", None, ""]) is False
     assert K.search_running_in(["python kagoya_offload.py cycle"]) is False
+
+
+def test_ut_due_every_three_days():
+    assert K.ut_due(None, TODAY, 3) is True
+    assert K.ut_due("2026-09-29", TODAY, 3) is False
+    assert K.ut_due("2026-09-28", TODAY, 3) is True
+
+
+def test_covered_today():
+    assert K.covered_today({"covered": {"desc": TODAY}}, "desc", TODAY) is True
+    assert K.covered_today({"covered": {"desc": "2026-09-30"}}, "desc", TODAY) is False
+    assert K.covered_today({}, "desc", TODAY) is False
+
+
+def test_done_item_ids_by_other_key():
+    lines = [json.dumps({"url": "u1"}), json.dumps({"url": "u2"})]
+    assert K.done_item_ids(lines, "url") == {"u1", "u2"}

@@ -44,6 +44,8 @@ SHADOW_CACHE_PATH = os.path.join(HERE, "kagoya_research_cache.json")
 WORK = os.path.join(r"C:/dev/iMak_data/hq", "offload_work")
 
 SWAP_EVERY_DAYS = 2           # 補4〜5本は2日に1回 (2〜3日に1回の案の短い方)
+DESC_LIMIT = 400              # 説明の番号読み (家の夜は200件。未読が約1,300件あるので倍に)
+UT_EVERY_DAYS = 3             # UT の補・再仕入れ先は週2回ほど (8晩で使える候補3本だったため毎晩はやめる)
 SNKR_SLEEP = 1.0
 MERCARI_BATCH = 8             # 家の夜の検索と同じ。この件数ごとに結果を書く
 
@@ -100,15 +102,15 @@ def plan_job(fill, swap, restock, cache, dry, today, should_skip_dry, swap_every
     return out, counts
 
 
-def done_item_ids(result_lines):
-    """結果ファイル (1行1件の JSON) から、もう済んだ itemID を集める。壊れた行は無視。純関数。"""
+def done_item_ids(result_lines, key="itemID"):
+    """結果ファイル (1行1件の JSON) から、もう済んだ物 (既定は itemID) を集める。壊れた行は無視。純関数。"""
     done = set()
     for line in result_lines:
         line = line.strip()
         if not line:
             continue
         try:
-            done.add(json.loads(line)["itemID"])
+            done.add(json.loads(line)[key])
         except Exception:
             continue
     return done
@@ -167,9 +169,85 @@ def run_job(job_path):
                 f.flush()
                 time.sleep(SNKR_SLEEP)
         print(f"  💾 {min(s + MERCARI_BATCH, len(todo))}/{len(todo)} ({round(time.time() - t0)}秒)", flush=True)
+    _run_desc(job, os.path.dirname(job_path))
+    _run_ut(job, os.path.dirname(job_path))
     json.dump({"job_id": job["job_id"], "finished": datetime.datetime.now().isoformat(timespec="seconds"),
                "sec": round(time.time() - t0)}, open(done_path, "w", encoding="utf-8"))
     print("[run] 完了", flush=True)
+
+
+def _done_keys(path, key):
+    if not os.path.exists(path):
+        return set()
+    return done_item_ids(open(path, encoding="utf-8").read().splitlines(), key)
+
+
+def _run_desc(job, d):
+    """メルカリの商品説明に書いてある番号を読む (mercari_desc_numbers と同じ読み方)。"""
+    urls = job.get("desc_urls") or []
+    if not urls:
+        return
+    import undetected_chromedriver as uc
+    import mercari_desc_numbers as MDN
+    from mercari_psa_resource import _chrome_major, _quiet_chromedriver
+    rp = os.path.join(d, "desc_result.jsonl")
+    done = _done_keys(rp, "url")
+    todo = [u for u in urls if u not in done]
+    print(f"[desc] 全{len(urls)}件 / 済{len(done)} / 残り{len(todo)}", flush=True)
+    if not todo:
+        return
+    _quiet_chromedriver()
+    o = uc.ChromeOptions()
+    for a in ("--headless=new", "--lang=ja-JP", "--window-size=1280,1400"):   # ログインしない
+        o.add_argument(a)
+    maj = _chrome_major()
+    drv = uc.Chrome(options=o, version_main=maj) if maj else uc.Chrome(options=o)
+    try:
+        with open(rp, "a", encoding="utf-8") as f:
+            for n, u in enumerate(todo, 1):
+                ent = MDN.read_description(drv, u)
+                if ent is None:
+                    continue                    # 読めなかった分は書かない (次の回にまた読む)
+                f.write(json.dumps({"url": u, "entry": ent}, ensure_ascii=False) + "\n")
+                f.flush()
+                if n % 50 == 0:
+                    print(f"  📝 {n}/{len(todo)}", flush=True)
+    finally:
+        try:
+            drv.quit()
+        except Exception:                                        # noqa: BLE001
+            pass
+
+
+def _run_ut(job, d):
+    """UT の補URL・再仕入れ先を探す (ut_hoju_fill と同じ探し方)。"""
+    groups = job.get("ut") or {}
+    if not any(groups.values()):
+        return
+    import mercari_psa_resource as mp
+    import ut_hoju_fill as U
+    rp = os.path.join(d, "ut_result.jsonl")
+    done = {(json.loads(x).get("sold_out"), json.loads(x).get("itemID"))
+            for x in (open(rp, encoding="utf-8").read().splitlines() if os.path.exists(rp) else [])
+            if x.strip().startswith("{")}
+    drv = U._new_driver()
+    try:
+        with open(rp, "a", encoding="utf-8") as f:
+            for sold_out, key in ((False, "fill"), (True, "restock")):
+                ts = [t for t in groups.get(key) or [] if (sold_out, t["itemID"]) not in done]
+                print(f"[ut-{key}] 残り{len(ts)}件", flush=True)
+                for t in ts:
+                    ent = U.search_one(drv, t, mp, job["date"])
+                    if ent is None:
+                        continue
+                    f.write(json.dumps({"itemID": t["itemID"], "sold_out": sold_out, "entry": ent},
+                                       ensure_ascii=False, default=str) + "\n")
+                    f.flush()
+    finally:
+        try:
+            drv.quit()
+        except Exception:                                        # noqa: BLE001
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +366,32 @@ def build_job(today):
             continue                     # 家の夜の検索と同じ: 番号が取れない物は探さず・控えも汚さない
         out.append({"itemID": t["itemID"], "kind": t["kind"], "q": q})
     counts["no_query"] = no_q
-    return {"job_id": f"{today}-{int(time.time())}", "date": today, "targets": out, "counts": counts}
+    job = {"job_id": f"{today}-{int(time.time())}", "date": today, "targets": out, "counts": counts}
+    if _mode() == "live":
+        # 説明の番号読み: 毎日 DESC_LIMIT 件 (家の夜は200件だった)
+        try:
+            import mercari_desc_numbers as MDN
+            job["desc_urls"] = MDN.urls_to_check(H._load_cache(), MDN.load())[:DESC_LIMIT]
+        except Exception as e:                                   # noqa: BLE001
+            print(f"  ⚠ 番号読みの対象を作れず ({type(e).__name__}) — 今日は家の夜に任せる")
+        counts["desc"] = len(job.get("desc_urls") or [])
+        # UT の補・再仕入れ先: UT_EVERY_DAYS 日に1回
+        if ut_due(_state().get("ut_last"), today, UT_EVERY_DAYS):
+            try:
+                import ut_hoju_fill as U
+                job["ut"] = {"fill": U.plan_targets(sold_out=False), "restock": U.plan_targets(sold_out=True)}
+            except Exception as e:                               # noqa: BLE001
+                print(f"  ⚠ UT の対象を作れず ({type(e).__name__}) — 今日は家の夜に任せる")
+        counts["ut"] = sum(len(v) for v in (job.get("ut") or {}).values())
+    return job
+
+
+def ut_due(last, today, every):
+    """UT を今日探すか (最後に探した日から every 日以上)。純関数。"""
+    try:
+        return (datetime.date.fromisoformat(today) - datetime.date.fromisoformat(str(last))).days >= every
+    except Exception:
+        return True
 
 
 def _mode():
@@ -316,7 +419,8 @@ def start_remote(cfg, job):
     jp = os.path.join(WORK, "job.json")
     json.dump(job, open(jp, "w", encoding="utf-8"), ensure_ascii=False, default=str)
     rc, out = _ssh(cfg, f'New-Item -ItemType Directory -Force {REMOTE_ROOT} | Out-Null; '
-                        f'Remove-Item {REMOTE_ROOT}\\result.jsonl,{REMOTE_ROOT}\\done.json -ErrorAction SilentlyContinue; "ok"')
+                        f'Remove-Item {REMOTE_ROOT}\\result.jsonl,{REMOTE_ROOT}\\desc_result.jsonl,'
+                        f'{REMOTE_ROOT}\\ut_result.jsonl,{REMOTE_ROOT}\\done.json -ErrorAction SilentlyContinue; "ok"')
     if rc != 0:
         raise RuntimeError(f"サーバーに入れない: {out[:200]}")
     if _scp_to(cfg, jp, REMOTE_ROOT + r"\job.json") != 0:
@@ -405,7 +509,60 @@ def pull_and_merge(cfg, st):
     st.setdefault("merged_ids", {})[job.get("job_id")] = sorted(merged_set)
     # 古い job の記録は捨てる (今の job だけ持つ)
     st["merged_ids"] = {k: v for k, v in st["merged_ids"].items() if k == job.get("job_id")}
+    if live:
+        n += _pull_desc(cfg, st, job) + _pull_ut(cfg, st, job)
     return n
+
+
+def _pull_lines(cfg, name):
+    lp = os.path.join(WORK, name)
+    if _scp_from(cfg, REMOTE_ROOT + "\\" + name, lp) != 0:
+        return []
+    out = []
+    for line in open(lp, encoding="utf-8").read().splitlines():
+        try:
+            out.append(json.loads(line))
+        except Exception:
+            continue
+    return out
+
+
+def _pull_desc(cfg, st, job):
+    """説明の番号を家の台帳 (mercari_desc_numbers.json) に書く。同じ URL は上書き = 何度取り込んでも同じ。"""
+    rows = _pull_lines(cfg, "desc_result.jsonl")
+    if not rows:
+        return 0
+    import mercari_desc_numbers as MDN
+    led = MDN.load()
+    for r in rows:
+        if r.get("url") and isinstance(r.get("entry"), dict):
+            led[r["url"]] = r["entry"]
+    MDN._save(led)
+    return len(rows)
+
+
+def _pull_ut(cfg, st, job):
+    """UT の探索結果を家のキャッシュ (補URL用 / 再仕入れ用) に書く。同じ出品は上書き。"""
+    rows = _pull_lines(cfg, "ut_result.jsonl")
+    if not rows:
+        return 0
+    import ut_hoju_fill as U
+    for sold_out in (False, True):
+        sub = [r for r in rows if bool(r.get("sold_out")) == sold_out and isinstance(r.get("entry"), dict)]
+        if not sub:
+            continue
+        path = U._cache_path(sold_out)
+        cache = U.load_cache(path)
+        for r in sub:
+            cache[r["itemID"]] = r["entry"]
+        U.save_cache(cache, path)
+    st["ut_last"] = job.get("date")
+    return len(rows)
+
+
+def covered_today(st, kind, today):
+    """家の夜の束が、その手順を飛ばしてよいか (今日の分をサーバーが終えて取り込み済み)。純関数。"""
+    return (st.get("covered") or {}).get(kind) == today
 
 
 def cycle():
@@ -427,6 +584,12 @@ def cycle():
             n = pull_and_merge(cfg, st)
             if n:
                 print(f"📥 結果 {n}件を控えに書いた ({_mode()})")
+    if rs["done"] and _mode() == "live" and not home_search_running():
+        # サーバーが今日の分を終えて、取り込みも済んだ → 家の夜の束はその手順を飛ばしてよい
+        job0 = _load_json(os.path.join(WORK, "job.json"))
+        cov = st.setdefault("covered", {})
+        if job0.get("desc_urls"):
+            cov["desc"] = job0.get("date")
     if rs["running"]:
         print(f"⏳ サーバーで実行中 ({rs['lines']}件済み)")
         _save_state(st)
@@ -529,6 +692,17 @@ def main():
     if a[0] == "status":
         status()
         return 0
+    if a[0] == "covered":
+        # 夜の束から呼ぶ: 0 = サーバーが済ませた (飛ばす) / 1 = 家でやる
+        kind, today, st = a[1], datetime.date.today().isoformat(), _state()
+        if _mode() != "live":
+            return 1
+        if kind == "ut":
+            ok = bool(st.get("ut_last")) and not ut_due(st.get("ut_last"), today, UT_EVERY_DAYS)
+        else:
+            ok = covered_today(st, kind, today)
+        print(f"[kagoya] {kind}: {'サーバーが済ませた → 家では飛ばす' if ok else '家でやる'}")
+        return 0 if ok else 1
     if a[0] == "compare":
         compare()
         return 0

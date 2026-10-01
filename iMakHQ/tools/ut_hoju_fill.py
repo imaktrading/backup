@@ -324,14 +324,47 @@ def _cache_path(sold_out):
     return RESTOCK_CACHE_PATH if sold_out else CACHE_PATH
 
 
-def search(limit=None, sold_out=False, min_backups=0, max_backups=AUX_MAX):
-    """候補を集めてキャッシュに貯める。スプシには書かない (書くのは目視の後)。"""
-    import datetime
-    import mercari_psa_resource as mp
-    import sheet_io
+def search_one(drv, t, mp, today):
+    """1出品ぶん探して、キャッシュの1件 (dict) を返す。取れなければ None。
 
-    today = datetime.date.today().isoformat()
-    # 目視で特定した行は カタログの作品名で探す (タイトルの語は店ごとにばらつく)
+    ★2026-10-01: KAGOYA (サーバー) でも同じ探し方をするため、1件分をここに出した (中身は変えていない)。
+    """
+    url = SEARCH_URL + urllib.parse.quote(t["keyword"])
+    try:
+        drv.get(url)
+        time.sleep(8)
+        items = mp.parse_mercari_items(drv.page_source)
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  {t['itemID']} 取得できず ({type(e).__name__})")
+        return None
+    same = [it for it in items
+            if size_matches(t["size"], jp_size_of(it.get("name")))]
+    cands = []
+    for it in same[:8]:
+        href = it.get("url") or it.get("href") or ""
+        if not href or href in t["have"]:
+            continue
+        try:
+            ok, ship, rev = mp._detail_supply_check(drv, href,
+                                                    min_reviews=MIN_REVIEWS)
+            _src = drv.page_source
+            cond, _ = mp._parse_cond_ship(_src)
+            # ★2026-09-04: _detail_supply_check の ok は捨てているので、
+            #   買えるかは自分で見る (捨てたまま足すと UT だけ素通りする)。
+            _buyable = mp.buyable_from_detail(_src)
+        except Exception:                                      # noqa: BLE001
+            continue
+        if usable_candidate(cond, ship, rev, mp._is_shops_url(href),
+                            buyable=_buyable):
+            cands.append({"channel": "mercari", "url": href,
+                          "price": it.get("price"), "name": it.get("name")})
+    print(f"  {t['itemID']} {t['size']} → 拾えた{len(items)} / サイズ一致{len(same)} / 使える{len(cands)}")
+    return {"date": today, "size": t["size"], "keyword": t["keyword"], "candidates": cands}
+
+
+def plan_targets(sold_out=False, min_backups=0, max_backups=AUX_MAX, limit=None):
+    """探す出品を選ぶ (スプシ・カタログを読む。家で動かす)。"""
+    import sheet_io
     try:
         sys.path.insert(0, r"C:\dev\iMak\iMakMercari")
         from ut_catalog_values import load_ledger as _led
@@ -343,8 +376,17 @@ def search(limit=None, sold_out=False, min_backups=0, max_backups=AUX_MAX):
                              hints=hints, min_backups=min_backups, max_backups=max_backups,
                              watch=load_watch())
     targets = [t for t in targets if t["keyword"] and t["size"] and t["size"] != "KIDS"]
-    if limit:
-        targets = targets[:limit]
+    return targets[:limit] if limit else targets
+
+
+def search(limit=None, sold_out=False, min_backups=0, max_backups=AUX_MAX):
+    """候補を集めてキャッシュに貯める。スプシには書かない (書くのは目視の後)。"""
+    import datetime
+    import mercari_psa_resource as mp
+
+    today = datetime.date.today().isoformat()
+    targets = plan_targets(sold_out=sold_out, min_backups=min_backups,
+                           max_backups=max_backups, limit=limit)
     what = "売り切れて再仕入れしたい" if sold_out else "補URLが足りない"
     n_cat = sum(1 for t in targets if t.get("from_catalog"))
     print(f"▶ {what} UT: {len(targets)}件 を探します "
@@ -356,40 +398,12 @@ def search(limit=None, sold_out=False, min_backups=0, max_backups=AUX_MAX):
     found = 0
     try:
         for n, t in enumerate(targets, 1):
-            url = SEARCH_URL + urllib.parse.quote(t["keyword"])
-            try:
-                drv.get(url)
-                time.sleep(8)
-                items = mp.parse_mercari_items(drv.page_source)
-            except Exception as e:                             # noqa: BLE001
-                print(f"  [{n}/{len(targets)}] {t['itemID']} 取得できず ({type(e).__name__})")
+            print(f"  [{n}/{len(targets)}]", end="")
+            ent = search_one(drv, t, mp, today)
+            if ent is None:
                 continue
-            same = [it for it in items
-                    if size_matches(t["size"], jp_size_of(it.get("name")))]
-            cands = []
-            for it in same[:8]:
-                href = it.get("url") or it.get("href") or ""
-                if not href or href in t["have"]:
-                    continue
-                try:
-                    ok, ship, rev = mp._detail_supply_check(drv, href,
-                                                            min_reviews=MIN_REVIEWS)
-                    _src = drv.page_source
-                    cond, _ = mp._parse_cond_ship(_src)
-                    # ★2026-09-04: _detail_supply_check の ok は捨てているので、
-                    #   買えるかは自分で見る (捨てたまま足すと UT だけ素通りする)。
-                    _buyable = mp.buyable_from_detail(_src)
-                except Exception:                              # noqa: BLE001
-                    continue
-                if usable_candidate(cond, ship, rev, mp._is_shops_url(href),
-                                    buyable=_buyable):
-                    cands.append({"channel": "mercari", "url": href,
-                                  "price": it.get("price"), "name": it.get("name")})
-            cache[t["itemID"]] = {"date": today, "size": t["size"],
-                                  "keyword": t["keyword"], "candidates": cands}
-            found += len(cands)
-            print(f"  [{n}/{len(targets)}] {t['itemID']} {t['size']} "
-                  f"→ 拾えた{len(items)} / サイズ一致{len(same)} / 使える{len(cands)}")
+            cache[t["itemID"]] = ent
+            found += len(ent["candidates"])
             if n % 5 == 0:
                 save_cache(cache, _cache_path(sold_out))
     finally:
@@ -397,11 +411,7 @@ def search(limit=None, sold_out=False, min_backups=0, max_backups=AUX_MAX):
             drv.quit()
         except Exception:                                      # noqa: BLE001
             pass
-    # ★2026-09-13: ここは `save_cache(cache)` で **置き場を指定していなかった**。
-    #   既定は補URL用なので、再仕入れの探索 (sold_out=True) を回すたびに
-    #   **補URL用のキャッシュが丸ごと上書き**され、中身が全部「売り切れた行」になっていた。
-    #   補URL の目視 (`confirm`) は出品中の行しか見ないので、**毎回 0件**。
-    #   実測 2026-09-13: 補URL用 36件が全部 売切の行 / 目視できる UT 0件。
+    # ★2026-09-13: 置き場は必ず指定する (既定は補URL用。再仕入れの探索で補URL用が上書きされていた)
     save_cache(cache, _cache_path(sold_out))
     print(f"\n✅ 候補 {found}本 をキャッシュに貯めました → 目視は `confirm`")
     return found

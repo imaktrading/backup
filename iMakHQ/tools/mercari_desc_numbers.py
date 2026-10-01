@@ -124,6 +124,38 @@ def urls_to_check(cache, ledger, today=None):
     return out
 
 
+def read_description(d, u):
+    """1件の商品ページを開いて説明の番号を読む → 台帳の1件 (dict)。読めなければ None。
+
+    ★2026-10-01: KAGOYA (サーバー) でも同じ読み方をするため、1件分をここに出した (中身は変えていない)。
+    """
+    try:
+        d.get(u)
+        text, gone, seen_el = "", False, False
+        for _ in range(10):
+            time.sleep(1.5)
+            body = d.find_element("tag name", "body").text
+            if any(w in body for w in _GONE_WORDS):
+                gone = True
+                break
+            els = d.find_elements("css selector", '[data-testid="description"]')
+            if els:
+                seen_el = True
+                text = els[0].text
+                if text.strip():
+                    break
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 読めませんでした {u}: {str(e)[:60]}")
+        return None
+    if gone:
+        return {"codes": [], "fracs": [], "gone": True, "at": dt.date.today().isoformat()}
+    if not seen_el:
+        return None
+    ent = extract_numbers(text)
+    ent["at"] = dt.date.today().isoformat()
+    return ent
+
+
 def run(limit=200):
     import undetected_chromedriver as uc
     from mercari_psa_resource import _chrome_major, _quiet_chromedriver
@@ -147,35 +179,12 @@ def run(limit=200):
     n = found = 0
     try:
         for u in todo[:limit]:
-            try:
-                d.get(u)
-                text, gone, seen_el = "", False, False
-                for _ in range(10):
-                    time.sleep(1.5)
-                    body = d.find_element("tag name", "body").text
-                    if any(w in body for w in _GONE_WORDS):
-                        gone = True
-                        break
-                    els = d.find_elements("css selector", '[data-testid="description"]')
-                    if els:
-                        seen_el = True
-                        text = els[0].text
-                        if text.strip():
-                            break
-            except Exception as e:                             # noqa: BLE001
-                print(f"  ⚠ 読めませんでした {u}: {str(e)[:60]}")
-                continue
-            if gone:
-                ledger[u] = {"codes": [], "fracs": [], "gone": True, "at": dt.date.today().isoformat()}
-                n += 1
-                continue
-            if not seen_el:
+            ent = read_description(d, u)
+            if ent is None:
                 continue                                       # 読めなかった分は台帳に書かない (次の夜にまた読む)
-            ent = extract_numbers(text)
-            ent["at"] = dt.date.today().isoformat()
             ledger[u] = ent
             n += 1
-            found += 1 if (ent["codes"] or ent["fracs"]) else 0
+            found += 1 if (ent.get("codes") or ent.get("fracs")) else 0
             if n % 20 == 0:
                 _save(ledger)                                  # 落ちても読んだ分は残す
     finally:

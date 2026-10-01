@@ -89,6 +89,9 @@ class TestSelectTargets:
     def test_search_uses_hints(self):
         import io
         src = io.open(os.path.join(_HQ, "tools", "ut_hoju_fill.py"), encoding="utf-8").read()
-        i = src.index("def search(")
+        # 2026-10-01: 対象選び (カタログの作品名を使う所) は plan_targets に移した (KAGOYA と共用)
+        i = src.index("def plan_targets(")
         body = src[i:i + 1200]
         assert "identity_hints(" in body and "hints=hints" in body
+        j = src.index("def search(")
+        assert "plan_targets(" in src[j:j + 800]
