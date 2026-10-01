@@ -240,4 +240,6 @@ def _log_to_file(msg):
 
 
 if __name__ == "__main__":
-    run(dry_run="--dry-run" in sys.argv, log=_log_to_file)
+    # ★2026-10-01: 何も無かった回は書かない (8日で976回中、落としたのは3回。ログが毎日144行ずつ伸びていた)
+    run(dry_run="--dry-run" in sys.argv,
+        log=lambda m: None if m.startswith("🧹 置き去りはありません") else _log_to_file(m))

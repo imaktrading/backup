@@ -50,10 +50,12 @@ EXCLUDE_DIRS = {
     r"catalog\montbell_pdfs", r"catalog\_don_images", r"catalog\_don_pdf_samples",
     r"catalog\_ygo_jp_images", r"catalog\pokemon_translation_cache",
     r"dedupe\img_cache",    # 重複くんの画像キャッシュ 2.3GB / 1.6万件。取り直せる (拡張子が無く種類で外せない)
+    "_symbols",             # ★2026-10-01 Windows のデバッグ用ファイル (25MB)。Microsoft から取り直せる
 }
 EXCLUDE_DIR_PATTERNS = ("*_dumps", "*_dumps.bak_*", "*_dumps_*", "*.bak_*", "__pycache__", "_tmp*")
 EXCLUDE_FILE_PATTERNS = ("*.bak*", "*pre_*", "*.sqlite", "*.sqlite-shm", "*.sqlite-wal",
-                         "*.jpg", "*.jpeg", "*.png", "*.webp", "*.gif", "*.pdf", "*.zip", "*.dmp")
+                         "*.jpg", "*.jpeg", "*.png", "*.webp", "*.gif", "*.pdf", "*.zip", "*.dmp",
+                         "hwinfo_log*.csv")   # ★2026-10-01 PC の温度などの診断記録 (2本で39MB)。取り直せる
 # ★2026-09-30 ユーザー確定: 共有データの外にある Claude の記憶・指示・skill も入れる
 #   (どこにも複製が無く、SSD が壊れたら消える状態だった)。会話の記録 (*.jsonl, 約900MB) は入れない。
 #   zip の中では _claude/ の下に置く
@@ -159,6 +161,8 @@ def pick_extra(home=CLAUDE_HOME, globs=EXTRA_GLOBS):
         for top in glob.glob(os.path.join(home, g)):
             walk = [(os.path.dirname(top), [], [os.path.basename(top)])] if os.path.isfile(top) else os.walk(top)
             for root, _, names in walk:
+                if ".trash" in root.replace("\\", "/").split("/"):
+                    continue                    # ★2026-10-01 消した skill の置き場 (7.5MB)。戻す物ではない
                 for n in names:
                     q = os.path.join(root, n)
                     try:
@@ -265,9 +269,20 @@ def verify_zip(path, db_rows):
     return n
 
 
+def zips_to_prune(names, keep=KEEP):
+    """消す zip を選ぶ (純関数)。**日付で数えて** 新しい keep 日分を残す。
+
+    ★2026-10-01: 以前は「個数」で14本残していた。同じ日に何本もできる (PC が落ちて取り直す) と、
+      14本あっても14日分にならなかった (9/30 は3本 → 13日分しか残っていなかった)。
+    """
+    zs = sorted(f for f in names if f.startswith("iMak_daily_") and f.endswith(".zip"))
+    days = sorted({f[len("iMak_daily_"):len("iMak_daily_") + 8] for f in zs})
+    keep_days = set(days[-keep:])
+    return [f for f in zs if f[len("iMak_daily_"):len("iMak_daily_") + 8] not in keep_days]
+
+
 def prune(dest=DEST, keep=KEEP):
-    zs = sorted(f for f in os.listdir(dest) if f.startswith("iMak_daily_") and f.endswith(".zip"))
-    old = zs[:-keep] if len(zs) > keep else []
+    old = zips_to_prune(os.listdir(dest), keep)
     for f in old:
         os.remove(os.path.join(dest, f))
     return old
