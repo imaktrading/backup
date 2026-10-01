@@ -281,7 +281,31 @@ def _fetch_live(use_cache: bool = True):
         CACHE.write_text(_json.dumps(live, ensure_ascii=False), encoding="utf-8")
     except OSError:
         pass
+    # ★2026-10-01 (総点検 10番): 重複チェック (dup_guard) の控えにも同じ取得を写す。
+    #   両方が別々に全件を取り直していた (1回 約24呼出)。入稿直後のここで取った一覧を
+    #   重複チェックの控えにすれば、次の「6時間以内なら使う」呼び出しが取り直さずに済む。
+    try:
+        import dup_guard as _dg
+        _dg._save_live_cache(*titles_skus_from_live(live))
+    except Exception:                                          # noqa: BLE001  写せなくても本処理は続ける
+        pass
     return live
+
+
+def titles_skus_from_live(live: dict) -> tuple[dict, dict]:
+    """live 一覧 → 重複チェック用の ({itemID: title}, {itemID: SKU}) (純関数)。
+
+    title は US 本体 (CurrentPrice が USD) だけ。GBP/CAD/EUR 等は eBaymag ミラー (同じ SKU の複製)。
+    SKU は値がある物だけ (dup_guard._ebay_active_titles と同じ形)。
+    """
+    titles, skus = {}, {}
+    for iid, v in (live or {}).items():
+        if (v or {}).get("cur") != "USD":
+            continue
+        titles[iid] = v.get("title") or ""
+        if v.get("sku"):
+            skus[iid] = v["sku"]
+    return titles, skus
 
 
 def main() -> int:

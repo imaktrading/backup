@@ -53,6 +53,7 @@ def summarize(data, days=1):
     for day in sorted(data, reverse=True)[:days]:
         bucket = dict(data[day] or {})
         total = int(bucket.pop("_total", 0))
+        bucket.pop("_by_caller", None)          # 呼んだスクリプト別 (by_caller で見る)
         calls = sorted(bucket.items(), key=lambda kv: -int(kv[1]))
         out.append((day, total, [(k, int(v)) for k, v in calls]))
     return out
@@ -89,7 +90,18 @@ def main() -> int:
             rc = 1
         for name, n in calls:
             print(f"     {name:28} {n:6}")
+        by = by_caller(data.get(day))
+        if by:
+            print("     ── 呼んだスクリプト別 (2026-10-01〜) ──")
+            for name, n in by:
+                print(f"       {name:44} {n:6}")
     return rc
+
+
+def by_caller(bucket):
+    """[(callname@script, 回数)…] 多い順。記録が無い日は [] (純関数)。"""
+    by = (bucket or {}).get("_by_caller") or {}
+    return sorted(((k, int(v)) for k, v in by.items()), key=lambda kv: -kv[1])
 
 
 if __name__ == "__main__":

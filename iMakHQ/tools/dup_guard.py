@@ -562,7 +562,23 @@ def catalog_has(product_ids):
 
 
 def _ebay_active_titles():
-    """eBay Active(US本体) の {itemID: title} を取得。失敗時は None (= 判定不能)。"""
+    """eBay Active(US本体) の {itemID: title} を取得。失敗時は None (= 判定不能)。
+
+    ★2026-10-01 (総点検 10番): 取得は itemid_writeback_audit._fetch_live に1本化した。
+      あちらは eBay の申告件数と突き合わせて取りこぼしを止める作りで、取った一覧を
+      両方の控え (itemID 書き戻し / 重複チェック) に書く。どちらかが取れば、もう片方は
+      自分の「新しさの線」の内なら取り直さない。読み込めない時だけ従来の取り方に戻る。
+    """
+    try:
+        import itemid_writeback_audit as _ia
+    except Exception:                                          # noqa: BLE001
+        _ia = None
+    if _ia is not None:
+        try:
+            return _ia.titles_skus_from_live(_ia._fetch_live(use_cache=False))
+        except Exception as e:                                 # noqa: BLE001  取りこぼし = 判定不能
+            print(f"  (live titles 取得失敗: {type(e).__name__}: {e})")
+            return None, None
     try:
         sys.path.insert(0, r"C:\dev\iMak\iMakeBayAPI")
         import dns_cache  # noqa: F401

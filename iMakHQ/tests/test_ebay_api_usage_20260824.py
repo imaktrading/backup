@@ -107,3 +107,23 @@ def test_total_is_not_shown_as_a_call_name(U):
 def test_verdict_leaves_room_for_takedowns(U, total, state):
     """取下げの枠を食い始めた時点で警告する (上限に当たってからでは遅い)。"""
     assert U.verdict(total)[0] == state
+
+
+# ── 2026-10-01: 呼んだスクリプト別にも数える (総点検 10番: 出品一覧の取り直しの出どころ) ──
+def test_counts_by_caller_script(fx, U, tmp_path, monkeypatch):
+    p = str(tmp_path / "usage.json")
+    now = datetime(2026, 10, 1, 20, 0)
+    monkeypatch.setattr(sys, "argv", [r"C:\x\dup_guard.py", "--x"])
+    fx._record_call("GetMyeBaySelling", path=p, now=now)
+    fx._record_call("GetMyeBaySelling", path=p, now=now)
+    monkeypatch.setattr(sys, "argv", ["cull_end.py"])
+    fx._record_call("GetMyeBaySelling", path=p, now=now)
+    data = json.load(open(p, encoding="utf-8"))
+    day = data["2026-10-01"]
+    assert day["_by_caller"] == {"GetMyeBaySelling@dup_guard.py": 2, "GetMyeBaySelling@cull_end.py": 1}
+    assert day["GetMyeBaySelling"] == 3 and day["_total"] == 3
+    # 呼出名別の集計に _by_caller が混ざらない
+    (_d, total, calls), = U.summarize(data, 1)
+    assert total == 3 and calls == [("GetMyeBaySelling", 3)]
+    assert U.by_caller(day)[0] == ("GetMyeBaySelling@dup_guard.py", 2)
+    assert U.by_caller({}) == []

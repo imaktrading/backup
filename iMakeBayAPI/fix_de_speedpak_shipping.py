@@ -89,6 +89,16 @@ def _record_call(callname, path=None, now=None):
         bucket = data.setdefault(day, {})
         bucket[callname] = int(bucket.get(callname, 0)) + 1
         bucket['_total'] = int(bucket.get('_total', 0)) + 1
+        # ★2026-10-01: 誰が呼んだか (起動したスクリプト名)。出品一覧の取り直しが日に 22〜170回と
+        #   ばらつき、どこが取っているか分からなかった (総点検 10番)。
+        try:
+            import sys as _sys
+            who = os.path.basename((_sys.argv or [''])[0] or '') or '?'
+        except Exception:                                      # noqa: BLE001
+            who = '?'
+        by = bucket.setdefault('_by_caller', {})
+        k = f'{callname}@{who}'
+        by[k] = int(by.get(k, 0)) + 1
         for old in sorted(data)[:-14]:          # 直近14日だけ残す
             data.pop(old, None)
         os.makedirs(os.path.dirname(path), exist_ok=True)
