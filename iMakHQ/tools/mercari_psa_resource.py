@@ -1465,6 +1465,174 @@ def new_scrape_driver():
     d.set_page_load_timeout(50)
     return d
 
+# ---------------------------------------------------------------------------
+# メルカリの読み方 (2026-10-01 ユーザー OK「メルカリは API で読み、だめな時だけ Chrome に戻る」)
+#   Chrome 1本 約1.1GB / 30件 約12分 → API 約0.07GB / 30件 77秒 (KAGOYA 実測・候補は30件とも同じ)。
+#   照合 (PSA10・番号・版) は読み方に関係なく同じ関数を通す。変えるのは「検索結果の取り方」と
+#   「詳細 (買えるか・送料込みか・評価数) の確かめ方」だけ。
+#   - 個人の出品: API の商品情報 (販売中か / オークションでないか / 送料の負担 / 出品者の評価数)
+#   - メルカリ Shops: API で送料・在庫が取れない → 今までどおり Chrome で詳細ページを開く
+#   - API が使えない時 (仕様変更・弾かれた) は、その回の残りを Chrome で読む (止めない)
+#   切り替え: C:/dev/iMak_data/hq/mercari_source.json {"source": "api" | "chrome"} (無ければ api)
+# ---------------------------------------------------------------------------
+MERCARI_SOURCE_PATH = r"C:/dev/iMak_data/hq/mercari_source.json"
+_API_SLEEP = 2.0
+_SHIP_INCLUDED_ID = 2          # API の shipping_payer.id 2 = 送料込み(出品者負担) (2026-10-01 実物で確認)
+
+
+def _search_url(kw):
+    return ("https://jp.mercari.com/search?keyword=" + urllib.parse.quote(kw)
+            + "&status=on_sale&order=asc&sort=price")
+
+
+class _ChromeSource:
+    """今までの読み方 (Chrome で検索結果ページと詳細ページを開く)。"""
+    _RESTART_EVERY = 10        # ★2026-07-24: 長時間で uc.Chrome が不安定化 → 10件ごとに作り直す
+
+    def __init__(self):
+        self.drv = None
+        self.n = 0
+
+    def driver(self):
+        if self.drv is None:
+            self.drv = new_scrape_driver()
+        return self.drv
+
+    def search(self, kw):
+        if self.drv is not None and self.n and self.n % self._RESTART_EVERY == 0:
+            self.close()
+            print(f"  ♻ Mercari driver 再起動 ({self.n}回 / 安定化)", flush=True)
+        self.n += 1
+        d = self.driver()
+        d.get(_search_url(kw)); time.sleep(8)      # BAN 回避の待ち (速度より しっかり探す)
+        return parse_mercari_items(d.page_source)
+
+    def supply_filter(self, cands, min_reviews=100):
+        return _filter_candidates_supply(self.driver(), cands, min_reviews=min_reviews)
+
+    def close(self):
+        if self.drv is not None:
+            try:
+                self.drv.quit()
+            except Exception:
+                pass
+            self.drv = None
+
+
+def api_supply_verdict(status, has_auction, shipping_payer_id, num_ratings, min_reviews=100):
+    """API の商品情報 → (ok, ship, reviews, buyable)。個人の出品用 (純関数)。
+
+    詳細ページの判定 (candidate_passes_filter) と同じ規則を、同じ関数で通す。
+    """
+    buyable = (str(status or "").lower() in ("on_sale", "item_status_on_sale")) and not has_auction
+    ship = "送料込み" if shipping_payer_id == _SHIP_INCLUDED_ID else ("着払い" if shipping_payer_id else "")
+    ok = candidate_passes_filter("", ship, num_ratings, False, min_reviews=min_reviews,
+                                 require_freeship=True, buyable=buyable)
+    return ok, ship, num_ratings, buyable
+
+
+class _ApiSource:
+    """API で読む。Shops の詳細と画像検索だけ Chrome (必要になった時に起動)。"""
+
+    def __init__(self):
+        import asyncio
+        try:
+            import certifi
+            os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+        except Exception:
+            pass
+        from mercapi import Mercapi
+        from mercapi.requests import SearchRequestData
+        self._R = SearchRequestData
+        self.api = Mercapi()
+        self.loop = asyncio.new_event_loop()
+        self.kind = {}             # href → 'shops' | 'item'
+        self.chrome = _ChromeSource()
+        self.fallen = False        # API が使えなくなったら True (残りは Chrome)
+
+    def _run(self, coro):
+        return self.loop.run_until_complete(coro)
+
+    def driver(self):
+        return self.chrome.driver()
+
+    def search(self, kw):
+        if self.fallen:
+            return self.chrome.search(kw)
+        R = self._R
+        try:
+            res = self._run(self.api.search(kw, sort_by=R.SortBy.SORT_PRICE, sort_order=R.SortOrder.ORDER_ASC,
+                                            status=[R.Status.STATUS_ON_SALE]))
+        except Exception as e:                                 # noqa: BLE001
+            self.fallen = True
+            print(f"  ⚠ メルカリ API が使えない ({type(e).__name__}) → この回の残りは Chrome で読む", flush=True)
+            return self.chrome.search(kw)
+        time.sleep(_API_SLEEP)
+        out = []
+        for it in res.items:
+            shops = "BEYOND" in str(getattr(it, "item_type", "") or "").upper()
+            href = ("https://jp.mercari.com/shops/product/" if shops else "https://jp.mercari.com/item/") + it.id_
+            self.kind[href] = "shops" if shops else "item"
+            out.append({"price": int(it.price or 0), "href": href, "url": href, "name": it.name or ""})
+        return out
+
+    def supply_filter(self, cands, min_reviews=100, keep=5):
+        if self.fallen:
+            return self.chrome.supply_filter(cands, min_reviews=min_reviews)
+        out = []
+        for c in cands:
+            href = c[1] if len(c) > 1 else ""
+            if not href:
+                continue
+            if self.kind.get(href) != "item":
+                ok, _s, _r = _detail_supply_check(self.chrome.driver(), href, min_reviews=min_reviews)
+            else:
+                try:
+                    d = self._run(self.api.item(href.rsplit("/", 1)[-1]))
+                    time.sleep(_API_SLEEP)
+                except Exception:                              # noqa: BLE001
+                    d = None
+                if d is None:
+                    ok, _s, _r = _detail_supply_check(self.chrome.driver(), href, min_reviews=min_reviews)
+                else:
+                    ok, _s, _r, buyable = api_supply_verdict(
+                        getattr(d, "status", ""), getattr(d, "auction_info", None) is not None,
+                        getattr(getattr(d, "shipping_payer", None), "id_", None),
+                        getattr(getattr(d, "seller", None), "num_ratings", None), min_reviews)
+                    if not buyable:
+                        remember_not_buyable(href, "オークション/売り切れ (API で判定)")
+            if ok:
+                out.append(c)
+                if len(out) >= keep:
+                    break
+        return out
+
+    def close(self):
+        self.chrome.close()
+        try:
+            self.loop.close()
+        except Exception:
+            pass
+
+
+def mercari_source_name(path=MERCARI_SOURCE_PATH):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return (json.load(f).get("source") or "api").lower()
+    except Exception:
+        return "api"
+
+
+def _make_source():
+    if mercari_source_name() == "chrome":
+        return _ChromeSource()
+    try:
+        return _ApiSource()
+    except Exception as e:                                     # noqa: BLE001  部品が無い等
+        print(f"  ⚠ メルカリ API を使えない ({type(e).__name__}) → Chrome で読む", flush=True)
+        return _ChromeSource()
+
+
 def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
     """各カードの メルカリ on_sale PSA10 を取得 → {idx: {"best":(price,url,name)|None, "cands":[(price,url,name),...]}}。
 
@@ -1482,34 +1650,22 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
     """
     import undetected_chromedriver as uc  # noqa: F401
 
-    def _new_driver():
-        return new_scrape_driver()
+    src = _make_source()
 
     # ★2026-07-24 確実性優先(ユーザー方針): driver を _RESTART_EVERY 件ごとに作り直す。
     # 長時間セッションで uc.Chrome が不安定化し途中でクラッシュ→以降 全 item timeout(2026-07-24
     # item58 で全滅=79件が空)を防ぐ。BAN回避の 8s sleep は維持し「速度より しっかり探す」。
-    _RESTART_EVERY = 10
     out = {}
-    drv = _new_driver()
     try:
         for i, c in enumerate(cards):
-            if i > 0 and i % _RESTART_EVERY == 0:
-                try:
-                    drv.quit()
-                except Exception:
-                    pass
-                drv = _new_driver()
-                print(f"  ♻ Mercari driver 再起動 ({i}件処理済 / 安定化)", flush=True)
             kw = c.get("kw"); card_no = c.get("card_no"); eid = c.get("ebay_item_id")
             if not kw:
                 out[i] = None
                 print(f"  [{i+1}/{len(cards)}] (検索語なし) skip", flush=True)
                 continue
-            url = "https://jp.mercari.com/search?keyword=" + urllib.parse.quote(kw) + "&status=on_sale&order=asc&sort=price"
             try:
-                drv.get(url); time.sleep(8)
                 # item-cell 単位で抽出 (name·price·href 対応保証 + 通常出品のみ=オークション除外)
-                items = parse_mercari_items(drv.page_source)
+                items = src.search(kw)
                 cands = pick_psa10_candidates(items, card_no, c.get("hint"),
                                               market_no=c.get("market_no"))   # 正変種 価格昇順 最大5
                 # ★2026-09-21: market_no を渡していなかった。検索は「177/165」で引くのに
@@ -1541,12 +1697,11 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
                     variant_cands = variant_unconfirmed_candidates(
                         items, card_no, c.get("hint"), market_no=c.get("market_no"))
                     if variant_cands and freeship_min_reviews is not None:
-                        variant_cands = _filter_candidates_supply(drv, variant_cands,
-                                                                  min_reviews=freeship_min_reviews)
+                        variant_cands = src.supply_filter(variant_cands, min_reviews=freeship_min_reviews)
                     print(f"  [{i+1}/{len(cards)}] {card_no}: 多変種で変種確証不可→版未確認で目視へ"
                           f"{len(variant_cands)}件", flush=True)
                 elif _unconfident and eid:
-                    img = image_search_fallback(drv, eid, card_no)
+                    img = image_search_fallback(src.driver(), eid, card_no)
                     if img:
                         best = img
                         cands = [img]
@@ -1559,7 +1714,7 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
                 # best も絞り込み後の最安にする = 価格判定も「実際に買える値段」になる。
                 if freeship_min_reviews is not None and cands:
                     _before = len(cands)
-                    cands = _filter_candidates_supply(drv, cands, min_reviews=freeship_min_reviews)
+                    cands = src.supply_filter(cands, min_reviews=freeship_min_reviews)
                     best = cands[0] if cands else None
                     if _before != len(cands):
                         via += f"+買える/送料込み/評価≥{freeship_min_reviews}({_before}→{len(cands)})"
@@ -1590,10 +1745,7 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
                              if t[1] not in _have]
                     kw2 = loose_search_kw(c)
                     try:
-                        url2 = ("https://jp.mercari.com/search?keyword="
-                                + urllib.parse.quote(kw2) + "&status=on_sale&order=asc&sort=price")
-                        drv.get(url2); time.sleep(8)
-                        items2 = parse_mercari_items(drv.page_source)
+                        items2 = src.search(kw2)
                         _seen = _have | {t[1] for t in loose}
                         loose += [t for t in pick_psa10_loose_candidates(
                                       items2, c.get("name_jp"), rarity=loose_rarity(c),
@@ -1617,10 +1769,7 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
                 out[i] = {"best": None, "cands": [], "_error": str(e)[:40] or "error"}
                 print(f"  [{i+1}/{len(cards)}] {card_no or kw}: ERR {str(e)[:30]}", flush=True)
     finally:
-        try:
-            drv.quit()
-        except Exception:
-            pass
+        src.close()
     return out
 
 
