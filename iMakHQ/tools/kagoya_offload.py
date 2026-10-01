@@ -815,6 +815,12 @@ def cycle():
         return 0
     if st.get("job_date") == today:
         print("✅ 今日の分は済み")
+        # ★2026-10-01 (総点検15): 売り切れで取り下げた出品の次の仕入元を、翌日 0:20 を待たずに探す
+        if _cfg().get("urgent_restock", True) is not False:
+            try:
+                start_urgent_restock(cfg, st, today)
+            except Exception as e:                               # noqa: BLE001  急ぎの分は次の回にまた見る
+                print(f"  ⚠ 売り切れ分の急ぎの探索を始められず ({type(e).__name__}: {e})")
         _save_state(st)
         return 0
     sync_code_and_db(cfg, st)
@@ -835,6 +841,61 @@ def cycle():
     _save_state(st)
     print("🚀 サーバーで開始した")
     return 0
+
+
+def newly_sold(rows, seen, cell, cols):
+    """商品管理シートで「売り切れ」に変わった PSA の出品 (前回見た集合 seen に無い物) → [行]。純関数。
+
+    cols = (B=itemID, D=売り切れ, CATEGORY, CERT, KEY)。itemID・売り切れ印・TCG・証明番号の数字がそろう行だけ。
+    """
+    B, D, CAT, CERT, KEY = cols
+    out = []
+    for r in rows:
+        iid = cell(r, B)
+        if not iid or iid == "9999" or not cell(r, D) or cell(r, CAT) != "TCG":
+            continue
+        if not str(cell(r, CERT)).strip().isdigit() or iid in seen:
+            continue
+        out.append(r)
+    return out
+
+
+def start_urgent_restock(cfg, st, today):
+    """売り切れに変わった出品だけの小さな仕事を送る (1時間おきの見回りから)。
+
+    初回は今の売り切れを「見た」ことにするだけ (過去の 1,900件を一度に探さない)。
+    今日もう探した出品は控えの日付で飛ばす。席が取れなければサーバー側で待ちの印を置き、次の回に続きから。
+    """
+    sys.path.insert(0, HERE)
+    import psa_hoju_fill as H
+    import mercari_psa_resource as mp
+    vals = H._read_high()
+    cols = (H.B, H.D, H.CATEGORY, H.CERT, H.KEY)
+    if "sold_seen" not in st:
+        st["sold_seen"] = sorted({H._cell(r, H.B) for r in vals[1:] if H._cell(r, H.D) and H._cell(r, H.B)})
+        print(f"  (売り切れの見張りを開始: 今の売り切れ {len(st['sold_seen'])}件は見たことにする)")
+        return
+    seen = set(st["sold_seen"])
+    new = newly_sold(vals[1:], seen, H._cell, cols)
+    if not new:
+        return
+    cache = H._load_cache()
+    targets = []
+    for r in new:
+        iid = H._cell(r, H.B)
+        if (cache.get(iid) or {}).get("date") == today:
+            continue                                   # 今日もう探した
+        t = {"itemID": iid, "key": H._cell(r, H.KEY), "cert": H._cell(r, H.CERT), "title": H._cell(r, H.C)}
+        q = H.build_search_query(t, mp)
+        if q.get("card_no"):
+            targets.append({"itemID": iid, "kind": "restock", "q": q})
+    if targets:
+        sync_code_and_db(cfg, st)
+        job = {"job_id": f"{today}-urgent-{int(time.time())}", "date": today, "targets": targets,
+               "counts": {"restock": len(targets), "urgent": True}}
+        start_remote(cfg, job)
+        print(f"🚀 売り切れに変わった {len(new)}件のうち {len(targets)}件の次の仕入元を探し始めた")
+    st["sold_seen"] = sorted(seen | {H._cell(r, H.B) for r in new})
 
 
 def start_remote_resume(cfg):
