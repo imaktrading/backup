@@ -139,6 +139,16 @@ def run_job(job_path):
     import snkrdunk_psa_resource as sp
 
     job = json.load(open(job_path, encoding="utf-8"))
+    if not acquire_server_lock("HQ"):
+        print("[run] サーバーの札をほかの担当が持っている → 今回は動かない (次の回に続きから)", flush=True)
+        return
+    try:
+        _run_job_body(job, job_path, mp, sp)
+    finally:
+        release_server_lock("HQ")
+
+
+def _run_job_body(job, job_path, mp, sp):
     res_path = os.path.join(os.path.dirname(job_path), "result.jsonl")
     done_path = os.path.join(os.path.dirname(job_path), "done.json")
     lines = open(res_path, encoding="utf-8").read().splitlines() if os.path.exists(res_path) else []
@@ -174,6 +184,70 @@ def run_job(job_path):
     json.dump({"job_id": job["job_id"], "finished": datetime.datetime.now().isoformat(timespec="seconds"),
                "sec": round(time.time() - t0)}, open(done_path, "w", encoding="utf-8"))
     print("[run] 完了", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# サーバーの札 (2026-10-01 ユーザー「今の4Gで、動かす順番とか組み直せよ」)
+#   メモリ 4GB なので、サーバーで動く仕事は **担当をまたいで1本だけ**。札を取れた仕事だけが動く。
+#   優先順: ①監視くんの予備 (割り込み可。ほかの仕事を止めて先に回す。止められた仕事は続きから再開)
+#           ②HQ の補探索・番号読み・UT (毎日、日付が変わったら最初・朝7時までに)
+#           ③抽出くんのキャラ収集など (その日の HQ の分が終わってから)
+#   札: SERVER_LOCK に {"owner", "pid", "started"}。持ち主の pid が死んでいれば札は無効 (取り直せる)
+# ---------------------------------------------------------------------------
+SERVER_LOCK = r"C:\setup\server.lock"
+
+
+def _pid_alive_win(pid):
+    try:
+        import ctypes
+        h = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+        ctypes.windll.kernel32.CloseHandle(h)
+        return code.value == 259
+    except Exception:
+        return False
+
+
+def lock_is_free(lock, pid_alive):
+    """札が空いているか (純関数)。無い / 壊れている / 持ち主が死んでいる → 空き。"""
+    if not isinstance(lock, dict) or not lock.get("pid"):
+        return True
+    return not pid_alive(lock["pid"])
+
+
+def acquire_server_lock(owner, path=SERVER_LOCK):
+    """札を取る。取れたら True。同時に取りに来ても1人だけが取れる (排他作成)。"""
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump({"owner": owner, "pid": os.getpid(),
+                           "started": datetime.datetime.now().isoformat(timespec="seconds")}, f)
+            return True
+        except FileExistsError:
+            try:
+                cur = json.load(open(path, encoding="utf-8"))
+            except Exception:
+                cur = None
+            if not lock_is_free(cur, _pid_alive_win):
+                return False
+            try:
+                os.remove(path)          # 持ち主が死んだ札は捨てて取り直す
+            except OSError:
+                return False
+    return False
+
+
+def release_server_lock(owner, path=SERVER_LOCK):
+    try:
+        cur = json.load(open(path, encoding="utf-8"))
+        if cur.get("owner") == owner and cur.get("pid") == os.getpid():
+            os.remove(path)
+    except Exception:
+        pass
 
 
 def _done_keys(path, key):

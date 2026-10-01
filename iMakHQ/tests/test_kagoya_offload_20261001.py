@@ -89,3 +89,23 @@ def test_covered_today():
 def test_done_item_ids_by_other_key():
     lines = [json.dumps({"url": "u1"}), json.dumps({"url": "u2"})]
     assert K.done_item_ids(lines, "url") == {"u1", "u2"}
+
+
+def test_lock_is_free():
+    assert K.lock_is_free(None, lambda p: True)
+    assert K.lock_is_free({"owner": "X"}, lambda p: True)
+    assert K.lock_is_free({"owner": "X", "pid": 5}, lambda p: False)       # 持ち主が死んでいる
+    assert not K.lock_is_free({"owner": "X", "pid": 5}, lambda p: True)
+
+
+def test_acquire_and_release_server_lock(tmp_path):
+    p = str(tmp_path / "server.lock")
+    assert K.acquire_server_lock("HQ", p) is True
+    assert K.acquire_server_lock("HARVEST", p) is False                 # 自分 (生きている pid) が持っている
+    K.release_server_lock("HARVEST", p)                                  # 他人の名前では外れない
+    assert os.path.exists(p)
+    K.release_server_lock("HQ", p)
+    assert not os.path.exists(p)
+    with open(p, "w", encoding="utf-8") as f:                           # 死んだ持ち主の札は取り直せる
+        json.dump({"owner": "HARVEST", "pid": 999999}, f)
+    assert K.acquire_server_lock("HQ", p) is True
