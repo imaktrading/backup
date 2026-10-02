@@ -1708,6 +1708,10 @@ def get_psa_data(driver, cert_number):
                 pass
             return cached
 
+    if driver is None:
+        # ★2026-10-03 PSA_CACHED_ONLY=1 (KAGOYA): Chrome を持たない。先取りに無い cert は取りに行かず飛ばす
+        print(f"    ⏭ 先取りに無い cert → 今回は飛ばす (#{cert_number})")
+        return None
     url = f"https://www.psacard.com/ja-JP/cert/{cert_number}/psa"
     try:
         # 5/29: Cloudflare challenge 検知 + 自動 retry (= 最大 3 回、 30 sec 待ち)
@@ -3192,6 +3196,11 @@ _PSA_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakHQ\chrome_profile_psa"
 _psa_warmup_driver = None  # warmup で起動した uc.Chrome、 main の本処理に流用
 
 
+def cached_only_mode(env=None):
+    """PSA_CACHED_ONLY=1 か (純関数)。KAGOYA で Chrome を開かずに走る時 (2026-10-03)。"""
+    return (env if env is not None else os.environ).get("PSA_CACHED_ONLY") == "1"
+
+
 def _psa_cloudflare_warmup():
     """PSA Cloudflare 対策 = uc.Chrome を visible で起動 + user 手動 突破.
 
@@ -3431,7 +3440,12 @@ def _keys_for_dropped_dupes(sheet_rows, certs, cls, cert_col=8, key_col=34):
 
 def main():
     print("=== iMak Trading Japan - PSA → eBay CSV Generator ===\n")
-    _psa_cloudflare_warmup()
+    # ★2026-10-03 ユーザー OK「PSA 新規を KAGOYA へ」: KAGOYA には Cloudflare を押す人がいない。
+    #   PSA_CACHED_ONLY=1 の時は Chrome を開かず、夜の先取り (psa_cache.json) にある cert だけで進む
+    if not cached_only_mode():
+        _psa_cloudflare_warmup()
+    else:
+        print("🛰 PSA_CACHED_ONLY: Chrome を開かず、先取り済みの cert だけで進みます\n")
 
     # 2026-04-24: certs.txt 廃止、スプシ駆動に完全移行
     # スプシ (19kj8... gid=851100680) の I列=cert# / B列=itemID空 / A列=URL で処理対象を抽出
@@ -3702,7 +3716,9 @@ def main():
         print(f"{len(cert_numbers)}件を処理します。\n")
 
     # 2026-05-26: warmup phase で uc.Chrome 起動済の場合は流用 (= profile 衝突回避)
-    if _psa_warmup_driver is not None:
+    if cached_only_mode():
+        driver = None
+    elif _psa_warmup_driver is not None:
         driver = _psa_warmup_driver
         print("🔁 warmup driver 流用 (= cookie 引き継ぎ + profile 衝突回避)")
     else:
@@ -3716,7 +3732,8 @@ def main():
         options.add_argument("--window-position=100,100")
         driver = uc.Chrome(options=options, version_main=detect_chrome_major())
     try:
-        driver.minimize_window()  # 起動後即最小化
+        if driver is not None:
+            driver.minimize_window()  # 起動後即最小化
     except Exception:
         pass  # 最小化失敗してもメイン処理に影響させない
 
@@ -3993,7 +4010,8 @@ def main():
     if _variant_skipped:
         print(f"\n🔀 刷りが PSA ラベルと合わず出品見送り: {len(_variant_skipped)} 件 {_variant_skipped}")
 
-    driver.quit()
+    if driver is not None:
+        driver.quit()
 
     # ===== StartPrice を決める =====
     # 価格は cost-plus (pricing_engine) が SSOT。相場は 2026-08-13 に停止 (global.yaml

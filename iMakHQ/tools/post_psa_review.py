@@ -2636,7 +2636,7 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
 
     server = None
     base_url = None
-    for p in range(SERVER_PORT, SERVER_PORT + 10):
+    for p in review_ports():
         try:
             server, thread, base_url = _start_review_server(p)
             append_log_func(f"  🌐 review server 起動: {base_url}\n")
@@ -2649,7 +2649,10 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
         _log_skips()
         return confirmed
 
-    if open_browser:
+    if os.environ.get("IMAK_NO_BROWSER") == "1":
+        # ★2026-10-03 KAGOYA: ここでは開かない。神風がこの行を見て、中継した番号で家のブラウザを開く
+        append_log_func(f"  ブラウザで確認してください → {base_url}\n")
+    elif open_browser:
         try:
             import subprocess
             subprocess.run(["cmd", "/c", "start", "", base_url], check=False)
@@ -2729,6 +2732,18 @@ def _apply_cert_fixes(fixes, append_log_func=lambda *_: None) -> int:
     except Exception as e:
         append_log_func(f"  ⚠️ cert 訂正の書込に失敗: {type(e).__name__}: {e}\n")
     return written
+
+
+def review_ports(env=None) -> list:
+    """目視画面を立てる番号の候補 (純関数)。
+
+    ★2026-10-03: KAGOYA で動く時は IMAK_REVIEW_PORT (ssh で家に中継している番号) の1つだけ。
+      別の番号に逃げると家から開けない。無ければ今までどおり 8765〜8774 の空き。
+    """
+    v = (env if env is not None else os.environ).get("IMAK_REVIEW_PORT", "")
+    if v.isdigit():
+        return [int(v)]
+    return list(range(SERVER_PORT, SERVER_PORT + 10))
 
 
 def _start_review_server(port: int = SERVER_PORT) -> tuple[HTTPServer, threading.Thread, str]:
