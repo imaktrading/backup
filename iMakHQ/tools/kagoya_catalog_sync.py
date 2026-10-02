@@ -340,6 +340,8 @@ def catalog_sync(cfg, st, log=print):
         return
     for name, fn in (("DB", lambda: pull_db(cfg, st, log)),
                      ("依頼書", lambda: sync_dir(cfg, st, "requests", log)),
+                     # ★2026-10-03 カタログのコミットを家に運ぶ git bundle (カタログ担当の案)
+                     ("コードの束", lambda: sync_dir(cfg, st, r"requests\_git", log)),
                      ("データ", lambda: sync_dir(cfg, st, "", log)),
                      ("控え", lambda: push_pending(cfg, log))):
         try:
