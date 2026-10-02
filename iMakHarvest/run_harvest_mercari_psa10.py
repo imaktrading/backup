@@ -101,7 +101,7 @@ def retry_urls_from(payload: dict, exclude: set | None = None) -> list[str]:
 
 
 def collect(args, dump_path=None, resume=None, urls_override=None,
-            on_flush=None, should_pause=None) -> dict:
+            on_flush=None, should_pause=None, detail_fn=None) -> dict:
     """収集 → 詳細 → Vision。
 
     ★途中で落ちても作業を捨てない (2026-08-17 の事故対策)。
@@ -117,6 +117,11 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
     その場で打ち切る (`finally` で保存される。 続きは次回 `resume=` で)。
     サーバーの席を他の仕事に譲る時など、 呼出側の都合で区切りたい時に渡す
     (2026-10-01 kagoya_server_rules.md の「1件ごとに見て区切る」対応)。
+
+    `detail_fn`: `url -> dict|None` の callable (例: API版の詳細取得)。 渡すと詳細取得を
+    まずこれで試し、 None が返ったら Chrome にフォールバックする。 Chrome (driver) は
+    実際にフォールバックが要る時まで起動しない (lazy) ので、 全件 detail_fn で済めば
+    Chrome を1本も起動せずに終わる (2026-10-02 段階②: メモリ削減)。
     """
     keywords = args.keywords or psa_search_terms.build_keywords(args.games)
     # 需要実証済 (ファネル分析 RESTOCK = 在庫切れ ∩ 需要あり) のカードを検索語に足す。
@@ -137,7 +142,15 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
     def _new_driver():
         return MS.create_anonymous_driver(headless=headless)
 
-    driver = _new_driver()
+    # ★lazy化 (2026-10-02 段階②): detail_fn (API) が全件済めば Chrome を1本も
+    # 起動しない。 必要になった時 (urls_override無しの検索、 または detail_fn の
+    # フォールバック) にだけ _get_driver() が起動する。
+    _driver_box = [None]
+
+    def _get_driver():
+        if _driver_box[0] is None:
+            _driver_box[0] = _new_driver()
+        return _driver_box[0]
     # vision_error は 「写真が読めない (= 正常な reject)」 とは別枠。 混ぜると API 障害を
     # 「不鮮明が多かった」 と読み違える (2026-08-17 に残高切れで実際に起きた)
     cands, rej = [], {"sold": 0, "seller_rating": 0, "no_identity": 0,
@@ -202,7 +215,7 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                 _save()
 
             collected = MSch.collect_multi_keyword_urls(
-                keywords, driver, price_min=args.price_min, price_max=args.price_max,
+                keywords, _get_driver(), price_min=args.price_min, price_max=args.price_max,
                 cap_per_keyword=args.cap_per_keyword, manual=args.manual,
                 sleep_between_sec=args.keyword_interval,
                 progress_callback=lambda n, m: _log(f"  収集 {m}"),
@@ -227,8 +240,8 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                 processed.append(url)
                 continue
             try:
-                kept = _process_one(url, driver, args, claimed, rej, vision_errors,
-                                    failed=failed_urls)
+                kept = _process_one(url, _get_driver, args, claimed, rej, vision_errors,
+                                    failed=failed_urls, detail_fn=detail_fn)
                 consecutive_errors = 0
             except Exception as e:  # noqa: BLE001 - 1 件の失敗で走行全体を殺さない
                 rej["item_error"] += 1
@@ -240,12 +253,14 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                 if consecutive_errors >= args.max_consecutive_errors:
                     # ドライバが死んでいる可能性が高い。 作り直して続行を試す
                     _log("  ドライバを作り直します")
+                    if _driver_box[0] is not None:
+                        try:
+                            _driver_box[0].quit()
+                        except Exception:
+                            pass
+                        _driver_box[0] = None
                     try:
-                        driver.quit()
-                    except Exception:
-                        pass
-                    try:
-                        driver = _new_driver()
+                        _get_driver()  # 作れるか確認 (lazy でも、 ここだけは前倒しで試す)
                         consecutive_errors = 0
                     except Exception as e2:  # noqa: BLE001
                         state["truncated"] = True
@@ -274,10 +289,11 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
             time.sleep(1.0)
     finally:
         _save()  # 例外で抜けても保存する
-        try:
-            driver.quit()
-        except Exception:
-            pass
+        if _driver_box[0] is not None:
+            try:
+                _driver_box[0].quit()
+            except Exception:
+                pass
 
     _log(f"収集完了{'(途中まで)' if state['truncated'] else ''}: "
          f"cert読取={len(cands)} / 番号読めず={len(unreadable)} (I列空欄で投入) "
@@ -324,12 +340,27 @@ def cost_rejected(price_jpy, cfg: dict) -> bool:
     return False
 
 
-def _process_one(url, driver, args, claimed, rej, vision_errors, failed=None):
+def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=None, detail_fn=None):
     """1 件を判定して 候補 dict を返す (対象外なら None)。 例外は呼出側で捕まえる.
 
+    driver_getter: 呼ぶと Chrome driver を返す callable (未起動なら起動する。 lazy)。
+    detail_fn: 指定時、まずこれで detail を取りに行く (例: API版)。 None を返したら
+    Chrome (`driver_getter()` → `mercari_item_detail.fetch_detail`) にフォールバックする
+    (2026-10-02 段階②: 詳細取得もAPIにする時、 Chromeを使わずに済んだ分は driver を
+    起動しない = メモリを使わない)。
     failed: 取得できなかった URL を貯めるリスト (= 未判定。 件数だけでなく URL を残す)。
     """
-    detail = mercari_item_detail.fetch_detail(driver, url)
+    detail = None
+    q = None
+    if detail_fn is not None:
+        try:
+            detail = detail_fn(url)
+        except Exception:  # noqa: BLE001 - API側の不調は Chrome にフォールバック
+            detail = None
+        if detail is not None:
+            q = detail.get("seller_quality") or {}
+    if detail is None:
+        detail = mercari_item_detail.fetch_detail(driver_getter(), url)
     if not detail:
         rej["fetch_fail"] += 1
         if failed is not None:
@@ -352,7 +383,8 @@ def _process_one(url, driver, args, claimed, rej, vision_errors, failed=None):
             rej["card_cost_over"] = rej.get("card_cost_over", 0) + 1
             return None
 
-    q = MSch.extract_seller_quality(driver)  # 直前に開いた商品ページから
+    if q is None:
+        q = MSch.extract_seller_quality(driver_getter())  # 直前に開いた商品ページから
     if not MSch.passes_seller_filter(
         q, min_rating_count=args.min_rating,
         require_identity=not args.no_identity,
