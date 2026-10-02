@@ -51,8 +51,9 @@ REMOTE_BUSY_MARKERS = ("kagoya_offload.py",)  # HQの補探索と重ならない
 SEAT_DIR = r"C:\setup\seats"
 # ★2026-10-01 [IMPLEMENT-GO] フェーズ①: 検索(キーワード→URL)だけ mercari API 版に切替
 # (kagoya_chara_offload.py と同じ理由付け。 0.2 への本格引下げはフェーズ②で)。
-HARVEST_NEED_GB = 1.0
+HARVEST_NEED_GB = 0.3  # 段階②: 詳細取得もAPI (kagoya_chara_offload.py と同じ理由付け)
 SEARCH_BACKEND = "api"  # "api" | "chrome" — 切り戻しはここを "chrome" に戻すだけ
+DETAIL_BACKEND = "api"  # "api" | "chrome" — 切り戻しはここを "chrome" に戻すだけ
 MEM_RESERVE_GB = 0.4
 PAUSE_RESERVE_GB = 0.3
 HQ_OFFLOAD_REMOTE_ROOT = r"C:\setup\offload"
@@ -214,12 +215,16 @@ def _run_job_body(job_path: str) -> None:
     from pathlib import Path  # noqa: PLC0415
     treasure_args = _server_treasure_args(job)
 
+    from scrapers.mercari_search_api import (  # noqa: PLC0415
+        ApiSearchClient, collect_multi_keyword_urls_api, fetch_detail_api,
+    )
+    api_client = ApiSearchClient() if (SEARCH_BACKEND == "api" or DETAIL_BACKEND == "api") else None
+
     urls_override = None
     if SEARCH_BACKEND == "api":
-        from scrapers.mercari_search_api import collect_multi_keyword_urls_api  # noqa: PLC0415
         api_res = collect_multi_keyword_urls_api(
             job["keywords"], price_min=treasure_args.price_min, price_max=treasure_args.price_max,
-            cap_per_keyword=treasure_args.cap_per_keyword,
+            cap_per_keyword=treasure_args.cap_per_keyword, client=api_client,
             progress_callback=lambda n, m: print(f"  {m}", flush=True))
         urls_override = api_res["urls"]
         print(f"[run] 検索(API版): {len(urls_override)} URL (dedup後) "
@@ -227,12 +232,24 @@ def _run_job_body(job_path: str) -> None:
         if api_res.get("errors"):
             print(f"  ⚠ API失敗語: {list(api_res['errors'].items())[:5]}", flush=True)
 
+    def _detail_fn(url):
+        try:
+            return fetch_detail_api(api_client, url)
+        except Exception as e:  # noqa: BLE001
+            print(f"  ⚠ 詳細(API版)失敗 ({type(e).__name__}) → この1件はChromeで読む", flush=True)
+            return None
+
+    detail_fn = _detail_fn if DETAIL_BACKEND == "api" else None
+
     kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
     kill_orphan_chromedriver()
     try:
         payload = psa10.collect(treasure_args, dump_path=Path(dump_path_str), resume=resume, on_flush=None,
-                                should_pause=should_pause_now, urls_override=urls_override)
+                                should_pause=should_pause_now, urls_override=urls_override,
+                                detail_fn=detail_fn)
     finally:
+        if api_client is not None:
+            api_client.close()
         kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
         kill_orphan_chromedriver()
 

@@ -69,13 +69,14 @@ REMOTE_BUSY_MARKERS = ("kagoya_offload.py",)
 #   (担当ごとに置き場が別なので、 ここにそのまま写す。 共有importはしない)。
 # ---------------------------------------------------------------------------
 SEAT_DIR = r"C:\setup\seats"
-# ★2026-10-01 [IMPLEMENT-GO] フェーズ①: 検索(キーワード→URL)だけ mercari API 版に切替。
-# 詳細取得(写真URL等)はまだ Chrome のまま (フェーズ②で検討)。 そのため Chrome は
-# 依然起動する = メモリの頭 (Chrome本体) は変わらない。 1.2→1.0 は「検索の待ち・scroll分の
-# 重さが無くなった」分の控えめな引下げで、 0.2 まで下げるのはフェーズ②でChromeを
-# 使わなくなってから (HQへの回答に明記)。
-HARVEST_NEED_GB = 1.0
+# ★2026-10-02 [IMPLEMENT-GO] 段階②: 詳細取得(写真URL等)もAPI版に切替 (フェーズ①は
+# 検索のみ済・4af98acb)。 Chrome driver はAPIで足りない時だけ lazy起動 (run_harvest_
+# mercari_psa10.collect の detail_fn 配線)。 0.3 は「ほぼAPIで済むが稀にフォールバックで
+# Chromeが立つ」実態に合わせた値 (0.2=完全無Chrome の理論値ではなく、 フォールバック分の
+# 余地を残す)。
+HARVEST_NEED_GB = 0.3
 SEARCH_BACKEND = "api"  # "api" | "chrome" — 切り戻しはここを "chrome" に戻すだけ
+DETAIL_BACKEND = "api"  # "api" | "chrome" — 切り戻しはここを "chrome" に戻すだけ
 MEM_RESERVE_GB = 0.4   # 席を取る時に残す余裕 (kagoya_server_rules.md と同じ値)
 PAUSE_RESERVE_GB = 0.3  # 動いている最中、これを切ったら区切って止まる (同上)
 HQ_OFFLOAD_REMOTE_ROOT = r"C:\setup\offload"
@@ -249,12 +250,16 @@ def _run_job_body(job_path: str) -> None:
     from pathlib import Path  # noqa: PLC0415
     chara_args = _server_chara_args(job)
 
+    from scrapers.mercari_search_api import (  # noqa: PLC0415
+        ApiSearchClient, collect_multi_keyword_urls_api, fetch_detail_api,
+    )
+    api_client = ApiSearchClient() if (SEARCH_BACKEND == "api" or DETAIL_BACKEND == "api") else None
+
     urls_override = None
     if SEARCH_BACKEND == "api":
-        from scrapers.mercari_search_api import collect_multi_keyword_urls_api  # noqa: PLC0415
         api_res = collect_multi_keyword_urls_api(
             job["keywords"], price_min=chara_args.price_min, price_max=chara_args.price_max,
-            cap_per_keyword=chara_args.cap_per_keyword,
+            cap_per_keyword=chara_args.cap_per_keyword, client=api_client,
             progress_callback=lambda n, m: print(f"  {m}", flush=True))
         urls_override = api_res["urls"]
         print(f"[run] 検索(API版): {len(urls_override)} URL (dedup後) "
@@ -262,12 +267,24 @@ def _run_job_body(job_path: str) -> None:
         if api_res.get("errors"):
             print(f"  ⚠ API失敗語: {list(api_res['errors'].items())[:5]}", flush=True)
 
+    def _detail_fn(url):
+        try:
+            return fetch_detail_api(api_client, url)
+        except Exception as e:  # noqa: BLE001 - 読めなければ Chrome にフォールバック
+            print(f"  ⚠ 詳細(API版)失敗 ({type(e).__name__}) → この1件はChromeで読む", flush=True)
+            return None
+
+    detail_fn = _detail_fn if DETAIL_BACKEND == "api" else None
+
     kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
     kill_orphan_chromedriver()
     try:
         payload = psa10.collect(chara_args, dump_path=Path(dump_path_str), resume=resume, on_flush=None,
-                                should_pause=should_pause_now, urls_override=urls_override)
+                                should_pause=should_pause_now, urls_override=urls_override,
+                                detail_fn=detail_fn)
     finally:
+        if api_client is not None:
+            api_client.close()
         kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
         kill_orphan_chromedriver()
 

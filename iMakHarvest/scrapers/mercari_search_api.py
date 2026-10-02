@@ -195,12 +195,12 @@ def map_item_to_detail(d) -> dict:
         既に絞っているので detail側では見ていなかった項目。 API版は検索で絞れないので
         ここで見る)
 
-    ★未確認: `identity_verified` (本人確認済み) に当たるAPI項目が無い。
-      `seller.register_sms_confirmation` は SMS認証であって本人確認(識別)とは別物の
-      可能性があり、安易に対応づけない。 `rating_count` と違って確証が無いので
-      **identity_verified は常に None** (= 未確認) を返す。 本人確認必須ゲート
-      (no_identity=False) を使う収集にこの関数を配線する前に、実際の「本人確認済」
-      バッジが付いたセラーで `register_sms_confirmation` の値を突き合わせて確認すること。
+    identity_verified は `seller.register_sms_confirmation == "yes"` を対応づける。
+    2026-10-02 実機3件 (Chrome版 `extract_seller_quality` の aria-label 「本人確認済」と
+    API側の `register_sms_confirmation` を同一出品で突合) で **3/3 一致**を確認したが、
+    "no" 側 (未確認セラー) の実例には当たれていない (検索結果に出てくる出品者が
+    ほぼ全員確認済だったため)。 誤判定の実害が出たら `psa_supply_sites_settled` 等と
+    同様にここへ追記すること。
     """
     status_raw = str(getattr(d, "status", "") or "").lower()
     has_auction = getattr(d, "auction_info", None) is not None
@@ -221,7 +221,7 @@ def map_item_to_detail(d) -> dict:
         "seller_quality": {
             "rating_count": getattr(seller, "num_ratings", None),
             "star": getattr(seller, "star_rating_score", None),
-            "identity_verified": None,  # ★未確認 (上記docstring参照)
+            "identity_verified": getattr(seller, "register_sms_confirmation", None) == "yes",
         },
     }
 
