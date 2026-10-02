@@ -618,6 +618,10 @@ def sync_code_and_db(cfg, st):
             raise RuntimeError(f"コードの展開に失敗: {out[:200]}")
         st["code_hash"] = ch
         print(f"  📦 コードを送った ({len(files)}本)")
+    if _cfg().get("db_master") == "kagoya":
+        # ★2026-10-03 段階C: DB とカタログのデータの正本は KAGOYA。家から送ると正本を古い物で上書きする。
+        #   向きは逆 (KAGOYA → 家) で kagoya_catalog_sync が受け持つ
+        return
     m = os.path.getmtime(LOCAL_DB)
     if st.get("db_mtime") != m and not db_is_healthy(LOCAL_DB):
         # ★2026-10-02: 08:20 に壊れた DB をそのまま KAGOYA に送っていた。壊れた物は送らない
@@ -946,6 +950,12 @@ def cycle():
         st["last_error"] = f"{datetime.datetime.now():%m/%d %H:%M} サーバーに入れない"
         _save_state(st)
         return 1
+    # ★2026-10-03 段階C: カタログ DB の正本が KAGOYA の時、写し・依頼書・データを行き来させる
+    try:
+        import kagoya_catalog_sync as CS
+        CS.catalog_sync(cfg, st)
+    except Exception as e:                                       # noqa: BLE001  他の仕事は止めない
+        print(f"⚠️要対応: カタログの行き来で例外 ({type(e).__name__}: {e})")
     if rs["lines"]:
         if _mode() == "live" and home_search_running():
             # 家の夜の検索は控えを丸ごと読み書きするので、その最中に書くと消し合う。終わってから取り込む
