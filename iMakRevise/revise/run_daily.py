@@ -82,6 +82,59 @@ def _upload_one(csv_path: Path, label: str, dry_run: bool) -> dict:
             "attempts": UPLOAD_MAX_ATTEMPTS, "error": last_err}
 
 
+def _upload_mode() -> str:
+    """config/revise_params.json の upload.mode ("api" / "chrome"). 読めなければ chrome (今までどおり)."""
+    import json
+    try:
+        cfg = json.loads((PKG_ROOT / "config" / "revise_params.json").read_text(encoding="utf-8"))
+        return (cfg.get("upload") or {}).get("mode", "chrome")
+    except Exception:  # noqa: BLE001
+        return "chrome"
+
+
+def _upload_via_api(result, targets: list) -> list | None:
+    """API で送る. 全部成功 + 読み直しが合えば uploads を返す. 1つでも駄目なら None (→ Chrome で全部送り直す).
+
+    2026-10-02 ユーザー判断で API 版に切替。Chrome (FileExchange) は戻り先として残す。
+    同じ値を送り直すだけなので、API が途中まで届いていても Chrome で全部送れば揃う。
+    """
+    from revise.api_revise import (build_plan, fetch_shipping_policy_ids, load_current_profiles,
+                                   send_plan, verify_sample)
+    from revise.price_revise import SHARED_SNAPSHOT_DIR
+
+    try:
+        snaps = sorted(SHARED_SNAPSHOT_DIR.glob("ebay_active_*.csv"))
+        snap_csv = snaps[-1] if snaps else None
+        var_json = snap_csv.with_name(snap_csv.stem + ".variations.json") if snap_csv else None
+        plan = build_plan(result.csv_path, result.var_price_path, result.var_shipping_path,
+                          var_json, fetch_shipping_policy_ids(),
+                          current_profiles=load_current_profiles(snap_csv))
+        if plan.problems:
+            _log(f"[daily] API 組めない {len(plan.problems)} 件 → Chrome で送る: {plan.problems[:3]}")
+            return None
+        sent = send_plan(plan)
+        if sent["failed"]:
+            _log(f"[daily] API 失敗 {len(sent['failed'])}/{sent['calls']} 呼出 → Chrome で送り直す: "
+                 f"{sent['failed'][0]['call']} {sent['failed'][0]['errors'][:2]}")
+            return None
+        bad = verify_sample(plan)
+        if bad:
+            _log(f"[daily] API 読み直しで不一致 {bad[:3]} → Chrome で送り直す")
+            return None
+    except Exception as e:  # noqa: BLE001 - どんな失敗でも Chrome に倒す (値段の見直しを抜かない)
+        _log(f"[daily] API 例外 {type(e).__name__}: {e} → Chrome で送る")
+        return None
+
+    _log(f"[daily] API 送信 {sent['calls']} 呼出 (値段 {len(plan.prices)} / 送料 {len(plan.shippings)}) 全成功・読み直し一致")
+    uploads = []
+    for csv_path, label in targets:
+        # 台帳 (price_ledger) はこの行で「eBay に届いた」を数える
+        _log(f"[daily] UP 成功 [{label}] {csv_path.name} (API)")
+        uploads.append({"label": label + " (API)", "csv": csv_path.name, "success": True,
+                        "attempts": 1, "error": None})
+    return uploads
+
+
 def _build_summary_body(result, uploads: list, dry_run: bool) -> str:
     now = datetime.now(JST)
     n_revise = len(result.revisable)
@@ -214,6 +267,11 @@ def run_daily(dry_run: bool = False) -> int:
 
     # Step 3: 自動 UP (verify + リトライ)。dry-run では UP を一切呼ばず「予定」だけ記録
     uploads: list[dict] = []
+    if targets and not dry_run and _upload_mode() == "api":
+        api_uploads = _upload_via_api(result, targets)
+        if api_uploads is not None:
+            uploads = api_uploads
+            targets = []  # API で届いたので Chrome は使わない
     for csv_path, label in targets:
         if dry_run:
             uploads.append({"label": label, "csv": csv_path.name, "success": True,

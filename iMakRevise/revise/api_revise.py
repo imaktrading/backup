@@ -219,3 +219,71 @@ def fetch_shipping_policy_ids() -> dict:
         r = _get(t.refresh_access_token())
     r.raise_for_status()
     return {p["name"]: p["fulfillmentPolicyId"] for p in r.json().get("fulfillmentPolicies", [])}
+
+
+# ── 送信 (本番。run_daily から呼ぶ) ────────────────────────────────────
+
+def trading_call(call_name: str, xml: str, _allow_refresh: bool = True) -> str:
+    import requests
+    from . import ebay_trading_api as t
+    headers = {
+        "X-EBAY-API-COMPATIBILITY-LEVEL": t.COMPATIBILITY_LEVEL,
+        "X-EBAY-API-CALL-NAME": call_name,
+        "X-EBAY-API-SITEID": t.SITE_ID_US,
+        "X-EBAY-API-IAF-TOKEN": t.load_access_token(),
+        "Content-Type": "text/xml; charset=utf-8",
+    }
+    r = requests.post(t.TRADING_API_URL, headers=headers, data=xml.encode("utf-8"), timeout=60)
+    r.raise_for_status()
+    if _allow_refresh and t._is_expired_iaf_token_error(r.text):
+        t.refresh_access_token()
+        return trading_call(call_name, xml, _allow_refresh=False)
+    return r.text
+
+
+def _call_name(xml: str) -> str:
+    return re.search(r"<(\w+)Request\b", xml).group(1)
+
+
+def send_plan(plan: ApiPlan, call_fn=None, retry_wait_sec: float = 5.0, sleep_fn=None) -> dict:
+    """組み立てた XML を全部送る. 失敗した呼出は1回だけ送り直し、それでも駄目なら failed に残す.
+
+    Returns: {"calls": 総呼出数, "failed": [{"call", "xml", "errors"}]}
+    """
+    import time
+    call_fn = call_fn or trading_call
+    sleep_fn = sleep_fn or time.sleep
+    failed = []
+    xmls = build_all_xml(plan)
+    for xml in xmls:
+        name = _call_name(xml)
+        errs = None
+        for attempt in (1, 2):
+            try:
+                res = call_fn(name, xml)
+                ack = re.search(r"<Ack>(.*?)</Ack>", res)
+                ack = ack.group(1) if ack else None
+                if ack in ("Success", "Warning"):
+                    errs = None
+                    break
+                errs = re.findall(r"<LongMessage>(.*?)</LongMessage>", res) or [f"Ack={ack}"]
+            except Exception as e:  # noqa: BLE001 - 通信例外も失敗として数える
+                errs = [f"{type(e).__name__}: {e}"]
+            if attempt == 1:
+                sleep_fn(retry_wait_sec)
+        if errs:
+            failed.append({"call": name, "xml": xml, "errors": errs})
+    return {"calls": len(xmls), "failed": failed}
+
+
+def verify_sample(plan: ApiPlan, get_fn=None, n: int = 10) -> list:
+    """送った値段を eBay から読み直して確かめる (単品のみ・最大 n 件). 合わない item を返す."""
+    if get_fn is None:
+        from .ebay_trading_api import get_item as get_fn
+    singles = [c for c in plan.prices if not c.sku][:n]
+    bad = []
+    for c in singles:
+        got = get_fn(c.item_id).get("current_price_usd")
+        if got is None or abs(got - c.price) > 0.001:
+            bad.append((c.item_id, c.price, got))
+    return bad

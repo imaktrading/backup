@@ -6,5 +6,9 @@
   },
   "snapshot": {
     "keep_count": 5
+  },
+  "upload": {
+    "mode": "api",
+    "_note": "2026-10-02 ユーザー判断で API に切替。chrome に戻すとFileExchange (Chrome) で送る"
   }
 }

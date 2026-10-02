@@ -28,26 +28,9 @@ if str(PKG_ROOT) not in sys.path:
 
 from revise import ebay_trading_api as t  # noqa: E402
 from revise.api_revise import (PriceChange, ShippingChange, assert_only_allowed_tags,  # noqa: E402
-                               build_inventory_status_xml, build_shipping_xml)
+                               build_inventory_status_xml, build_shipping_xml, trading_call)
 
 OUT_DIR = PKG_ROOT / "decision_log" / "api_trial"
-
-
-def trading_call(call_name: str, xml: str, _allow_refresh: bool = True) -> str:
-    import requests
-    headers = {
-        "X-EBAY-API-COMPATIBILITY-LEVEL": t.COMPATIBILITY_LEVEL,
-        "X-EBAY-API-CALL-NAME": call_name,
-        "X-EBAY-API-SITEID": t.SITE_ID_US,
-        "X-EBAY-API-IAF-TOKEN": t.load_access_token(),
-        "Content-Type": "text/xml; charset=utf-8",
-    }
-    r = requests.post(t.TRADING_API_URL, headers=headers, data=xml.encode("utf-8"), timeout=60)
-    r.raise_for_status()
-    if _allow_refresh and t._is_expired_iaf_token_error(r.text):
-        t.refresh_access_token()
-        return trading_call(call_name, xml, _allow_refresh=False)
-    return r.text
 
 
 def get_full(item_id: str) -> str:
