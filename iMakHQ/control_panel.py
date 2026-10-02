@@ -2260,14 +2260,11 @@ def after_run(script, returncode, append_log, run_log_text=None, listing_start_t
         except Exception as _e:
             append_log(f"⚠️ ファイル起動失敗: {_e}\n")
     # open_url: 結果スプシ(URL)を自動で開く (集約方針=結果はスプシ。2026-06-07)
+    # ★2026-10-02 ユーザー「終わったらスプシが立ち上がるけど、不要にして。それ以外のボタンも」:
+    #   全ボタンで自動では開かない。見たい時のために場所だけログに出す
     _ou = script.get("open_url")
     if _ou and returncode in (0, None):
-        try:
-            import webbrowser as _wb
-            _wb.open(_ou)
-            append_log(f"🌐 開く: {_ou}\n")
-        except Exception as _e:
-            append_log(f"⚠️ スプシ起動失敗: {_e}\n")
+        append_log(f"🔗 結果のシート (開きません): {_ou}\n")
     # 取下再出品②(relist)は CSV破壊系の後処理をスキップ。
     # 理由: relist は「同じ型番を意図的に再出品」。重複くん/excluder は通常出品用で、
     #       取下げ前(=管理シート上はまだACTIVE)の同型番を「重複」と誤判定し CSV から物理削除する。
