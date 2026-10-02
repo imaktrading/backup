@@ -334,6 +334,56 @@ def push_pending(cfg, log=print):
     return n
 
 
+CATALOG_WT = r"C:\dev\iMak_catalog"
+CATALOG_BRANCH = "feature/uniqlo-ut"
+BUNDLE_DIR = os.path.join(CAT, "requests", "_git")
+
+
+def _git(*args, timeout=120):
+    import subprocess
+    r = subprocess.run(["git", "-C", CATALOG_WT, *args], capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=timeout, creationflags=K.NOWIN)
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
+def apply_code_bundles(st, log=print):
+    """KAGOYA のカタログのコミット (git bundle) を、家の作業ツリーに早送りで取り込む。
+
+    ★2026-10-03 ユーザー OK (2回): カタログ担当は KAGOYA に移り、家の C:\\dev\\iMak_catalog は
+      **読むだけの写し** (家の出品くんが import して読む)。「他担当の作業フォルダに触らない」の例外として
+      HQ が1時間おきにそろえる。家で書き換えがあれば触らずに止める (fail-closed)。早送りしかしない。
+    """
+    if not os.path.isdir(BUNDLE_DIR):
+        return False
+    bundles = sorted((f for f in os.listdir(BUNDLE_DIR) if f.endswith(".bundle")),
+                     key=lambda f: os.path.getmtime(os.path.join(BUNDLE_DIR, f)))
+    if not bundles:
+        return False
+    newest = os.path.join(BUNDLE_DIR, bundles[-1])
+    sig = [bundles[-1], os.path.getmtime(newest), os.path.getsize(newest)]
+    if st.get("catalog_bundle_applied") == sig:
+        return False
+    rc, out = _git("status", "--porcelain", "--untracked-files=no")
+    if rc != 0 or out.strip():
+        raise RuntimeError(f"家のカタログの作業ツリーに書き換えがある → 取り込まない: {out[:200]}")
+    rc, out = _git("bundle", "verify", newest)
+    if rc != 0:
+        raise RuntimeError(f"束が壊れている / 前提のコミットが無い: {out[-200:]}")
+    rc, out = _git("fetch", newest, f"+{CATALOG_BRANCH}:refs/remotes/kagoya/{CATALOG_BRANCH}")
+    if rc != 0:
+        raise RuntimeError(f"束を読めない: {out[-200:]}")
+    _, before = _git("rev-parse", "--short", "HEAD")
+    rc, out = _git("merge", "--ff-only", f"refs/remotes/kagoya/{CATALOG_BRANCH}")
+    if rc != 0:
+        raise RuntimeError(f"早送りできない (家に KAGOYA に無いコミットがある?): {out[-200:]}")
+    _, after = _git("rev-parse", "--short", "HEAD")
+    st["catalog_bundle_applied"] = sig
+    st["catalog_home_head"] = after.strip()
+    if before.strip() != after.strip():
+        log(f"  📦 カタログのコードを KAGOYA の版にそろえた ({before.strip()} → {after.strip()})")
+    return True
+
+
 def catalog_sync(cfg, st, log=print):
     """1時間おきの本体。どこかで失敗しても他は続ける。"""
     if not db_master_is_kagoya(cfg):
@@ -342,6 +392,7 @@ def catalog_sync(cfg, st, log=print):
                      ("依頼書", lambda: sync_dir(cfg, st, "requests", log)),
                      # ★2026-10-03 カタログのコミットを家に運ぶ git bundle (カタログ担当の案)
                      ("コードの束", lambda: sync_dir(cfg, st, r"requests\_git", log)),
+                     ("コードの取り込み", lambda: apply_code_bundles(st, log)),
                      ("データ", lambda: sync_dir(cfg, st, "", log)),
                      ("控え", lambda: push_pending(cfg, log))):
         try:
