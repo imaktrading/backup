@@ -342,7 +342,7 @@ def prune_runs(root, keep=KEEP_RUNS):
 
 def run_local(cwd, envs, args):
     env = dict(os.environ, **dict(e.split("=", 1) for e in envs))
-    return subprocess.call([sys.executable, "-X", "utf8", "-u"] + args, cwd=cwd, env=env)
+    return subprocess.call([sys.executable, "-X", "utf8", "-u"] + args, cwd=cwd, env=env, creationflags=K.NOWIN)
 
 
 def home_main(cwd, envs, args):
@@ -363,7 +363,7 @@ def home_main(cwd, envs, args):
         print(f"🏠 KAGOYA で動かせないので家で動かします ({e})", flush=True)
         return run_local(cwd, envs, args)
     print(f"🛰 KAGOYA で動かします (控え {n}本を送った)", flush=True)
-    p = subprocess.Popen(remote_ssh_cmd(cfg, cwd, envs, args), stdout=subprocess.PIPE,
+    p = subprocess.Popen(remote_ssh_cmd(cfg, cwd, envs, args), stdout=subprocess.PIPE, creationflags=K.NOWIN,
                          stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
     for line in p.stdout:
         sys.stdout.write(line)

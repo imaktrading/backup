@@ -531,23 +531,29 @@ def _save_state(st):
     os.replace(tmp, STATE_PATH)
 
 
+# ★2026-10-02: 神風 (pythonw = 画面なし) から呼ばれると、ssh / scp を起こすたびに黒い窓が一瞬出た
+#   (ユーザー「CMD がちらちらする」)。外のコマンドは窓を出さずに起こす
+NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def _ssh(cfg, remote_ps, timeout=120):
     cmd = ["ssh", "-i", cfg["key"], "-o", "BatchMode=yes", "-o", "ConnectTimeout=20",
            "-o", "LogLevel=ERROR", f"{cfg['user']}@{cfg['host']}", remote_ps]
-    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                       creationflags=NOWIN)
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
 def _scp_to(cfg, local, remote, timeout=1800):
     cmd = ["scp", "-q", "-i", cfg["key"], "-o", "BatchMode=yes", "-o", "LogLevel=ERROR",
            local, f"{cfg['user']}@{cfg['host']}:{remote.replace(chr(92), '/')}"]
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).returncode
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, creationflags=NOWIN).returncode
 
 
 def _scp_from(cfg, remote, local, timeout=600):
     cmd = ["scp", "-q", "-i", cfg["key"], "-o", "BatchMode=yes", "-o", "LogLevel=ERROR",
            f"{cfg['user']}@{cfg['host']}:{remote.replace(chr(92), '/')}", local]
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).returncode
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, creationflags=NOWIN).returncode
 
 
 def _code_files():
@@ -807,7 +813,7 @@ def home_search_running():
         r = subprocess.run(["powershell", "-NoProfile", "-Command",
                             "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
                             "ForEach-Object { $_.CommandLine }"],
-                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, creationflags=NOWIN)
         return search_running_in(r.stdout.splitlines())
     except Exception:                                            # noqa: BLE001
         return True
