@@ -13,16 +13,14 @@ def test_local_button_is_unchanged():
     assert server.remote_command({"label": "補URL", "cwd": "C:/x"}, ["python", "a.py"], {}) is None
 
 
-def test_remote_button_builds_ssh_with_tunnel():
+def test_remote_button_goes_through_kagoya_button():
+    """送る → KAGOYA で動かす → 取り込む は kagoya_button.py が受け持つ (2026-10-02)。"""
     cmd = server.remote_command({"label": "補URL", "cwd": "C:/dev/iMak/iMakHQ/tools", "env": {"A": "1"}},
                                 ["python", "psa_hoju_fill.py", "confirm", "--limit=15"], CFG)
-    assert cmd[0] == "ssh" and "u@h" in cmd
-    assert "%d:127.0.0.1:%d" % (server.REVIEW_PORT, server.REVIEW_PORT) in cmd
-    remote = cmd[-1]
-    assert "Set-Location 'C:\\dev\\iMak\\iMakHQ\\tools'" in remote
-    assert "'psa_hoju_fill.py' 'confirm' '--limit=15'" in remote
-    assert "$env:IMAK_NO_BROWSER='1'" in remote and "$env:A='1'" in remote
-    assert "OutputEncoding" in remote
+    assert cmd[0] == sys.executable and cmd[4].endswith("kagoya_button.py")
+    assert cmd[cmd.index("--cwd") + 1] == "C:/dev/iMak/iMakHQ/tools"
+    assert cmd[cmd.index("--env") + 1] == "A=1"
+    assert cmd[cmd.index("--") + 1:] == ["psa_hoju_fill.py", "confirm", "--limit=15"]
 
 
 def test_review_line_regex():

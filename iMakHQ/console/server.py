@@ -1095,24 +1095,23 @@ def _offload_cfg():
 
 
 def remote_command(script, cmd, cfg=None):
-    """KAGOYA で動かすボタンなら ssh のコマンド (list) を返す。そうでなければ None (純関数寄り)。"""
+    """KAGOYA で動かすボタンなら、そのためのコマンド (list) を返す。そうでなければ None (純関数寄り)。
+
+    ★2026-10-02: ssh を直接張るのをやめ、tools/kagoya_button.py に渡す。
+      家の控えを送る → KAGOYA で動かす (目視の画面は中継) → KAGOYA で変わったファイルだけ家に取り込む。
+      KAGOYA に届かない・席が空いていない時は、kagoya_button が家で今までどおり動かす。
+    """
     cfg = cfg if cfg is not None else _offload_cfg()
     if script.get("label") not in (cfg.get("remote_buttons") or []):
         return None
     args = list(cmd)
     if args and os.path.basename(args[0]).lower().startswith("python"):
         args = args[1:]
-    q = " ".join("'" + str(a).replace("'", "''") + "'" for a in args)
-    envs = "".join("$env:%s='%s'; " % (k, str(v).replace("'", "''"))
-                   for k, v in (script.get("env") or {}).items())
-    remote = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
-              "$env:PYTHONIOENCODING='utf-8'; $env:PYTHONUNBUFFERED='1'; "
-              "$env:IMAK_HEADLESS='1'; $env:IMAK_NO_BROWSER='1'; $env:IMAK_REVIEW_PORT='%d'; %s"
-              "Set-Location '%s'; & '%s' -X utf8 -u %s"
-              % (REVIEW_PORT, envs, str(script["cwd"]).replace("/", "\\"), REMOTE_PY, q))
-    return ["ssh", "-i", cfg["key"], "-o", "BatchMode=yes", "-o", "ServerAliveInterval=30",
-            "-o", "ExitOnForwardFailure=yes", "-L", "%d:127.0.0.1:%d" % (REVIEW_PORT, REVIEW_PORT),
-            "%s@%s" % (cfg["user"], cfg["host"]), remote]
+    tool = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "kagoya_button.py")
+    envs = []
+    for k, v in (script.get("env") or {}).items():
+        envs += ["--env", "%s=%s" % (k, v)]
+    return [sys.executable, "-X", "utf8", "-u", tool, "--cwd", str(script["cwd"])] + envs + ["--"] + args
 
 
 def _run_worker(script, cmd=None):
