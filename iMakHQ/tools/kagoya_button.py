@@ -37,7 +37,7 @@ PUSH_DIRS = [
     r"C:/dev/iMak/iMakHQ/review_logs",
     r"C:/dev/iMak/iMakTCG/data",
 ]
-PUSH_EXT = (".json", ".jsonl")
+PUSH_EXT = (".json", ".jsonl", ".txt", ".csv")   # txt/csv: 除外リスト等 (2026-10-02 補充の除外4件が KAGOYA で効かなかった)
 FUNNEL_DIR = r"C:/dev/iMak/iMakHQ/funnel_output"     # 並び順に使う最新のファネル (1本だけ)
 # 下の階層で読む物 (2026-10-02 試走で家と食い違った: 市場で売れた実績の台帳が無く並び順が変わった)
 PUSH_EXTRA = [
