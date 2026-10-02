@@ -1062,6 +1062,18 @@ def stop_job():
         _cp()._kill_process_tree(p, _log)                      # control_panel と同じ関数を使う
     except Exception as e:                                     # noqa: BLE001
         return 500, {"error": "止められませんでした: %s" % e}
+    if job.get("remote"):
+        # ★2026-10-02: 家の側を止めても KAGOYA の処理は残る (実測)。目視の画面の番号と席を握ったままに
+        #   なるので、KAGOYA の側も閉じる (裏で。神風は待たない)
+        try:
+            tool = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools",
+                                "kagoya_button.py")
+            subprocess.Popen([sys.executable, tool, "cleanup"], cwd=os.path.dirname(tool),
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            _log("■ KAGOYA の側も閉じます")
+        except Exception:                                      # noqa: BLE001
+            pass
     return 200, {"ok": True}
 
 
@@ -1179,6 +1191,8 @@ def _run_worker(script, cmd=None):
         _rcmd = remote_command(script, cmd)
         if _rcmd:
             _log("🛰 KAGOYA で動かします (画面は中継してこの PC で開きます)")
+            with _LOCK:
+                STATE["job"]["remote"] = True                  # 止めた時に KAGOYA の側も閉じる
         p = subprocess.Popen(_rcmd or cmd, cwd=script["cwd"], env=env,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                              encoding="utf-8", errors="replace", bufsize=1,

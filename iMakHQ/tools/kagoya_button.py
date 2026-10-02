@@ -52,12 +52,16 @@ MIRROR_DIRS = [r"C:/dev/iMak_data/hq/market_sold/getitem"]
 # 絵柄の照合などが読む鍵 (KAGOYA の鍵は credentials に置いてある・中身は家と同じを確認済)
 REMOTE_KEY_COPY = (r"C:\dev\iMak_data\credentials\api_key.txt", r"C:\dev\iMak\iMakTCG\API key.txt")
 # 取り込む場所 (KAGOYA でボタンの間に変わったファイルを探す)。抽出くん等の置き場は入れない
+# ★2026-10-02: 家のデスクトップを名指しで書く道具がある (03_PSA再仕入れ候補_*.csv 等)。
+#   KAGOYA にも同じ場所を作って書かせ、書いた物は家の同じ場所に戻す (C:\dev の外は "ABS/C/..." で運ぶ)
+HOME_DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
 SCAN_ROOTS = [
     r"C:\dev\iMak_data\hq",
     r"C:\dev\iMak_data\dedupe",
     r"C:\dev\iMak\iMakHQ",
     r"C:\dev\iMak\iMakTCG\data",
     r"C:\dev\iMak\iMakeBayAPI\cache",
+    HOME_DESK,
 ]
 SKIP_EXT = (".py", ".pyc", ".log", ".tgz", ".tmp", ".lock")
 SKIP_DIR_WORDS = ("__pycache__", "profile", "offload_work", "run_logs", ".git")
@@ -181,6 +185,24 @@ def _push_files():
     return files
 
 
+def carry_name(p):
+    """KAGOYA から運ぶ時の名前 (純関数)。C:\\dev の下は相対、それ以外は "ABS/C/..."。"""
+    p = os.path.normpath(p)
+    dev = os.path.normpath(DEV)
+    if p.lower().startswith(dev.lower() + os.sep):
+        return os.path.relpath(p, dev).replace(os.sep, "/")
+    drive, rest = os.path.splitdrive(p)
+    return "ABS/" + drive.rstrip(":") + rest.replace(os.sep, "/")
+
+
+def home_path(name):
+    """carry_name の逆 (純関数)。"""
+    if name.startswith("ABS/"):
+        d, rest = name[4:].split("/", 1)
+        return os.path.normpath(d + ":/" + rest)
+    return os.path.normpath(os.path.join(DEV, name))
+
+
 def _rel(p):
     return os.path.relpath(p, DEV).replace(os.sep, "/")
 
@@ -262,8 +284,8 @@ def pull_and_merge(cfg, run_dir):
         srv = _read(os.path.join(srv_dir, "files", rel))
         if srv is None:
             continue
-        home_p = os.path.join(DEV, rel)
-        base = _read(os.path.join(run_dir, "base", rel))
+        home_p = home_path(rel)
+        base = None if rel.startswith("ABS/") else _read(os.path.join(run_dir, "base", rel))
         home = _read(home_p)
         out, how, c = merge_file(home_p, base, srv, home)
         if c:
@@ -347,8 +369,29 @@ def changed_since(roots, t0):
     return out
 
 
+def _kill_previous_remote_runs():
+    """前のボタンの残り (神風で止めた・回線が切れた) を、子のプロセスごと閉じる。
+
+    ボタンは一度に1つしか動かない (神風が1つずつ流す) ので、残っている remote-run は全部 前の回の物。
+    残すと目視の画面の番号 (18765) と席を握ったままになり、次のボタンが動けない。
+    """
+    ps = ("Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'kagoya_button.py.+remote-run' "
+          f"-and $_.ProcessId -ne {os.getpid()} -and $_.ProcessId -ne {os.getppid()} }} | "
+          "ForEach-Object { taskkill /T /F /PID $_.ProcessId | Out-Null }")
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps], timeout=60, capture_output=True)
+    except Exception:                                          # noqa: BLE001
+        pass
+    try:
+        K.release_server_seat(BTN_SEAT)
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
 def remote_main(cwd, out_dir, envs, args):
     os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(HOME_DESK, exist_ok=True)
+    _kill_previous_remote_runs()
     try:
         os.remove(os.path.join(out_dir, "out.tgz"))   # 前の回の結果を取り込まないように
     except OSError:
@@ -364,7 +407,7 @@ def remote_main(cwd, out_dir, envs, args):
     finally:
         K.release_server_seat(BTN_SEAT)
     files = changed_since(SCAN_ROOTS, t0)
-    rels = [os.path.relpath(p, r"C:\dev").replace(os.sep, "/") for p in files]
+    rels = [carry_name(p) for p in files]
     tgz = os.path.join(out_dir, "out.tgz")
     with tarfile.open(tgz, "w:gz") as tf:
         man = json.dumps({"rc": rc, "files": rels}, ensure_ascii=False).encode("utf-8")
@@ -396,6 +439,16 @@ def _parse(a):
 
 def main():
     a = sys.argv[1:]
+    if a and a[0] == "remote-cleanup":                 # KAGOYA の側: 残っているボタンを閉じる
+        _kill_previous_remote_runs()
+        print("[KAGOYA] 残っていたボタンを閉じた", flush=True)
+        return 0
+    if a and a[0] == "cleanup":                        # 家の側: 神風で止めた時
+        cfg = K._cfg()
+        script = rf"{K.REMOTE_CODE_ROOT}\iMakHQ\tools\kagoya_button.py"
+        rc, out = K._ssh(cfg, f"& {_q(K.REMOTE_PY)} {_q(script)} remote-cleanup", timeout=120)
+        print(out.strip()[-200:])
+        return rc
     if a and a[0] == "remote-run":
         cwd, out, envs, args = _parse(a[1:])
         return remote_main(cwd, out or REMOTE_OUT, envs, args)

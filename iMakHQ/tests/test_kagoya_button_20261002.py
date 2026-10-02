@@ -70,3 +70,12 @@ def test_remote_cmd_relays_review_port_and_quotes():
 
 def test_mirror_sends_only_new_or_changed():
     assert B.mirror_todo({"a": 1, "b": 2}, {"a": 1, "b": 3, "c": 4}) == ["b", "c"]
+
+
+def test_carry_name_roundtrip_inside_and_outside_dev():
+    a = r"C:\dev\iMak_data\hq\x.json"
+    b = r"C:\Users\imax2\OneDrive\デスクトップ\03_PSA再仕入れ候補_20261002.csv"
+    assert B.carry_name(a) == "iMak_data/hq/x.json"
+    assert B.carry_name(b).startswith("ABS/C/Users/")
+    assert os.path.normcase(B.home_path(B.carry_name(a))) == os.path.normcase(a)
+    assert os.path.normcase(B.home_path(B.carry_name(b))) == os.path.normcase(b)
