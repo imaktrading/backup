@@ -254,10 +254,11 @@ def pull_db(cfg, st, log=print):
     code = ("import sqlite3, os, json, hashlib\n"
             f"db = r'''{REMOTE_DB}'''\n"
             f"snap = r'''{REMOTE_SNAP}'''\n"
-            "sig = []\n"
-            "for p in (db, db + '-wal'):\n"
-            "    try:\n        s = os.stat(p); sig.append([round(s.st_mtime, 1), s.st_size])\n"
-            "    except OSError:\n        sig.append(None)\n"
+            # 読むだけでも -wal の時刻は動く (開いた時に作られる) → 本体の時刻と大きさ + -wal の大きさで見る
+            "s = os.stat(db)\n"
+            "try:\n    w = os.stat(db + '-wal').st_size\n"
+            "except OSError:\n    w = 0\n"
+            "sig = [round(s.st_mtime, 1), s.st_size, w]\n"
             "src = sqlite3.connect(f'file:{db}?mode=ro', uri=True, timeout=60)\n"
             "ver = src.execute('select count(*), max(rowid) from products').fetchone()\n"
             "print('SIG', json.dumps([sig, ver]))\n")
