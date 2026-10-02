@@ -800,6 +800,15 @@ def kw_search(drv, kw, limit):
     上位に来て本体が埋もれる(2026-06-24 ユーザー指摘)。新品フィルタも外す(recall優先・
     正しい景品を見つけるのが目的。新品担保はパスBの最終確認で)。画像は実src を付与。
     """
+    # ★2026-10-02: まず API (Chrome を開かない・おすすめ順は同じ)。だめな時だけ Chrome
+    try:
+        import mercari_psa_resource as _mpa
+        if _mpa.mercari_source_name() != "chrome":
+            got = _mpa.api_search(kw, by_price=False, limit=limit)
+            if got is not None:
+                return got
+    except Exception:                                          # noqa: BLE001
+        pass
     url = "https://jp.mercari.com/search?keyword=" + urllib.parse.quote(kw) + "&status=on_sale"
     drv.get(url)
     time.sleep(8)
@@ -1117,10 +1126,8 @@ def _identify_scrape(targets, cand_n, use_cache=True):
     items, drv = [], None
     if todo:
         print(f"  検索が要る対象: {len(todo)}/{len(targets)}件 (残りはキャッシュ再利用)", flush=True)
-        drv = _make_driver()
+        drv = _LazyDriver()            # ★2026-10-02: 検索は API。読めない時だけ Chrome を起こす
     try:
-        if drv:
-            drv.set_page_load_timeout(50)
         for i, t in enumerate(targets, 1):
             iid = str(t["item_id"])
             ent = cache.get(iid)

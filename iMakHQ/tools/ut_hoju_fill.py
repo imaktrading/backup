@@ -330,13 +330,18 @@ def search_one(drv, t, mp, today):
     ★2026-10-01: KAGOYA (サーバー) でも同じ探し方をするため、1件分をここに出した (中身は変えていない)。
     """
     url = SEARCH_URL + urllib.parse.quote(t["keyword"])
-    try:
-        drv.get(url)
-        time.sleep(8)
-        items = mp.parse_mercari_items(drv.page_source)
-    except Exception as e:                                     # noqa: BLE001
-        print(f"  {t['itemID']} 取得できず ({type(e).__name__})")
-        return None
+    # ★2026-10-02: まず API で検索・詳細 (Chrome を開かない)。だめな時だけ Chrome
+    use_api = mp.mercari_source_name() != "chrome"
+    items = mp.api_search(t["keyword"], by_price=True) if use_api else None
+    if items is None:
+        use_api = False
+        try:
+            drv.get(url)
+            time.sleep(8)
+            items = mp.parse_mercari_items(drv.page_source)
+        except Exception as e:                                 # noqa: BLE001
+            print(f"  {t['itemID']} 取得できず ({type(e).__name__})")
+            return None
     same = [it for it in items
             if size_matches(t["size"], jp_size_of(it.get("name")))]
     cands = []
@@ -344,6 +349,14 @@ def search_one(drv, t, mp, today):
         href = it.get("url") or it.get("href") or ""
         if not href or href in t["have"]:
             continue
+        if use_api:
+            d = mp.api_detail(href)
+            if d is not None:
+                if usable_candidate(d["cond"], d["ship"], d["reviews"], mp._is_shops_url(href),
+                                    buyable=d["buyable"]):
+                    cands.append({"channel": "mercari", "url": href,
+                                  "price": it.get("price"), "name": it.get("name")})
+                continue
         try:
             ok, ship, rev = mp._detail_supply_check(drv, href,
                                                     min_reviews=MIN_REVIEWS)

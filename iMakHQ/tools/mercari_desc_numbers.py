@@ -156,6 +156,40 @@ def read_description(d, u):
     return ent
 
 
+def read_description_api(u):
+    """read_description の API 版 (Chrome を開かない)。読めなければ None (呼び出し側が Chrome で読む)。
+
+    ★2026-10-02 ユーザー「API に変えるとかさ」: KAGOYA で毎日400件を Chrome で開いていた。
+      個人 = items/get の description / Shops = shops/products の product_detail.description。
+      出品が消えている (404) は gone。
+    """
+    import asyncio
+    import re as _re
+    m_item = _re.search(r"jp\.mercari\.com/item/(m\w+)", u or "")
+    m_shop = _re.search(r"jp\.mercari\.com/shops/product/(\w+)", u or "")
+    if not (m_item or m_shop):
+        return None
+    try:
+        import mercari_psa_resource as mp
+        if "api" not in mp._API_ONE:
+            mp.api_detail("https://jp.mercari.com/item/m0")      # 部品を起こすだけ (結果は捨てる)
+        api, loop = mp._API_ONE["api"], mp._API_ONE["loop"]
+        if m_item:
+            d = loop.run_until_complete(api.item(m_item.group(1)))
+            text = None if d is None else (getattr(d, "description", "") or "")
+        else:
+            p = loop.run_until_complete(api.product(m_shop.group(1)))
+            text = None if p is None else (getattr(getattr(p, "product_detail", None), "description", "") or "")
+        time.sleep(mp._API_SLEEP)
+    except Exception:                                          # noqa: BLE001
+        return None
+    if text is None:
+        return {"codes": [], "fracs": [], "gone": True, "at": dt.date.today().isoformat()}
+    ent = extract_numbers(text)
+    ent["at"] = dt.date.today().isoformat()
+    return ent
+
+
 def run(limit=200):
     import undetected_chromedriver as uc
     from mercari_psa_resource import _chrome_major, _quiet_chromedriver

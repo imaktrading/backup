@@ -145,7 +145,8 @@ def run_job(job_path):
 
     job = json.load(open(job_path, encoding="utf-8"))
     wait_path = os.path.join(SEAT_DIR, "HQ.wait")
-    if not acquire_server_seat("HQ"):
+    # ★2026-10-02: 急ぎの探索 (数件・メルカリは API) は Chrome を使わないので軽い席で取る
+    if not acquire_server_seat("HQ", need_gb=float(job.get("need_gb") or HQ_NEED_GB)):
         # 優先順の低い仕事 (抽出くん等) はこの印を見たら区切りの良い所で止まって席を空ける (続きは後で)
         os.makedirs(SEAT_DIR, exist_ok=True)
         json.dump({"since": datetime.datetime.now().isoformat(timespec="seconds")},
@@ -214,6 +215,7 @@ def _run_job_body(job, job_path, mp, sp):
 # ---------------------------------------------------------------------------
 SEAT_DIR = r"C:\setup\seats"
 HQ_NEED_GB = 1.2
+URGENT_NEED_GB = 0.4          # 急ぎの探索 (数件・API のみ。画像検索に落ちた時だけ Chrome)
 MEM_RESERVE_GB = 0.4
 
 
@@ -320,16 +322,24 @@ def _run_desc(job, d):
     print(f"[desc] 全{len(urls)}件 / 済{len(done)} / 残り{len(todo)}", flush=True)
     if not todo:
         return
-    _quiet_chromedriver()
-    o = uc.ChromeOptions()
-    for a in ("--headless=new", "--lang=ja-JP", "--window-size=1280,1400"):   # ログインしない
-        o.add_argument(a)
-    maj = _chrome_major()
-    drv = uc.Chrome(options=o, version_main=maj) if maj else uc.Chrome(options=o)
+    drv = None
+
+    def _chrome():
+        _quiet_chromedriver()
+        o = uc.ChromeOptions()
+        for a in ("--headless=new", "--lang=ja-JP", "--window-size=1280,1400"):   # ログインしない
+            o.add_argument(a)
+        maj = _chrome_major()
+        return uc.Chrome(options=o, version_main=maj) if maj else uc.Chrome(options=o)
     try:
         with open(rp, "a", encoding="utf-8") as f:
             for n, u in enumerate(todo, 1):
-                ent = MDN.read_description(drv, u)
+                # ★2026-10-02: まず API (Chrome を開かない)。読めない物だけ Chrome
+                ent = MDN.read_description_api(u)
+                if ent is None:
+                    if drv is None:
+                        drv = _chrome()
+                    ent = MDN.read_description(drv, u)
                 if ent is None:
                     continue                    # 読めなかった分は書かない (次の回にまた読む)
                 f.write(json.dumps({"url": u, "entry": ent}, ensure_ascii=False) + "\n")
@@ -354,7 +364,18 @@ def _run_ut(job, d):
     done = {(json.loads(x).get("sold_out"), json.loads(x).get("itemID"))
             for x in (open(rp, encoding="utf-8").read().splitlines() if os.path.exists(rp) else [])
             if x.strip().startswith("{")}
-    drv = U._new_driver()
+    class _Lazy:                       # ★2026-10-02: 検索・詳細は API。読めない時だけ Chrome を起こす
+        _d = None
+
+        def __getattr__(self, name):
+            if self._d is None:
+                self._d = U._new_driver()
+            return getattr(self._d, name)
+
+        def quit(self):
+            if self._d is not None:
+                self._d.quit()
+    drv = _Lazy()
     try:
         with open(rp, "a", encoding="utf-8") as f:
             for sold_out, key in ((False, "fill"), (True, "restock")):
@@ -1001,6 +1022,7 @@ def start_urgent_restock(cfg, st, today):
         sync_code_and_db(cfg, st)
         nf = sum(1 for t in targets if t["kind"] == "fill")
         job = {"job_id": f"{today}-urgent-{int(time.time())}", "date": today, "targets": targets,
+               "need_gb": URGENT_NEED_GB,
                "counts": {"restock": len(targets) - nf, "fill": nf, "urgent": True}}
         start_remote(cfg, job)
         print(f"🚀 急ぎの探索 {len(targets)}件 (売り切れの次の仕入元 {len(targets) - nf} / 補0本の新しい出品 {nf})")

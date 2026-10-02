@@ -85,7 +85,11 @@ def test_stale_cache_triggers_research(monkeypatch, tmp_path):
     monkeypatch.setattr(I, "fetch_listing_images", lambda *_a: ["ref"])
     monkeypatch.setattr(I, "_ebay_title", lambda *_a: "eBay title")
     monkeypatch.setattr(I, "build_keyword", lambda *_a: ("kw", "A賞"))
-    monkeypatch.setattr(I, "kw_search", lambda *_a: [{"href": "u2", "price": 2, "image": "i"}])
+    # ★2026-10-02: Chrome は読めない時だけ起こす (遅延) ので、「検索し直したか」を検索の呼び出しで数える
+    def _kw(*_a):
+        called["n"] += 1
+        return [{"href": "u2", "price": 2, "image": "i"}]
+    monkeypatch.setattr(I, "kw_search", _kw)
 
     items = I._identify_scrape([{"row": 5, "item_id": "111", "title": "t"}], cand_n=10)
     assert called["n"] == 1

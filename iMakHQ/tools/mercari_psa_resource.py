@@ -1722,6 +1722,45 @@ def api_detail(url):
         return None
 
 
+def api_search(kw, by_price=False, limit=None):
+    """メルカリ検索 (販売中) を API で → parse_mercari_items と同じ形 [{type,name,price,href,image}]。失敗は None。
+
+    ★2026-10-02 ユーザー「API に変えるとかさ」「単純にメモリ上げては コスト UP」: UT 探し・一番くじの候補集めの
+      Chrome 検索を置き換える (KAGOYA 4GB で Chrome の仕事が詰まっていた)。
+      by_price=True = 価格の安い順 (UT と同じ並び) / False = おすすめ順 (一番くじと同じ並び)
+      まとめ売り・オークションは Chrome 版と同じく落とす。
+    """
+    import asyncio
+    try:
+        if "api" not in _API_ONE:
+            api_detail("https://jp.mercari.com/item/m0")          # 部品を起こすだけ
+        from mercapi.requests import SearchRequestData as R
+        api, loop = _API_ONE["api"], _API_ONE["loop"]
+        kw_args = {"status": [R.Status.STATUS_ON_SALE]}
+        if by_price:
+            kw_args.update(sort_by=R.SortBy.SORT_PRICE, sort_order=R.SortOrder.ORDER_ASC)
+        res = loop.run_until_complete(api.search(kw, **kw_args))
+        time.sleep(_API_SLEEP)
+    except Exception:                                          # noqa: BLE001
+        return None
+    out = []
+    for it in getattr(res, "items", None) or []:
+        auc = getattr(it, "auction", None)
+        if auc is not None and getattr(auc, "id_", None):
+            continue                                   # オークション
+        name = getattr(it, "name", "") or ""
+        if _is_lot(name):
+            continue
+        typ = str(getattr(it, "item_type", "") or "")
+        shops = "BEYOND" in typ.upper()
+        href = ("https://jp.mercari.com/shops/product/" if shops else "https://jp.mercari.com/item/") + it.id_
+        th = getattr(it, "thumbnails", None) or []
+        out.append({"type": "ITEM_TYPE_BEYOND" if shops else "ITEM_TYPE_MERCARI", "name": name,
+                    "price": int(getattr(it, "price", 0) or 0), "href": href, "url": href,
+                    "image": th[0] if th else ""})
+    return out[:limit] if limit else out
+
+
 def api_shops_verdict(shipping_payer_code, quantities, min_reviews=100):
     """Shops API の商品情報 → (ok, ship, buyable) (純関数)。
 
