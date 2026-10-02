@@ -59,6 +59,7 @@ def _boxes():
         pytest.skip("no display")
     root.withdraw()
     top = tk.Toplevel(root)
+    top.withdraw()                            # ★2026-10-03 コミットのたびに画面に窓がちらついていた (配置は出さなくても取れる)
     cp.ListingPanel(top, mode="maint")
     root.update_idletasks()
 
