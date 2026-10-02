@@ -705,14 +705,17 @@ def _serve_confirm(page_bytes, extract, timeout, api=None):
             self.end_headers()
             self.wfile.write(b'{"ok":true}')
 
-    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    # ★2026-10-02 (KAGOYA 移管 段階B): KAGOYA で動かす時は決まった番号で出し (IMAK_REVIEW_PORT)、
+    #   ブラウザは開かない (IMAK_NO_BROWSER=1)。神風が ssh の中継を張って、この PC のブラウザで開く
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("IMAK_REVIEW_PORT") or 0)), H)
     url = f"http://127.0.0.1:{httpd.server_address[1]}/"
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     print(f"  ブラウザで確認してください → {url}", flush=True)
-    try:
-        webbrowser.open(url)
-    except Exception:
-        pass
+    if os.environ.get("IMAK_NO_BROWSER") != "1":
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
     deadline = time.time() + timeout
     while not state["done"] and time.time() < deadline:
         time.sleep(0.3)

@@ -1073,6 +1073,48 @@ def count_of(kind):
     return info.get("n") if info else None
 
 
+# ---------------------------------------------------------------------------
+# ★2026-10-02 (KAGOYA 移管 段階B・ユーザー確定「神風はこの PC、裏の処理は KAGOYA」):
+#   offload.json の "remote_buttons" に名前 (label) があるボタンは、KAGOYA で動かす。
+#   出力は ssh 越しに今までどおり画面へ。目視の画面は決まった番号 (REVIEW_PORT) で出し、
+#   ssh の中継 (-L) でこの PC のブラウザから開く。設計: iMak_data/hq/kagoya_phase_bc_design.md
+#   ★ボタンを remote_buttons に入れるのは、そのボタンの控えの正本を KAGOYA に移した後だけ。
+# ---------------------------------------------------------------------------
+OFFLOAD_CFG = r"C:/dev/iMak_data/hq/offload.json"
+REMOTE_PY = r"C:\Program Files\Python311\python.exe"
+REVIEW_PORT = 18765
+_REVIEW_RE = re.compile(r"ブラウザで確認してください\s*→\s*(http://127\.0\.0\.1:\d+/)")
+
+
+def _offload_cfg():
+    try:
+        with open(OFFLOAD_CFG, encoding="utf-8-sig") as f:
+            return json.load(f)
+    except Exception:                                          # noqa: BLE001
+        return {}
+
+
+def remote_command(script, cmd, cfg=None):
+    """KAGOYA で動かすボタンなら ssh のコマンド (list) を返す。そうでなければ None (純関数寄り)。"""
+    cfg = cfg if cfg is not None else _offload_cfg()
+    if script.get("label") not in (cfg.get("remote_buttons") or []):
+        return None
+    args = list(cmd)
+    if args and os.path.basename(args[0]).lower().startswith("python"):
+        args = args[1:]
+    q = " ".join("'" + str(a).replace("'", "''") + "'" for a in args)
+    envs = "".join("$env:%s='%s'; " % (k, str(v).replace("'", "''"))
+                   for k, v in (script.get("env") or {}).items())
+    remote = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+              "$env:PYTHONIOENCODING='utf-8'; $env:PYTHONUNBUFFERED='1'; "
+              "$env:IMAK_HEADLESS='1'; $env:IMAK_NO_BROWSER='1'; $env:IMAK_REVIEW_PORT='%d'; %s"
+              "Set-Location '%s'; & '%s' -X utf8 -u %s"
+              % (REVIEW_PORT, envs, str(script["cwd"]).replace("/", "\\"), REMOTE_PY, q))
+    return ["ssh", "-i", cfg["key"], "-o", "BatchMode=yes", "-o", "ServerAliveInterval=30",
+            "-o", "ExitOnForwardFailure=yes", "-L", "%d:127.0.0.1:%d" % (REVIEW_PORT, REVIEW_PORT),
+            "%s@%s" % (cfg["user"], cfg["host"]), remote]
+
+
 def _run_worker(script, cmd=None):
     """走る前のガード → 実行 → 後処理。**旧パネルと同じ関数** (control_panel.before_run / after_run)。"""
     cp = _cp()
@@ -1135,13 +1177,24 @@ def _run_worker(script, cmd=None):
         _flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
                   | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
                   | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0))
-        p = subprocess.Popen(cmd, cwd=script["cwd"], env=env,
+        _rcmd = remote_command(script, cmd)
+        if _rcmd:
+            _log("🛰 KAGOYA で動かします (画面は中継してこの PC で開きます)")
+        p = subprocess.Popen(_rcmd or cmd, cwd=script["cwd"], env=env,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                              encoding="utf-8", errors="replace", bufsize=1,
                              creationflags=_flags)
         STATE["proc"] = p                                      # 止めるボタン用
         for line in p.stdout:
             _log(line)
+            if _rcmd:
+                _m = _REVIEW_RE.search(line)
+                if _m:
+                    try:
+                        import webbrowser
+                        webbrowser.open(_m.group(1))
+                    except Exception:                          # noqa: BLE001
+                        pass
             if fh:
                 fh.write(line)
                 fh.flush()
