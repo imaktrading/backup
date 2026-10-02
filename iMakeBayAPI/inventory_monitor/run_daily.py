@@ -130,6 +130,49 @@ def _parse_qty_output(out: str) -> dict:
     return info
 
 
+def _sync_counts(res: dict) -> tuple[dict, dict]:
+    """ebay_supplier_sync の結果 JSON → (zero, restore) を _parse_qty_output と同じ形で返す (純関数).
+
+    ★ 2026-10-02: 取下げ・復活を ebay_supplier_sync に替えた後も、件名と冒頭は旧 auto_qty_zero の
+    stdout を読んでいたため、3 枠を 0 にした回でも「正常 (処理 0 件) / 対象なし」と出ていた。
+    kind 1 (単品) は listing Revise、kind 2/3 は variation Revise に数える。
+    """
+    done = (res or {}).get("done") or {}
+    out = []
+    for action in ("zero", "restore"):
+        ok_items = done.get(action) or []
+        ng_items = [f for f in (done.get("failed") or []) if f.get("action") == action]
+        info = {"variation_executed": 0, "variation_success": None,
+                "single_executed": 0, "single_success": None,
+                "candidates": 0, "two_cycle_pass": 0,
+                "ok": len(ok_items), "ng": len(ng_items), "total": len(ok_items) + len(ng_items),
+                "success": sum(1 for f in ok_items if f.get("ack") == "Success"),
+                "warning": sum(1 for f in ok_items if f.get("ack") == "Warning"),
+                "safe_failure": 0, "action_needed_failure": len(ng_items), "transient": 0}
+        for key, is_single in (("single", True), ("variation", False)):
+            n_ok = sum(1 for f in ok_items if (f.get("kind") == 1) == is_single)
+            n_ng = sum(1 for f in ng_items if (f.get("kind") == 1) == is_single)
+            info[f"{key}_executed"] = n_ok + n_ng
+            if n_ok + n_ng:
+                info[f"{key}_success"] = n_ng == 0
+        out.append(info)
+    return out[0], out[1]
+
+
+def _load_sync_result(since: datetime) -> dict:
+    """この回 (since 以降) に ebay_supplier_sync が書いた結果 JSON。無ければ {}。"""
+    files = sorted(LOG_DIR.glob("ebay_supplier_sync_2*.json"), key=lambda f: f.stat().st_mtime)
+    for f in reversed(files):
+        if f.stat().st_mtime < since.timestamp():
+            break
+        try:
+            import json  # noqa: PLC0415
+            return json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+    return {}
+
+
 def _format_report(start: datetime, end: datetime,
                    monitor: dict, zero: dict, restore: dict,
                    step_results: list) -> tuple[str, str]:
@@ -171,7 +214,8 @@ def _format_report(start: datetime, end: datetime,
     restore_ng = restore.get("ng", 0) or 0
     total_ng = zero_ng + restore_ng
     revise_step_failed = any(not ok for name, ok in step_results
-                              if "qty_zero" in name.lower() or "restore" in name.lower()
+                              if name.lower() == "zero"
+                              or "qty_zero" in name.lower() or "restore" in name.lower()
                               or "audit" in name.lower())
     if revise_step_failed:
         ebay_status = f"❌ 異常 (revise step 失敗、 動作不能 or 部分実行) — 処理 {total_processed} 件 / 失敗 {total_ng} 件"
@@ -456,8 +500,8 @@ def main():
 
     end = datetime.now()
     monitor = _parse_monitor_output(outputs.get("monitor", ""))
-    zero = _parse_qty_output(outputs.get("zero", ""))
-    restore = _parse_qty_output(outputs.get("restore", ""))
+    # ★ 2026-10-02: 取下げ・復活は ebay_supplier_sync (結果は JSON)。旧 stdout 解析では 0 件と出ていた。
+    zero, restore = _sync_counts(_load_sync_result(start))
 
     subject, body = _format_report(start, end, monitor, zero, restore, step_results)
     # ★ 2026-10-02: 取下げ・突合せは 実 eBay × 仕入元 (サイズ・色) の新方式。その結果をそのまま載せる。
