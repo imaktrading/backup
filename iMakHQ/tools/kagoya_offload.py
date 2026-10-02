@@ -428,10 +428,30 @@ def _run_kuji(job, d):
         return
     print("[kuji] 一番くじの夜の検索", flush=True)
     t0 = time.time()
-    r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(HERE, "run_kuji_night.py")],
-                       cwd=HERE, env=dict(os.environ, PYTHONIOENCODING="utf-8", IMAK_HEADLESS="1"))
-    json.dump({"job_id": job["job_id"], "rc": r.returncode, "sec": round(time.time() - t0)},
+    started = datetime.datetime.now()
+    try:
+        r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(HERE, "run_kuji_night.py")],
+                           cwd=HERE, env=dict(os.environ, PYTHONIOENCODING="utf-8", IMAK_HEADLESS="1"))
+        rc = r.returncode
+    finally:
+        # ★2026-10-02: 途中で止まると一番くじの Chrome (16個・約900MB) が残り、一日中 席が取れなかった。
+        #   この回に起動した、一番くじ用の Chrome だけを閉じる (他の担当・前からある物には触らない)
+        _close_own_chrome("ichibankuji_scrape_profile", started)
+    json.dump({"job_id": job["job_id"], "rc": rc, "sec": round(time.time() - t0)},
               open(mark, "w", encoding="utf-8"))
+
+
+def _close_own_chrome(profile_word, since):
+    """サーバーで、since 以降に起動した profile_word の Chrome だけを閉じる (Windows・自分の仕事の後片付け)。"""
+    ps = ("Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'chrome.exe' -and "
+          f"$_.CommandLine -match '{profile_word}' -and "
+          f"$_.CreationDate -ge [datetime]'{since:%Y-%m-%dT%H:%M:%S}' }} | "
+          "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }")
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps], timeout=60,
+                       capture_output=True, text=True)
+    except Exception:                                          # noqa: BLE001
+        pass
 
 
 def _push_kuji_files(cfg):
