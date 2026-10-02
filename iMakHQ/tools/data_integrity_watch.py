@@ -39,6 +39,25 @@ HOURLY_LOG = r"C:\dev\iMak_data\hq\data_integrity_hourly.jsonl"
 REQ_DIR = r"C:\dev\iMak_data\catalog\requests"
 
 
+# ★2026-10-02 (カタログ回答 2026-10-02_catalog_integrity_auto_response.md): UNIQLO の specs は取り込みのたびに
+#   評価・在庫を取り直す。数字1文字の変化は 1ビット差になりやすく ('0'↔'4' / '5'↔'4')、毎回「化け」に見えていた。
+#   変わった場所がこれらの項目の値の中なら数えない (他の項目・他の列の化けは今までどおり拾う)。
+VOLATILE_SPEC_KEYS = ("rating", "stock_total", "in_stock", "sold_out_since", "stock_by_size", "review_count")
+
+
+def only_volatile_changed(old_raw, new_raw):
+    """specs の JSON 2つを読み、違う項目が VOLATILE_SPEC_KEYS だけなら True (純関数)。
+    読めない (化けで JSON が壊れた等) 時は False = 今までどおり化けとして数える。"""
+    try:
+        a, b = json.loads(old_raw), json.loads(new_raw)
+    except Exception:                                          # noqa: BLE001
+        return False
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return False
+    diff = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
+    return bool(diff) and diff <= set(VOLATILE_SPEC_KEYS)
+
+
 def bitflips(old_rows, new_rows, cols):
     """{rowid: 行} ×2 → 1ビット化けの欄のリスト (純関数)。
 
@@ -56,6 +75,8 @@ def bitflips(old_rows, new_rows, cols):
             d = [(k, a[k] ^ b[k]) for k in range(len(a)) if a[k] != b[k]]
             if 1 <= len(d) <= 3 and all(bin(v).count("1") == 1 and v != 0x20 for _, v in d):
                 k0 = d[0][0]
+                if (cols[i] if i < len(cols) else "") == "specs" and only_volatile_changed(a, b):
+                    continue                   # 取り込みのたびに正しく変わる値 (評価・在庫など)
                 out.append({"rowid": rid, "column": cols[i] if i < len(cols) else str(i),
                             "offsets": [k for k, _ in d], "bits": [hex(v) for _, v in d],
                             "was": a[max(0, k0 - 25):k0 + 15].decode("utf-8", "replace"),
