@@ -182,7 +182,8 @@ def _get_item(iid: str) -> dict:
         q = int((re.search(r"<Quantity>(\d+)</Quantity>", v) or [0, "0"])[1])
         s = int((re.search(r"<QuantitySold>(\d+)</QuantitySold>", v) or [0, "0"])[1])
         spec = dict(re.findall(r"<NameValueList><Name>([^<]*)</Name><Value>([^<]*)</Value>", v))
-        variations.append({"spec": spec, "avail": q - s})
+        sku = (re.search(r"<SKU>([^<]*)</SKU>", v) or [0, ""])[1]
+        variations.append({"spec": spec, "avail": q - s, "sku": sku})
     top = re.sub(r"<Variations>.*?</Variations>", "", x, flags=re.S)
     q = re.search(r"<Quantity>(\d+)</Quantity>", top)
     s = re.search(r"<QuantitySold>(\d+)</QuantitySold>", top)
@@ -191,6 +192,7 @@ def _get_item(iid: str) -> dict:
     title = (re.search(r"<Title>([^<]*)</Title>", x) or [0, ""])[1]
     return {"status": status, "avail": (int(q[1]) - int(s[1])) if q and s else 0,
             "color": specs.get("color", ""), "size": specs.get("size", ""),
+            "sku": (re.search(r"<SKU>([^<]*)</SKU>", top) or [0, ""])[1],
             "ebay_title": title, "variations": variations}
 
 

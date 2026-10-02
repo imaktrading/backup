@@ -83,3 +83,53 @@ def test_assorted_needs_every_color_in_stock():
                 ({"09", "BLACK"}, "4XL", True)])
     assert S.supplier_state(slot, sup)[0] == "out" and S.decide(slot, "out", 0) == "zero"
     assert S.supplier_state({**slot, "size": "4XL"}, sup)[0] == "in"
+
+
+# ------------------------------------------------------------------ SKU 詳細シートを eBay の枠に合わせる
+NOW = "2026/10/02 11:30"
+
+
+def _r(row, size, color, sku=""):
+    return {"row": row, "size": size, "color": color, "sku": sku}
+
+
+def test_sheet_adds_rows_for_ebay_colors_missing_from_sheet():
+    """③ パフテック: eBay の DARK GRAY が シートに無い → 行を足す (色は仕入元の名前)."""
+    sup = _sup([({"08", "DARK GRAY", "08 DARK GRAY"}, "M", True), ({"09", "BLACK", "09 BLACK"}, "M", True)])
+    slots = [{"slot": {"kind": 3, "size": "M", "color": "Black", "spec": {}, "avail": 1, "sku": "u1"},
+              "sup": sup, "state": "in", "avail": 1},
+             {"slot": {"kind": 3, "size": "M", "color": "DARK GRAY", "spec": {}, "avail": 1, "sku": "u2"},
+              "sup": sup, "state": "in", "avail": 1}]
+    p = S.plan_sheet("357849150249", "Puff Tech", slots, [_r(18, "M", "BLACK", "u1")], NOW)
+    assert p["updates"][18] == {"I": "◎", "K": 1, "L": NOW, "V": "対応あり"}
+    assert len(p["appends"]) == 1
+    new = p["appends"][0]
+    assert (new[3], new[5], new[6], new[7], new[8]) == ("357849150249", "u2", "M", "DARK GRAY", "◎")
+
+
+def test_sheet_marks_other_color_rows_without_ebay_slot():
+    """② EVANGELION: 出品は NAVY。OFF WHITE の行は消さずに「eBay に対応なし」."""
+    sup = _sup([({"69", "NAVY"}, "M", False), ({"01", "OFF WHITE"}, "M", True)], trusted={"69", "NAVY"})
+    slots = [{"slot": {"kind": 2, "size": "M", "color": "Navy", "spec": {}, "avail": 0, "sku": "d1"},
+              "sup": sup, "state": "out", "avail": 0}]
+    p = S.plan_sheet("358711287999", "Eva", slots, [_r(705, "M", "OFF WHITE"), _r(719, "M", "NAVY")], NOW)
+    assert p["updates"][719]["I"] == "✕" and p["updates"][719]["K"] == 0
+    assert p["updates"][705] == {"V": "eBay に対応なし"} and p["orphans"] == [705]
+    assert p["appends"] == []
+
+
+def test_sheet_unknown_state_does_not_overwrite_supplier_mark():
+    sup = {"stock": {}, "trusted_colors": set(), "ok": False}
+    slots = [{"slot": {"kind": 1, "size": "XL", "color": "Red", "spec": None, "avail": 1, "sku": "x"},
+              "sup": sup, "state": "unknown", "avail": 1}]
+    p = S.plan_sheet("1", "t", slots, [_r(616, "XL", "RDBR")], NOW)
+    assert "I" not in p["updates"][616] and p["updates"][616]["K"] == 1
+
+
+def test_sheet_duplicate_rows_for_one_slot_are_marked():
+    sup = _sup([({"BK"}, "M", True)])
+    slots = [{"slot": {"kind": 3, "size": "M", "color": "BK", "spec": {}, "avail": 1, "sku": "s"},
+              "sup": sup, "state": "in", "avail": 1}]
+    p = S.plan_sheet("1", "t", slots, [_r(245, "M", "BK"), _r(300, "M", "BK")], NOW)
+    assert p["updates"][245]["V"] == "対応あり"
+    assert p["updates"][300] == {"V": "重複 (同じ eBay 枠に複数行)"}

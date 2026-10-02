@@ -197,10 +197,14 @@ def match_supplier_skus_with_sheet(
                     and _normalize_color(sh_sku.get("color", "")) == u_color):
                 existing = sh_sku
                 break
-        # size-only fallback
+        # size-only fallback — ★ 2026-10-02: 色の入っていない古い行だけに当てる。
+        #   旧実装は 色が違っても同じサイズの行に当てていたため、URL の色 (OFF WHITE) の在庫が
+        #   別の色 (NAVY) の行に書かれ、eBay の枠と仕入元が食い違った (EVANGELION)。
+        #   他の色の行は ebay_supplier_sync が eBay の枠に合わせて作る。
         if existing is None:
             for sh_sku in sheet_skus:
-                if _normalize_size(sh_sku.get("size", "")) == u_size:
+                if (_normalize_size(sh_sku.get("size", "")) == u_size
+                        and not _normalize_color(sh_sku.get("color", ""))):
                     existing = sh_sku
                     break
 

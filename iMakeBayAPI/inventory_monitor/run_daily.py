@@ -419,7 +419,7 @@ def main():
     #   照合して決める (ebay_supplier_sync)。旧 auto_qty_zero はシートの別の色の行で 在庫のある枠まで
     #   0 にし得るので外す。1 に戻す (--execute-restore) は ユーザーの OK まで付けない。
     # after_steps.append(("zero",    [PY, "auto_qty_zero.py", "--mode=zero", "--execute"]))
-    after_steps.append(("zero", [PY, "ebay_supplier_sync.py", "--execute-zero"]))
+    after_steps.append(("zero", [PY, "ebay_supplier_sync.py", "--execute-zero", "--update-sheet"]))
     # ★ 2026-10-02 ユーザー判断: 「eBay を 1 に戻す」自動処理 (restore と audit_heal) を、対応づけを
     #   直すまで止める。シートの行と eBay の枠を サイズ・色 で正しく対応させていないため、
     #   10/02 03:08 の audit_heal が ウインドブラスト Men's の 公式「M-R ◎」を eBay「JP M」に当てて、
@@ -464,7 +464,7 @@ def main():
     for name in ("zero", "audit_buyable"):
         for ln in (outputs.get(name, "") or "").splitlines():
             s = ln.split("] ", 1)[-1] if ln.startswith("[") else ln
-            if s.startswith(("判断:", "突合せ:", "  [zero]", "  [restore]", "  ⚠️", "  ⚠️要対応")):
+            if s.startswith(("判断:", "シート:", "突合せ:", "  [zero]", "  [restore]", "  ⚠️", "  ⚠️要対応")):
                 extra.append("  " + s.strip())
     extra.append("  ※ 1 に戻す処理は止めています (2026-10-02)。[restore] は候補の一覧で、実行していません。")
     body = body + "\n" + "\n".join(extra)

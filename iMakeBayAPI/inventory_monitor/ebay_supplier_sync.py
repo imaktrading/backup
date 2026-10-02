@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -100,7 +101,8 @@ def ebay_slots(item: dict) -> list:
     variations = item.get("variations") or []
     if not variations:
         return [{"kind": 1, "size": A.jp_size(item.get("ebay_title", "")) or A.jp_size(item.get("size", "")),
-                 "color": item.get("color", ""), "spec": None, "avail": item.get("avail") or 0}]
+                 "color": item.get("color", ""), "spec": None, "avail": item.get("avail") or 0,
+                 "sku": item.get("sku", "")}]
     out = []
     for v in variations:
         spec = v.get("spec") or {}
@@ -108,7 +110,8 @@ def ebay_slots(item: dict) -> list:
         color = low.get("color") or low.get("colour") or ""
         out.append({"kind": 3 if color else 2,
                     "size": A.jp_size(low.get("sizes") or low.get("size") or ""),
-                    "color": color or item.get("color", ""), "spec": spec, "avail": v.get("avail") or 0})
+                    "color": color or item.get("color", ""), "spec": spec, "avail": v.get("avail") or 0,
+                    "sku": v.get("sku", "")})
     return out
 
 
@@ -164,7 +167,106 @@ def slot_key(iid: str, slot: dict) -> str:
     return f"{iid}|{slot['size']}|{slot['color']}"
 
 
+# ------------------------------------------------------------------ SKU 詳細シートを eBay の枠に合わせる (純関数)
+# ★ 2026-10-02 ユーザー了承: SKU 詳細の行は これまで「仕入元 URL の 1 色」から作っていたため、
+#   eBay で出している他の色の行が無い (74 枠) / サイズだけで別の色の行に当てる / 古い行が残る、
+#   が起きていた。eBay の出品の枠 (①②③) を正として 1 枠 1 行に合わせる。行は消さない。
+SHEET_COL_MATCH = 22          # V: eBay対応
+SHEET_MATCH_HEADER = "eBay対応"
+
+
+def supplier_color_name(slot: dict, sup: dict) -> str:
+    """新しく作る行の H 列 (色) = 仕入元側の色名 (UNIQLO は "DARK GRAY"、montbell は "BK")."""
+    def pick(keys):
+        names = sorted((k for k in keys if k and not k.isdigit() and not re.match(r"^\d+\s", k)),
+                       key=len, reverse=True)
+        return names[0] if names else (sorted(keys)[0] if keys else "")
+    if slot["kind"] in (1, 2) and sup.get("trusted_colors"):
+        return pick(sup["trusted_colors"])
+    ck = A.color_keys(slot["color"])
+    for keys, _ in sup.get("stock", {}):
+        if keys & ck and keys != frozenset({"*"}):
+            return pick(keys)
+    return (slot["color"] or "").upper()
+
+
+def _slot_color_keys(slot: dict, sup: dict) -> set:
+    keys = A.color_keys(slot["color"]) | A.color_keys(supplier_color_name(slot, sup))
+    if slot["kind"] in (1, 2):
+        keys |= set(sup.get("trusted_colors") or ())
+    return keys
+
+
+def plan_sheet(iid: str, title: str, slots: list, rows: list, now: str) -> dict:
+    """1 出品分の SKU 詳細シートの直し方を決める.
+
+    slots: [{"slot": ebay_slots の 1 枠, "sup": supplier_stock, "state": in/out/vanished/unknown, "avail": 実行後の残り}]
+    rows : その出品の既存行 [{"row", "size", "color", "sku"}]
+    Returns: {"updates": {row: {"I","K","L","V"}}, "appends": [行の値], "orphans": [row]}
+    """
+    updates, appends, used = {}, [], set()
+    mark = {"in": "◎", "out": "✕", "vanished": "✕"}
+    for s in slots:
+        slot, sup = s["slot"], s["sup"]
+        ck = _slot_color_keys(slot, sup)
+        size = (slot["size"] or "").upper()
+        hits = [r for r in rows
+                if (r["size"] or "").strip().upper() == size
+                and (not ck or A.color_keys(r["color"]) & ck)]
+        cells = {"K": s["avail"], "L": now, "V": "対応あり"}
+        if s["state"] in mark:
+            cells["I"] = mark[s["state"]]
+        if hits:
+            updates[hits[0]["row"]] = cells
+            used.add(hits[0]["row"])
+            for extra in hits[1:]:
+                updates[extra["row"]] = {"V": "重複 (同じ eBay 枠に複数行)"}
+                used.add(extra["row"])
+        else:
+            appends.append([False, False, "", iid, title, slot.get("sku", ""), size,
+                            supplier_color_name(slot, sup), cells.get("I", ""), "", s["avail"], now,
+                            "", "", "", "", "", "", "", "", "", "対応あり (自動追加 " + now[:10] + ")"])
+    orphans = [r["row"] for r in rows if r["row"] not in used]
+    for r in orphans:
+        updates[r] = {"V": "eBay に対応なし"}
+    return {"updates": updates, "appends": appends, "orphans": orphans}
+
+
 # ------------------------------------------------------------------ 実行
+
+def _sync_sheet(sh, per_listing: dict, ended: set) -> dict:
+    """SKU 詳細シートを eBay の枠に合わせて書く (I/K/L/V を更新、足りない行を追加、行は消さない)."""
+    from sheet_updater import get_sku_worksheet  # noqa: PLC0415
+    ws = get_sku_worksheet(sh)
+    values = ws.get_all_values()
+    if ws.col_count < SHEET_COL_MATCH:
+        ws.add_cols(SHEET_COL_MATCH - ws.col_count)
+    rows_by = {}
+    for i, r in enumerate(values[1:], start=2):
+        r = list(r) + [""] * SHEET_COL_MATCH
+        rows_by.setdefault(r[3].strip(), []).append({"row": i, "size": r[6], "color": r[7], "sku": r[5]})
+    now = datetime.now().strftime("%Y/%m/%d %H:%M")
+    col = {"I": "I", "K": "K", "L": "L", "V": "V"}
+    batch, appends, n_upd, n_orph, n_end = [], [], 0, 0, 0
+    for iid, (title, slots) in per_listing.items():
+        p = plan_sheet(iid, title[:80], [{**s} for s in slots], rows_by.get(iid, []), now)
+        for row, cells in p["updates"].items():
+            n_upd += 1
+            for k, v in cells.items():
+                batch.append({"range": f"{col[k]}{row}", "values": [[v]]})
+        appends += p["appends"]
+        n_orph += len(p["orphans"])
+    for iid in ended:
+        for r in rows_by.get(iid, []):
+            n_end += 1
+            batch.append({"range": f"V{r['row']}", "values": [["出品終了"]]})
+    batch.append({"range": "V1", "values": [[SHEET_MATCH_HEADER]]})
+    for i in range(0, len(batch), 2000):
+        ws.batch_update(batch[i:i + 2000], value_input_option="USER_ENTERED")
+    if appends:
+        ws.append_rows(appends, value_input_option="USER_ENTERED")
+    return {"updated": n_upd, "appended": len(appends), "orphans": n_orph, "ended": n_end}
+
 
 def _revise(iid: str, slot: dict, qty: int) -> dict:
     from ebay_actions.trading_api_client import (  # noqa: PLC0415
@@ -174,7 +276,7 @@ def _revise(iid: str, slot: dict, qty: int) -> dict:
     return revise_inventory_status_variation(iid, slot["spec"], qty)
 
 
-def run(execute_zero: bool, execute_restore: bool) -> dict:
+def run(execute_zero: bool, execute_restore: bool, update_sheet: bool = False) -> dict:
     from sheet_updater import open_sheet, read_main_active_rows  # noqa: PLC0415
     try:
         prev = json.loads(STATE_FILE.read_text(encoding="utf-8")) if STATE_FILE.exists() else {}
@@ -183,7 +285,10 @@ def run(execute_zero: bool, execute_restore: bool) -> dict:
     streaks = prev.get("streak_in", {})
     new_streaks = {}
     plan, reports = [], []
-    listings = read_main_active_rows(open_sheet(), supplier_filter="all")
+    per_listing = {}          # iid -> (title, [{slot, sup, state}])  シート合わせ用
+    ended = set()
+    sh = open_sheet()
+    listings = read_main_active_rows(sh, supplier_filter="all")
     for L in listings:
         iid, sup_name = L["listing_id"], L.get("supplier", "uniqlo")
         try:
@@ -192,6 +297,7 @@ def run(execute_zero: bool, execute_restore: bool) -> dict:
             reports.append({"iid": iid, "why": f"eBay を読めない {type(ex).__name__}: {ex}"})
             continue
         if item.get("status") != "Active":
+            ended.add(iid)
             continue
         try:
             sup = supplier_stock(sup_name, L["url"], L["title"])
@@ -204,6 +310,8 @@ def run(execute_zero: bool, execute_restore: bool) -> dict:
             if st == "in":
                 new_streaks[key] = streaks.get(key, 0) + 1
             action = decide(slot, st, new_streaks.get(key, 0))
+            per_listing.setdefault(iid, (item.get("ebay_title") or L["title"], []))[1].append(
+                {"slot": slot, "sup": sup, "state": st, "avail": slot["avail"]})
             rec = {"iid": iid, "title": (item.get("ebay_title") or L["title"])[:40], "sup": sup_name,
                    "slot": f"{slot['size'] or '?'} / {slot['color'] or '-'}", "kind": slot["kind"],
                    "ebay_avail": slot["avail"], "supplier": st, "why": why, "action": action}
@@ -227,11 +335,18 @@ def run(execute_zero: bool, execute_restore: bool) -> dict:
             r = _revise(iid, slot, qty)
             (done[rec["action"]] if r.get("success") else done["failed"]).append(
                 {**rec, "ack": r.get("ack"), "err": r.get("error_code")})
+            if r.get("success"):
+                for ent in per_listing.get(iid, (None, []))[1]:
+                    if ent["slot"] is slot:
+                        ent["avail"] = qty
+
+    sheet_result = _sync_sheet(sh, per_listing, ended) if update_sheet else None
 
     STATE_FILE.write_text(json.dumps({"ts": datetime.now().isoformat(timespec="seconds"),
                                       "streak_in": new_streaks}, ensure_ascii=False), encoding="utf-8")
     return {"ts": datetime.now().isoformat(timespec="seconds"), "listings": len(listings),
             "plan": [p[0] for p in plan], "done": done, "held": held, "reports": reports,
+            "sheet": sheet_result,
             "execute_zero": execute_zero, "execute_restore": execute_restore}
 
 
@@ -239,9 +354,13 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="実 eBay × 仕入元 (サイズ・色) で eBay の数量を決める")
     ap.add_argument("--execute-zero", action="store_true")
     ap.add_argument("--execute-restore", action="store_true")
+    ap.add_argument("--update-sheet", action="store_true", help="SKU 詳細シートを eBay の枠に合わせる")
     args = ap.parse_args()
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    res = run(args.execute_zero, args.execute_restore)
+    res = run(args.execute_zero, args.execute_restore, args.update_sheet)
+    if res.get("sheet"):
+        _log(f"シート: 更新 {res['sheet']['updated']} 行 / 追加 {res['sheet']['appended']} 行 / "
+             f"eBay に対応なし {res['sheet']['orphans']} 行 / 出品終了 {res['sheet']['ended']} 行")
     nz = sum(1 for p in res["plan"] if p["action"] == "zero")
     nr = sum(1 for p in res["plan"] if p["action"] == "restore")
     _log(f"判断: 0 にする {nz} 枠 / 1 に戻す {nr} 枠 / 知らせるだけ {len(res['reports'])} 件 / "
