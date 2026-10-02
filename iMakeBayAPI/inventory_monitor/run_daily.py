@@ -415,7 +415,11 @@ def main():
         _log(">>> step uuid_sync / qty_sync: skip (eBay report 未 DL)")
         step_results.append(("uuid_sync", False))
         step_results.append(("qty_sync", False))
-    after_steps.append(("zero",    [PY, "auto_qty_zero.py", "--mode=zero", "--execute"]))
+    # ★ 2026-10-02: 取下げは シート (K/B 列) ではなく 実 eBay × 仕入元の実在庫 (全色) を サイズ・色 で
+    #   照合して決める (ebay_supplier_sync)。旧 auto_qty_zero はシートの別の色の行で 在庫のある枠まで
+    #   0 にし得るので外す。1 に戻す (--execute-restore) は ユーザーの OK まで付けない。
+    # after_steps.append(("zero",    [PY, "auto_qty_zero.py", "--mode=zero", "--execute"]))
+    after_steps.append(("zero", [PY, "ebay_supplier_sync.py", "--execute-zero"]))
     # ★ 2026-10-02 ユーザー判断: 「eBay を 1 に戻す」自動処理 (restore と audit_heal) を、対応づけを
     #   直すまで止める。シートの行と eBay の枠を サイズ・色 で正しく対応させていないため、
     #   10/02 03:08 の audit_heal が ウインドブラスト Men's の 公式「M-R ◎」を eBay「JP M」に当てて、
@@ -455,6 +459,15 @@ def main():
     restore = _parse_qty_output(outputs.get("restore", ""))
 
     subject, body = _format_report(start, end, monitor, zero, restore, step_results)
+    # ★ 2026-10-02: 取下げ・突合せは 実 eBay × 仕入元 (サイズ・色) の新方式。その結果をそのまま載せる。
+    extra = ["", "【実 eBay × 仕入元 (サイズ・色)】"]
+    for name in ("zero", "audit_buyable"):
+        for ln in (outputs.get(name, "") or "").splitlines():
+            s = ln.split("] ", 1)[-1] if ln.startswith("[") else ln
+            if s.startswith(("判断:", "突合せ:", "  [zero]", "  [restore]", "  ⚠️", "  ⚠️要対応")):
+                extra.append("  " + s.strip())
+    extra.append("  ※ 1 に戻す処理は止めています (2026-10-02)。[restore] は候補の一覧で、実行していません。")
+    body = body + "\n" + "\n".join(extra)
     _log("\n" + body)
     # レポート本文を毎回ファイル保存 (= pythonw で print 破棄 + メール失敗 でも結果を失わない)
     try:
