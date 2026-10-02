@@ -417,9 +417,10 @@ def main():
         step_results.append(("qty_sync", False))
     # ★ 2026-10-02: 取下げは シート (K/B 列) ではなく 実 eBay × 仕入元の実在庫 (全色) を サイズ・色 で
     #   照合して決める (ebay_supplier_sync)。旧 auto_qty_zero はシートの別の色の行で 在庫のある枠まで
-    #   0 にし得るので外す。1 に戻す (--execute-restore) は ユーザーの OK まで付けない。
+    #   0 にし得るので外す。1 に戻す (--execute-restore) は 2026-10-02 ユーザーの OK で再開。
     # after_steps.append(("zero",    [PY, "auto_qty_zero.py", "--mode=zero", "--execute"]))
-    after_steps.append(("zero", [PY, "ebay_supplier_sync.py", "--execute-zero", "--update-sheet"]))
+    after_steps.append(("zero", [PY, "ebay_supplier_sync.py", "--execute-zero", "--execute-restore",
+                                 "--update-sheet"]))
     # ★ 2026-10-02 ユーザー判断: 「eBay を 1 に戻す」自動処理 (restore と audit_heal) を、対応づけを
     #   直すまで止める。シートの行と eBay の枠を サイズ・色 で正しく対応させていないため、
     #   10/02 03:08 の audit_heal が ウインドブラスト Men's の 公式「M-R ◎」を eBay「JP M」に当てて、
@@ -466,7 +467,7 @@ def main():
             s = ln.split("] ", 1)[-1] if ln.startswith("[") else ln
             if s.startswith(("判断:", "シート:", "突合せ:", "  [zero]", "  [restore]", "  ⚠️", "  ⚠️要対応")):
                 extra.append("  " + s.strip())
-    extra.append("  ※ 1 に戻す処理は止めています (2026-10-02)。[restore] は候補の一覧で、実行していません。")
+    extra.append("  ※ 1 に戻すのは 仕入元 ◎ が 2 回続き 対応が 1 つに決まる枠だけ (1 回 20 枠まで)。")
     body = body + "\n" + "\n".join(extra)
     _log("\n" + body)
     # レポート本文を毎回ファイル保存 (= pythonw で print 破棄 + メール失敗 でも結果を失わない)
