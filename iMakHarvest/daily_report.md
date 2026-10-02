@@ -1,5 +1,35 @@
 # iMakHarvest daily_report
 
+## 2026-10-01〜10-02 — 定期処理を全部KAGOYAへ移設 + メルカリAPI化 (段階①②)
+
+ユーザー最優先「家のPCが毎日落ちる→KAGOYAへ移行を急ぐ」。抽出くんの定期処理
+(ヨドバシ収集・GSHOCK反映・トレジャーハント・キャラ収集) を全部KAGOYAサーバー側で
+動く形に移した。家のPCは毎時cycleのSSH呼出だけが残る。
+
+**KAGOYA移設** (`kagoya_chara_offload.py` / `kagoya_treasure_offload.py` 新設、
+`kagoya_yodobashi_offload.py` 新設。commit `71af20d7`〜`9259f832`)
+- キャラ収集・トレジャーハント: 仕事ファイルを送る→サーバーで検索・判定→結果を取り込む形
+- ヨドバシ収集+GshockMerge: 鍵(スプシ/eBay)もKAGOYAに置かれたため、既存スクリプトを
+  そのままSSH実行するだけで完結 (下流はGoogle Sheetsを読むので結果ファイルの受渡し不要)
+- サーバーの「席」(空きメモリで取る、1担当1つ、owner=HARVEST) は仕様が2回改訂され
+  その都度追従。優先順(①監視くん予備 ②HQ ③抽出くん)を守る
+
+**メルカリAPI化 段階①②** (`scrapers/mercari_search_api.py` 新設。既存の収集本体
+`run_harvest_mercari_psa10.py`は触らず、urls_override/detail_fnの配線口で接続)
+- 段階①(検索): Chrome版は anti-bot で1語6件程度が頭打ちだったが、API版は同条件で
+  3倍以上拾えた (実機比較: 一致率100%)
+- 段階②(詳細取得): Chrome driverをlazy化し、APIで足りればChromeを1本も起動しない
+  設計に (commit `1fdf9176`)。need_gb 1.2→0.3。identity_verified は実機3件で
+  `register_sms_confirmation=="yes"` との一致を確認して対応づけ (no側は未確認と明記)
+- 副次発見・修正: API検索にShopsが混ざり下流fetch_failが増える不具合 (commit `aa8fce82`)
+
+**障害対応**: KAGOYAにAnthropicキー配置直後もVision全滅 (45%失敗) — 真因は
+`anthropic`パッケージ未インストールだった。pip install で解消、実機でcert読取確認後
+両タスク再開。再発防止で `remote_busy()` のマーカー一致バグ (コマンドライン上の
+閉じ引用符で絶対一致しない実装ミス) も発見・修正
+
+計10件程度の依頼・回答、commit多数、push済み (最新 `ad285e75`)。
+
 ## 2026-09-24 — 夜間タスクのChrome調査(0台) + キャラ軸トレジャーハント新設 + クラッシュ再開対応
 
 **夜間タスクの所要時間・Chrome数** (ADV依頼 `night_job_duration_and_chrome`。作業PCが9/16から
