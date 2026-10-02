@@ -86,3 +86,11 @@ def test_prune_keeps_newest(tmp_path):
         (tmp_path / n).mkdir()
     B.prune_runs(str(tmp_path), keep=2)
     assert sorted(p.name for p in tmp_path.iterdir()) == ["20261002_110000", "20261002_120000"]
+
+
+def test_token_fingerprint_changes_only_with_reauthorization():
+    a = json.dumps({"access_token": "x1", "refresh_token": "R"}).encode()
+    b = json.dumps({"access_token": "x2", "refresh_token": "R"}).encode()     # 2時間ごとの取り直し
+    c = json.dumps({"access_token": "x3", "refresh_token": "R2"}).encode()    # 認可のやり直し
+    assert B.token_fingerprint(a) == B.token_fingerprint(b) != B.token_fingerprint(c)
+    assert B.token_fingerprint(b"broken") is None

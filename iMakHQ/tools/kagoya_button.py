@@ -212,6 +212,19 @@ def mirror_todo(sent, files):
     return sorted(k for k, m in files.items() if sent.get(k) != m)
 
 
+SYNC_TOKENS = [r"C:/dev/iMak_data/credentials/ebay_oauth_token_sell.json"]
+
+
+def token_fingerprint(data):
+    """鍵ファイルの「認可の版」(refresh_token の要約)。読めなければ None (純関数)。"""
+    import hashlib
+    try:
+        rt = json.loads(data.decode("utf-8-sig")).get("refresh_token") or ""
+    except Exception:                                          # noqa: BLE001
+        return None
+    return hashlib.sha256(rt.encode()).hexdigest()[:16] if rt else None
+
+
 def push(cfg, run_dir, st=None):
     """家の控えを送る。送った中身は run_dir/base に残す (取り込みの比べる元)。"""
     base_dir = os.path.join(run_dir, "base")
@@ -242,6 +255,13 @@ def push(cfg, run_dir, st=None):
             ti.mtime = os.path.getmtime(p)         # 展開した時に今の時刻や 1970 にしない
             tf.addfile(ti, io.BytesIO(data))
             n += 1
+        # eBay の鍵 (認可をやり直すと中身の refresh_token が変わる)。変わった時だけ KAGOYA にも送る。
+        # 家に戻すことはしない (KAGOYA が自分で取り直す使い捨ての access_token は家に要らない)
+        for p in SYNC_TOKENS:
+            fp = token_fingerprint(_read(p))
+            if fp and st.get("token_sent:" + os.path.basename(p)) != fp:
+                tf.add(p, arcname=_rel(p))
+                st["token_sent:" + os.path.basename(p)] = fp
     if K._scp_to(cfg, tgz, K.REMOTE_ROOT + r"\button_push.tgz") != 0:
         raise RuntimeError("控えを送れなかった")
     src, dst = REMOTE_KEY_COPY
