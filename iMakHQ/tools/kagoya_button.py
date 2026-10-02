@@ -267,7 +267,9 @@ def remote_ssh_cmd(cfg, cwd, envs, args):
     port = 18765
     return ["ssh", "-i", cfg["key"], "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "-o", "LogLevel=ERROR",
             "-o", "ServerAliveInterval=30", "-o", "ExitOnForwardFailure=yes",
-            "-L", f"{port}:127.0.0.1:{port}", f"{cfg['user']}@{cfg['host']}", remote]
+            "-L", f"{port}:127.0.0.1:{port}",
+            # 一番くじの再仕入れ① は自前の画面を決まった番号 (8766) で出す (ichibankuji_restock.PORT)
+            "-L", "8766:127.0.0.1:8766", f"{cfg['user']}@{cfg['host']}", remote]
 
 
 def pull_and_merge(cfg, run_dir):
@@ -304,6 +306,20 @@ def pull_and_merge(cfg, run_dir):
     return man, wrote, conflicts
 
 
+KEEP_RUNS = 5          # 1回 約20MB (送った写し + 戻ってきた物)。ぶつかった時の家の分もここに残る
+
+
+def prune_runs(root, keep=KEEP_RUNS):
+    """古い回の作業フォルダを消す (新しい keep 回は残す)。"""
+    import shutil
+    try:
+        names = sorted(n for n in os.listdir(root) if os.path.isdir(os.path.join(root, n)))
+    except OSError:
+        return
+    for n in names[:-keep] if keep else names:
+        shutil.rmtree(os.path.join(root, n), ignore_errors=True)
+
+
 def run_local(cwd, envs, args):
     env = dict(os.environ, **dict(e.split("=", 1) for e in envs))
     return subprocess.call([sys.executable, "-X", "utf8", "-u"] + args, cwd=cwd, env=env)
@@ -318,6 +334,7 @@ def home_main(cwd, envs, args):
         st = K._state()
         K.sync_code_and_db(cfg, st)
         K._save_state(st)
+        prune_runs(os.path.join(K.WORK, "button"))
         run_dir = os.path.join(K.WORK, "button", datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
         os.makedirs(run_dir, exist_ok=True)
         n = push(cfg, run_dir, st)

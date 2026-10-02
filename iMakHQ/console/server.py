@@ -1095,7 +1095,7 @@ def count_of(kind):
 OFFLOAD_CFG = r"C:/dev/iMak_data/hq/offload.json"
 REMOTE_PY = r"C:\Program Files\Python311\python.exe"
 REVIEW_PORT = 18765
-_REVIEW_RE = re.compile(r"ブラウザで確認してください\s*→\s*(http://127\.0\.0\.1:\d+/)")
+_REVIEW_RE = re.compile(r"(?:ブラウザで確認してください\s*→|ブラウザで選択 → 送信:)\s*(http://127\.0\.0\.1:\d+/)")
 
 
 def _offload_cfg():

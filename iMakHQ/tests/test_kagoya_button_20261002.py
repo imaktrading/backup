@@ -79,3 +79,10 @@ def test_carry_name_roundtrip_inside_and_outside_dev():
     assert B.carry_name(b).startswith("ABS/C/Users/")
     assert os.path.normcase(B.home_path(B.carry_name(a))) == os.path.normcase(a)
     assert os.path.normcase(B.home_path(B.carry_name(b))) == os.path.normcase(b)
+
+
+def test_prune_keeps_newest(tmp_path):
+    for n in ["20261002_100000", "20261002_110000", "20261002_120000"]:
+        (tmp_path / n).mkdir()
+    B.prune_runs(str(tmp_path), keep=2)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["20261002_110000", "20261002_120000"]

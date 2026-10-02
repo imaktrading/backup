@@ -26,3 +26,8 @@ def test_remote_button_goes_through_kagoya_button():
 def test_review_line_regex():
     m = server._REVIEW_RE.search("  ブラウザで確認してください → http://127.0.0.1:18765/")
     assert m and m.group(1) == "http://127.0.0.1:18765/"
+
+
+def test_review_line_regex_kuji_screen():
+    m = server._REVIEW_RE.search("  🌐 ブラウザで選択 → 送信: http://127.0.0.1:8766/")
+    assert m and m.group(1) == "http://127.0.0.1:8766/"
