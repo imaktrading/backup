@@ -135,7 +135,8 @@ def merge_file(path, base, srv, home):
     """1ファイル分の取り込み。返り値 (書く中身 or None, 表示用の一言, ぶつかったか)。"""
     if path.lower().endswith(".jsonl"):
         out, c = merge_jsonl(base, srv, home)
-        return out, "追記", c
+        # 後ろに足されただけなら「追記」、KAGOYA で書き直されていたら (目視待ちを消した等)「丸ごと」
+        return out, ("追記" if srv.startswith(base or b"") else "丸ごと"), c
     if path.lower().endswith(".json"):
         try:
             bj = _loads(base) if base is not None else {}

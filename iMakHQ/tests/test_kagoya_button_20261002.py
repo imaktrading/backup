@@ -94,3 +94,10 @@ def test_token_fingerprint_changes_only_with_reauthorization():
     c = json.dumps({"access_token": "x3", "refresh_token": "R2"}).encode()    # 認可のやり直し
     assert B.token_fingerprint(a) == B.token_fingerprint(b) != B.token_fingerprint(c)
     assert B.token_fingerprint(b"broken") is None
+
+
+def test_jsonl_rewritten_on_server_is_labeled_whole_file():
+    out, how, c = B.merge_file("x.jsonl", b"a\nb\n", b"b\n", b"a\nb\n")
+    assert out == b"b\n" and how == "丸ごと" and not c
+    out, how, c = B.merge_file("x.jsonl", b"a\n", b"a\nb\n", b"a\n")
+    assert out == b"a\nb\n" and how == "追記"
