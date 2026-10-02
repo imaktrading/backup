@@ -53,6 +53,8 @@
 
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  // ★2026-10-02: KAGOYA で動くボタンに印 (ユーザー要望「移行したマークつけれない？」)
+  function kg(x) { return x && x.kagoya ? '<span class="kg" title="押すと KAGOYA で動きます (画面はこの PC で開きます)">KAGOYA</span>' : ""; }
   function money(v) {
     if (v == null) return "—";
     return Math.abs(v) >= 1e6 ? "$" + (v / 1e6).toFixed(2) + "M" : "$" + Math.round(v).toLocaleString("en-US");
@@ -145,7 +147,7 @@
   function liCard(j) {
     var hot = j.state === "todo";
     return openTag(j, "li" + (hot ? " hot" : ""), "", ' title="' + esc(tipOf(j)) + '"') +
-      '<span class="t">' + esc(j.label) + "</span>" +
+      '<span class="t">' + esc(j.label) + kg(j) + "</span>" +
       '<span class="note">' + esc(INFO[j.kind] || j.note || "") + "</span>" +
       '<span class="row"><span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" +
       chip(j) + goMark(j) + "</span>" + closeTag(j);
@@ -156,7 +158,7 @@
     var html = (names || []).map(function (name) {
       return buttons.filter(function (x) { return !x.used && x.label.indexOf(name) >= 0; }).map(function (b) {
         b.used = true;
-        return openTag(b, "rw", "", "") + '<span class="t">' + esc(b.label) + '</span><span class="d">' +
+        return openTag(b, "rw", "", "") + '<span class="t">' + esc(b.label) + kg(b) + '</span><span class="d">' +
           esc((b.tip || "").split("。")[0]) + "</span>" + goMark(b, "実行") + closeTag(b);
       }).join("");
     }).join("");
@@ -219,7 +221,7 @@
         var auto = b.type === "auto";
         return openTag(b, "task", ' style="--gc:var(' + (auto ? "--g-restock" : "--g-seed") + ');--pc:var(--p-new)"',
                        ' title="' + esc(b.tip || "") + '"') +
-          '<span class="tag"><span class="pg">' + esc(b.label) + "</span>" +
+          '<span class="tag"><span class="pg">' + esc(b.label) + kg(b) + "</span>" +
           '<span class="gp">' + (auto ? "目視 → 生成 → 予約出品" : "CSV を作る") + "</span></span>" +
           '<span class="nm">' + esc(c) + "</span>" +
           '<span class="row"><span class="note">' + (auto ? "続けて出品まで" : "作って入稿は手で") + "</span>" +
@@ -294,7 +296,7 @@
         '<div class="tasks">' + list.map(function (j) {
           return openTag(j, "task", ' style="--gc:var(--g-' + esc(j.group) + ');--pc:var(' + L[2] + ')"', ' title="' + esc(tipOf(j)) + '"') +
             '<span class="tag"><span class="pg it" data-it="' + esc(itemOf(j)) + '">' + esc(itemOf(j)) + '</span><span class="gp">' + esc(tagOf(j)) + "</span></span>" +
-            '<span class="nm">' + esc(shortName(j.label)) + "</span>" +
+            '<span class="nm">' + esc(shortName(j.label)) + kg(j) + "</span>" +
             '<span class="row"><span class="n">' + num(j) + "<small>件</small></span>" + goMark(j) + "</span>" + closeTag(j);
         }).join("") + "</div></div>";
     }).join("");
@@ -376,10 +378,10 @@
     var extra = buttons.filter(function (b) { return !b.used && !b.badge; });
     $("g-other").hidden = !rest.length && !extra.length;
     $("other-rows").innerHTML = rest.map(function (j) {
-      return openTag(j, "rw", "", "") + '<span class="t">' + esc(j.label) + '</span><span class="d">' +
+      return openTag(j, "rw", "", "") + '<span class="t">' + esc(j.label) + kg(j) + '</span><span class="d">' +
         esc(j.tip.split("。")[0]) + "</span>" + goMark(j) + closeTag(j);
     }).join("") + extra.map(function (b) {
-      return openTag(b, "rw", "", "") + '<span class="t">' + esc(b.label) + '</span><span class="d">' +
+      return openTag(b, "rw", "", "") + '<span class="t">' + esc(b.label) + kg(b) + '</span><span class="d">' +
         esc((b.tip || "").split("。")[0]) + "</span>" + goMark(b, "実行") + closeTag(b);
     }).join("");
   }

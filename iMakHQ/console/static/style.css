@@ -387,3 +387,6 @@ svg.agsp{display:block;width:120px;height:30px}
 
 .strip .st .stlink{font:600 11.5px var(--f-ui);border:1px solid var(--line-strong);color:var(--ink-2);border-radius:12px;padding:1px 9px;text-decoration:none}
 .strip .st .stlink:hover{border-color:var(--ai);color:var(--ai)}
+/* ★2026-10-02: KAGOYA で動くボタンの印 */
+.kg{display:inline-block;margin-left:6px;padding:0 5px;border-radius:3px;font:600 10px/16px var(--f-mono);
+  letter-spacing:.04em;color:var(--ai);background:var(--ai-soft);border:1px solid var(--ai);vertical-align:1px;white-space:nowrap}

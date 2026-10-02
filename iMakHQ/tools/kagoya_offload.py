@@ -578,6 +578,19 @@ def _code_hash(files):
     return h.hexdigest()[:16]
 
 
+def db_is_healthy(path):
+    """SQLite の quick_check が ok か (読むだけ)。開けない時も壊れている扱い。"""
+    import sqlite3
+    try:
+        c = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30)
+        try:
+            return c.execute("pragma quick_check").fetchone()[0] == "ok"
+        finally:
+            c.close()
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
 def sync_code_and_db(cfg, st):
     """コードと DB の写しを、変わった時だけ送る。"""
     os.makedirs(WORK, exist_ok=True)
@@ -600,7 +613,11 @@ def sync_code_and_db(cfg, st):
         st["code_hash"] = ch
         print(f"  📦 コードを送った ({len(files)}本)")
     m = os.path.getmtime(LOCAL_DB)
-    if st.get("db_mtime") != m:
+    if st.get("db_mtime") != m and not db_is_healthy(LOCAL_DB):
+        # ★2026-10-02: 08:20 に壊れた DB をそのまま KAGOYA に送っていた。壊れた物は送らない
+        #   (KAGOYA は前の写しのまま動く)。直った DB は mtime が変わるので次の回に送られる
+        print("  ⚠️要対応: カタログ DB が壊れている (quick_check NG) → KAGOYA には送らない")
+    elif st.get("db_mtime") != m:
         if _scp_to(cfg, LOCAL_DB, REMOTE_ROOT + r"\products.sqlite") != 0:
             raise RuntimeError("DB を送れなかった")
         rc, out = _ssh(cfg, f'Copy-Item {REMOTE_ROOT}\\products.sqlite {REMOTE_DB} -Force; "ok"')

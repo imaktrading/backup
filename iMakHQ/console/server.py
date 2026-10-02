@@ -537,9 +537,14 @@ def get_jobs():
         jobs.append({"kind": kind, "i": i, "label": label, "step": m.group(0) if m else "",
                      "group": group_of(label), "tip": (s.get("tip") or "")[:400],
                      "runnable": runnable(s), "params": s.get("params") or [],
-                     "ask_amount": bool(s.get("ask_amount")), **info})
+                     "ask_amount": bool(s.get("ask_amount")), "kagoya": s["label"] in _remote_set(), **info})
     return {"jobs": jobs, "counts_at": STATE["counts_at"], "counting": STATE["counting"],
             "counts_error": STATE["counts_error"]}
+
+
+def _remote_set():
+    """KAGOYA で動くボタンの名前 (offload.json の remote_buttons)。画面に印を付けるため。"""
+    return set(_offload_cfg().get("remote_buttons") or [])
 
 
 def get_buttons():
@@ -551,7 +556,7 @@ def get_buttons():
                     "label": display_label(s["label"]), "badge": s.get("badge"),
                     "runnable": runnable(s), "why": version.why_not_runnable(s),
                     "params": s.get("params") or [], "ask_amount": bool(s.get("ask_amount")),
-                    "tip": (s.get("tip") or "")[:400]})
+                    "tip": (s.get("tip") or "")[:400], "kagoya": s["label"] in _remote_set()})
     return {"buttons": out}
 
 
