@@ -40,3 +40,20 @@ def test_kagoya_picks_from_prefetched_before_selecting():
     cache = {"1": {"Subject": "A", "Grade": "10"}, "2": {"Subject": "B"}, "4": {"Subject": "D", "Grade": ""}}
     ok, wait = P.split_cached_certs(["1", "2", "3", "4"], cache)
     assert ok == ["1", "4"] and wait == ["2", "3"]
+
+
+def test_start_that_does_not_run_is_reported_not_silent(monkeypatch):
+    """起動したのに動かない (run.log がつかまれていた 10/2〜10/3) を黙って毎時繰り返さない。"""
+    import pytest
+    monkeypatch.setattr(K, "remote_status", lambda cfg: {"ok": True, "running": False, "done": False})
+    monkeypatch.setattr(K.time, "sleep", lambda s: None)
+    t = iter(range(0, 1000, 10))
+    monkeypatch.setattr(K.time, "time", lambda: next(t))
+    with pytest.raises(RuntimeError, match="動いていない"):
+        K.confirm_started({}, wait_s=30)
+
+
+def test_start_that_runs_is_ok(monkeypatch):
+    monkeypatch.setattr(K, "remote_status", lambda cfg: {"ok": True, "running": True, "done": False})
+    monkeypatch.setattr(K.time, "sleep", lambda s: None)
+    assert K.confirm_started({}, wait_s=30)

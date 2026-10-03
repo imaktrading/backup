@@ -796,6 +796,7 @@ def start_remote(cfg, job):
         _push_kuji_files(cfg)
     if _scp_to(cfg, jp, REMOTE_ROOT + r"\job.json") != 0:
         raise RuntimeError("仕事のファイルを送れなかった")
+    cleanup_remote_orphans(cfg)
     script = rf"{REMOTE_CODE_ROOT}\iMakHQ\tools\kagoya_offload.py"
     cmdline = (f'cmd /c set PYTHONIOENCODING=utf-8 && "{REMOTE_PY}" -u "{script}" run '
                f'{REMOTE_ROOT}\\job.json > {REMOTE_ROOT}\\run.log 2>&1')
@@ -804,6 +805,7 @@ def start_remote(cfg, job):
     rc, out = _ssh(cfg, ps)
     if rc != 0 or out.strip().splitlines()[-1:] != ["0"]:
         raise RuntimeError(f"起動に失敗: {out[:200]}")
+    confirm_started(cfg)
 
 
 def remote_status(cfg):
@@ -998,7 +1000,13 @@ def cycle():
     if st.get("job_date") == today and not rs["done"]:
         # 今日の仕事が途中で止まった (サーバー再起動など) → 続きから再開
         print("↻ 今日の仕事が途中で止まっていた → 続きから再開")
-        start_remote_resume(cfg)
+        try:
+            start_remote_resume(cfg)
+        except Exception as e:                                   # noqa: BLE001
+            print(f"⚠️要対応: 続きから再開できない ({e})")
+            st["last_error"] = f"{datetime.datetime.now():%m/%d %H:%M} 再開できない: {str(e)[:120]}"
+            _save_state(st)
+            return 1
         _save_state(st)
         return 0
     if st.get("job_date") == today:
@@ -1021,9 +1029,19 @@ def cycle():
         st["job_date"] = today
         _save_state(st)
         return 0
-    start_remote(cfg, job)
-    st["job_date"] = today
+    st["job_date"] = today                     # 起動を確かめられなくても今日の仕事は送った (次の回は再開で拾う)
     st["job_id"] = job["job_id"]
+    try:
+        start_remote(cfg, job)
+    except Exception as e:                                       # noqa: BLE001
+        print(f"⚠️要対応: KAGOYA で今日の仕事が始まらない ({e})")
+        if "動いていない" not in str(e):
+            # 仕事のファイルを送る前に失敗 → 次の回は新しく作り直す (前日の job.json を再開しない)
+            st.pop("job_date", None)
+            st.pop("job_id", None)
+        st["last_error"] = f"{datetime.datetime.now():%m/%d %H:%M} 始まらない: {str(e)[:120]}"
+        _save_state(st)
+        return 1
     st["started"] = datetime.datetime.now().isoformat(timespec="seconds")
     st.pop("last_error", None)
     _save_state(st)
@@ -1101,6 +1119,7 @@ def start_urgent_restock(cfg, st, today):
 
 def start_remote_resume(cfg):
     """結果ファイルを消さずに、同じ仕事をもう一度起動する (済んだ分は飛ばされる)。"""
+    cleanup_remote_orphans(cfg)
     script = rf"{REMOTE_CODE_ROOT}\iMakHQ\tools\kagoya_offload.py"
     cmdline = (f'cmd /c set PYTHONIOENCODING=utf-8 && "{REMOTE_PY}" -u "{script}" run '
                f'{REMOTE_ROOT}\\job.json >> {REMOTE_ROOT}\\run.log 2>&1')
@@ -1109,6 +1128,38 @@ def start_remote_resume(cfg):
     rc, out = _ssh(cfg, ps)
     if rc != 0 or out.strip().splitlines()[-1:] != ["0"]:
         raise RuntimeError(f"再開の起動に失敗: {out[:200]}")
+    confirm_started(cfg)
+
+
+# ★2026-10-03: 10/2 8:30 の一番くじの処理が残した chromedriver が run.log をつかんだまま残り、
+#   以後の起動は全部「run.log に書けない」で即終了していた (10/2 8:33〜10/3 13:4x・朝の仕事1回分が抜けた)。
+#   毎時の見回りは「続きから再開」と出すだけで気づかなかった (fail-OPEN)。
+#   → 起動の前に、親の処理がもう居ない Chrome / chromedriver を片付ける。起動の後は動いたかを確かめる
+_ORPHAN_PS = (
+    "$ids = @{}; Get-CimInstance Win32_Process | ForEach-Object { $ids[[int]$_.ProcessId] = 1 }; "
+    "Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(undetected_chromedriver|chromedriver|chrome)\\.exe$' "
+    "-and -not $ids.ContainsKey([int]$_.ParentProcessId) } | "
+    "ForEach-Object { taskkill /T /F /PID $_.ProcessId | Out-Null; 'orphan ' + $_.Name + ' ' + $_.ProcessId }")
+
+
+def cleanup_remote_orphans(cfg):
+    """KAGOYA の置き去りの Chrome / chromedriver (親が居ない物だけ) を閉じる。返り値: 閉じた数。"""
+    rc, out = _ssh(cfg, _ORPHAN_PS, timeout=120)
+    n = sum(1 for x in out.splitlines() if x.startswith("orphan "))
+    if n:
+        print(f"  🧹 KAGOYA の置き去りの Chrome を {n}個 閉じた")
+    return n
+
+
+def confirm_started(cfg, wait_s=30):
+    """起動した仕事が本当に動いているか。動いていなければ要対応として例外 (黙って毎時繰り返さない)。"""
+    t0 = time.time()
+    while time.time() - t0 < wait_s:
+        time.sleep(5)
+        rs = remote_status(cfg)
+        if rs.get("running") or rs.get("done"):
+            return True
+    raise RuntimeError("⚠️要対応: KAGOYA で起動したのに動いていない (run.log がつかまれている / 席が取れない 等)")
 
 
 def compare():
