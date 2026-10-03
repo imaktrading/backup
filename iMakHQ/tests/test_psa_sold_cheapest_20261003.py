@@ -148,3 +148,16 @@ def test_snkr_existing_url_uses_listing_photo():
     assert P.snkr_listing_now(SP, u, cache) == (True, 8000, "https://cdn.snkrdunk.com/x.jpg")
     assert P.snkr_listing_now(SP, "https://snkrdunk.com/apparels/358113/used/1", cache) == (False, None, "")
     assert calls == ["358113"]                     # 同じカードは1回だけ読む
+
+
+def test_sync_orders_before_listing(monkeypatch):
+    """仕入れ先を探す前に注文の取り込みを走らせる (仕入れ済みが出ていた・2026-10-04)。"""
+    import order_purchase_sync as ops
+    calls = []
+    monkeypatch.setattr(ops, "main", lambda argv: calls.append(("sync", argv)) or 0)
+    monkeypatch.setattr(P, "load_waiting_orders", lambda item=None: calls.append(("load", item)) or [])
+    assert P.main(["--no-open"]) == 0
+    assert calls == [("sync", ["--write"]), ("load", None)]
+    calls.clear()
+    P.main(["--no-open", "--no-sync"])
+    assert calls == [("load", None)]

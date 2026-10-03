@@ -387,6 +387,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--item", help="この itemID だけ")
     ap.add_argument("--no-open", action="store_true")
+    ap.add_argument("--no-sync", action="store_true", help="先に注文の取り込みをしない")
     a = ap.parse_args(argv)
 
     import mercari_psa_resource as mp
@@ -396,6 +397,15 @@ def main(argv=None) -> int:
     import snkrdunk_psa_resource as sp
     import sold_restock_worklist as W
 
+    # ★2026-10-04 ユーザー「すでに仕入れた出品も表示されている。スプシ更新のタイミングを調整して」:
+    #   仕入済のチェックは「注文の取り込み」が購入履歴と結んだ時に付く。先に取り込んでから仕入れ待ちを読む
+    if not a.no_sync:
+        print("▶ 先に注文の取り込み (購入履歴と結ぶ) をします", flush=True)
+        try:
+            import order_purchase_sync as _ops
+            _ops.main(["--write"])
+        except Exception as e:                                 # noqa: BLE001
+            print(f"  ⚠ 注文の取り込みに失敗 ({type(e).__name__}: {str(e)[:80]}) — 前回の状態のまま探します", flush=True)
     orders = load_waiting_orders(a.item)
     print(f"仕入れ待ちの PSA: {len(orders)}件")
     if not orders:
