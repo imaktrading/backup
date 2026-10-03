@@ -490,6 +490,107 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
 
 
 # ============================================================================
+# API (mercapi) 判定 — 2026-10-03 HQ 依頼 watcher_mercari_to_api (ユーザー GO)
+# ============================================================================
+# Chrome は1件 約10秒、API は 0.1〜0.4秒。巡回の大半がメルカリなのでここを API にする。
+# **API で確実に読めた時だけ**結果を返す。それ以外 (例外・None・知らない status・数量が
+# 数字でない) は None を返し、呼出元が今までの Chrome 判定に回す (= 売切に倒さない)。
+#   - 削除済の個人出品は mercapi が None ではなく KeyError('data') を投げる (実測) → Chrome へ
+#   - 取引中 (trading) は Chrome 版でも checkout-button 不在 = SOLD 扱い → 同じく SOLD
+# ★既定は「止める」(POC 合格・ユーザーの go まで本番は Chrome のまま。2026-10-03 ADV 依頼 watcher_mercari_api_poc)。
+#   試す時だけ環境変数 IMAK_MERCARI_API=1。go が出たら下の既定値を "1" に替える。
+MERCARI_API_ENABLED = os.environ.get("IMAK_MERCARI_API", "0") == "1"
+_API_SOLD_STATUSES = {"sold_out", "trading"}
+_QUIET_INSTALLED = False
+
+
+def _quiet_mercapi_warnings(logging) -> None:
+    """mercapi が毎件出す「optional property を読めない」警告だけを落とす (ログが埋まるため)."""
+    global _QUIET_INSTALLED
+    if _QUIET_INSTALLED:
+        return
+    logging.getLogger().addFilter(
+        lambda r: not str(r.msg).startswith("Encountered optional response property"))
+    _QUIET_INSTALLED = True
+
+
+def _detect_via_api(url: str, is_shops: bool) -> Optional[dict]:
+    """mercapi で在庫判定。戻り値は _detect_via_selenium と同じ形、判定不能は None."""
+    if not MERCARI_API_ENABLED:
+        return None
+    try:
+        import asyncio  # noqa: PLC0415
+        import logging  # noqa: PLC0415
+        import certifi  # noqa: PLC0415
+        os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+        from mercapi import Mercapi  # noqa: PLC0415
+        _quiet_mercapi_warnings(logging)
+    except Exception:
+        return None
+
+    key = url.split("?")[0].rstrip("/").split("/")[-1]
+    if not key:
+        return None
+
+    async def _run():
+        m = Mercapi()
+        return await (m.product(key) if is_shops else m.item(key))
+
+    try:
+        obj = asyncio.run(_run())
+    except Exception:
+        return None
+    if obj is None:
+        return None
+
+    try:
+        price = int(obj.price) if obj.price is not None else None
+    except (TypeError, ValueError):
+        price = None
+
+    if is_shops:
+        detail = getattr(obj, "product_detail", None)
+        variants = getattr(detail, "variants", None) if detail is not None else None
+        if not variants:
+            return None
+        total = 0
+        for v in variants:
+            try:
+                total += int(getattr(v, "quantity", None))
+            except (TypeError, ValueError):
+                return None
+        in_stock = total >= 1
+        # Shops のタイムセール中は画面の値段 = time_sale_details.price (obj.price は定価)。
+        # POC 実測: 2JUdPs… 定価 7,500 / 画面 5,500。読めないセール情報は Chrome で見る
+        ts = getattr(detail, "time_sale_details", None)
+        if ts:
+            try:
+                from datetime import timezone  # noqa: PLC0415
+                now = datetime.now(timezone.utc)
+                start = datetime.fromisoformat(ts["startTime"].replace("Z", "+00:00"))
+                end = datetime.fromisoformat(ts["endTime"].replace("Z", "+00:00"))
+                if start <= now <= end:
+                    price = int(ts["price"])
+            except Exception:
+                return None
+        return {"name": getattr(obj, "display_name", "") or "",
+                "status": "ON_SALE" if in_stock else "SOLD_OUT",
+                "in_stock": in_stock, "price_jpy": price}
+
+    if getattr(obj, "auction_info", None) is not None:
+        return {"name": obj.name or "", "status": "AUCTION",
+                "in_stock": False, "price_jpy": None}
+    status = (getattr(obj, "status", "") or "").lower()
+    if status == "on_sale":
+        return {"name": obj.name or "", "status": "ON_SALE",
+                "in_stock": True, "price_jpy": price}
+    if status in _API_SOLD_STATUSES:
+        return {"name": obj.name or "", "status": "SOLD_OUT",
+                "in_stock": False, "price_jpy": price}
+    return None  # 知らない status (stop 等) → Chrome で見る
+
+
+# ============================================================================
 # 公開 API
 # ============================================================================
 def fetch_product_inventory(
@@ -513,6 +614,21 @@ def fetch_product_inventory(
     """
     item_id = parse_item_id(url) or ""
     is_shops = is_mercari_shops_url(url)
+
+    # 0) API で読めたらそれで確定 (読めなければ下の 404 check → Chrome へ)
+    raw = _detect_via_api(url, is_shops)
+    if raw is not None:
+        return {
+            "name": raw.get("name", ""),
+            "product_id": item_id,
+            "color": "",
+            "status": raw["status"],
+            "source": "api",
+            "fetched_at": datetime.now().isoformat(timespec="seconds"),
+            "skus": [{"size": "", "in_stock": raw["in_stock"],
+                      "quantity": 1 if raw["in_stock"] else 0,
+                      "price_jpy": raw.get("price_jpy")}],
+        }
 
     # 1) 高速 404 check
     is_404 = _check_404(url)
