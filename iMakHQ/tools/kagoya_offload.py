@@ -197,6 +197,7 @@ def _run_job_body(job, job_path, mp, sp):
     _run_desc(job, os.path.dirname(job_path))
     _run_ut(job, os.path.dirname(job_path))
     _run_stock(job, os.path.dirname(job_path))
+    _run_pending(job, os.path.dirname(job_path))
     _run_kuji(job, os.path.dirname(job_path))
     json.dump({"job_id": job["job_id"], "finished": datetime.datetime.now().isoformat(timespec="seconds"),
                "sec": round(time.time() - t0)}, open(done_path, "w", encoding="utf-8"))
@@ -511,6 +512,25 @@ def _run_stock(job, d):
                                    ensure_ascii=False) + "\n")
 
 
+def _run_pending(job, d):
+    """補URL の目視待ちの今の値段と売り切れを確かめる (API のみ・Chrome なし)。結果は家で当てる。"""
+    urls = job.get("pending_urls") or []
+    if not urls:
+        return
+    import aux_pending_refresh as APR
+    rp = os.path.join(d, "pending_result.jsonl")
+    done = _done_keys(rp, "url")
+    todo = [u for u in urls if u not in done]
+    print(f"[pending] 全{len(urls)}件 / 済{len(done)} / 残り{len(todo)}", flush=True)
+    for s in range(0, len(todo), 50):
+        res = APR.check_urls(todo[s:s + 50], log=lambda m: print(m, flush=True))
+        with open(rp, "a", encoding="utf-8") as f:
+            for u, v in res.items():                           # 確かめられなかった分は書かない (触らない)
+                f.write(json.dumps({"url": u, "live": v.get("live"), "price": v.get("price"),
+                                    "at": datetime.datetime.now().isoformat(timespec="seconds")},
+                                   ensure_ascii=False) + "\n")
+
+
 # ---------------------------------------------------------------------------
 # 家の側: 送る・起動・取りに行く
 # ---------------------------------------------------------------------------
@@ -723,6 +743,15 @@ def build_job(today):
             except Exception as e:                               # noqa: BLE001
                 print(f"  ⚠ 🌱 の在庫確認の対象を作れず ({type(e).__name__}) — 昼のボタンで確かめる")
         counts["stock"] = len(job.get("stock_urls") or [])
+        # ★2026-10-03 補URL の目視待ちの棚卸し (売り切れを外す・今の値段を書く)。
+        #   ユーザー「神風で作業するまえに、裏処理は全て夜のうちに済まさないと」
+        try:
+            import aux_pending
+            import aux_pending_refresh as APR
+            job["pending_urls"] = APR.urls_to_check(aux_pending.load())
+        except Exception as e:                                   # noqa: BLE001
+            print(f"  ⚠ 目視待ちの棚卸しの対象を作れず ({type(e).__name__})")
+        counts["pending"] = len(job.get("pending_urls") or [])
         # 一番くじの夜の検索 (切り替え: offload.json "kuji_night": true。既定は切 = 鍵を置いてから入れる)
         if _cfg().get("kuji_night") is True:
             job["kuji"] = True
@@ -788,6 +817,7 @@ def start_remote(cfg, job):
     rc, out = _ssh(cfg, f'New-Item -ItemType Directory -Force {REMOTE_ROOT} | Out-Null; '
                         f'Remove-Item {REMOTE_ROOT}\\result.jsonl,{REMOTE_ROOT}\\desc_result.jsonl,'
                         f'{REMOTE_ROOT}\\ut_result.jsonl,{REMOTE_ROOT}\\stock_result.jsonl,'
+                        f'{REMOTE_ROOT}\\pending_result.jsonl,'
                         f'{REMOTE_ROOT}\\kuji_done.json,'
                         f'{REMOTE_ROOT}\\done.json -ErrorAction SilentlyContinue; "ok"')
     if rc != 0:
@@ -886,7 +916,7 @@ def pull_and_merge(cfg, st):
     st["merged_ids"] = {k: v for k, v in st["merged_ids"].items() if k == job.get("job_id")}
     if live:
         n += (_pull_desc(cfg, st, job) + _pull_ut(cfg, st, job) + _pull_stock(cfg, st, job)
-              + _pull_kuji(cfg, st, job))
+              + _pull_pending(cfg, st, job) + _pull_kuji(cfg, st, job))
     return n
 
 
@@ -905,6 +935,26 @@ def _pull_stock(cfg, st, job):
     json.dump(led, open(tmp, "w", encoding="utf-8"), ensure_ascii=False)
     os.replace(tmp, STOCK_SEEN_PATH)
     return len(rows)
+
+
+def _pull_pending(cfg, st, job):
+    """目視待ちの棚卸しの結果を家の目視待ちに当てる (売り切れを外す・値段を書く)。同じ結果は二度当てない。"""
+    if not job.get("pending_urls"):
+        return 0
+    rows = _pull_lines(cfg, "pending_result.jsonl")
+    key = "pending_applied:" + str(job.get("job_id"))
+    done = st.get(key, 0)
+    new = rows[done:]
+    if not new:
+        return 0
+    import aux_pending_refresh as APR
+    res = {r["url"]: {"live": r.get("live"), "price": r.get("price")} for r in new if r.get("url")}
+    APR.apply_results(res)
+    st = st if st is not None else {}
+    for k in [k for k in st if k.startswith("pending_applied:") and k != key]:
+        st.pop(k, None)
+    st[key] = len(rows)
+    return len(new)
 
 
 def _pull_lines(cfg, name):
