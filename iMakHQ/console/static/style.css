@@ -373,6 +373,7 @@ svg.agsp{display:block;width:120px;height:30px}
 .urgent{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
 .urgent:empty{display:none}
 .urgent .u.calm{border-left-color:var(--line);opacity:.7}
+.urgent .u.ord{order:-1}
 @media (min-width:700px){.urgent{grid-template-columns:1fr 1fr}}
 .urgent .u{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:12px;padding:14px 16px;display:grid;grid-template-columns:1fr auto;gap:4px 14px;align-items:center}
 .urgent .k{font-size:11.5px;color:var(--ink-3);letter-spacing:.04em}
