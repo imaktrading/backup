@@ -13,6 +13,16 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "iMakHQ", "tools"))
 import sheet_io  # noqa: E402
 
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_real_aux_log(monkeypatch, tmp_path):
+    """★2026-10-04: 本物の補URL 記録 (review_logs/aux_url_log.jsonl) に「行2/4・url u」を書いていた
+    (コミットのたびに2行・計359行)。記録先を一時フォルダに向ける。"""
+    import aux_url_log
+    monkeypatch.setattr(aux_url_log, "LOG_PATH", str(tmp_path / "aux_url_log.jsonl"))
+
 
 def _row(a, b):
     r = [""] * 40

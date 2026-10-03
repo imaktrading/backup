@@ -56,14 +56,36 @@ def test_unknown_price_existing_is_kept():
     assert full[0] == _u(2)                                # 値段が分かる方が先
 
 
-def test_unknown_price_is_pushed_out_only_by_a_full_cheaper_set():
-    """値段の分かる安いのが枠数そろった時だけ、値段不明の既存が落ちる。"""
+def test_unknown_price_existing_is_never_pushed_out():
+    """★2026-10-04 決まりを変えた: 値段の分からない既存は、安い候補が枠数そろっても外さない。
+
+    前の決まり (「安いのが5本そろえば値段不明の既存を押し出す」) のせいで、値段表が読めなかった
+    10/3 17:44 の ③補充 で既存の補が全部「値段不明」になり、高い候補に押し出された
+    (275行・補の最安が上がった出品 95件)。値段が分からないなら、高いか安いかも分からない。
+    """
     existing = [_u(1)]
     new = [_u(2), _u(3), _u(4), _u(5), _u(6)]
     prices = {u: 1000 for u in new}
     full, _added, removed = H.rank_backurls(existing, new, prices, max_slots=5)
-    assert removed == [_u(1)]
-    assert len(full) == 5
+    assert removed == []
+    assert _u(1) in full and len(full) == 5
+
+
+def test_known_price_existing_is_replaced_only_by_cheaper():
+    """値段の分かる既存は、もっと安い物が入る時だけ外れる (ラティオス ¥7,650 が ¥8,999 に負けた事故)。"""
+    existing = [_u(1), _u(2), _u(3), _u(4), _u(5)]
+    prices = {_u(1): 7650, _u(2): 7700, _u(3): 8000, _u(4): 8200, _u(5): 9500,
+              _u(6): 8999, _u(7): 6000}
+    full, added, removed = H.rank_backurls(existing, [_u(6), _u(7)], prices, max_slots=5)
+    assert added == [_u(7)] and removed == [_u(5)]
+    assert full == [_u(7), _u(1), _u(2), _u(3), _u(4)]
+
+
+def test_price_table_missing_keeps_all_existing():
+    """値段表が読めない (既存の値段が全部不明) 時は、既存5本を1本も外さない。"""
+    existing = [_u(1), _u(2), _u(3), _u(4), _u(5)]
+    full, added, removed = H.rank_backurls(existing, [_u(6), _u(7)], {_u(6): 9000, _u(7): 9900}, max_slots=5)
+    assert removed == [] and added == [] and full == existing
 
 
 def test_no_duplicates_and_blank_ignored():

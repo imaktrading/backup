@@ -1196,9 +1196,9 @@ def compute_backurl_additions(existing, new_urls, max_slots=None):
 def rank_backurls(existing, new_urls, price_by_url=None, max_slots=None):
     """既存補URL + 今日 確定したURL を **安い順**に並べ直して最大 max_slots 本にする (純関数)。
 
-    - 値段が分かる URL (= 今日の候補に出ている) を安い順に前へ
-    - 値段が分からない URL (= 今日の候補に出ていない既存) はその後ろに元の順で置く
-      → 5本ぶん もっと安いものが確定した時だけ押し出される。押し出す根拠が無いなら残る
+    - 値段が分かる URL を安い順に前へ (既存も新しい物も)
+    - 値段が分からない **既存** は外さない (押し出す根拠が無い)。その後ろに置く
+    - 値段が分からない **新しい** URL は、空きがある時だけ一番後ろに入る
     - 主URL(A列) はここでは扱わない (呼び手が別管理)
 
     Returns: (full, added, removed)
@@ -1220,9 +1220,19 @@ def rank_backurls(existing, new_urls, price_by_url=None, max_slots=None):
             continue
         seen.add(n)
         pool.append(u)
-    # 安定ソート: 値段が分かる方を先に、その中は安い順。分からない分は元の順のまま後ろへ
-    ranked = sorted(pool, key=lambda u: (0, _price(u)) if _price(u) is not None else (1, 0))
-    full = ranked[:max_slots]
+    # ★2026-10-04: **値段の分からない既存の補は外さない**。
+    #   以前は「値段が分かる方を先に・分からない分は後ろ」に並べて上から5本を取っていたので、
+    #   値段表が読めなかった走行 (10/3 17:44 の ③補充・家) で既存の補が全部「値段不明」になり、
+    #   高い新しい候補に押し出された (275行書き換え・補の最安が上がった出品 95件・ラティオスは
+    #   ¥7,650/¥7,700 を外して ¥8,200〜¥8,999 を入れた)。外してよいのは「値段が分かっていて、
+    #   入る物より高い」既存だけ (hoju_url_from_dupes.plan_replacement と同じ決まり)。
+    exist_n = {_norm_url(u) for u in (existing or []) if u}
+    keep_unknown = [u for u in pool if _norm_url(u) in exist_n and _price(u) is None]
+    known = sorted((u for u in pool if _price(u) is not None), key=_price)
+    new_unknown = [u for u in pool if _norm_url(u) not in exist_n and _price(u) is None]
+    room = max(max_slots - len(keep_unknown), 0)
+    head = known[:room]
+    full = (head + keep_unknown + new_unknown)[:max_slots]
     kept = {_norm_url(u) for u in full}
     before = {_norm_url(u) for u in (existing or []) if u}
     added = [u for u in full if _norm_url(u) not in before]

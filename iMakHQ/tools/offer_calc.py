@@ -512,15 +512,21 @@ table{border-collapse:collapse;width:100%;margin-top:10px;font-size:13px}
 td,th{border:1px solid #3a3a3a;padding:6px 9px;text-align:right}
 th{background:#252525;color:#9cf}td:first-child,th:first-child{text-align:left}
 .note{color:#bbb;font-size:12px;margin-top:14px;line-height:1.8}
+.otbl td{vertical-align:top}
+.orow{cursor:pointer}
+.orow.go td{background:#16301a}.orow.warn td{background:#3a2a16}.orow.ng td{background:#3a1616}
+.orow:hover td{filter:brightness(1.35)}
+.orow.sel td{outline:2px solid #ffd700;outline-offset:-2px}
 a{color:#7ab8ff}
 </style></head><body>
 <h1>オファー判定 — 通していい？</h1>
 <div class="sub">スプレッドシート v9 の各タブ15行の数式をそのまま移植（生成時に突合検証済）。
-最終確認はシートで。</div>
+<b>この画面で決めてよい</b>（シートは念のため確認したい時だけ）。</div>
 
 <div class="f" style="margin-bottom:12px">
-  <label>📥 受信中のオファー（選ぶと全項目が入る）</label>
-  <div id="offerbox"><select id="offersel"></select>
+  <label>📥 受信中のオファー（行をクリックすると下に内訳が出ます）</label>
+  <div id="offerbox"><select id="offersel" style="display:none"></select>
+    <div id="offertbl"></div>
     <div id="meta" style="color:#9cf;font-size:12px;margin-top:6px"></div></div>
 </div>
 
@@ -543,7 +549,7 @@ a{color:#7ab8ff}
 （実例: $70承諾 ad10%で ¥-150 / ad0%で ¥+1,212）。<br>
 ★ <b>仕入は「購入 → 入金確認 → 少し置く」</b>。承諾時点では仕入れない。<br>
 ★ 米国向けは <b>関税を我々が負担（DDP）</b>。米国外はDDUなので同じ価格でも利益が厚い。<br>
-★ 最終判断はシートで。<span id="lnk"></span>
+★ 念のため確認したい時だけ → <span id="lnk"></span>
 </div>
 
 <script>
@@ -579,18 +585,23 @@ function iossLimit(cur){
    出品後に変えられない。>€150 で出したら、オファーで €150 を割っても送料は 0 のまま。
    空欄なら「出品=成約」とみなす (= その価格で出したらの試算)。
    ★シートの r15/16 が $C$9 を見るのと同じ扱い (2026-07-31)。 */
-function listedPrice(price){
-  const v = +document.getElementById('list').value || 0;
+function listedPrice(price, ov){
+  const v = ov ? (+ov.list || 0) : (+document.getElementById('list').value || 0);
   return v > 0 ? v : price;
 }
 
-function calc(price){
-  const dk = dest.value, ck = cat.value;
+/* ★2026-10-04: 一覧の各行を**画面の入力とは独立に**計算できるよう ov (上書き) を足した。
+   ov を渡すと DOM を読まない。同じ calc を使うので、一覧と下の内訳で数字がズレない
+   (別実装で表を作ると「どちらが正しいか」が分からなくなる)。
+   ov = {dest, cat, cost, pt, list, promo}。promo は既定 0 = 外す (承諾時の見方)。 */
+function calc(price, ov){
+  const dk = ov ? ov.dest : dest.value, ck = ov ? ov.cat : cat.value;
   const [tab, sym, cur] = P.routes[dk];
   const fx = P.fx[cur], C = P.cats[ck];
-  const promo = document.getElementById('promo').value === '1' ? P.promo : 0;
-  const cost = +document.getElementById('cost').value || 0;
-  const pt = +document.getElementById('pt').value || 0;
+  const promo = ov ? (ov.promo ? P.promo : 0)
+                   : (document.getElementById('promo').value === '1' ? P.promo : 0);
+  const cost = ov ? (+ov.cost || 0) : (+document.getElementById('cost').value || 0);
+  const pt = ov ? (+ov.pt || 0) : (+document.getElementById('pt').value || 0);
   const J = C.ship;
   let cKey = (dk === 'その他 (US出品・米国外へ発送)') ? 'US' : dk;
   const fr = feeRate(cKey === 'US' && tab === 'US計算_非US' ? 'US' : cKey, ck);
@@ -614,7 +625,7 @@ function calc(price){
       const e = P.eu[euCountry()] || {tier: 17, cost: 3219};
       const lim = iossLimit(cur);
       N = (price <= lim) ? (e.cost - J) : 0;                 // コストは成約額の帯
-      D = (listedPrice(price) <= lim) ? (e.cost - J) / fx : 0;  // 送料は出品価格の帯
+      D = (listedPrice(price, ov) <= lim) ? (e.cost - J) / fx : 0;  // 送料は出品価格の帯
     }
     E = F + D; G = E * fx;
     K = G * fr + 0.4 * fx; L = G * promo; M = G * P.payo;
@@ -631,11 +642,11 @@ function calc(price){
           profit: G - O, margin: (G - O) / G, cost, pt};
 }
 
-function solve(targetMargin){                 // その利益率になる価格を二分探索
+function solve(targetMargin, ov){              // その利益率になる価格を二分探索
   let lo = 0.5, hi = 5000;
   for (let i = 0; i < 60; i++){
     const mid = (lo + hi) / 2;
-    (calc(mid).margin < targetMargin) ? lo = mid : hi = mid;
+    (calc(mid, ov).margin < targetMargin) ? lo = mid : hi = mid;
   }
   return (lo + hi) / 2;
 }
@@ -722,7 +733,14 @@ function render(){
       '<tr><td>目標 ' + (P.target * 100).toFixed(0) + '% を満たす下限</td><td>' + r.sym +
         targetPrice.toFixed(2) + '</td><td>' + yen(calc(targetPrice).profit) + '</td></tr>' +
       '<tr><td><b>今回のオファー</b></td><td><b>' + r.sym + r.price.toFixed(2) +
-        '</b></td><td><b>' + yen(r.profit) + '</b></td></tr></table>' +
+        '</b></td><td><b>' + yen(r.profit) + '</b></td></tr>' +
+      /* ★2026-10-04: 出品価格のままの利益 (= V9 の9行目) を併記。ユーザーは
+         「9行目と16行目を主に見ている」= オファー額と出品価格を**並べて**比べている。 */
+      (function(){ const lp = +document.getElementById('list').value || 0;
+        if (!(lp > 0) || Math.abs(lp - r.price) < 0.005) return '';
+        return '<tr><td>出品価格のまま売れたら</td><td>' + r.sym + lp.toFixed(2) +
+               '</td><td>' + yen(calc(lp).profit) + '</td></tr>'; })() +
+      '</table>' +
     '<div style="margin-top:12px">' +
       line('売上', yen(r.G)) + line('仕入', '-' + yen(r.cost)) +
       (r.pt ? line('ポイント還元', '+' + yen(r.pt)) : '') +
@@ -778,6 +796,51 @@ document.getElementById('eucty').addEventListener('change', render);
   const sel = document.getElementById('offersel');
   P.offers.forEach((o, i) => sel.add(new Option(
     `${o.sym}${o.price}  ${o.title.slice(0,44)}  (${o.destLabel}／期限 ${o.expire}）`, i)));
+
+  /* ★2026-10-04 ユーザー「少し使いづらい。V9スプシでやっているのが実態」。
+     1件ずつ選ぶ形だと複数件を比べられず、出品価格のままの利益 (9行目) も見えなかった。
+     来ている全件を1枚の表にして、各件の **オファー額の利益 (16行目相当)** と
+     **出品価格のままの利益 (9行目相当)**、**いくらまで通るか** を並べる。
+     計算は下の内訳と同じ calc() を使う (プロモは外した前提 = 承諾時の見方)。 */
+  (function(){
+    var rows = P.offers.map(function(o, i){
+      var ov = {dest: o.dest, cat: o.cat, cost: o.cost, pt: 0, list: o.list, promo: 0};
+      var r = calc(o.price, ov), be = solve(0, ov);
+      var lp = (+o.list || 0) > 0 ? calc(o.list, ov) : null;
+      var cls = (r.margin >= P.target) ? 'go' : (r.profit > 0 ? 'warn' : 'ng');
+      var mark = (r.margin >= P.target) ? '✅ 通してよい'
+               : (r.profit > 0 ? '⚠️ 薄い' : '🚫 赤字');
+      var nocost = !o.cost;
+      return '<tr class="orow ' + cls + '" data-i="' + i + '">'
+        + '<td title="' + (o.title || '').replace(/"/g, '') + '">'
+          + (o.title || '').slice(0, 38) + '<br><span style="color:#888;font-size:11px">'
+          + o.destLabel + '／期限 ' + o.expire + '／' + o.buyer + '</span></td>'
+        + '<td><b>' + o.sym + (+o.price).toFixed(2) + '</b></td>'
+        + '<td>' + (nocost ? '<span style="color:#f88">—</span>' : yen(r.profit)) + '</td>'
+        + '<td>' + (lp && !nocost ? o.sym + (+o.list).toFixed(2) + '<br>'
+                    + '<span style="color:#bbb;font-size:11px">' + yen(lp.profit) + '</span>'
+                    : '—') + '</td>'
+        + '<td>' + (nocost ? '—' : o.sym + be.toFixed(2)) + '</td>'
+        + '<td>' + (nocost ? '<b style="color:#f88">仕入値が取れていません</b>' : mark) + '</td>'
+        + '</tr>';
+    }).join('');
+    document.getElementById('offertbl').innerHTML =
+      '<table class="otbl"><tr><th>出品／バイヤー</th><th>オファー</th>'
+      + '<th>この額の利益</th><th>出品価格のまま</th><th>ここまでなら</th><th>判定</th></tr>'
+      + rows + '</table>'
+      + '<div style="color:#888;font-size:11px;margin-top:4px">'
+      + 'プロモを外した前提（承諾時の見方）。行をクリックすると下に内訳が出ます</div>';
+    Array.prototype.forEach.call(document.querySelectorAll('.orow'), function(tr){
+      tr.addEventListener('click', function(){
+        sel.value = tr.getAttribute('data-i');
+        Array.prototype.forEach.call(document.querySelectorAll('.orow'),
+          function(x){ x.classList.remove('sel'); });
+        tr.classList.add('sel');
+        apply();
+      });
+    });
+  })();
+
   function apply(){
     const o = P.offers[+sel.value];
     dest.value = o.dest; cat.value = o.cat;
