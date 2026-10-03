@@ -101,3 +101,10 @@ def test_jsonl_rewritten_on_server_is_labeled_whole_file():
     assert out == b"b\n" and how == "丸ごと" and not c
     out, how, c = B.merge_file("x.jsonl", b"a\n", b"a\nb\n", b"a\n")
     assert out == b"a\nb\n" and how == "追記"
+
+
+def test_remote_exit_code_reaches_home():
+    """★2026-10-03: PowerShell が python の終了コードを返さず、「席が取れない (75)」が家に届かなかった
+    → 家で動かす代わりに失敗で止まった。remote のコマンドは終了コードを明示して返す。"""
+    cmd = B.remote_ssh_cmd({"key": "k", "user": "u", "host": "h"}, r"C:/dev/x", [], ["a.py"])
+    assert cmd[-1].rstrip().endswith("exit $LASTEXITCODE")

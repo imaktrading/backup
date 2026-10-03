@@ -286,7 +286,10 @@ def remote_ssh_cmd(cfg, cwd, envs, args):
     remote = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
               "$env:PYTHONIOENCODING='utf-8'; $env:PYTHONUNBUFFERED='1'; "
               f"& {_q(K.REMOTE_PY)} -X utf8 -u {_q(script)} remote-run --cwd {_q(cwd.replace('/', chr(92)))} "
-              f"--out {_q(REMOTE_OUT)} {env_args} -- " + " ".join(_q(a) for a in args))
+              f"--out {_q(REMOTE_OUT)} {env_args} -- " + " ".join(_q(a) for a in args)
+              # ★2026-10-03: PowerShell は python の終了コードをそのまま返さない → 「席が取れない (75)」が
+              #   家に届かず、家で動かす代わりに失敗で止まった。明示して返す
+              + "; exit $LASTEXITCODE")
     port = 18765
     return ["ssh", "-i", cfg["key"], "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "-o", "LogLevel=ERROR",
             "-o", "ServerAliveInterval=30", "-o", "ExitOnForwardFailure=yes",
