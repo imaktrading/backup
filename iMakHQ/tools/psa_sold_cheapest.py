@@ -42,6 +42,7 @@ SHOWN_KEEP_DAYS = 60
 MIN_REVIEWS = 100                 # 補URL と同じ基準 (個人の評価数)
 MAX_MERCARI = 10
 MAX_SNKR = 6
+SWAP_MIN_GAIN = 1000              # 補URL の入れ替えに出す差 (psa_hoju_fill.SWAP_MIN_GAIN と同じ)
 
 
 # ---------------------------------------------------------------- 純関数
@@ -163,6 +164,25 @@ def save_shown(store, path=SHOWN):
     os.replace(tmp, p)
 
 
+def gap_note(c, cost_jpy, min_gain=SWAP_MIN_GAIN):
+    """仕入元・補以外の候補が仕入値よりいくら安いか → 1行 (純関数)。安くなければ ''。
+
+    ★2026-10-04 ユーザー「目視に100円安いだけのものが出てくるのを防ぐためだから、やむなし。
+      それを売れた後の画面の候補に書いておけばわかるかも」: 補の入れ替えは仕入値より
+      ¥1,000 以上安い物しか出さないので、それ未満の安い出品は補に入らずここに並ぶ。
+    """
+    if c.get("src") in ("仕入元",) or str(c.get("src", "")).startswith("補"):
+        return ""
+    p = c.get("price")
+    if not (isinstance(p, int) and isinstance(cost_jpy, int)) or p >= cost_jpy:
+        return ""
+    d = cost_jpy - p
+    if d < min_gain:
+        return (f"仕入れ用に探し直して見つけた安い物: 仕入値より¥{d:,}安い "
+                f"(補は¥{min_gain:,}未満の差では入れ替えない)")
+    return f"仕入れ用に探し直して見つけた安い物: 仕入値より¥{d:,}安い (補にはまだ入っていない)"
+
+
 def _e(v):
     return _html.escape("" if v is None else str(v))
 
@@ -185,6 +205,9 @@ def build_html(orders):
             badge = ("<span class='ok'>条件OK</span>" if ok else
                      "".join(f"<span class='ng'>{_e(x)}</span>" for x in mk))
             price = f"¥{c['price']:,}" if isinstance(c.get("price"), int) else "¥?"
+            gap = gap_note(c, o.get("cost_jpy"))
+            if gap:
+                badge += f"<div class='gap'>{_e(gap)}</div>"
             img = c.get("image") or ""
             cls = "cand sold" if c.get("buyable") is False else "cand"
             cards.append(
@@ -216,6 +239,7 @@ padding:12px;margin:0 0 18px}h2{font-size:16px;margin:0 0 4px}.meta{font-size:12
 .cands{display:flex;flex-wrap:wrap;gap:10px}.cand{width:170px;border:1px solid var(--line);border-radius:6px;padding:6px;font-size:12px}
 .cand img{width:156px;height:200px;object-fit:contain;background:#eee}.cand.sold{opacity:.45}
 .src{font-weight:bold;font-size:12px;margin-bottom:4px}.pr{font-size:16px;font-weight:bold;margin:4px 0}
+.gap{color:#06c;font-size:11px;margin-top:2px}
 .ok{background:#0a7;color:#fff;border-radius:3px;padding:0 5px}.ng{background:#e85;color:#fff;border-radius:3px;
 padding:0 5px;margin-right:3px;display:inline-block;margin-bottom:2px}.nm{color:#555;height:3em;overflow:hidden}
 .noimg{display:flex;width:156px;height:200px;align-items:center;justify-content:center;background:#eee}

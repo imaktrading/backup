@@ -171,3 +171,14 @@ def test_cancel_in_progress_is_not_waiting():
     assert ops.order_state(o) == "キャンセル中"
     o["cancelStatus"]["cancelState"] = "NONE_REQUESTED"
     assert ops.order_state(o) == "未発送"
+
+
+def test_gap_note_explains_swap_gate():
+    """仕入値より少し安い候補には「補の入れ替えに出さない差」と書く (2026-10-04)。"""
+    import psa_hoju_fill as H
+    assert P.SWAP_MIN_GAIN == H.SWAP_MIN_GAIN
+    assert "未満の差では入れ替えない" in P.gap_note({"src": "スニダン", "price": 7650}, 8000)
+    assert "補にはまだ入っていない" in P.gap_note({"src": "メルカリ", "price": 6500}, 8000)
+    assert P.gap_note({"src": "補2", "price": 7000}, 8000) == ""
+    assert P.gap_note({"src": "スニダン", "price": 8500}, 8000) == ""
+    assert P.gap_note({"src": "スニダン", "price": 7000}, None) == ""
