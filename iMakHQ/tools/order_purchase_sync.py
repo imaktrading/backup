@@ -499,9 +499,16 @@ def _link_mercari(targets, linked):
         print(f"  ⚠ メルカリの購入履歴を読めませんでした: {str(e)[:60]}")
         print("    → ログインし直す: python iMakHQ/tools/mercari_purchases.py --login (窓でログインしたら自動で閉じます)")
         return {}
+    # ★2026-10-04: 「売れた PSA の仕入れ先を探す」の画面に出した候補から買った物も結ぶ (ユーザー OK)。
+    #   仕入元・補URL だけだと、探し直して見つけた別の出品から買った分が「仕入れ待ち」に残っていた
+    try:
+        import psa_sold_cheapest as PSC
+        shown = PSC.load_shown()
+    except Exception:                                          # noqa: BLE001
+        shown = {}
     orders = []
     for n, r, o in targets:
-        ids = set()
+        ids = set((shown.get(norm_order(o.get("orderId"))) or {}).get("ids") or [])
         for li in o.get("lineItems") or []:
             ids |= cand(li.get("sku") or "", str(li.get("legacyItemId") or ""))
         day = _jst_day(o.get("creationDate"))

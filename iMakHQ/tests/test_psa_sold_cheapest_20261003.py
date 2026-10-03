@@ -97,3 +97,35 @@ def test_purchase_login_failure_reaches_order_card(monkeypatch):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "console"))
     import server as SV
     assert "ログイン切れ" in SV.order_job_info(st)["warn"]
+
+
+def test_shown_candidates_are_recorded_and_pruned():
+    """画面に出したメルカリ候補を注文ごとに残す (売り切れは除く・60日で消す)。"""
+    import datetime as dt
+    cands = [{"url": "https://jp.mercari.com/item/m111", "buyable": True},
+             {"url": "https://jp.mercari.com/item/m222", "buyable": False},
+             {"url": "https://snkrdunk.com/apparels/1/used/2", "buyable": True}]
+    assert P.shown_ids(cands) == ["m111"]
+    st = P.merge_shown({"old": {"at": "2026-07-01", "ids": ["m9"]}}, "27-1", ["m111"], dt.date(2026, 10, 4))
+    assert "old" not in st and st["27-1"]["ids"] == ["m111"]
+    st = P.merge_shown(st, "27-1", ["m333", "m111"], dt.date(2026, 10, 5))
+    assert st["27-1"]["ids"] == ["m111", "m333"]
+
+
+def test_link_uses_shown_candidates(monkeypatch):
+    """画面から買った物 (仕入元・補URL に無い) も注文に結ぶ (2026-10-04)。"""
+    import datetime as dt
+    import order_purchase_sync as ops
+    import mercari_purchases as MP
+    import psa_sold_cheapest as PSC
+    monkeypatch.setattr(ops, "_candidate_lookup", lambda: (lambda sku, iid: {"m_supply"}))
+    monkeypatch.setattr(MP, "fetch_purchases", lambda: [
+        {"id": "m_shown", "url": "https://jp.mercari.com/transaction/m_shown", "title": "PSA10 ミュウ",
+         "at": dt.datetime(2026, 10, 3, 22, 34)}])
+    monkeypatch.setattr(PSC, "load_shown", lambda: {"27-15214-32723": {"at": "2026-10-03", "ids": ["m_shown"]}})
+    row = [""] * 30
+    row[ops.C_ORDER] = "27-15214-32723"
+    order = {"orderId": "27-15214-32723", "creationDate": "2026-10-03T00:47:34.000Z",
+             "lineItems": [{"sku": "m48829345464", "legacyItemId": "820169464104"}]}
+    hit = ops._link_mercari([(155, row, order)], {})
+    assert 155 in hit and hit[155][1].endswith("m_shown")

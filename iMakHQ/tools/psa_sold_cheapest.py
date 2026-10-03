@@ -35,6 +35,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, r"C:\dev\iMak\iMakeBayAPI")
 
 OUT = Path(r"C:\dev\iMak_data\hq\psa_sold_cheapest.html")
+# 画面に出したメルカリの候補 {注文番号: {"at": 日付, "ids": [m…]}}。注文の取り込み (order_purchase_sync) が
+# 購入履歴と結ぶ時の候補に足す (2026-10-04 ユーザー OK: この画面から買った物も自動で結ぶ)
+SHOWN = Path(r"C:\dev\iMak_data\hq\psa_sold_shown_candidates.json")
+SHOWN_KEEP_DAYS = 60
 MIN_REVIEWS = 100                 # 補URL と同じ基準 (個人の評価数)
 MAX_MERCARI = 10
 MAX_SNKR = 6
@@ -116,6 +120,47 @@ def merge_candidates(existing, found):
         idx[k] = len(out)
         out.append(dict(c))
     return out
+
+
+def shown_ids(cands):
+    """画面に出したメルカリ候補の id (売り切れは除く) (純関数)。"""
+    out = []
+    for c in cands:
+        m = re.search(r"jp\.mercari\.com/item/(m\d+)", c.get("url") or "")
+        if m and c.get("buyable") is not False and m.group(1) not in out:
+            out.append(m.group(1))
+    return out
+
+
+def merge_shown(store, order, ids, today, keep_days=SHOWN_KEEP_DAYS):
+    """記録に足す (前に出した id も残す)。keep_days より古い注文は消す (純関数)。"""
+    import datetime as _dt
+    out = {}
+    for k, v in (store or {}).items():
+        try:
+            if (today - _dt.date.fromisoformat(v.get("at", ""))).days <= keep_days:
+                out[k] = v
+        except ValueError:
+            continue
+    if order and ids:
+        old = (out.get(order) or {}).get("ids") or []
+        out[order] = {"at": today.isoformat(), "ids": old + [x for x in ids if x not in old]}
+    return out
+
+
+def load_shown(path=SHOWN):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_shown(store, path=SHOWN):
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(store, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, p)
 
 
 def _e(v):
@@ -391,6 +436,12 @@ def main(argv=None) -> int:
               + (f" / 最安 ¥{ok[0]['price']:,} ({ok[0]['src']})" if ok else ""), flush=True)
         done.append({**o, "key": key, "cost_jpy": cost, "note": note, "cands": cands,
                      "ref_images": [u for u in refs if u]})
+    import datetime as _dt
+    import order_purchase_sync as ops
+    store = load_shown()
+    for d in done:
+        store = merge_shown(store, ops.norm_order(d.get("order")), shown_ids(d["cands"]), _dt.date.today())
+    save_shown(store)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(build_html(done), encoding="utf-8")
     print(f"✅ 目視画面: {OUT}")
