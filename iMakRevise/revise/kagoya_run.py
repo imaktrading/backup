@@ -49,7 +49,7 @@ def run_shadow() -> int:
                                        load_current_profiles)
         from revise.price_revise import SHARED_SNAPSHOT_DIR, run_price_revise
 
-        result = run_price_revise(review_xlsx=False)
+        result = run_price_revise(review_xlsx=True)  # 家と食い違った時に1件ずつ理由を見るため
         snaps = sorted(SHARED_SNAPSHOT_DIR.glob("ebay_active_*.csv"))
         snap_csv = snaps[-1] if snaps else None
         var_json = snap_csv.with_name(snap_csv.stem + ".variations.json") if snap_csv else None
@@ -59,7 +59,8 @@ def run_shadow() -> int:
         calls = len(build_all_xml(plan))
 
         out.mkdir(parents=True, exist_ok=True)
-        for p in (result.csv_path, result.var_price_path, result.var_shipping_path):
+        reviews = sorted(Path(result.csv_path).parent.glob('revise_review_*.xlsx')) if result.csv_path else []
+        for p in (result.csv_path, result.var_price_path, result.var_shipping_path, reviews[-1] if reviews else None):
             if p and Path(p).exists():
                 shutil.copy2(p, out / Path(p).name)
         (out / "plan.json").write_text(json.dumps({

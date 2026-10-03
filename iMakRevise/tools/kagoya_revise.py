@@ -100,6 +100,34 @@ def _prices_from_csvs(folder: Path) -> tuple:
     return prices, ships
 
 
+def _snapshot_state(snap: Path) -> tuple:
+    from revise.api_revise import _specifics_key
+    cur, prof = {}, {}
+    with open(snap, encoding="utf-8-sig", newline="") as f:
+        for r in csv.DictReader(f):
+            if (r.get("Listing site") or "").strip() == "US":
+                try:
+                    cur[r["Item number"]] = float(r["Current price"])
+                except (TypeError, ValueError):
+                    pass
+                prof[r["Item number"]] = r.get("Shipping profile name") or ""
+    vj = snap.with_name(snap.stem + ".variations.json")
+    vcur = {}
+    if vj.exists():
+        for i, vs in json.loads(vj.read_text(encoding="utf-8")).items():
+            for v in vs:
+                vcur[(i, _specifics_key(v.get("specifics") or {}))] = v.get("start_price")
+    return cur, prof, vcur
+
+
+def _effective(prices: dict, ships: dict, cur: dict, prof: dict, vcur: dict) -> tuple:
+    def changed(key, v):
+        now = cur.get(key[0]) if key[1] is None else vcur.get(key)
+        return now is None or abs(float(v) - float(now)) > 0.001
+    return ({k: v for k, v in prices.items() if changed(k, v)},
+            {k: v for k, v in ships.items() if prof.get(k) != v})
+
+
 def compare(day: str | None = None) -> int:
     cfg = k._cfg()
     day = day or datetime.now().strftime("%Y%m%d")
@@ -120,18 +148,23 @@ def compare(day: str | None = None) -> int:
         cands = sorted(p for p in home.glob(f"{pat}{day}_*.csv") if "_diff" not in p.name)
         if cands:
             shutil.copy2(cands[0], home_day / cands[0].name)
-    hp, hs = _prices_from_csvs(home_day)
-    kp, ks = _prices_from_csvs(dst)
+    # 比べるのは「eBay の今と違う物 = 実際に変わる物」だけ。
+    # 家の CSV は送料の控えが古く、値段も送料も変わらない行を毎朝書いている (API 版は送る前に落とす) ので、生の行数は合わない
+    snaps = sorted(Path(r"C:/dev/iMak_data/snapshots").glob(f"ebay_active_{day[:4]}-{day[4:6]}-{day[6:]}_0*.csv"))
+    cur, prof, vcur = _snapshot_state(snaps[0]) if snaps else ({}, {}, {})
+    hp, hs = _effective(*_prices_from_csvs(home_day), cur, prof, vcur)
+    kp, ks = _effective(*_prices_from_csvs(dst), cur, prof, vcur)
     p_same = sum(1 for key, v in hp.items() if kp.get(key) == v)
     s_same = sum(1 for key, v in hs.items() if ks.get(key) == v)
     only_k = len(set(kp) - set(hp)) + len(set(ks) - set(hs))
     total = len(hp) + len(hs)
     pct = round(100 * (p_same + s_same) / total, 2) if total else 0.0
-    line = (f"{datetime.now():%Y-%m-%d %H:%M:%S} [kagoya] {day} 家と一致 {pct}% 値段 {p_same}/{len(hp)} "
-            f"送料 {s_same}/{len(hs)} KAGOYAだけ {only_k} | API呼出 {status.get('api_calls')} "
-            f"組めない {status.get('problems')}")
+    line = (f"{datetime.now():%Y-%m-%d %H:%M:%S} [kagoya] {day} 実際に変わる物で家と一致 {pct}% "
+            f"値段 {p_same}/{len(hp)} 送料 {s_same}/{len(hs)} KAGOYAだけ {only_k} | "
+            f"API呼出 {status.get('api_calls')} 組めない {status.get('problems')}")
     _log(line)
-    diffs = [(key, hp[key], kp.get(key)) for key in hp if kp.get(key) != hp[key]][:20]
+    diffs = ([("家だけ/値違い", key, hp[key], kp.get(key)) for key in hp if kp.get(key) != hp[key]]
+             + [("KAGOYAだけ", key, None, kp[key]) for key in kp if key not in hp])[:20]
     for d in diffs:
         _log(f"   - {d}")
     return 0 if pct == 100.0 and not only_k else 1
