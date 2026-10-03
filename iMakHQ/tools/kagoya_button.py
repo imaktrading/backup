@@ -347,8 +347,20 @@ def prune_runs(root, keep=KEEP_RUNS):
 
 
 def run_local(cwd, envs, args):
-    env = dict(os.environ, **dict(e.split("=", 1) for e in envs))
-    return subprocess.call([sys.executable, "-X", "utf8", "-u"] + args, cwd=cwd, env=env, creationflags=K.NOWIN)
+    """家で動かす (KAGOYA に届かない・席が無い時)。
+
+    ★2026-10-03: subprocess.call で出力をそのまま受け継がせていたら、神風の画面と記録に何も出なかった
+      (PSA 自動 27件出品・補URL③ 30分の走行がどちらも始まりと終わりだけ)。KAGOYA の時と同じく1行ずつ中継する。
+    """
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1",
+               **dict(e.split("=", 1) for e in envs))
+    p = subprocess.Popen([sys.executable, "-X", "utf8", "-u"] + args, cwd=cwd, env=env, creationflags=K.NOWIN,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                         encoding="utf-8", errors="replace", bufsize=1)
+    for line in p.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    return p.wait()
 
 
 def home_main(cwd, envs, args):
