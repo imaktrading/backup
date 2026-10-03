@@ -276,9 +276,14 @@ def card_meta_for_key(key, _cache={}, _db=r"C:/dev/iMak_data/catalog/products.sq
         return None
     try:
         con = sqlite3.connect(_db)
-        rows = con.execute(
-            "SELECT name_jp, images, set_name, specs, category FROM products WHERE product_id=?",
-            (pid,)).fetchall()
+        try:
+            rows = con.execute(
+                "SELECT name_jp, images, set_name, specs, category, name_en FROM products WHERE product_id=?",
+                (pid,)).fetchall()
+        except sqlite3.OperationalError:               # name_en の無い古い DB (テスト用など)
+            rows = con.execute(
+                "SELECT name_jp, images, set_name, specs, category FROM products WHERE product_id=?",
+                (pid,)).fetchall()
         con.close()
         r = None
         if cat:
@@ -318,7 +323,10 @@ def card_meta_for_key(key, _cache={}, _db=r"C:/dev/iMak_data/catalog/products.sq
                 # 入れる: メルカリ=JP名 / SNKRDUNK=EN名 と marketplace で言語が違うため(E2Eで判明)。
                 # set列がNoneでも get_info/set_name_ebay が入手元セットを持つ → 両 marketplace と突合可。
                 # key(suffix _p1 等)は marketplace に出ず部分一致雑音になるため hint に入れない。
-                "hint": [r[2] or "", get_info, set_name_ebay, variant_type, rarity, r[0] or ""],
+                # ★2026-10-03: index6 に英語のカード名。版の確証からカード名を除くため
+                #   (snkrdunk_psa_resource.set_confirm_tokens)。末尾に足すので既存の位置は変わらない
+                "hint": [r[2] or "", get_info, set_name_ebay, variant_type, rarity, r[0] or "",
+                         (r[5] if len(r) > 5 else "") or ""],
             }
     except Exception:
         out = None

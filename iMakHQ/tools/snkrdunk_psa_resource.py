@@ -143,12 +143,20 @@ def set_confirm_tokens(variant_hint):
         return []
     set_part = (list(variant_hint)[:3]
                 if isinstance(variant_hint, (list, tuple)) else variant_hint)
+    # ★2026-10-03: 版の名前にカード名が入っている版 (「スタートデッキ 紫 モンキー・D・ルフィ【ST-18】」) で、
+    #   確証の言葉が「モンキー」「ルフィ」になり、ルフィならどの版でも「欲しい版」と判定していた
+    #   (P-041_r1 の補にセブンイレブン版が「確証済み」で並び、人が「違う」を6回押した)。
+    #   カード名 (index5=日本語 / index6=英語) に当たる言葉は確証に使わない。
+    name_toks = [x for x in _hint_tokens(list(variant_hint)[5:7])
+                 if len(x) >= 3 or not x.isascii()] if isinstance(variant_hint, (list, tuple)) else []
     out = []
     for t in _hint_tokens(set_part):
         if re.fullmatch(r"[A-Z]{2,}\d{1,3}", t):      # set-code = 番号と被る
             continue
         if t in GENERIC_SET_TOKENS:
             continue
+        if any(nt in t or t in nt for nt in name_toks):
+            continue                                   # カード名 = 同じキャラの別の版でも必ず一致する
         n = _norm_match(t)
         if not n or n in GENERIC_SET_TOKENS or n in out:
             continue
