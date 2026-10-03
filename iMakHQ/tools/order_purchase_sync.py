@@ -168,9 +168,14 @@ def money_cells(order, fin, tracking=""):
 
 
 def order_state(order):
-    """未発送 / 発送済 / キャンセル / 返金 / 未払い。"""
-    if ((order.get("cancelStatus") or {}).get("cancelState") or "") == "CANCELED":
+    """未発送 / 発送済 / キャンセル / キャンセル中 / 返金 / 未払い。"""
+    cs = ((order.get("cancelStatus") or {}).get("cancelState") or "")
+    if cs == "CANCELED":
         return "キャンセル"
+    # ★2026-10-04: こちらからキャンセルした直後は IN_PROGRESS (返金待ち) のまま。「未発送」と読むと
+    #   返金が終わるまで仕入れ待ちに数えていた (AU バイヤーの二重購入のミュウ 1件目)
+    if cs == "IN_PROGRESS" and order.get("orderFulfillmentStatus") != "FULFILLED":
+        return "キャンセル中"
     pay = (order.get("orderPaymentStatus") or "").upper()
     if pay == "FULLY_REFUNDED":
         return "返金"

@@ -161,3 +161,13 @@ def test_sync_orders_before_listing(monkeypatch):
     calls.clear()
     P.main(["--no-open", "--no-sync"])
     assert calls == [("load", None)]
+
+
+def test_cancel_in_progress_is_not_waiting():
+    """キャンセル手続き中 (返金待ち) は仕入れ待ちに数えない (2026-10-04)。"""
+    import order_purchase_sync as ops
+    o = {"cancelStatus": {"cancelState": "IN_PROGRESS"}, "orderPaymentStatus": "PAID",
+         "orderFulfillmentStatus": "NOT_STARTED"}
+    assert ops.order_state(o) == "キャンセル中"
+    o["cancelStatus"]["cancelState"] = "NONE_REQUESTED"
+    assert ops.order_state(o) == "未発送"
