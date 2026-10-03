@@ -81,7 +81,7 @@ def runnable(script):
 def group_of(label):
     # ★2026-09-19 ユーザー「オファーの件、重要だからTOP画面に出してほしい」。
     #   まとまりが無いと 今日やること の枠に入らず、新規出品の側に紛れていた。
-    if "オファー" in label or "注文の取り込み" in label:
+    if "オファー" in label or "注文の取り込み" in label or "仕入れ先を探す" in label:
         return "offer"
     if "補URL" in label:
         return "hoju"

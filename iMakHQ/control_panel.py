@@ -1499,6 +1499,18 @@ SCRIPTS = [
         "skip_postprocess": True,
     },
     {
+        # ★2026-10-03 ユーザー「売れたら仕入元URLと補URLに加えて、改めてメルカリとスニダンで最安値を調べて
+        #   購入している。この部分を精度高く」→ 目視画面 / ボタンを押した時 / 条件外も印を付けて出す。
+        #   仕入れ待ちの PSA ごとに、仕入元・補URL の今と、補URL探しと同じ検索の結果を安い順に並べる。読むだけ。
+        "category": None, "type": "utility",
+        "label": "🛒 売れた PSA の仕入れ先を探す",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_sold_cheapest.py"],
+        "params": [],
+        "tip": "仕入れ待ちの PSA10 について、仕入元・補URL・メルカリ・スニダンの今買える物を安い順に目視画面で開く",
+        "skip_postprocess": True,
+    },
+    {
         # ★2026-09-19: 同上。UK/AU/CA のミラーに 広告10% と ベストオファーを付ける
         #   (付いていない物だけ。押したら実行する = 2026-09-11 ユーザー確定)。
         "category": None, "type": "utility",

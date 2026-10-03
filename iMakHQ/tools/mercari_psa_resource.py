@@ -1109,11 +1109,23 @@ _NAME_PREFIXES = ("アローラ", "ガラル", "ヒスイ", "パルデア",
                   "の")
 
 
+def _is_katakana(ch):
+    """カタカナ (長音を含む) 1文字か (純関数)。"""
+    return bool(ch) and ("ァ" <= ch <= "ヺ" or ch == "ー")
+
+
 def _name_is_other_card(title, name_jp):
     """出品名の中の名前が、対象の名前に語が付いた **別のカード** か (純関数)。"""
     nm = unicodedata.normalize("NFKC", name_jp or "").replace(" ", "").upper()
     if not nm:
         return False
+    # ★2026-10-03: 名前のすぐ後ろにカタカナが続くのは別の名前 (ミュウ → ミュウツー)。
+    #   売れた PSA の探し直しで、ミュウ (S8a-002) の候補にミュウツー EX / ミュウツーVSTAR が並んだ。
+    #   空白を詰める前の出品名で見る (「ミュウ ポケカ」を「ミュウポケカ」と読まない)。
+    ts = unicodedata.normalize("NFKC", title or "").replace("　", " ").upper()
+    hits = [m.end() for m in re.finditer(re.escape(nm), ts)]
+    if hits and all(e < len(ts) and _is_katakana(ts[e]) for e in hits):
+        return True
     t = unicodedata.normalize("NFKC", title or "").replace(" ", "").replace("　", "").upper()
     found = False
     for m in re.finditer(re.escape(nm), t):
@@ -1669,8 +1681,17 @@ def api_stock_check(urls, budget_sec=None, now=None, sleep=None):
 _API_ONE = {}
 
 
+def _int_or_none(v):
+    """API の値段 (int / 数字の文字列) → int。読めなければ None。"""
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
 def api_detail(url):
-    """メルカリの詳細を API で → {cond, ship, reviews, buyable, seller, star, ship_days}。読めなければ None。
+    """メルカリの詳細を API で → {cond, ship, reviews, buyable, seller, star, ship_days, price, name, image}。読めなければ None。
 
     ★2026-10-02: 一番くじの詳細の先取りを KAGOYA で回すと、Chrome の詳細ページが遅く 40分で20件しか進まなかった。
       詳細ページから読んでいた項目は API に全部ある (実物4件で控えの中身と一致を確認)。
@@ -1711,7 +1732,9 @@ def api_detail(url):
                     "buyable": (str(getattr(d, "status", "") or "").lower() in ("on_sale", "item_status_on_sale")
                                 and getattr(d, "auction_info", None) is None),
                     "seller": getattr(s, "name", "") or "", "star": star,
-                    "ship_days": getattr(getattr(d, "shipping_duration", None), "name", "") or ""}
+                    "ship_days": getattr(getattr(d, "shipping_duration", None), "name", "") or "",
+                    "price": _int_or_none(getattr(d, "price", None)), "name": getattr(d, "name", "") or "",
+                    "image": ((getattr(d, "photos", None) or [""])[0] or "")}
         p = loop.run_until_complete(api.product(m_shop.group(1)))
         time.sleep(_API_SLEEP)
         if p is None:
@@ -1725,7 +1748,9 @@ def api_detail(url):
         return {"cond": getattr(getattr(pd, "condition", None), "display_name", "") or "",
                 "ship": "送料込み" if code == "SELLER" else ("送料別" if code else ""),
                 "reviews": None, "buyable": buy, "seller": "", "star": None,
-                "ship_days": getattr(getattr(pd, "shipping_duration", None), "display_name", "") or ""}
+                "ship_days": getattr(getattr(pd, "shipping_duration", None), "display_name", "") or "",
+                "price": _int_or_none(getattr(p, "price", None)), "name": getattr(p, "display_name", "") or "",
+                "image": getattr(p, "thumbnail", "") or ""}
     except Exception:                                          # noqa: BLE001  読めない = Chrome で見る
         return None
 

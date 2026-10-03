@@ -59,7 +59,8 @@ def test_api_detail_maps_item_and_shops(monkeypatch):
     monkeypatch.setattr(mp, "_API_SLEEP", 0)
     a = mp.api_detail("https://jp.mercari.com/item/m123")
     assert a == {"cond": "新品、未使用", "ship": "送料込み", "reviews": 277, "buyable": True,
-                 "seller": "柴", "star": 5.0, "ship_days": "1~2日で発送"}
+                 "seller": "柴", "star": 5.0, "ship_days": "1~2日で発送",
+                 "price": None, "name": "", "image": ""}
     s = mp.api_detail("https://jp.mercari.com/shops/product/ABC")
     assert s["ship"] == "送料別" and s["buyable"] is True and s["reviews"] is None
     assert mp.api_detail("https://snkrdunk.com/x") is None
