@@ -1846,13 +1846,19 @@ class _ApiSource:
             if self.kind.get(href) == "shops":
                 # ★2026-10-01 (総点検 ⑨): Shops も API (shops/products) で送料の負担と在庫数が取れる
                 #   (実物2件で確認)。読めない時だけ Chrome で詳細ページを開く。
+                # ★2026-10-03: 消えている (API が 404 = None) は「買えない」と分かっているので Chrome を開かない。
+                #   Chrome で見に行くのは API の通信が失敗した時と、中身が読めなかった時だけ。
+                failed = False
                 try:
                     p = self._run(self.api.product(href.rsplit("/", 1)[-1]))
                     time.sleep(_API_SLEEP)
                 except Exception:                              # noqa: BLE001
-                    p = None
+                    p, failed = None, True
                 pd = getattr(p, "product_detail", None) if p is not None else None
-                if pd is None:
+                if p is None and not failed:
+                    ok = False
+                    remember_not_buyable(href, "消えている (Shops API で判定)")
+                elif pd is None:
                     ok, _s, _r = _detail_supply_check(self.chrome.driver(), href, min_reviews=min_reviews)
                 else:
                     ok, _s, buyable = api_shops_verdict(
@@ -1864,12 +1870,16 @@ class _ApiSource:
             elif self.kind.get(href) != "item":
                 ok, _s, _r = _detail_supply_check(self.chrome.driver(), href, min_reviews=min_reviews)
             else:
+                failed = False
                 try:
                     d = self._run(self.api.item(href.rsplit("/", 1)[-1]))
                     time.sleep(_API_SLEEP)
                 except Exception:                              # noqa: BLE001
-                    d = None
-                if d is None:
+                    d, failed = None, True
+                if d is None and not failed:                   # 消えている (404) = 買えない。Chrome は開かない
+                    ok = False
+                    remember_not_buyable(href, "消えている (API で判定)")
+                elif d is None:
                     ok, _s, _r = _detail_supply_check(self.chrome.driver(), href, min_reviews=min_reviews)
                 else:
                     ok, _s, _r, buyable = api_supply_verdict(
