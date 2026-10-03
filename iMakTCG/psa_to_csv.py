@@ -3201,6 +3201,18 @@ def cached_only_mode(env=None):
     return (env if env is not None else os.environ).get("PSA_CACHED_ONLY") == "1"
 
 
+def split_cached_certs(certs, cache):
+    """候補を「先取り済み」と「先取り待ち」に分ける (純関数・順番は保つ)。
+
+    先取り済み = get_psa_data が Chrome なしで返せる物 (Subject があり、グレードを取りに行った印 Grade がある)。
+    """
+    ok, wait = [], []
+    for c in certs:
+        e = (cache or {}).get(str(c)) or {}
+        (ok if e.get("Subject") and "Grade" in e else wait).append(c)
+    return ok, wait
+
+
 def _psa_cloudflare_warmup():
     """PSA Cloudflare 対策 = uc.Chrome を visible で起動 + user 手動 突破.
 
@@ -3682,6 +3694,13 @@ def main():
         PSA_BATCH_LIMIT = max(1, int(os.environ.get("PSA_BATCH_LIMIT") or 15))
     except ValueError:
         PSA_BATCH_LIMIT = 15
+    # ★2026-10-03 ユーザー「(先取りに無い分を飛ばして件数が減るのは) そりゃあかんやろ」:
+    #   KAGOYA (Chrome なし) では、選んだ後に飛ばすのではなく **選ぶ前に** 先取り済みの候補だけに絞る。
+    #   20件の枠は先取り済みから埋まる。先取りに無い分は消さず、夜の先取りの後の回で選ばれる
+    if cached_only_mode():
+        cert_numbers, _wait = split_cached_certs(cert_numbers, _load_psa_cache())
+        cost_map = {c: cost_map[c] for c in cert_numbers if c in cost_map}
+        print(f"🛰 先取り済みの候補 {len(cert_numbers)}件から選ぶ (先取り待ち {len(_wait)}件は夜の先取りの後に回す)")
     # ★2026-09-28 ユーザー「CAP 20件は 20件出品したいから」: 仕入元を読んだ後に減った分を
     #   残りの候補から補うため、選ぶ前の候補全体を控えておく
     _pool_all = list(cert_numbers)

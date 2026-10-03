@@ -32,7 +32,9 @@ echo [start] %date% %time% >> "%LOG%"
 REM 2026-09-24: guarded by night_step.py so night_resume.py can rerun it after a crash.
 python -u C:/dev/iMak/iMakHQ/tools/night_step.py psawarm --begin >> "%LOG%" 2>&1
 python -u C:/dev/iMak/iMakHQ/tools/night_step.py psawarm psa_cache_warm --check >> "%LOG%" 2>&1 || goto :skip1
-python -u psa_cache_warm.py --limit 100 >> "%LOG%" 2>&1
+REM 2026-10-03: 100 -> 200. PSA new runs on KAGOYA (no Chrome) and only picks prefetched certs,
+REM   so the backlog must reach 0 every night (10/2: 301 candidates, 33 left after 100).
+python -u psa_cache_warm.py --limit 200 >> "%LOG%" 2>&1
 python -u C:/dev/iMak/iMakHQ/tools/night_step.py psawarm psa_cache_warm --done %errorlevel% >> "%LOG%" 2>&1
 :skip1
 python -u C:/dev/iMak/iMakHQ/tools/night_step.py psawarm --end >> "%LOG%" 2>&1

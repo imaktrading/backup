@@ -30,3 +30,13 @@ def test_tcg_code_files_sent_but_not_the_key():
     assert K.tcg_code_file("cert_overrides.json")
     assert not K.tcg_code_file("API key.txt")      # 鍵は送らない
     assert not K.tcg_code_file("ebay_upload_20260413_091322_cost.json")
+
+
+def test_kagoya_picks_from_prefetched_before_selecting():
+    """先取りに無い cert は選ぶ前に外す (選んだ後に飛ばすと20件の枠が減る)。順番は保つ。"""
+    sys.path.insert(0, os.path.join(HERE, "..", "..", "iMakTCG"))
+    sys.path.insert(0, os.path.join(HERE, "..", "..", "iMakeBayAPI"))
+    import psa_to_csv as P
+    cache = {"1": {"Subject": "A", "Grade": "10"}, "2": {"Subject": "B"}, "4": {"Subject": "D", "Grade": ""}}
+    ok, wait = P.split_cached_certs(["1", "2", "3", "4"], cache)
+    assert ok == ["1", "4"] and wait == ["2", "3"]
