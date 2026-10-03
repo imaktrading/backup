@@ -129,3 +129,22 @@ def test_link_uses_shown_candidates(monkeypatch):
              "lineItems": [{"sku": "m48829345464", "legacyItemId": "820169464104"}]}
     hit = ops._link_mercari([(155, row, order)], {})
     assert 155 in hit and hit[155][1].endswith("m_shown")
+
+
+def test_snkr_existing_url_uses_listing_photo():
+    """補URL のスニダンは出品一覧 API の写真を使う (og:image は共通ロゴだった・2026-10-04)。"""
+    import snkrdunk_psa_resource as sp
+    calls = []
+
+    class SP:
+        _parse_listing_url = staticmethod(sp._parse_listing_url)
+
+        @staticmethod
+        def fetch_psa10_listings(cid):
+            calls.append(cid)
+            return [{"listing_id": 48878837, "price": 8000, "image": "https://cdn.snkrdunk.com/x.jpg"}]
+    cache = {}
+    u = "https://snkrdunk.com/apparels/358113/used/48878837"
+    assert P.snkr_listing_now(SP, u, cache) == (True, 8000, "https://cdn.snkrdunk.com/x.jpg")
+    assert P.snkr_listing_now(SP, "https://snkrdunk.com/apparels/358113/used/1", cache) == (False, None, "")
+    assert calls == ["358113"]                     # 同じカードは1回だけ読む

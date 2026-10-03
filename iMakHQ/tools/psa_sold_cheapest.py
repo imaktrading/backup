@@ -241,23 +241,40 @@ def _mercari_now(mp, url):
                 image=d.get("image", ""), ship=d.get("ship", ""), reviews=d.get("reviews"), shops=shops)
 
 
+def snkr_listing_now(sp, url, cache):
+    """スニダンの出品 URL → (生きているか True/False/None, 値段, 写真)。cache は card_id ごとの一覧。"""
+    card_id, lid = sp._parse_listing_url(url)
+    if not card_id or not lid:
+        return None, None, ""
+    if card_id not in cache:
+        try:
+            cache[card_id] = sp.fetch_psa10_listings(card_id)
+        except Exception:                                      # noqa: BLE001
+            cache[card_id] = None
+    ls = cache[card_id]
+    if ls is None:
+        return None, None, ""
+    for x in ls:
+        if str(x.get("listing_id")) == str(lid):
+            p = x.get("price")
+            return True, (p if isinstance(p, int) and p > 0 else None), x.get("image") or ""
+    return False, None, ""
+
+
 def existing_candidates(mp, sp, urls):
     """仕入元・補URL の今 → 候補 [{src, channel, url, price, buyable, ...}]。"""
     out = []
+    _snkr_cache = {}
     for label, u in urls:
         if "mercari.com" in u:
             c = {"src": label, "channel": "mercari", "url": u, "version": ""}
             c.update(_mercari_now(mp, u))
         elif "snkrdunk.com" in u:
-            live, price = sp.listing_live_price(u)
+            # ★2026-10-04: 出品ページの og:image はスニダン共通のロゴだった (補URL の画像が全部ロゴ)。
+            #   出品一覧の API に、その出品の写真 (primaryPhoto) と値段がある → 1回で生死・値段・写真を取る
+            live, price, img = snkr_listing_now(sp, u, _snkr_cache)
             c = {"src": label, "channel": "snkrdunk", "url": u, "version": "", "buyable": live,
-                 "price": price, "name": "", "image": ""}
-            if live:
-                try:
-                    import psa_resource_html as H
-                    c["image"] = H.fetch_snkr_image(u)
-                except Exception:                              # noqa: BLE001
-                    pass
+                 "price": price, "name": "", "image": img}
         else:
             c = {"src": label, "channel": "other", "url": u, "version": "", "buyable": None,
                  "price": None, "name": "", "image": ""}
