@@ -148,9 +148,10 @@ def test_メール本文は件数とURL():
 
 
 def test_自動だけ20件_手動は既定のまま():
-    """ユーザー指示 (2026-08-18)。上限はコード分岐でなく env で注入する。"""
+    """ユーザー指示 (2026-08-18)。上限はコード分岐でなく env で注入する。
+    ★2026-10-03 ユーザー「30にするか」(KAGOYA で動かすので Cloudflare 回避の理由が無くなった) → 30。"""
     e = _entry()
-    assert '"PSA_BATCH_LIMIT": "20"' in e
+    assert '"PSA_BATCH_LIMIT": "30"' in e
     src = _src()
     i = src.index('"category": "PSA TCG", "type": "new"')
     manual = src[i:src.index("    },\n", i)]

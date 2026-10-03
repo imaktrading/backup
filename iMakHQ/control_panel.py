@@ -1389,8 +1389,10 @@ SCRIPTS = [
         #   値は env で注入 = コード側に「自動なら〜」の分岐を作らない。
         # PSA_REVIEW_ALL=1: 確定済 cert も毎回目視に出す。cert 入力ミスは
         #   「仕入元の写真 ↔ PSA写真」の見比べでしか弾けず、自動はここが最後の砦。
+        # ★2026-10-03 ユーザー「30にするか」: KAGOYA で動かす (走行中に PSA を見に行かない) ので
+        #   Cloudflare 回避の上限 (20) の理由が無くなった。20 → 30
         "env": {"TCG_USE_NEW_GEN": "1", "PSA_VERIFY_BEFORE_BUILD": "1",
-                "PSA_BATCH_LIMIT": "20", "PSA_REVIEW_ALL": "1"},
+                "PSA_BATCH_LIMIT": "30", "PSA_REVIEW_ALL": "1"},
         "params": [],
         "auto_full": True,
         "auto_csv_prefix": "tcg_upload_",
