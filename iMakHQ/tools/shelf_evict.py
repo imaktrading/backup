@@ -483,6 +483,9 @@ PRICE_CHANGES_PATH = r"C:/dev/iMak_data/revise/price_change_counts.json"
 # ★2026-10-01 ユーザー「％だと、価格によってムラがでるね」→ 価格帯ごとの **金額** で決める。
 #   表は設定ファイル (コードに触らずに変えられる)。無い時は下の既定値。
 SETTINGS_PATH = r"C:/dev/iMak_data/hq/shelf_evict_settings.json"
+# まだ値下げしていないので落とさなかった ② (= 値下げ候補)。★2026-10-03: 定義が無く NameError で
+#   一度も書けていなかった (10/1 から 231件が候補に回らず)
+PRICE_DOWN_FIRST_PATH = r"C:/dev/iMak_data/hq/price_down_before_evict.json"
 DEFAULT_PRICE_DOWN_BANDS = [[50, 5], [200, 15], [500, 30], [None, 50]]   # [出品時の値段の上限($), 下がっていれば値下げ済み($)]
 
 
