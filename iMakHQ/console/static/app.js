@@ -68,7 +68,8 @@
   function job(kind) { return jobs[kind] || null; }
   function chip(j) { return '<span class="chip ' + esc(j.state) + '">' + esc(j.state === "hold" ? "止めている " + j.hold : (STATE_LABEL[j.state] || j.state)) + "</span>"; }
   function num(j) { return j.n == null ? "—" : Number(j.n).toLocaleString("ja-JP"); }
-  function verb(j) { return /目視|確認|補充|入れ替え/.test(j.label) ? "目視" : /CSV/.test(j.label) ? "CSV" : /戻す/.test(j.label) ? "戻す" : "実行"; }
+  // ★2026-10-03: 「🔁 売れた分を補充」は目視の無いボタン (在庫を1に戻すだけ) なのに、「補充」で「目視」と出ていた
+  function verb(j) { return /売れた分/.test(j.label) ? "戻す" : /目視|確認|補充|入れ替え/.test(j.label) ? "目視" : /CSV/.test(j.label) ? "CSV" : /戻す/.test(j.label) ? "戻す" : "実行"; }
   function btn(j, hot, text) {
     if (!j.runnable) return '<span class="else">今の出品くんで</span>';
     var busy = running && running.running;
