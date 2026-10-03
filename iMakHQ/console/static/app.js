@@ -363,6 +363,9 @@
       var ps = buttons.filter(function (b) { return b.label.indexOf("仕入れ先を探す") >= 0; })[0];
       big.push('<div class="u ord"><span class="k">注文 仕入れ待ち' + (dj.ship_by ? " (一番近い発送期限 " + esc(dj.ship_by) + ")" : "") + "</span>" +
         '<span class="t"><b>' + num(dj) + "</b>件 仕入れ待ち" + (dj.psa ? " <small>うち PSA " + dj.psa + "件</small>" : "") + "</span>" +
+        (dj.warn ? '<span class="d" style="color:var(--crit,#e66)">⚠ ' + esc(dj.warn) +
+                   " — 仕入れ済みでも結び付きません" + (dj.warn.indexOf("メルカリ") >= 0
+                     ? "。デスクトップの「メルカリ購入履歴_ログインし直す」→ 取り込む" : "") + "</span>" : "") +
         '<span class="d">' + (dj.psa ? "売れた PSA の仕入れ先を、仕入元・補URL・メルカリ・スニダンから安い順に開きます"
                                      : "PSA の仕入れ待ちはありません (" + esc(dj.note || "") + ")") + "</span>" +
         '<span class="ugo">' + (dj.psa && ps ? jobBtn(ps, "仕入れ先を探す").replace("<button", '<button class="run hot"') : "") + "</span></div>");

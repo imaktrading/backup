@@ -492,6 +492,10 @@ def _link_mercari(targets, linked):
     try:
         buys = MP.fetch_purchases()
     except Exception as e:                                     # noqa: BLE001
+        # ★2026-10-04: ログイン切れで購入が結べず、仕入れ済みのミュウが「仕入れ待ち」に残っていた。
+        #   走行ログにしか出ていなかったので、神風の注文の枠に出す (_write_status が書く)
+        LINK_WARN.append("メルカリの購入履歴を読めません (ログイン切れ)" if "ログイン" in str(e)
+                         else "メルカリの購入履歴を読めません")
         print(f"  ⚠ メルカリの購入履歴を読めませんでした: {str(e)[:60]}")
         print("    → ログインし直す: python iMakHQ/tools/mercari_purchases.py --login (窓でログインしたら自動で閉じます)")
         return {}
@@ -519,6 +523,7 @@ def _link_uniqlo(targets, linked):
         mon = UQ.monitor_urls()
         buys = UQ.fetch_purchases()
     except Exception as e:                                     # noqa: BLE001
+        LINK_WARN.append("ユニクロの購入履歴を読めません" + (" (ログイン切れ)" if "ログイン" in str(e) else ""))
         print(f"  ⚠ ユニクロの購入履歴を読めませんでした: {str(e)[:60]}")
         print("    → ログインし直す: python iMakHQ/tools/uniqlo_purchases.py --login (窓でログインしたら自動で閉じます)")
         return {}
@@ -565,11 +570,15 @@ def _format(ws, last_row):
     ws.spreadsheet.batch_update({"requests": reqs})
 
 
+LINK_WARN: list = []                       # 購入履歴を読めなかった知らせ (神風の注文の枠に出す)
+
+
 def _write_status(rows):
     w = waiting(rows)
     shipby = sorted(r[C_SHIPBY] for _n, r in w if r[C_SHIPBY])
     st = {"at": dt.datetime.now().isoformat(timespec="seconds"), "waiting": len(w),
           "earliest_ship_by": shipby[0] if shipby else "",
+          "warn": " / ".join(dict.fromkeys(LINK_WARN)),
           "items": [{"row": n, "no": r[C_NO], "title": r[C_TITLE][:60], "ship_by": r[C_SHIPBY]} for n, r in w]}
     os.makedirs(os.path.dirname(STATUS), exist_ok=True)
     tmp = STATUS + ".tmp"

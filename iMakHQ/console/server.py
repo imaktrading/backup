@@ -436,7 +436,7 @@ def order_job_info(st):
     # ★2026-10-04: 今日やることの「注文」枠に、うち PSA の件数と一番近い発送期限を出す
     psa = sum(1 for x in (st.get("items") or []) if "PSA" in (x.get("title") or "").upper())
     return {"n": n, "state": "todo" if n else "done", "note": "最後の取り込み %s" % at, "hold": 0,
-            "psa": psa, "ship_by": st.get("earliest_ship_by") or ""}
+            "psa": psa, "ship_by": st.get("earliest_ship_by") or "", "warn": st.get("warn") or ""}
 
 
 def _home_worker():
