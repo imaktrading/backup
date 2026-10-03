@@ -2930,8 +2930,24 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         #   「見送りが無かった」のかが、走行ログから区別できない。
         print("  ⏭ 見送りにした候補はありませんでした (全部いずれかの判断をしています)")
     if diffs:
-        print(f"🚨 「違う」{len(diffs)}件 = 検索が別カード/別変種を拾った精度事故。"
-              "slice2 の検索(kw/variant_hint)を要修正(残存=精度事故の放置)。")
+        # ★2026-10-03: 「🟠版未確認」の候補は、版を確かめられないので **人に決めてもらうために** 出した物。
+        #   そこで「違う」と答えたのは目視が効いた形で、検索の事故ではない (P-041・OP11-106 で誤報が鳴った)。
+        _vc_urls = set()
+        try:
+            for _e in (_load_cache() or {}).values():
+                for _t in (((_e or {}).get("mercari") or {}).get("variant_cands") or []):
+                    if _t and len(_t) > 1 and _t[1]:
+                        _vc_urls.add(_norm_url(_t[1]))
+        except Exception:                                      # noqa: BLE001  読めなければ今までどおり鳴らす
+            _vc_urls = set()
+        _diff_urls = [(d.get("url") or "") for d in (res.get("diffs") or [])]
+        _by_vc = sum(1 for u in _diff_urls if u and _norm_url(u) in _vc_urls)
+        _real = len(diffs) - _by_vc
+        if _by_vc:
+            print(f"  ✋ 版未確認の候補を「違う」で外した {_by_vc}件 (人が版を決める枠=目視が効いた形。正常)")
+        if _real > 0:
+            print(f"🚨 「違う」{_real}件 = 検索が別カード/別変種を拾った精度事故。"
+                  "slice2 の検索(kw/variant_hint)を要修正(残存=精度事故の放置)。")
 
     # ★「ラベルの表記は違うが同じカードの可能性が濃厚」= 後で調べる印 (2026-08-09 ユーザー要望)。
     #   NG には落とさない。NG にすると次回から候補に出なくなり、**調べる前に捨てる**ことになる。
