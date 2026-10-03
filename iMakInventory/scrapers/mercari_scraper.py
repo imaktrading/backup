@@ -73,7 +73,8 @@ DELETION_KEYWORDS = (
     "削除されています",       # "該当する商品は削除されています" (出品者取下げ)
     "該当する商品は",         # 上記の前置
     "ページが見つかりません", # trabajo 文言2
-    "エラーが発生しました",   # trabajo 文言3 (Phase 7.2 で追加)
+    # 「エラーが発生しました」は 2026-10-04 に外した: 一時的なエラー画面を削除 (= 取下げ) にしてしまう。
+    #   エラー画面は判定不能 (None) にして触らない
     "Not Found",
 )
 
@@ -257,6 +258,23 @@ def _save_failure_snapshot(driver, url: str, reason: str) -> None:
         pass
 
 
+def _is_deleted_page(driver, detail_testid: str) -> bool:
+    """削除済ページか. 商品の枠が無い (= 説明文も無い) ページに限って削除の文言を見る.
+
+    削除済ページには商品の要素が1つも無く、文言しか手がかりが無い (2026-10-04 実ページで確認:
+    個人 m70161110227 は 200 で「該当する商品は削除されています。」)。商品の枠があるページでは
+    文言を見ない = 商品説明の文字で削除・売切にしない。
+    """
+    from selenium.webdriver.common.by import By  # noqa: PLC0415
+    try:
+        if driver.find_elements(By.CSS_SELECTOR, f'[data-testid="{detail_testid}"]'):
+            return False
+        page_text = driver.find_element(By.TAG_NAME, "body").text or ""
+    except Exception:
+        return False
+    return any(kw in page_text for kw in DELETION_KEYWORDS)
+
+
 def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
     """driver に url を load し在庫状態を判定.
 
@@ -303,63 +321,30 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
     #                    or variant-purchase-button が不在 / disabled
     # ============================================================
     if is_shops:
-        # Phase 9 Shops DOM 仕様変更対応 (2026-04-30 検体: variant-purchase-button が
-        # 無くなり、body text の「購入手続きへ」/「在庫切れ」で判定する DOM に移行)。
-        # 旧 testid は best-effort で残しつつ、page text を主シグナルにする。
-        SHOPS_INSTOCK_TEXT = "購入手続きへ"
-        SHOPS_SOLDOUT_TEXTS = ("在庫切れ", "売り切れました", "Sold Out", "SoldOut",
-                               "販売を終了", "売り切れ")
+        # ★2026-10-04 ページの文字で売切を決めるのをやめた (ADV 依頼・ユーザー GO / 2026-04・06 に続き3回目)。
+        #   旧版は本文に「在庫切れ」「売り切れ」があれば売切にしていたため、商品説明に
+        #   「在庫切れとなる場合がございます」と書く Shops (カードショップ ドンドン 等) を、
+        #   購入ボタンの描画前に誤って売切にしていた (9月の巡回で4件が売切⇔在庫ありを26〜47回往復)。
+        #   要素だけで決める (2026-10-04 実ページで確認):
+        #     売切   = [data-testid="disabled-purchase-button"] (testid 属性版も) / [data-testid="out-of-stock"]
+        #     在庫あり = [data-testid="variant-purchase-button"] が有効
+        #     削除   = 商品の枠 (product-detail-container) が無いページで削除の文言 (_is_deleted_page)
         end_at = time.time() + SELENIUM_WAIT_SEC
         while time.time() < end_at:
-            # SOLD 直接シグナル (trabajo 解析 selector、互換維持)
-            sold_signal_found = False
-            for sold_sel in (
-                '[testid="disabled-purchase-button"]',       # trabajo: data- 無し
-                '[data-testid="disabled-purchase-button"]',  # 標準形 (念のため)
-            ):
-                try:
-                    driver.find_element(By.CSS_SELECTOR, sold_sel)
-                    sold_signal_found = True
-                    break
-                except NoSuchElementException:
-                    pass
-            if sold_signal_found:
+            if driver.find_elements(By.CSS_SELECTOR,
+                    '[testid="disabled-purchase-button"], [data-testid="disabled-purchase-button"], '
+                    '[data-testid="out-of-stock"]'):
                 in_stock = False
                 break
-
-            # IN_STOCK 直接シグナル (旧 DOM、互換維持)
-            try:
-                btn = driver.find_element(By.CSS_SELECTOR, '[data-testid="variant-purchase-button"]')
+            btns = driver.find_elements(By.CSS_SELECTOR, '[data-testid="variant-purchase-button"]')
+            if btns:
+                btn = btns[0]
                 cls = (btn.get_attribute("class") or "").lower()
-                if "disabled" in cls or btn.get_attribute("disabled"):
-                    in_stock = False
-                else:
-                    in_stock = True
+                in_stock = not ("disabled" in cls or btn.get_attribute("disabled"))
                 break
-            except NoSuchElementException:
-                pass
-
-            # body text 判定 (新 DOM 主シグナル)
-            try:
-                page_text = driver.find_element(By.TAG_NAME, "body").text or ""
-                if any(kw in page_text for kw in DELETION_KEYWORDS):
-                    return {"name": "(deleted)", "status": "DELETED",
-                            "in_stock": False, "price_jpy": None}
-                if any(s in page_text for s in SHOPS_SOLDOUT_TEXTS):
-                    in_stock = False
-                    break
-                # product-detail-container が出現していて「購入手続きへ」あり = IN_STOCK
-                if SHOPS_INSTOCK_TEXT in page_text:
-                    try:
-                        driver.find_element(
-                            By.CSS_SELECTOR, '[data-testid="product-detail-container"]'
-                        )
-                        in_stock = True
-                        break
-                    except NoSuchElementException:
-                        pass
-            except Exception:
-                pass
+            if _is_deleted_page(driver, "product-detail-container"):
+                return {"name": "(deleted)", "status": "DELETED",
+                        "in_stock": False, "price_jpy": None}
             time.sleep(SELENIUM_POLL_INTERVAL)
         if in_stock is None:
             _save_failure_snapshot(driver, url, "shops_purchase_button_not_found_30s")
@@ -402,13 +387,9 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
                 break
             except NoSuchElementException:
                 pass
-            try:
-                page_text = driver.find_element(By.TAG_NAME, "body").text or ""
-                if any(kw in page_text for kw in DELETION_KEYWORDS):
-                    deleted = True
-                    break
-            except Exception:
-                pass
+            if _is_deleted_page(driver, "item-detail-container"):
+                deleted = True
+                break
             time.sleep(SELENIUM_POLL_INTERVAL)
 
         if deleted:
@@ -497,9 +478,9 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
 # 数字でない) は None を返し、呼出元が今までの Chrome 判定に回す (= 売切に倒さない)。
 #   - 削除済の個人出品は mercapi が None ではなく KeyError('data') を投げる (実測) → Chrome へ
 #   - 取引中 (trading) は Chrome 版でも checkout-button 不在 = SOLD 扱い → 同じく SOLD
-# ★既定は「止める」(POC 合格・ユーザーの go まで本番は Chrome のまま。2026-10-03 ADV 依頼 watcher_mercari_api_poc)。
-#   試す時だけ環境変数 IMAK_MERCARI_API=1。go が出たら下の既定値を "1" に替える。
-MERCARI_API_ENABLED = os.environ.get("IMAK_MERCARI_API", "0") == "1"
+# ★2026-10-04 ユーザー GO で既定 ON (LAPTOP の 380件突き合わせ: 有効342・売切の食い違い4は全部 Chrome 側の誤り)。
+#   止める時は環境変数 IMAK_MERCARI_API=0 (全件 Chrome に戻る)。
+MERCARI_API_ENABLED = os.environ.get("IMAK_MERCARI_API", "1") != "0"
 _API_SOLD_STATUSES = {"sold_out", "trading"}
 _QUIET_INSTALLED = False
 
@@ -590,6 +571,38 @@ def _detect_via_api(url: str, is_shops: bool) -> Optional[dict]:
     return None  # 知らない status (stop 等) → Chrome で見る
 
 
+# 抜き取り確認 (2026-10-04 ADV 依頼・切替条件3): API が「在庫あり」と言った分を N 件に1件
+# Chrome でも見る。危険側 (売切を在庫ありと誤る) が出ないことの継続確認。
+# 食い違ったら **売切の方を採る** (取下げ = 安全側) うえで記録に残す。
+SPOTCHECK_EVERY = 20
+SPOTCHECK_LOG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "decision_log", "mercari_api_spotcheck.jsonl")
+_spotcheck_counter = 0
+
+
+def _spotcheck_api_in_stock(driver, url: str, is_shops: bool, api_raw: dict) -> dict:
+    global _spotcheck_counter
+    _spotcheck_counter += 1
+    if _spotcheck_counter % SPOTCHECK_EVERY:
+        return api_raw
+    try:
+        chrome = _detect_via_selenium(driver, url, is_shops)
+    except Exception as e:  # noqa: BLE001
+        chrome = {"error": f"{type(e).__name__}: {str(e)[:80]}"}
+    mismatch = isinstance(chrome, dict) and chrome.get("in_stock") is False
+    try:
+        import json as _json  # noqa: PLC0415
+        with open(SPOTCHECK_LOG, "a", encoding="utf-8") as f:
+            f.write(_json.dumps({"ts": datetime.now().isoformat(timespec="seconds"), "url": url,
+                                 "api": api_raw, "chrome": chrome, "mismatch": mismatch},
+                                ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+    if mismatch:
+        return dict(chrome, status=chrome.get("status") or "SOLD_OUT")
+    return api_raw
+
+
 # ============================================================================
 # 公開 API
 # ============================================================================
@@ -617,6 +630,8 @@ def fetch_product_inventory(
 
     # 0) API で読めたらそれで確定 (読めなければ下の 404 check → Chrome へ)
     raw = _detect_via_api(url, is_shops)
+    if raw is not None and raw["in_stock"] and driver is not None:
+        raw = _spotcheck_api_in_stock(driver, url, is_shops, raw)
     if raw is not None:
         return {
             "name": raw.get("name", ""),

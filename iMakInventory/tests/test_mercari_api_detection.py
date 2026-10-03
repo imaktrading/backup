@@ -143,3 +143,30 @@ def test_shops_time_sale_outside_window_uses_list_price(monkeypatch):
 def test_shops_unreadable_time_sale_goes_to_chrome(monkeypatch):
     _install_fake_mercapi(monkeypatch, product=_product_ts({"price": "x"}))
     assert m._detect_via_api(SHOPS, True) is None
+
+
+def test_spotcheck_takes_sold_when_chrome_disagrees(monkeypatch, tmp_path):
+    _install_fake_mercapi(monkeypatch, item=_item("on_sale"))
+    monkeypatch.setattr(m, "SPOTCHECK_EVERY", 1)
+    monkeypatch.setattr(m, "SPOTCHECK_LOG", str(tmp_path / "s.jsonl"))
+    monkeypatch.setattr(m, "_detect_via_selenium", lambda d, u, s: {
+        "name": "c", "status": "SOLD_OUT", "in_stock": False, "price_jpy": None})
+    r = m.fetch_product_inventory(ITEM, driver=object())
+    assert r["skus"][0]["in_stock"] is False
+    assert '"mismatch": true' in (tmp_path / "s.jsonl").read_text(encoding="utf-8")
+
+
+def test_spotcheck_keeps_api_when_chrome_unreadable(monkeypatch, tmp_path):
+    _install_fake_mercapi(monkeypatch, item=_item("on_sale"))
+    monkeypatch.setattr(m, "SPOTCHECK_EVERY", 1)
+    monkeypatch.setattr(m, "SPOTCHECK_LOG", str(tmp_path / "s.jsonl"))
+    monkeypatch.setattr(m, "_detect_via_selenium", lambda d, u, s: None)
+    assert m.fetch_product_inventory(ITEM, driver=object())["skus"][0]["in_stock"] is True
+
+
+def test_spotcheck_skipped_between_samples(monkeypatch, tmp_path):
+    _install_fake_mercapi(monkeypatch, item=_item("on_sale"))
+    monkeypatch.setattr(m, "SPOTCHECK_EVERY", 1000)
+    monkeypatch.setattr(m, "_spotcheck_counter", 1)
+    monkeypatch.setattr(m, "_detect_via_selenium", lambda d, u, s: pytest.fail("見ない回"))
+    assert m.fetch_product_inventory(ITEM, driver=object())["skus"][0]["in_stock"] is True
