@@ -751,14 +751,27 @@ def main():
             skipped += 1
             continue
 
-        src_mark = " ⚠️古い仕入値 (監視くんの巡回が古い/仕入元が売切)" if stale else " 監視くんの今の最安"
+        # ★2026-10-03: 止めた理由を分けて出す。「古い仕入値」とだけ出していたが、実際は
+        #   「仕入元が売り切れで補URL も無い (= 買える先が無い)」がほとんどだった (10/3 の4件すべて)。
+        _sold_out = len(row) > COL_SOLD and bool((row[COL_SOLD] or "").strip())
+        _n_aux = sum(1 for k in range(S.PRODUCT_AUX_MAX)
+                     if len(row) > S.PRODUCT_COL_AUX_START + k
+                     and (row[S.PRODUCT_COL_AUX_START + k] or "").strip())
+        if not stale:
+            src_mark = " 監視くんの今の最安"
+        elif _sold_out:
+            src_mark = f" ⚠️仕入元が売り切れ・補URL {_n_aux}本"
+        else:
+            src_mark = " ⚠️監視くんの巡回が2日以上前の値"
         print(f"{head}")
         print(f"     → {act} / qty=1 / ${price} / {profile} "
               f"(仕入¥{int(cost):,}{src_mark})")
         if stale and write and not allow_stale:
             # 古い仕入値のまま戻すと「売れない値段」で並ぶ。既定では送らない。
-            print("     → 止めました。今の仕入値を --cost で渡すか、"
-                  "🃏 PSA再仕入れ照合 を先に走らせてください (--allow-stale-cost で強行)")
+            if _sold_out and not _n_aux:
+                print("     → 止めました。買える仕入元がありません (KAGOYA が毎日 次の仕入元を探しています)")
+            else:
+                print("     → 止めました。監視くんの次の巡回で今の仕入値が入れば、次に押した時に戻します")
             skipped += 1
             continue
         if not write:
