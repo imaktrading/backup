@@ -433,7 +433,10 @@ def order_job_info(st):
         return {"n": None, "state": "unknown", "note": "まだ取り込んでいません", "hold": 0}
     n = int(st.get("waiting") or 0)
     at = (st.get("at") or "")[5:16].replace("T", " ").replace("-", "/")
-    return {"n": n, "state": "todo" if n else "done", "note": "最後の取り込み %s" % at, "hold": 0}
+    # ★2026-10-04: 今日やることの「注文」枠に、うち PSA の件数と一番近い発送期限を出す
+    psa = sum(1 for x in (st.get("items") or []) if "PSA" in (x.get("title") or "").upper())
+    return {"n": n, "state": "todo" if n else "done", "note": "最後の取り込み %s" % at, "hold": 0,
+            "psa": psa, "ship_by": st.get("earliest_ship_by") or ""}
 
 
 def _home_worker():
@@ -1245,7 +1248,9 @@ def _run_worker(script, cmd=None):
         stopped = STATE["stopping"]
         STATE["stopping"] = False
     _t_done = time.time()
-    _keys = count_keys_for(script.get("badge"))
+    # ★2026-10-04: 読むだけのボタン (売れた PSA の仕入れ先を探す) は数え直さない。badge が無いと
+    #   「分からないボタン = 全部数え直す」になり、押した後 3〜8分「数え直し中」のままだった
+    _keys = [] if script.get("no_recount") else count_keys_for(script.get("badge"))
     if _keys != []:                                   # [] = 数える項目が無いボタン (注文の取り込み)
         refresh_counts(wait=True, keys=_keys)
     # ★押したのに件数が減らなかったら、その場で言う (旧パネルと同じ判定を使う)。

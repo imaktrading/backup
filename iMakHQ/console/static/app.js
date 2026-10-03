@@ -341,13 +341,32 @@
                         jobBtn(dj, "取り込む") + ' <a class="stlink" href="' + SALES_SHEET + '" target="_blank" rel="noopener">シート</a>']);
     $("today-strip").innerHTML = chips.concat(STRIP.errors || []).map(stChip).join("");
     var big = [];
+    // 左オファー・右注文の2枠。どちらかに件数があれば両方並べる (0件の側は「ありません」)
+    var two = (oj && oj.n) || (dj && dj.n);
+    if (two && !(oj && oj.n)) {
+      big.push('<div class="u calm"><span class="k">オファー</span><span class="t"><b>0</b>件</span>' +
+        '<span class="d">来ていません</span><span class="ugo"></span></div>');
+    }
     if (oj && oj.n) {
       big.push('<div class="u"><span class="k">オファー (返事の期限は受信から約1日)</span>' +
         '<span class="t"><b>' + num(oj) + "</b>件 来ています</span>" +
         '<span class="d">国・出品価格・仕入値つきの一覧をブラウザで開きます</span>' +
         '<span class="ugo">' + (oj.runnable ? jobBtn(oj, "オファー対応").replace("<button", '<button class="run hot"') : "") + "</span></div>");
     }
-    // ★2026-09-29 ユーザー「これ自体もいらんかな」: 仕入れ待ちの大きな枠はやめ、状態の1行 (件数・取り込む・シート) だけ
+    // ★2026-10-04 ユーザー「今日やることのオファーのようにして。右に注文、左にオファーの２枠で」:
+    //   9/29 にやめた仕入れ待ちの大きな枠を、売れた PSA の仕入れ先を探すボタン付きで戻す
+    if (two && !(dj && dj.n)) {
+      big.push('<div class="u calm"><span class="k">注文 仕入れ待ち</span><span class="t"><b>0</b>件</span>' +
+        '<span class="d">仕入れ待ちはありません' + (dj && dj.note ? " (" + esc(dj.note) + ")" : "") + '</span><span class="ugo"></span></div>');
+    }
+    if (dj && dj.n) {
+      var ps = buttons.filter(function (b) { return b.label.indexOf("仕入れ先を探す") >= 0; })[0];
+      big.push('<div class="u"><span class="k">注文 仕入れ待ち' + (dj.ship_by ? " (一番近い発送期限 " + esc(dj.ship_by) + ")" : "") + "</span>" +
+        '<span class="t"><b>' + num(dj) + "</b>件 仕入れ待ち" + (dj.psa ? " <small>うち PSA " + dj.psa + "件</small>" : "") + "</span>" +
+        '<span class="d">' + (dj.psa ? "売れた PSA の仕入れ先を、仕入元・補URL・メルカリ・スニダンから安い順に開きます"
+                                     : "PSA の仕入れ待ちはありません (" + esc(dj.note || "") + ")") + "</span>" +
+        '<span class="ugo">' + (dj.psa && ps ? jobBtn(ps, "仕入れ先を探す").replace("<button", '<button class="run hot"') : "") + "</span></div>");
+    }
     $("today-urgent").innerHTML = big.join("");
   }
 

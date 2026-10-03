@@ -53,3 +53,23 @@ def test_psa_order_row():
     assert P.is_psa_order_row(r, 2, 17)
     r[2] = "G-SHOCK GW-M5610"
     assert not P.is_psa_order_row(r, 2, 17)
+
+
+def test_today_order_card_counts_psa():
+    """今日やることの「注文」枠 (2026-10-04): うち PSA の件数と一番近い発送期限を出す。"""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "console"))
+    import server as SV
+    st = {"at": "2026-10-03T22:00:00", "waiting": 3, "earliest_ship_by": "2026/10/14",
+          "items": [{"title": "PSA 10 Pokemon Mew"}, {"title": "G-SHOCK GW-M5610"}, {"title": "PSA 10 Latios"}]}
+    d = SV.order_job_info(st)
+    assert d["n"] == 3 and d["psa"] == 2 and d["ship_by"] == "2026/10/14"
+
+
+def test_read_only_button_does_not_recount():
+    """読むだけのボタンは押した後に全部数え直さない (3〜8分「数え直し中」のままだった)。"""
+    import control_panel as cp
+    b = [s for s in cp.SCRIPTS if "仕入れ先を探す" in s["label"]][0]
+    assert b.get("no_recount") is True
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "console", "server.py"),
+               encoding="utf-8").read()
+    assert 'script.get("no_recount")' in src
