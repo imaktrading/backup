@@ -6,4 +6,4 @@ SRC = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools
 
 
 def test_swap_log_says_removed():
-    assert "もっと安いのが5本そろったので外した" in SRC
+    assert "売り切れ / もっと安い物が入ったので外した" in SRC

@@ -495,9 +495,15 @@ body{font-family:system-ui,'Meiryo',sans-serif;background:#141414;color:#eee;mar
   max-width:980px}
 h1{color:#ffd700;font-size:20px;margin:0 0 2px}
 .sub{color:#999;font-size:12px;margin-bottom:16px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:6px}
 .f{background:#1e1e1e;border:1px solid #333;border-radius:8px;padding:12px}
 .f label{display:block;color:#9cf;font-size:12px;margin-bottom:6px}
+/* ★2026-10-04 ユーザー「ここがスペース取りすぎてない？」。入力欄はほとんど自動で
+   埋まる (仕入値も国もカテゴリも) ので、見る場所ではない。1段に詰める */
+.grid .f{padding:5px 7px;border-radius:6px}
+.grid .f label{font-size:10px;margin-bottom:2px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.grid input,.grid select{padding:4px 5px;font-size:13px}
 input,select{width:100%;box-sizing:border-box;background:#111;color:#eee;border:1px solid #555;
   border-radius:5px;padding:9px;font-size:16px}
 #verdict{margin-top:16px;border-radius:10px;padding:18px;border:2px solid #444;background:#1a1a1a}
@@ -507,6 +513,12 @@ input,select{width:100%;box-sizing:border-box;background:#111;color:#eee;border:
 .big{font-size:30px;font-weight:bold}
 .line{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #2a2a2a;
   font-size:14px}
+/* ★2026-10-04 ユーザー「この部分が横長すぎて、見づらい」。項目と金額が画面の端どうしに
+   離れていた。内訳は 2列に畳み、表は中身の幅までにする */
+#verdict .brk{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:0 28px;max-width:620px}
+#verdict table{width:auto;min-width:420px}
+#verdict table td,#verdict table th{padding:5px 14px}
 .line b{font-variant-numeric:tabular-nums}
 table{border-collapse:collapse;width:100%;margin-top:10px;font-size:13px}
 td,th{border:1px solid #3a3a3a;padding:6px 9px;text-align:right}
@@ -517,6 +529,17 @@ th{background:#252525;color:#9cf}td:first-child,th:first-child{text-align:left}
 .orow.go td{background:#16301a}.orow.warn td{background:#3a2a16}.orow.ng td{background:#3a1616}
 .orow:hover td{filter:brightness(1.35)}
 .orow.sel td{outline:2px solid #ffd700;outline-offset:-2px}
+/* 左右の対比 (2026-10-04)。狭い画面では自動で上下に折り返す */
+.cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px;margin-top:14px}
+.pane{border:2px solid #444;border-radius:10px;padding:12px;background:#1a1a1a}
+.pane.go{border-color:#4caf50;background:#16301a}
+.pane.warn{border-color:#ff9800;background:#3a2a16}
+.pane.ng{border-color:#f44336;background:#3a1616}
+.plabel{color:#9cf;font-size:12px;margin-bottom:2px}
+#verdict{border-color:#333;background:transparent;padding:0;border:0}
+.pk{background:#222;color:#9cf;border:1px solid #456;border-radius:12px;padding:3px 9px;
+  font-size:11px;cursor:pointer;margin:2px 0}
+.pk:hover{background:#2c3a4a}
 a{color:#7ab8ff}
 </style></head><body>
 <h1>オファー判定 — 通していい？</h1>
@@ -531,15 +554,31 @@ a{color:#7ab8ff}
 </div>
 
 <div class="grid">
-  <div class="f"><label>バイヤーの国（仕向地）</label><select id="dest"></select></div>
+  <div class="f"><label title="バイヤーの国（仕向地）">バイヤーの国</label><select id="dest"></select></div>
   <div class="f"><label>カテゴリ</label><select id="cat"></select></div>
-  <div class="f"><label>オファー金額（現地通貨）</label><input id="price" type="number" step="0.01" value="70"></div>
-  <div class="f"><label>出品価格（任意・帯またぎ検出用）</label><input id="list" type="number" step="0.01" value="0"></div>
+  <div class="f"><label title="オファー金額（現地通貨）">オファー金額</label><input id="price" type="number" step="0.01" value="70"></div>
+  <div class="f"><label title="出品価格（任意・帯またぎ検出用）">出品価格</label><input id="list" type="number" step="0.01" value="0"></div>
   <div class="f"><label>仕入値（円）</label><input id="cost" type="number" step="10" value="1800"></div>
-  <div class="f"><label>ポイント還元（円）</label><input id="pt" type="number" step="10" value="0"></div>
+  <div class="f"><label title="ポイント還元（円）">ポイント還元</label><input id="pt" type="number" step="10" value="0"></div>
   <div class="f"><label>プロモ</label><select id="promo">
-      <option value="0">外す（承諾時はこちら）</option><option value="1">つけたまま</option></select></div>
-  <div class="f"><label>EU 仕向国（送料・関税の実費に効く）</label><select id="eucty"></select></div>
+      <option value="0">外す（承諾時）</option><option value="1">つけたまま</option></select></div>
+  <div class="f"><label title="EU 仕向国（送料・関税の実費に効く）">EU 仕向国</label><select id="eucty"></select></div>
+  <div class="f"><label title="動かすと下の目安と判定が変わります">目標の利益率（%）</label>
+    <input id="target" type="number" step="1" min="0" max="60" value="10"></div>
+</div>
+
+<!-- ★2026-10-04 ユーザー「カウンターの目安がわからない」「画面上で調整できる欄があると
+     比較しやすい」。損益分岐・目標下限・出品価格を**並べて置き、額を動かして利益を見る**枠。
+     #verdict とは別の枠にしてある (verdict は毎回作り直すので、入力中に欄が消えてしまう)。 -->
+<div class="f" id="ctrbox" style="margin-top:14px;border-color:#ffd700">
+  <label>↩︎ いくらで返すか（カウンター額）</label>
+  <div style="display:flex;gap:10px;align-items:center">
+    <span id="ctrsym" style="font-size:20px">$</span>
+    <input id="ctr" type="number" step="0.5" style="max-width:150px">
+    <input id="ctrr" type="range" step="0.5" style="flex:1">
+  </div>
+  <div id="ctrout" style="margin-top:10px"></div>
+  <div id="ctrpick" style="margin-top:8px;font-size:12px"></div>
 </div>
 
 <div id="verdict"></div>
@@ -571,10 +610,15 @@ function feeRate(countryKey, catKey){
   return (base + c.intl + c.reg) * (1 + c.tax);
 }
 
-/* 仕向国コード。DE ルートは DE/AT、その他ルートは EU国セレクタの値を使う */
+/* 仕向国コード。'NONE' = EU 以外 (= DDP 無し)。
+   ★2026-10-04: 既定を 'NONE' にした。EU27 か国は**発送除外中**で買えない
+   (実機確認: 出品 820189150139 の ExcludeShipToLocation 61件に EU27 が全部入っている)。
+   「US計算_非US」を通るのは 英/加/豪/アジア/中東 等で、EU の DDP (送料で ¥3,219 徴収して
+   関税を負担) は誰にも当たらない。これを全員に当てていたため V9 と 227〜991円 ズレていた。
+   EU 再開は残務にあるので、国の選択肢自体は残す。 */
 function euCountry(){
   const s = document.getElementById('eucty');
-  return (s && s.value) || 'DE';
+  return (s && s.value) || 'NONE';
 }
 /* IOSS 上限 (€150) を、そのルートの通貨に換算したしきい値 */
 function iossLimit(cur){
@@ -594,6 +638,13 @@ function listedPrice(price, ov){
    ov を渡すと DOM を読まない。同じ calc を使うので、一覧と下の内訳で数字がズレない
    (別実装で表を作ると「どちらが正しいか」が分からなくなる)。
    ov = {dest, cat, cost, pt, list, promo}。promo は既定 0 = 外す (承諾時の見方)。 */
+/* 目標の利益率 (入力欄。既定は設定タブの値)。★2026-10-04: 画面で動かせるようにした */
+function tgt(){
+  const e = document.getElementById('target');
+  const v = e ? (+e.value) : NaN;
+  return (isFinite(v) && v >= 0) ? v / 100 : P.target;
+}
+
 function calc(price, ov){
   const dk = ov ? ov.dest : dest.value, ck = ov ? ov.cat : cat.value;
   const [tab, sym, cur] = P.routes[dk];
@@ -622,10 +673,11 @@ function calc(price, ov){
              定義:「DDP分と日本郵便との差額 + 関税」を送料として徴収する。
              J(設定の想定送料) は日本郵便で送った場合の想定で、本体価格に内包済。
              >€150 は送料無料なので 0。 */
-      const e = P.eu[euCountry()] || {tier: 17, cost: 3219};
+      const e = (euCountry() === 'NONE') ? null : (P.eu[euCountry()] || {tier: 17, cost: 3219});
       const lim = iossLimit(cur);
-      N = (price <= lim) ? (e.cost - J) : 0;                 // コストは成約額の帯
-      D = (listedPrice(price, ov) <= lim) ? (e.cost - J) / fx : 0;  // 送料は出品価格の帯
+      /* EU 以外 (既定) は DDP 無し。V9 の非US タブ (D列・N列が 0 固定) と同じ */
+      N = (e && price <= lim) ? (e.cost - J) : 0;                 // コストは成約額の帯
+      D = (e && listedPrice(price, ov) <= lim) ? (e.cost - J) / fx : 0;  // 送料は出品価格の帯
     }
     E = F + D; G = E * fx;
     K = G * fr + 0.4 * fx; L = G * promo; M = G * P.payo;
@@ -686,7 +738,10 @@ function shipInfo(dk, price){
   } else if (dk === 'US'){
     out.method = 'SpeedPAK Economy（US_EconomySppedPAK）';
     out.why = '米国内向け。関税は当方負担（DDP）';
-  } else {                                   // その他 (US出品・米国外へ発送)
+  } else if (euCountry() === 'NONE'){         // その他・EU 以外 (既定)
+    out.method = '日本郵便（国際eパケット / EMS）';
+    out.why = 'DDU。買い手の国で関税がかかれば着払い。米国関税は払わないので US 基準より利益は厚い';
+  } else {                                   // その他 (US出品・EU へ発送)
     if (eur <= IOSS_EUR){
       out.method = 'SpeedPAK Economy（rate table iMak_EU_DDP_Common）';
       out.why = '取引額 €' + eur.toFixed(2) + ' ≤ €150。EU25 か国は Economy でカバー';
@@ -697,7 +752,8 @@ function shipInfo(dk, price){
   }
   // 帯またぎ (出品価格を入れた時だけ)
   const listP = +document.getElementById('list').value || 0;
-  if (listP > 0 && (dk === 'DE' || dk === 'その他 (US出品・米国外へ発送)')){
+  if (listP > 0 && euCountry() !== 'NONE' &&
+      (dk === 'DE' || dk === 'その他 (US出品・米国外へ発送)')){
     const listEUR = listP * (P.fx[cur] || 0) / (P.fx.EUR || 1);
     if (listEUR > IOSS_EUR && eur <= IOSS_EUR)
       out.warns.push('<b>帯またぎ</b>: 出品 €' + listEUR.toFixed(2) + ' は「>€150=日本郵便」設定だが、'
@@ -709,74 +765,136 @@ function shipInfo(dk, price){
     out.warns.push('Economy 制約: <b>6〜16営業日</b> / 電池不可 / '
       + '<b>申告額 1kgあたり $1,000 以上は不可</b>（PSA10 は梱包 0.3kg 以上を確保）');
   }
-  if (dk === 'DE' || dk === 'その他 (US出品・米国外へ発送)')
+  if (euCountry() !== 'NONE' && (dk === 'DE' || dk === 'その他 (US出品・米国外へ発送)'))
     out.warns.push('EU 向けは <b>IOSS 番号 IM2760000742</b> を差出人参照番号欄に入れる（忘れると VAT 二重払い）');
   return out;
 }
 
-function render(){
-  const r = calc(+document.getElementById('price').value || 0);
-  const v = document.getElementById('verdict');
-  const ok = r.margin >= P.target, be = r.profit > 0;
-  v.className = ok ? 'go' : (be ? 'warn' : 'ng');
+/* 1つの額ぶんの判定カード (★2026-10-04 ユーザー「左右で対比できると見やすいかも」:
+   左=相手のオファー / 右=カウンター額 を**同じ形**で並べる。同じ calc() なので
+   どちらの列も数字の出どころは1つ)。 */
+function panel(price, label){
+  const r = calc(price);
+  const ok = r.margin >= tgt(), be = r.profit > 0;
+  const cls = ok ? 'go' : (be ? 'warn' : 'ng');
   const head = ok ? '✅ 通してよい' : (be ? '⚠️ 薄い（黒字だが目標未達）' : '🚫 赤字');
-  const breakEven = solve(0), targetPrice = solve(P.target);
-  v.innerHTML =
-    '<div class="big">' + head + '</div>' +
-    '<div style="font-size:26px;margin:6px 0">利益 ' + yen(r.profit) +
-      ' <span style="color:#9cf;font-size:18px">（' + (r.margin * 100).toFixed(1) + '%）</span></div>' +
-    '<div style="color:#bbb;font-size:13px">使用: <b>' + r.tab + '</b> ／ 為替 ' +
-      r.fx.toFixed(2) + ' 円 ／ 実効手数料率 ' + (r.fr * 100).toFixed(2) + '%</div>' +
-    '<table><tr><th>ここまでなら</th><th>金額</th><th>利益</th></tr>' +
-      '<tr><td>損益分岐（これ未満は赤字）</td><td>' + r.sym + breakEven.toFixed(2) +
-        '</td><td>' + yen(0) + '</td></tr>' +
-      '<tr><td>目標 ' + (P.target * 100).toFixed(0) + '% を満たす下限</td><td>' + r.sym +
-        targetPrice.toFixed(2) + '</td><td>' + yen(calc(targetPrice).profit) + '</td></tr>' +
-      '<tr><td><b>今回のオファー</b></td><td><b>' + r.sym + r.price.toFixed(2) +
-        '</b></td><td><b>' + yen(r.profit) + '</b></td></tr>' +
-      /* ★2026-10-04: 出品価格のままの利益 (= V9 の9行目) を併記。ユーザーは
-         「9行目と16行目を主に見ている」= オファー額と出品価格を**並べて**比べている。 */
-      (function(){ const lp = +document.getElementById('list').value || 0;
-        if (!(lp > 0) || Math.abs(lp - r.price) < 0.005) return '';
-        return '<tr><td>出品価格のまま売れたら</td><td>' + r.sym + lp.toFixed(2) +
-               '</td><td>' + yen(calc(lp).profit) + '</td></tr>'; })() +
-      '</table>' +
-    '<div style="margin-top:12px">' +
+  const s = shipInfo(dest.value, r.price);
+  return '<div class="pane ' + cls + '">' +
+    '<div class="plabel">' + label + '</div>' +
+    '<div style="font-size:24px;font-weight:bold;margin-bottom:2px">' + r.sym +
+      r.price.toFixed(2) + '</div>' +
+    '<div class="big" style="font-size:19px">' + head + '</div>' +
+    '<div style="font-size:23px;margin:4px 0">利益 ' + yen(r.profit) +
+      ' <span style="color:#9cf;font-size:15px">（' + (r.margin * 100).toFixed(1) + '%）</span></div>' +
+    '<div style="margin-top:8px">' +
       line('売上', yen(r.G)) + line('仕入', '-' + yen(r.cost)) +
       (r.pt ? line('ポイント還元', '+' + yen(r.pt)) : '') +
       line('送料', '-' + yen(r.J)) + line('eBay手数料', '-' + yen(r.K)) +
       line('プロモ費', '-' + yen(r.L)) + line('Payoneer', '-' + yen(r.M)) +
       line(r.tab.startsWith('US') ? 'DDP/関税ほか' : 'VAT/GST相殺', '-' + yen(r.N)) +
     '</div>' +
-    (function(){
-      const s = shipInfo(dest.value, r.price);
-      return '<div style="margin-top:14px;padding:12px;border:1px solid #3a5;border-radius:8px;'
-        + 'background:#16241a">'
-        + '<div style="color:#9f9;font-size:12px;margin-bottom:4px">📦 何で送るか（成約額で決まる）</div>'
-        + '<div style="font-size:18px;font-weight:bold">' + s.method + '</div>'
-        + '<div style="color:#bbb;font-size:12px;margin-top:3px">' + s.why + '</div>'
-        + (s.warns.length
-            ? '<ul style="margin:8px 0 0;padding-left:18px;font-size:12px;color:#ffd">'
-              + s.warns.map(w => '<li>' + w + '</li>').join('') + '</ul>'
-            : '')
-        + '</div>';
-    })();
+    '<div style="margin-top:10px;padding:9px;border:1px solid #3a5;border-radius:8px;'
+      + 'background:#16241a">'
+      + '<div style="color:#9f9;font-size:11px">📦 何で送るか（成約額で決まる）</div>'
+      + '<div style="font-size:15px;font-weight:bold">' + s.method + '</div>'
+      + '<div style="color:#bbb;font-size:11px;margin-top:2px">' + s.why + '</div>'
+      + (s.warns.length
+          ? '<ul style="margin:6px 0 0;padding-left:16px;font-size:11px;color:#ffd">'
+            + s.warns.map(w => '<li>' + w + '</li>').join('') + '</ul>'
+          : '')
+      + '</div>' +
+    '</div>';
+}
+
+function render(){
+  ctrSync();                       // カウンター額の既定値を先に決める (左右の右側で使う)
+  const offer = +document.getElementById('price').value || 0;
+  const ctrv = +document.getElementById('ctr').value || offer;
+  const r = calc(offer);
+  const v = document.getElementById('verdict');
+  v.className = '';                // 色は中の2枚が持つ (枠全体は中立)
+  v.innerHTML =
+    '<div style="color:#bbb;font-size:13px">使用: <b>' + r.tab + '</b> ／ 為替 ' +
+      r.fx.toFixed(2) + ' 円 ／ 実効手数料率 ' + (r.fr * 100).toFixed(2) + '%</div>' +
+    /* ★2026-10-04 ユーザー「同じ数字が3回出ている」。ここにあった「ここまでなら」表は
+       外した。損益分岐・目標下限・出品価格は**カウンター枠の押せるボタン**に、
+       出品価格のままの利益は**一覧表の列**に出ているので、同じ数字の3度目だった。 */
+    '<div class="cmp">' + panel(offer, '相手のオファー') +
+      panel(ctrv, '↩︎ カウンター額（上の欄で変えられます）') + '</div>';
+  renderCtr();
   document.getElementById('lnk').innerHTML =
     '<a href="' + P.url + P.tabs[r.tab] + '" target="_blank">' + r.tab + ' を開く</a>' +
     '（C15 に ' + r.sym + r.price.toFixed(2) + ' を入れて 16行を見る）';
 }
 function line(k, v){ return '<div class="line"><span>' + k + '</span><b>' + v + '</b></div>'; }
 
+/* ===== カウンター額の枠 (2026-10-04) =====
+   相手のオファー / 損益分岐 / 目標下限 / 出品価格 を**同じ軸に並べて**、額を動かしながら
+   利益を見る。目安は「押すとその額が入る」ボタンにしてある (覚えなくていいように)。 */
+var ctrTouched = false;              // 人が動かしたら、自動の初期値で上書きしない
+function ctrMarks(){
+  const offer = +document.getElementById('price').value || 0;
+  const list = +document.getElementById('list').value || 0;
+  const be = solve(0), tp = solve(tgt());
+  const mid = (list > tp) ? (tp + list) / 2 : tp;     // 目標下限と出品価格の中間
+  return {offer, list, be, tp, mid};
+}
+function ctrDefault(){                // 既定のカウンター = 目標下限と出品価格の中間
+  const m = ctrMarks();
+  return Math.max(m.mid, m.tp);
+}
+/* 既定値の流し込みだけ。render() の頭で呼ぶ (右パネルがこの値を使うため) */
+function ctrSync(){
+  const box = document.getElementById('ctr');
+  if (!ctrTouched || !(+box.value > 0)) box.value = ctrDefault().toFixed(2);
+}
+/* 判定と利益は右パネルに出るので、ここは「額を動かす所」だけ */
+function renderCtr(){
+  const m = ctrMarks(), box = document.getElementById('ctr'), rng = document.getElementById('ctrr');
+  const r0 = calc(m.offer);
+  document.getElementById('ctrsym').textContent = r0.sym;
+  rng.min = Math.floor(Math.min(m.offer, m.be) * 0.9);
+  rng.max = Math.ceil(Math.max(m.list, m.tp, +box.value) * 1.05);
+  rng.value = box.value;
+  const down = m.list > 0 ? ((1 - (+box.value) / m.list) * 100) : 0;
+  document.getElementById('ctrout').innerHTML =
+    '<span style="color:#bbb;font-size:12px">' +
+      '出品 ' + r0.sym + m.list.toFixed(2) + ' から <b>' + down.toFixed(1) + '% 引き</b>' +
+      ' ／ 相手のオファー ' + r0.sym + m.offer.toFixed(2) + ' との差 <b>' + r0.sym +
+      ((+box.value) - m.offer).toFixed(2) + '</b>　→ 判定と内訳は下の<b>右</b></span>';
+  const pick = [['相手のオファー', m.offer], ['赤字の境目', m.be],
+                ['目標 ' + (tgt() * 100).toFixed(0) + '% の下限', m.tp],
+                ['目標と出品の中間', m.mid], ['出品価格', m.list]];
+  document.getElementById('ctrpick').innerHTML = '押すとその額が入る: ' +
+    pick.filter(x => x[1] > 0).map(x =>
+      '<button class="pk" data-v="' + x[1].toFixed(2) + '">' + x[0] + ' ' + r0.sym +
+      x[1].toFixed(2) + '</button>').join(' ');
+  Array.prototype.forEach.call(document.querySelectorAll('.pk'), function(b){
+    b.addEventListener('click', function(){
+      document.getElementById('ctr').value = b.getAttribute('data-v');
+      ctrTouched = true; render();
+    });
+  });
+}
+['ctr', 'ctrr'].forEach(function(id){
+  document.getElementById(id).addEventListener('input', function(e){
+    ctrTouched = true;
+    if (id === 'ctrr') document.getElementById('ctr').value = e.target.value;
+    render();
+  });
+});
+
 /* EU 仕向国セレクタ (EU送料マスタ 由来) */
 (function(){
   const s = document.getElementById('eucty');
+  s.add(new Option('EU 以外（いま EU は発送除外中）', 'NONE'));
   const ks = Object.keys(P.eu || {});
-  if (!ks.length){ s.add(new Option('DE (マスタ未読込)', 'DE')); return; }
   ks.forEach(k => s.add(new Option(`${k} ${P.eu[k].name}（$${P.eu[k].tier}）`, k)));
-  s.value = 'DE';
+  s.value = 'NONE';
 })();
 
-['dest','cat','price','list','cost','pt','promo','eucty'].forEach(id =>
+document.getElementById('target').value = (P.target * 100).toFixed(0);
+['dest','cat','price','list','cost','pt','promo','eucty','target'].forEach(id =>
   document.getElementById(id).addEventListener('input', render));
 document.getElementById('eucty').addEventListener('change', render);
 
@@ -807,8 +925,8 @@ document.getElementById('eucty').addEventListener('change', render);
       var ov = {dest: o.dest, cat: o.cat, cost: o.cost, pt: 0, list: o.list, promo: 0};
       var r = calc(o.price, ov), be = solve(0, ov);
       var lp = (+o.list || 0) > 0 ? calc(o.list, ov) : null;
-      var cls = (r.margin >= P.target) ? 'go' : (r.profit > 0 ? 'warn' : 'ng');
-      var mark = (r.margin >= P.target) ? '✅ 通してよい'
+      var cls = (r.margin >= tgt()) ? 'go' : (r.profit > 0 ? 'warn' : 'ng');
+      var mark = (r.margin >= tgt()) ? '✅ 通してよい'
                : (r.profit > 0 ? '⚠️ 薄い' : '🚫 赤字');
       var nocost = !o.cost;
       return '<tr class="orow ' + cls + '" data-i="' + i + '">'
@@ -854,6 +972,7 @@ document.getElementById('eucty').addEventListener('change', render);
       + ` ／ バイヤー ${o.buyer}（${o.country}・評価${o.fb}）`
       + (o.stock ? ` ／ 在庫確認 ${o.stock}` : '')
       + (o.supply ? ` ／ 補URL ${o.supply}本` : '');
+    ctrTouched = false;          // 別のオファーに移ったら目安を入れ直す
     render();
   }
   sel.addEventListener('change', apply);
@@ -869,13 +988,15 @@ DDP = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 140, 160, 180, 200, 220, 24
 
 
 def calc_py(p, tab, cat_key, dest_key, price, cost, pt=0.0, promo_on=False,
-            eu_country="DE", listed=None):
+            eu_country="NONE", listed=None):
     """HTML(JS) と **同じ式**を Python でも持つ。検証はこれとシートを突き合わせる。
 
     2実装が食い違ったら、その時点で検証が落ちる = 気づける。
 
     eu_country: EU送料マスタ の国コード。US計算_非US / DE計算 の DDP に効く
                 (2026-07-31 追加。旧 shipMode の置換)。
+                ★既定 "NONE" = EU 以外 → DDP 無し (2026-10-04)。EU27 は発送除外中で
+                  買えないため、このルートを通るのは英/加/豪/アジア/中東等。
     listed:     **出品価格**。送料を取れるかは出品時のポリシーで決まるので、
                 D(DDP分送料) はこちらの帯で判定する。N(DDPコスト) は成約額 price の帯。
                 None なら出品=成約 (= その価格で出したらの試算)。
@@ -903,15 +1024,17 @@ def calc_py(p, tab, cat_key, dest_key, price, cost, pt=0.0, promo_on=False,
             N = D * fx
         else:
             # ★2026-07-31: EU送料マスタ 由来の国別値 (旧 独/FedEx7 の2値は廃止)
-            e = (p.get("eu") or {}).get(eu_country or "DE", {"tier": 17, "cost": 3219})
+            # eu_country="NONE" (既定) = EU 以外 → DDP 無し。V9 の非US タブと同じ
+            e = None if (eu_country or "NONE") == "NONE" else                 (p.get("eu") or {}).get(eu_country, {"tier": 17, "cost": 3219})
             # ≤€150 = DDP/Economy (関税は当方負担) / >€150 = DDU/国際エアパケット (買い手着払い)
             # >€150 は想定送料 J(¥2,000) で足りる (実費はそれ以下、差はバッファ) → 追加 0
             lim = p.get("iossEur", 150) * p["fx"]["EUR"] / p["fx"]["USD"]
-            N = (e["cost"] - J) if price <= lim else 0.0
+            N = (e["cost"] - J) if (e and price <= lim) else 0.0
             # ★DDP分送料 D = DDPコスト と同額 (US計算 の `N9=D9*$C$3` と同じ関係)。
             #   ただし判定は **出品価格**。>€150 で出したら送料無料ポリシーなので、
             #   オファーで ≤€150 に落ちても送料は取れない (= またぎ)。
-            D = (e["cost"] - J) / fx if (listed if listed is not None else price) <= lim else 0.0
+            D = ((e["cost"] - J) / fx
+                 if (e and (listed if listed is not None else price) <= lim) else 0.0)
         G = (F + D) * fx
         K, L, M = G * fr + 0.4 * fx, G * promo, G * p["payo"]
     else:

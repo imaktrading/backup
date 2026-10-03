@@ -1831,8 +1831,43 @@ def moved_target_indices(item_targets, fresh_rows):
     return out
 
 
+def dead_existing_aux(confirmed, item_targets, vals, aux_max=None):
+    """書く出品の今の補のうち、**今は買えないと確かめた** 物 (正規化URL の集合)。I/O。
+
+    メルカリ = API (個人: 販売中でない・消えた / Shops: 在庫数0・消えた)。スニダン = 出品一覧 API に無い。
+    確かめられなかった物 (通信失敗・その他のサイト) は入れない = 残す。
+    """
+    aux_max = aux_max or AUXN
+    urls = []
+    for idx in (confirmed or {}):
+        t = item_targets[idx] if idx < len(item_targets) else None
+        row = (t or {}).get("row")
+        r = vals[row - 1] if (row and 0 < row <= len(vals)) else []
+        urls += [u for u in (_cell(r, AUX0 + k) for k in range(aux_max)) if u]
+    dead = set()
+    merc = [u for u in urls if "mercari.com" in u]
+    if merc:
+        try:
+            import mercari_psa_resource as _mp
+            ok, _t, _unk = _mp.api_stock_check(merc)
+            dead |= {_norm_url(u) for u, v in ok.items() if v is False}
+        except Exception as e:                                 # noqa: BLE001
+            print(f"  ⚠ 補の在庫をメルカリ API で確かめられません ({type(e).__name__}) — 外さずに残します")
+    snk = [u for u in urls if "snkrdunk.com" in u]
+    if snk:
+        try:
+            import snkrdunk_psa_resource as _sp
+            for u in snk:
+                live, _p = _sp.listing_live_price(u)
+                if live is False:
+                    dead.add(_norm_url(u))
+        except Exception as e:                                 # noqa: BLE001
+            print(f"  ⚠ 補の在庫をスニダンで確かめられません ({type(e).__name__}) — 外さずに残します")
+    return dead
+
+
 def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, aux_max=None,
-                       price_by_url=None):
+                       price_by_url=None, dead_urls=None):
     """確定URL → 補URL書込計画 {row: [URL×5]} を決める **純関数**(I/Oなし・test可)。
 
     - guard_ok=False (= URL共有ガードを組めなかった) なら **何も書かない**。
@@ -1842,6 +1877,9 @@ def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, au
       並べ直し 最大5本にする (2026-09-05。従来は既存保持+空き枠のみだったので、
       補が埋まっている出品には もっと安い供給が1本も入らなかった)。
     price_by_url: {idx: {正規化URL: 価格}}。値段の分かるURLだけが安い順に前へ出る。
+    dead_urls: 今は買えないと **確かめた** 既存の補 (正規化URL の集合)。外して詰める。
+      ★2026-10-04 ユーザー「それのほうがいいのでは？」: 売り切れた補が枠をふさぎ、安い候補が入れなかった
+      (ラティオスの補1)。確かめられなかった物は入れない = 残す (判定不能は外さない)。
     戻り: (aux_writeback{row: [5要素]}, 追加URL総数,
            他出品所有で落としたURL [(url, [owner...])], 押し出した既存 [(itemID, url)])
     """
@@ -1857,8 +1895,12 @@ def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, au
         urls, dropped = _dg.filter_urls_owned_by_others(urls, owner_by_url, _cell(r, B))
         dropped_all.extend(dropped)
         existing = [u for u in (_cell(r, AUX0 + k) for k in range(aux_max)) if u]
-        full, added, removed = rank_backurls(existing, urls,
+        dead = [u for u in existing if _norm_url(u) in (dead_urls or ())]
+        live = [u for u in existing if _norm_url(u) not in (dead_urls or ())]
+        urls = [u for u in urls if _norm_url(u) not in (dead_urls or ())]
+        full, added, removed = rank_backurls(live, urls,
                                              (price_by_url or {}).get(idx), aux_max)
+        removed = dead + removed
         # 並びが変わっただけでも書く (安い順に持ち直すのが目的なので)
         if added or removed or full != existing:
             aux_writeback[row] = full
@@ -2727,13 +2769,16 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         print(f"⚠️要対応 書く直前の読み直しに失敗 → 書込を中止: {type(_e_fr).__name__}: {_e_fr}")
         _guard_ok = False
     _price_by_idx = add_existing_prices(_price_by_idx, confirmed, item_targets, vals)
+    _dead = dead_existing_aux(confirmed, item_targets, vals)
+    if _dead:
+        print(f"  🧹 今入っている補で売り切れ・消えている物 {len(_dead)}本 → 外して詰めます")
     aux_writeback, added_total, dropped, replaced = plan_aux_writeback(
         confirmed, item_targets, vals, _owner_by_url, _guard_ok,
-        price_by_url=_price_by_idx)
+        price_by_url=_price_by_idx, dead_urls=_dead)
     for _u, _own in dropped:
         print(f"  ⛔ 補URL除外(他出品が使用中 {_own}): {_u[:70]}")
     for _iid, _u in replaced:
-        print(f"  ♻ 補URL入替 — もっと安いのが5本そろったので外した {_iid}: {_u[:70]}")
+        print(f"  ♻ 補URL入替 — 売り切れ / もっと安い物が入ったので外した {_iid}: {_u[:70]}")
     written = 0
     if not _guard_ok:
         print("  (ガード不成立のため書込0行。確証結果は台帳に残るので再実行で復帰できます)")

@@ -115,3 +115,33 @@ def test_plan_writes_when_only_the_order_changed():
         price_by_url=prices)
     assert wb[2][:2] == [_u(8), _u(7)], wb
     assert added == 1 and dropped == [] and replaced == []
+
+
+NCOL = 40
+
+
+def test_dead_existing_aux_is_removed_when_writing():
+    """★2026-10-04: 売り切れと確かめた既存の補は、書く時に外して詰める (ラティオスの補1が枠をふさいでいた)。"""
+    row = ["x"] * NCOL
+    row[H.B] = "111"
+    for k in range(5):
+        row[H.AUX0 + k] = _u(10 + k)
+    vals = [[f"c{i}" for i in range(NCOL)], row]
+    prices = {0: {_u(10 + k): 8000 + k for k in range(5)} | {_u(20): 8500}}
+    wb, added, _d, replaced = H.plan_aux_writeback(
+        {0: [_u(20)]}, [{"row": 2, "itemID": "111"}], vals, {}, guard_ok=True,
+        price_by_url=prices, dead_urls={H._norm_url(_u(10))})
+    assert _u(10) not in wb[2] and _u(20) in wb[2]
+    assert ("111", _u(10)) in replaced and added == 1
+
+
+def test_unconfirmed_existing_aux_is_kept():
+    """確かめられなかった補 (dead に入っていない) は外さない。"""
+    row = ["x"] * NCOL
+    row[H.B] = "111"
+    row[H.AUX0] = _u(10)
+    vals = [[f"c{i}" for i in range(NCOL)], row]
+    wb, _a, _d, replaced = H.plan_aux_writeback(
+        {0: [_u(20)]}, [{"row": 2, "itemID": "111"}], vals, {}, guard_ok=True,
+        price_by_url={0: {_u(20): 5000}}, dead_urls=set())
+    assert _u(10) in wb[2] and replaced == []
