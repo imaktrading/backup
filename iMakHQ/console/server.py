@@ -537,7 +537,7 @@ def get_jobs():
         jobs.append({"kind": kind, "i": i, "label": label, "step": m.group(0) if m else "",
                      "group": group_of(label), "tip": (s.get("tip") or "")[:400],
                      "runnable": runnable(s), "params": s.get("params") or [],
-                     "ask_amount": bool(s.get("ask_amount")), "kagoya": s["label"] in _remote_set(), **info})
+                     "ask_amount": bool(s.get("ask_amount")), "kagoya": is_remote(s, _remote_set()), **info})
     return {"jobs": jobs, "counts_at": STATE["counts_at"], "counting": STATE["counting"],
             "counts_error": STATE["counts_error"]}
 
@@ -545,6 +545,16 @@ def get_jobs():
 def _remote_set():
     """KAGOYA で動くボタンの名前 (offload.json の remote_buttons)。画面に印を付けるため。"""
     return set(_offload_cfg().get("remote_buttons") or [])
+
+
+def is_remote(script, names):
+    """そのボタンが KAGOYA で動くか (純関数)。
+
+    名前 (label) か「商材 名前」で当てる。★2026-10-03: 「🤖自動」は PSA・Tシャツ・G-SHOCK 等で
+    同じ名前なので、PSA だけ向ける時は "PSA TCG 🤖自動" と商材付きで書く。
+    """
+    lab = script.get("label")
+    return lab in names or f"{script.get('category')} {lab}" in names
 
 
 def get_buttons():
@@ -556,7 +566,7 @@ def get_buttons():
                     "label": display_label(s["label"]), "badge": s.get("badge"),
                     "runnable": runnable(s), "why": version.why_not_runnable(s),
                     "params": s.get("params") or [], "ask_amount": bool(s.get("ask_amount")),
-                    "tip": (s.get("tip") or "")[:400], "kagoya": s["label"] in _remote_set()})
+                    "tip": (s.get("tip") or "")[:400], "kagoya": is_remote(s, _remote_set())})
     return {"buttons": out}
 
 
@@ -1119,7 +1129,7 @@ def remote_command(script, cmd, cfg=None):
       KAGOYA に届かない・席が空いていない時は、kagoya_button が家で今までどおり動かす。
     """
     cfg = cfg if cfg is not None else _offload_cfg()
-    if script.get("label") not in (cfg.get("remote_buttons") or []):
+    if not is_remote(script, set(cfg.get("remote_buttons") or [])):
         return None
     args = list(cmd)
     if args and os.path.basename(args[0]).lower().startswith("python"):

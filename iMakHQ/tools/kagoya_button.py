@@ -48,7 +48,9 @@ PUSH_EXTRA = [
     r"C:/dev/iMak_data/hq/night_state/weekly.json",
 ]
 # 読むだけの控えの山 (eBay から取った出品の控え 約2,200本・65MB)。初回に全部、あとは増えた・変わった分だけ送る
-MIRROR_DIRS = [r"C:/dev/iMak_data/hq/market_sold/getitem"]
+MIRROR_DIRS = [r"C:/dev/iMak_data/hq/market_sold/getitem",
+               # ★2026-10-03 PSA 新規: PSA の cert の控え (約2,500本・1.3MB)。KAGOYA で足された分は SCAN_ROOTS で戻る
+               r"C:/dev/iMak/iMakeBayAPI/cache/psa_certs"]
 # 絵柄の照合などが読む鍵 (KAGOYA の鍵は credentials に置いてある・中身は家と同じを確認済)
 REMOTE_KEY_COPY = (r"C:\dev\iMak_data\credentials\api_key.txt", r"C:\dev\iMak\iMakTCG\API key.txt")
 # 取り込む場所 (KAGOYA でボタンの間に変わったファイルを探す)。抽出くん等の置き場は入れない
@@ -440,7 +442,9 @@ def remote_main(cwd, out_dir, envs, args):
     t0 = time.time() - 2
     try:
         env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1", IMAK_HEADLESS="1",
-                   IMAK_NO_BROWSER="1", IMAK_REVIEW_PORT="18765", **dict(e.split("=", 1) for e in envs))
+                   IMAK_NO_BROWSER="1", IMAK_REVIEW_PORT="18765",
+                   # ★2026-10-03 PSA 新規: KAGOYA には Cloudflare を押す人がいない → 先取り済みの cert だけで進む
+                   PSA_CACHED_ONLY="1", **dict(e.split("=", 1) for e in envs))
         rc = subprocess.call([sys.executable, "-X", "utf8", "-u"] + args, cwd=cwd, env=env)
     finally:
         K.release_server_seat(BTN_SEAT)

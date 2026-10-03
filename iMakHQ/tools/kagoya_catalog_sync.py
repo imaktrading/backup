@@ -238,6 +238,15 @@ def sync_dir(cfg, st, sub, log=print):
     return plan
 
 
+def _sha256(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
 def local_db_healthy(path):
     try:
         c = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30)
@@ -267,8 +276,13 @@ def pull_db(cfg, st, log=print):
     if rc != 0 or not line:
         raise RuntimeError(f"KAGOYA の DB を見られない: {out[:300]}")
     sig = json.loads(line[4:])
-    if st.get("catalog_db_pulled_sig") == sig and os.path.exists(LOCAL_DB):
+    # ★2026-10-03: 写した後に**家で**化けた (1行・KAGOYA の正本は0行)。読むだけでも、この PC では化ける。
+    #   毎回、家の写しが取ってきた時と同じ中身か (sha256) を見て、違えば取り直す
+    home_ok = os.path.exists(LOCAL_DB) and _sha256(LOCAL_DB) == st.get("catalog_db_pulled_sha")
+    if st.get("catalog_db_pulled_sig") == sig and home_ok:
         return False
+    if st.get("catalog_db_pulled_sig") == sig and not home_ok:
+        log("  ⚠️要対応: 家の DB の写しが取ってきた時と違う (この PC で化けた) → 取り直す")
     code = ("import sqlite3, os\n"
             f"db = r'''{REMOTE_DB}'''\n"
             f"snap = r'''{REMOTE_SNAP}'''\n"
@@ -280,18 +294,24 @@ def pull_db(cfg, st, log=print):
             "ok = dst.execute('pragma quick_check').fetchone()[0]\n"
             "n = dst.execute('select count(*) from products').fetchone()[0]\n"
             "dst.close(); src.close()\n"
-            "print('SNAP', ok, n)\n")
+            "import hashlib\n"
+            "h = hashlib.sha256()\n"
+            "with open(snap, 'rb') as f:\n"
+            "    for b in iter(lambda: f.read(1 << 20), b''):\n"
+            "        h.update(b)\n"
+            "print('SNAP', ok, n, h.hexdigest())\n")
     rc, out = _py_remote(cfg, code, timeout=900)
     line = next((x for x in out.splitlines() if x.startswith("SNAP ")), "")
-    if rc != 0 or " ok " not in line + " ":
+    parts = line.split()
+    if rc != 0 or len(parts) != 4 or parts[1] != "ok":
         raise RuntimeError(f"KAGOYA の DB の写しが取れない / quick_check NG: {out[-300:]}")
-    n_remote = int(line.split()[-1])
+    n_remote, sha_remote = int(parts[2]), parts[3]
     inc = LOCAL_DB + ".incoming"
     if K._scp_from(cfg, REMOTE_SNAP, inc, timeout=1800) != 0:
         raise RuntimeError("DB を受け取れない")
-    if not local_db_healthy(inc):
+    if _sha256(inc) != sha_remote or not local_db_healthy(inc):
         os.remove(inc)
-        raise RuntimeError("受け取った DB の quick_check が NG (運ぶ途中で化けた) → 次の回にやり直す")
+        raise RuntimeError("受け取った DB が KAGOYA の物と違う (運ぶ途中かこの PC で化けた) → 次の回にやり直す")
     try:
         os.replace(inc, LOCAL_DB)
     except PermissionError:
@@ -303,6 +323,7 @@ def pull_db(cfg, st, log=print):
         except OSError:
             pass
     st["catalog_db_pulled_sig"] = sig
+    st["catalog_db_pulled_sha"] = sha_remote
     st["catalog_db_pulled_at"] = datetime.datetime.now().isoformat(timespec="seconds")
     log(f"  📥 カタログ DB の写しを KAGOYA から取った ({n_remote}行・quick_check ok)")
     return True

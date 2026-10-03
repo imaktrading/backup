@@ -572,7 +572,24 @@ def _code_files():
         if os.path.relpath(dp, cat).count(os.sep) >= 1:
             continue
         files += [os.path.relpath(os.path.join(dp, f), REPO) for f in fn if f.endswith(".py")]
+    # ★2026-10-03 段階B⑤: PSA 新規 (psa_to_csv) を KAGOYA で動かすための iMakTCG 一式
+    #   (コード・説明文テンプレ・上書き表)。鍵 (API key.txt) は送らない (KAGOYA の credentials から写す)
+    tcg = os.path.join(REPO, "iMakTCG")
+    files += [os.path.join("iMakTCG", f) for f in os.listdir(tcg) if tcg_code_file(f)]
+    for sub, exts in (("config", (".yaml", ".yml", ".json")), ("tools", (".py",))):
+        d = os.path.join(tcg, sub)
+        if os.path.isdir(d):
+            files += [os.path.join("iMakTCG", sub, f) for f in os.listdir(d) if f.endswith(exts)]
     return sorted(files)
+
+
+TCG_DATA_FILES = ("cert_overrides.json", "promo_overrides.json", "popular_characters.json",
+                  "PSA10.txt", "PSA10_snkrdunk.txt")
+
+
+def tcg_code_file(name):
+    """iMakTCG 直下で KAGOYA に送る物か (純関数)。コードと、生成が読む表・説明文テンプレだけ。"""
+    return name.endswith(".py") or name in TCG_DATA_FILES
 
 
 def _code_hash(files):
