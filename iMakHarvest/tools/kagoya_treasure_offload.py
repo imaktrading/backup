@@ -43,6 +43,9 @@ REMOTE_PY = r"C:\Program Files\Python311\python.exe"
 REMOTE_CODE_ROOT = r"C:\dev\iMak_harvest_offload"  # キャラ収集と共有 (同じコード一式)
 
 REMOTE_BUSY_MARKERS = ("kagoya_offload.py",)  # HQの補探索と重ならない (chara版と同じ判定)
+# ★2026-10-04 HQ依頼: 同じ仕事が2回続けて即死したら送り続けない (HQのnight_stepと同じ
+# MAX_ATTEMPTS=2)。無限ループで Haiku Vision だけ再発動させ続けた反省 (費用の暴発)。
+MAX_RESTART_ATTEMPTS = 2
 
 
 # ---------------------------------------------------------------------------
@@ -482,8 +485,20 @@ def cycle() -> int:
         print("✅ 今日の分は済み")
         return 0
     if st.get("pending_date") == today:
-        print("⚠️ 前回の起動が続いていない (即死の可能性) → 作り直して再送")
+        attempts = st.get("restart_attempts", 0) + 1
+        if attempts > MAX_RESTART_ATTEMPTS:
+            msg = (f"{attempts - 1}回連続で即死 (上限{MAX_RESTART_ATTEMPTS}) → "
+                   f"これ以上は送らない。要対応")
+            print(f"❌ {msg}")
+            st["last_error"] = f"{datetime.datetime.now():%m/%d %H:%M} {msg}"
+            _save_state(st)
+            return 1
+        print(f"⚠️ 前回の起動が続いていない (即死の可能性・{attempts}/{MAX_RESTART_ATTEMPTS}回目) → "
+              f"続きから作り直して再送 (result.jsonは残すので読み済み分は捨てない)")
+        st["restart_attempts"] = attempts
         st.pop("pending_date", None)
+    else:
+        st["restart_attempts"] = 0
     if remote_busy(cfg):
         print("⏸ サーバーでHQの補探索が動いている → 今回は待つ")
         return 0

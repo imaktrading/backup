@@ -101,7 +101,7 @@ def retry_urls_from(payload: dict, exclude: set | None = None) -> list[str]:
 
 
 def collect(args, dump_path=None, resume=None, urls_override=None,
-            on_flush=None, should_pause=None, detail_fn=None) -> dict:
+            on_flush=None, should_pause=None, detail_fn=None, claimed=None) -> dict:
     """収集 → 詳細 → Vision。
 
     ★途中で落ちても作業を捨てない (2026-08-17 の事故対策)。
@@ -122,6 +122,11 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
     まずこれで試し、 None が返ったら Chrome にフォールバックする。 Chrome (driver) は
     実際にフォールバックが要る時まで起動しない (lazy) ので、 全件 detail_fn で済めば
     Chrome を1本も起動せずに終わる (2026-10-02 段階②: メモリ削減)。
+
+    `claimed`: `{"urls": set, "certs": set}` を渡すと `args.no_dedupe` でも使う
+    (2026-10-04 HQ依頼: KAGOYA はスプシ認証を持たないので `no_dedupe=True` だったが、
+    cert単位の重複読取を防ぐため、 呼出側 (家) が `sheet_writer.load_claimed_supply()` で
+    取った値を job に積んで渡せるようにした)。
     """
     keywords = args.keywords or psa_search_terms.build_keywords(args.games)
     # 需要実証済 (ファネル分析 RESTOCK = 在庫切れ ∩ 需要あり) のカードを検索語に足す。
@@ -194,10 +199,11 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
 
     # 本番で既に押さえてある仕入元は拾い直さない (URL は詳細フェッチの前に落とすので
     # 1 件あたり 約10秒 と Vision 1 回分が丸ごと浮く)
-    claimed = {"urls": set(), "certs": set()}
-    if not args.no_dedupe:
-        from sheet_writer import load_claimed_supply  # noqa: PLC0415
-        claimed = load_claimed_supply()
+    if claimed is None:
+        claimed = {"urls": set(), "certs": set()}
+        if not args.no_dedupe:
+            from sheet_writer import load_claimed_supply  # noqa: PLC0415
+            claimed = load_claimed_supply()
         _log(f"既知の仕入元: URL {len(claimed['urls'])} 件 / cert {len(claimed['certs'])} 件")
 
     from sheet_writer import dedupe_key  # noqa: PLC0415

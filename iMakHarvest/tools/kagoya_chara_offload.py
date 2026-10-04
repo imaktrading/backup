@@ -59,6 +59,8 @@ REMOTE_CODE_ROOT = r"C:\dev\iMak_harvest_offload"
 # " run" まで含めると絶対に一致しない。 "kagoya_chara_offload.py" に
 # "kagoya_offload.py" は部分一致しない(間に "chara_" が挟まる)ので自分には誤反応しない)
 REMOTE_BUSY_MARKERS = ("kagoya_offload.py",)
+# ★2026-10-04 HQ依頼: 同じ仕事が2回続けて即死したら送り続けない (treasure版と同じ)
+MAX_RESTART_ATTEMPTS = 2
 
 
 # ---------------------------------------------------------------------------
@@ -532,8 +534,20 @@ def cycle() -> int:
         return 0
     if st.get("pending_week") == this_week_key:
         # 起動済のはずが実行中でも完了でもない = 起動に失敗して即死した。 作り直して再送
-        print("⚠️ 前回の起動が続いていない (即死の可能性) → 作り直して再送")
+        attempts = st.get("restart_attempts", 0) + 1
+        if attempts > MAX_RESTART_ATTEMPTS:
+            msg = (f"{attempts - 1}回連続で即死 (上限{MAX_RESTART_ATTEMPTS}) → "
+                   f"これ以上は送らない。要対応")
+            print(f"❌ {msg}")
+            st["last_error"] = f"{datetime.datetime.now():%m/%d %H:%M} {msg}"
+            _save_state(st)
+            return 1
+        print(f"⚠️ 前回の起動が続いていない (即死の可能性・{attempts}/{MAX_RESTART_ATTEMPTS}回目) → "
+              f"続きから作り直して再送 (result.jsonは残すので読み済み分は捨てない)")
+        st["restart_attempts"] = attempts
         st.pop("pending_week", None)
+    else:
+        st["restart_attempts"] = 0
     if remote_busy(cfg):
         print("⏸ サーバーでHQの補探索が動いている → 今回は待つ")
         return 0
