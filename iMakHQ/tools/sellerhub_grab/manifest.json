@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Seller Hub レポート取り",
-  "version": "2.7",
+  "version": "2.8",
   "description": "Seller Hub のファネル用レポートを出品くん Console の起動時 (1日1回) に自動で作って落とす",
   "permissions": [
     "tabs",

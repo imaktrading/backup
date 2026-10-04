@@ -131,8 +131,17 @@
       c.querySelectorAll("img, svg, script, style").forEach((t) => t.remove());
       return c.outerHTML;
     };
-    const dialogs = [...document.querySelectorAll("[role=dialog], [aria-modal=true], .lightbox-dialog, .drawer-dialog")]
-      .filter(visible).map((d) => strip(d).slice(0, 60000));
+    const dialogs = [...document.querySelectorAll("[role=dialog], [aria-modal=true], .lightbox-dialog, .drawer-dialog, " +
+      "[class*=dialog], [class*=drawer], [class*=modal], [class*=panel]")]
+      .filter(visible).filter((d) => /offer/i.test(txt(d)))
+      .filter((d, i, all) => !all.some((o) => o !== d && o.contains(d)))     // 一番外側だけ
+      .map((d) => strip(d).slice(0, 60000));
+    // ★2.8: 小窓の作りが分からなくても拾えるよう、見えている入力欄の周り (6段上まで) も控える
+    const inputs = [...document.querySelectorAll("input:not([type=checkbox]):not([type=hidden]), textarea, input[type=checkbox]")]
+      .filter(visible).filter((el) => !el.closest("tr") && !el.closest("header"))
+      .map((el) => { let b = el; for (let i = 0; i < 6 && b.parentElement; i++) b = b.parentElement; return b; })
+      .filter((b, i, all) => all.indexOf(b) === i).map((b) => strip(b).slice(0, 20000));
+    dialogs.push(...inputs.map((s) => "<!-- 入力欄の周り -->" + s));
     const offerBtns = [...document.querySelectorAll("button, [role=button], a, [role=menuitem]")].filter(visible)
       .filter((b) => /offer/i.test((b.getAttribute("aria-label") || "") + " " + txt(b)))
       .map((b) => b.outerHTML.slice(0, 800));
