@@ -1315,6 +1315,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, get_watcher())
         if u.path == "/api/agents":
             return self._json(200, get_agents())
+        if u.path == "/api/offers/waiting":
+            # ★2026-10-05 拡張 (sellerhub_grab) が Seller Hub の画面からオファーを送る一覧 (tools/shelf_offer.py)
+            if TOOLS not in sys.path:
+                sys.path.insert(0, TOOLS)
+            import shelf_offer as SO
+            return self._json(200, {"items": SO.waiting_list()})
         if u.path == "/api/defender":
             # ★2026-10-04 ユーザー「ここにボタン付けてくれない？ON/OFFで」: Defender の検査の対象外 (C:\dev)
             if TOOLS not in sys.path:
@@ -1428,6 +1434,18 @@ class Handler(BaseHTTPRequestHandler):
                 sys.path.insert(0, TOOLS)
             import defender_toggle as DT
             return self._json(200, DT.request(bool(body.get("on"))))
+        if u.path in ("/api/offers/prepare", "/api/offers/sent"):
+            # ★2026-10-05 拡張が1件送る直前 (US の広告を外す) / 送れた後 (台帳を「送った」・期限96時間)
+            if TOOLS not in sys.path:
+                sys.path.insert(0, TOOLS)
+            import shelf_offer as SO
+            iid = str(body.get("item_id") or "")
+            try:
+                if u.path == "/api/offers/prepare":
+                    return self._json(200, SO.prepare(iid))
+                return self._json(200, SO.mark_sent(iid, body.get("pct")))
+            except Exception as e:                       # noqa: BLE001
+                return self._json(200, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         if u.path == "/api/research/open":
             try:
                 return self._json(200, research_open(body.get("preset"), body.get("tabs"),

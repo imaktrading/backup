@@ -154,6 +154,119 @@
     log(`✅ 控えた (${offerDumpN}回目・${Math.round(text.length / 1000)}KB)。ダウンロードに sellerhub_offer_dump_${offerDumpN}.txt`);
   }
 
+  // ---------------------------------------------------------------- オファーを送る (2026-10-05)
+  // 送る一覧は神風 (tools/shelf_offer.py) が作る。拡張は1件ずつ:
+  //   神風に「広告を外して」→ 行の Send offers → Percent off に % / 自動オファーを外す / カウンター可 /
+  //   メッセージ → Send offers → 神風に「送った」(台帳に期限96時間)。
+  //   小窓の作りは 2026-10-05 8:02 の控え (sellerhub_offer_dump) で確かめた物だけを使う。
+  const OFFER_MSG = "Thank you for watching this item! Here is a special price just for you. " +
+    "This offer is valid for a limited time.";
+
+  function api(method, path, body) {
+    return new Promise((res) => {
+      try {
+        chrome.runtime.sendMessage({ type: "api", method, path, body }, (r) => res(r || { ok: false, error: "返事なし" }));
+      } catch (e) { res({ ok: false, error: String(e) }); }
+    });
+  }
+
+  function liveOfferDialog() {
+    return [...document.querySelectorAll("[data-testid=sio-modal-root]")]
+      .find((m) => !m.hasAttribute("hidden") && visible(m) && /counteroffer/i.test(txt(m))) || null;
+  }
+
+  function setValue(el, v) {
+    const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, "value").set.call(el, String(v));
+    for (const t of ["input", "change", "blur"]) el.dispatchEvent(new Event(t, { bubbles: true }));
+  }
+
+  async function fillOffer(item) {
+    const d = await waitFor(() => {
+      const m = liveOfferDialog();
+      const inp = m && m.querySelector("[data-testid=discount-value-input] input:not([disabled])");
+      return inp ? m : null;
+    }, 20000);
+    if (!d) return "小窓が開かない";
+    const body = txt(d);
+    if (!/1 item selected/i.test(body) || !/Eligible \(1\)/.test(body)) return "小窓の対象が1件ではない";
+    const head = (item.title || "").slice(0, 25);
+    if (head && !body.includes(head)) return "小窓の出品が違う";
+    const typeBtn = d.querySelector("[data-testid=discount-type-select-button] button");
+    if (!typeBtn || !/Percent off/i.test(txt(typeBtn))) {
+      if (typeBtn) typeBtn.click();
+      await sleep(400);
+      const opt = d.querySelector("[data-testid=discount-type-PERCENTAGE_OFF]");
+      if (!opt) return "割引の種類 (Percent off) を選べない";
+      opt.click();
+      await sleep(400);
+    }
+    setValue(d.querySelector("[data-testid=discount-value-input] input"), item.pct);
+    const auto = d.querySelector("[data-testid=automated-offer-section] input[type=checkbox]");
+    if (auto && auto.checked) auto.click();                    // eBay の自動オファーは使わない
+    const counter = d.querySelector("[data-testid=counter-offer-section] input[type=checkbox]");
+    if (counter && !counter.checked) counter.click();          // カウンターは受ける
+    const msg = d.querySelector("[data-testid=offer-message-input] textarea");
+    if (msg) setValue(msg, OFFER_MSG);
+    await sleep(800);
+    if (auto && auto.checked) return "自動オファーのチェックが外れない";
+    if (!counter || !counter.checked) return "カウンターのチェックが入らない";
+    const pv = d.querySelector("[data-testid=discount-value-input] input").value;
+    if (String(pv) !== String(item.pct)) return `割引率が入らない (${pv})`;
+    return d;
+  }
+
+  function cancelDialog() {
+    const d = liveOfferDialog();
+    const c = d && d.querySelector("[data-testid=cancel-button]");
+    if (c) c.click();
+  }
+
+  async function sendOffers(mode) {
+    // mode: "try" = 1件を小窓に入れるまで (送らない) / "one" = 1件送る / "all" = 全部送る
+    const w = await api("GET", "/api/offers/waiting");
+    const items = (w && w.items) || [];
+    if (!items.length) { log("送る一覧が空です (神風の「💌 オファーの送る一覧を作る」を先に)"); return; }
+    if (!/offers=sendNewOffers/.test(location.search)) {
+      log("「Send offers - eligible」の一覧に移ります。移ったらもう一度押してください");
+      location.href = "https://www.ebay.com/sh/lst/active?offers=sendNewOffers&source=filterbar&action=search";
+      return;
+    }
+    for (let i = 0; i < 40 && !document.querySelector("tr[data-id]"); i++) await sleep(500);
+    let sent = 0, skipped = 0;
+    for (const item of items) {
+      const row = document.querySelector(`tr[data-id="${item.item_id}"]`);
+      if (!row) { log(`✗ ${item.item_id} 一覧に無い (もう送れない出品)`); skipped++; continue; }
+      const btn = [...row.querySelectorAll("button.primary-action__button")].find((b) => /Send offers/i.test(txt(b)));
+      if (!btn) { log(`✗ ${item.item_id} 行に Send offers が無い`); skipped++; continue; }
+      if (mode !== "try") {
+        const p = await api("POST", "/api/offers/prepare", { item_id: item.item_id });
+        if (!p || !p.ok) { log(`✗ ${item.item_id} 広告を外せず送らない (${(p && p.error) || ""})`); skipped++; continue; }
+      }
+      btn.click();
+      const d = await fillOffer(item);
+      if (typeof d === "string") { log(`✗ ${item.item_id} ${d} → 閉じます`); cancelDialog(); skipped++; await sleep(1500); continue; }
+      if (mode === "try") {
+        log(`✅ 試し: ${item.item_id} を ${item.pct}%引き・自動オファー無し・カウンター可 で入れました。送らずに止めます (小窓を見て Cancel で閉じてください)`);
+        return;
+      }
+      const submit = await waitFor(() => {
+        const b = d.querySelector("[data-testid=submit-button]");
+        return b && !b.disabled ? b : null;
+      }, 10000);
+      if (!submit) { log(`✗ ${item.item_id} Send offers が押せない → 閉じます`); cancelDialog(); skipped++; await sleep(1500); continue; }
+      submit.click();
+      const closed = await waitFor(() => (liveOfferDialog() ? null : true), 20000);
+      if (!closed) { log(`⚠ ${item.item_id} 送った後に小窓が閉じない → 送れたか画面で確かめてください (台帳には入れません)`); return; }
+      const m = await api("POST", "/api/offers/sent", { item_id: item.item_id, pct: item.pct });
+      log(`💌 送った: ${item.item_id} ${item.pct}%引き (下限 $${item.floor})${m && m.ok ? "" : " ⚠台帳に入らず"}`);
+      sent++;
+      await sleep(2500);
+      if (mode === "one") break;
+    }
+    log(`終わり: 送った ${sent}件 / 送れなかった ${skipped}件`);
+  }
+
   // 「Your listings」の欄の右の ↓ (Download)。名前 (aria-label / title / 文字 / 絵の名前) に download が入る物を探す。
   //   1つに決まらなければ押さない (間違った物を押さない)
   function trafficButton() {
@@ -383,22 +496,11 @@
     document.addEventListener("keydown", (e) => {
       if (e.altKey && (e.key === "d" || e.key === "D")) { e.preventDefault(); dumpOffer(); }
     }, true);
-    startButton("① これを押す → ② 行の Send offers を押す (開いたら自動で控える)", () => {
-      log("待っています: 行の「Send offers」を押して小窓を開いてください");
-      const t0 = Date.now();
-      const iv = setInterval(() => {
-        // ★3.0: 同じ作りの隠れた小窓が先にあり、querySelector (先頭1つ) では開いた方を見ていなかった
-        const open = [...document.querySelectorAll("[data-testid=sio-modal-root], [role=dialog]")]
-          .some((m) => !m.hasAttribute("hidden") && visible(m) && /counteroffer/i.test(txt(m)));
-        if (open) {
-          clearInterval(iv);
-          setTimeout(dumpOffer, 2000);            // 中身が出そろうのを待つ
-        } else if (Date.now() - t0 > 5 * 60000) {
-          clearInterval(iv);
-          log("5分たっても小窓が開かなかったのでやめました");
-        }
-      }, 500);
-    });
+    // ★3.1 (2026-10-05): 神風の「送る一覧」を Seller Hub の画面から送る (カウンターを受けるため)。
+    //   いきなり全部は送らない: 試し (入れるだけ) → 1件送る → 全部 の順で確かめる
+    startButton("💌 試し: 1件を小窓に入れる (送らない)", () => sendOffers("try"));
+    startButton("💌 1件だけ送る", () => sendOffers("one"));
+    startButton("💌 一覧を全部送る", () => sendOffers("all"));
   } else if (location.pathname.startsWith("/sh/performance/traffic")) {
     // ★2026-10-04 トラフィックレポート (前の90日との比較つき) も毎日落とす (棚② の「埋もれた」判定)。
     //   ユーザー「小窓でないよ。右の↓をおすだけ」: 「Your listings」の欄の右の ↓ (Download) を押す

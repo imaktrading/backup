@@ -19,8 +19,18 @@ async function writeLog() {
   });
 }
 
-chrome.runtime.onMessage.addListener((msg, sender) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg) return;
+  if (msg.type === "api") {
+    // ★2026-10-05 神風 (127.0.0.1:8770) とのやり取り。ページの中からは直接呼べないので、ここで中継する
+    fetch("http://127.0.0.1:8770" + msg.path, {
+      method: msg.method || "GET",
+      headers: { "Content-Type": "application/json", "X-Console": "1" },
+      body: msg.method === "POST" ? JSON.stringify(msg.body || {}) : undefined,
+    }).then((r) => r.json()).then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, error: "神風に繋がらない (" + e + ")" }));
+    return true;                       // 返事は後で送る
+  }
   if (msg.type === "start") {
     chrome.storage.local.set({ shgLines: [`${new Date().toLocaleString()} 自動 開始`] });
   } else if (msg.type === "log") {

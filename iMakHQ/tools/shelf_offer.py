@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""棚② で落とす前に、ウォッチしている人へオファーを1回送る (2026-10-05 ユーザー確定)。
+"""ウォッチしている人へオファーを送る仕組み (2026-10-05 ユーザー確定・管理表タブ「オファーの仕組み (案)」)。
 
-流れ (棚②のボタン = shelf_evict --end の中で動く):
-    1. 落とす候補 (PSA) のうち、eBay が「今オファーを送れる」とした出品だけが対象
-       (find_eligible_items。ウォッチ・カート離脱の人がいる出品。10/4 実測: 落とす31件中3件)
-    2. 仕入元 + 補 のうち **今買える物が2本以上** ある時だけ送る (API で確かめる)。
-       1本だと、受けてもらう前に切れたら仕入れられない
-    3. 値段は **広告費の10%分を引く** (ユーザー「プロモ費が10%だから、その分割引けばいいか」)。
-       **2番目に安い仕入元** で利益を計算し、赤字になるなら値引きを浅くする。1%でも赤字なら送らない
-       (一番安い仕入元が先に売り切れても赤字にならない。一番高い物で計算すると 40件中24件しか
-        10%引きで送れず「それだと、オファーする意味なくね？」→ 2番目で 35件)
-    4. 送る前にその出品の **広告を外す** (広告を付けたまま10%引くと利益が1/3になる・offer_calc で実測)
-    5. 送った物は台帳 (OFFERS_PATH) に残し、期限まで落とさない。期限が切れて売れていなければ、
-       次に棚②を押した時に落とす。同じ出品に送るのは1回だけ
+送るのは **Seller Hub の画面から** (拡張 sellerhub_grab がこの一覧を読んで1件ずつ送る)。
+    API (send_offer_to_interested_buyers) はカウンターを受けられない (eBay 仕様「must set false」)。
+    ユーザー「カウンターは受けたいね」→「Seller Hub の画面から人が送る 拡張機能を作ってよ」。
+    eBay の自動オファーは使わない (広告を外せない・仕入値で赤字を確かめられない)。
+
+送る理由は2つ・仕組みと台帳は1つ (OFFERS_PATH):
+    ① 棚②で落とす PSA (shelf_evict が落とす前にここを通す)  ② それ以外 (店全体・`plan` で一覧を作る)
+
+送る条件と値段:
+    - eBay が「今オファーを送れる」とした出品 (find_eligible_items。ウォッチ・カート離脱がある)
+    - 仕入元 + 補 のうち **今買える物が2本以上** (1本だと受けてもらう前に切れたら仕入れられない)
+    - 値引きは **広告費の10%分まで** (ユーザー「プロモ費が10%だから、その分割引けばいいか」)。
+      **2番目に安い仕入元** で利益を計算し、赤字なら浅くする。eBay の最小は5%引き → 5%未満になる物は送らない
+    - 「下限」= カウンターを受けてよい一番低い値段 (2番目に安い仕入元で利益0)
+
+台帳の状態 (status):
+    送る待ち   一覧に載せた。拡張が送る前に広告を外す。WAIT_DAYS (2日) 送らなければ後始末
+    送った     拡張が送った。期限は96時間 (ebay.com の画面から送ったオファー)
+    (結果)     売れた・終了 / 落とす / 広告を戻した / 送らずに終了
 """
 from __future__ import annotations
 
@@ -28,8 +35,12 @@ sys.path.insert(0, HERE)
 OFFERS_PATH = r"C:/dev/iMak_data/hq/shelf2_offers.json"
 NO_AD_PATH = r"C:/dev/iMak_data/hq/no_ad_items.json"
 DISCOUNT_MAX = 10          # 広告費 (V9 の実効プロモ率 10%) の分
-OFFER_DAYS = 2
+MIN_PCT = 5                # eBay の画面のオファーは5%引き以上
+OFFER_HOURS = 96           # 画面から送ったオファーの期限 (ebay.com)
+WAIT_DAYS = 2              # 一覧に載せて送らないまま この日数で後始末
+RESEND_DAYS = 30           # 同じ出品に送るのは30日に1回
 MIN_SOURCES = 2
+WAITING, SENT = "送る待ち", "送った"
 NEG = "https://api.ebay.com/sell/negotiation/v1"
 MKT = "https://api.ebay.com/sell/marketing/v1"
 MESSAGE = ("Thank you for watching this item! Here is a special price just for you. "
@@ -37,7 +48,7 @@ MESSAGE = ("Thank you for watching this item! Here is a special price just for y
 
 
 # ---------------------------------------------------------------- 純関数
-def choose_discount(price, costs, profit_at, max_pct=DISCOUNT_MAX, min_sources=MIN_SOURCES):
+def choose_discount(price, costs, profit_at, max_pct=DISCOUNT_MAX, min_sources=MIN_SOURCES, min_pct=MIN_PCT):
     """(値引き%, オファー価格, 計算に使った仕入値, 理由) を返す。送らない時は 値引き%=None。
 
     profit_at(offer_price, cost) → 円の利益 (広告なし)。
@@ -46,22 +57,45 @@ def choose_discount(price, costs, profit_at, max_pct=DISCOUNT_MAX, min_sources=M
     if len(costs) < min_sources:
         return None, None, None, f"今買える仕入元が{len(costs)}本 (2本以上で送る)"
     basis = costs[1]                                  # 2番目に安い仕入元
-    for pct in range(max_pct, 0, -1):
+    for pct in range(max_pct, min_pct - 1, -1):
         offer = round(price * (100 - pct) / 100, 2)
         if profit_at(offer, basis) >= 0:
             return pct, offer, basis, ""
-    return None, None, basis, "値引きすると赤字 (2番目に安い仕入元で計算)"
+    return None, None, basis, f"{min_pct}%引きでも赤字 (2番目に安い仕入元で計算)"
+
+
+def floor_price(price, basis, profit_at):
+    """カウンターを受けてよい一番低い値段 (2番目に安い仕入元で利益0)。$0.5 刻みで上から探す (純関数)。"""
+    lo = None
+    p = round(price, 2)
+    while p > 0 and profit_at(p, basis) >= 0:
+        lo = p
+        p = round(p - 0.5, 2)
+    return lo
 
 
 def offer_state(entry, now):
-    """台帳の1件 → "offering" (期限前・落とさない) / "expired" (落としてよい) / None (未送信)。"""
+    """台帳の1件 → waiting / waiting_over / offering / expired / done / None (台帳に無い)。"""
     if not entry:
         return None
+    if entry.get("status") not in (None, WAITING, SENT):
+        return "done"
     try:
+        if entry.get("status") == WAITING:
+            t = datetime.datetime.fromisoformat(entry["planned"])
+            return "waiting" if now < t + datetime.timedelta(days=WAIT_DAYS) else "waiting_over"
         exp = datetime.datetime.fromisoformat(entry["expires"])
     except (KeyError, ValueError, TypeError):
         return "expired"
     return "offering" if now < exp else "expired"
+
+
+def recently_sent(entry, now, days=RESEND_DAYS):
+    """30日以内に送った (= もう送らない)。"""
+    try:
+        return now - datetime.datetime.fromisoformat(entry.get("sent") or "") < datetime.timedelta(days=days)
+    except (ValueError, TypeError):
+        return False
 
 
 def load_json(path, default):
@@ -88,7 +122,7 @@ def _headers():
 
 
 def eligible_ids(h):
-    """eBay が今オファーを送れるとした itemID。取れなければ None (= 送らない・落とす前の動きは今までどおり)。"""
+    """eBay が今オファーを送れるとした itemID。取れなければ None (= 一覧に載せない)。"""
     import requests
     out, url = set(), f"{NEG}/find_eligible_items?limit=200"
     try:
@@ -128,7 +162,7 @@ def buyable_costs(urls):
 
 
 def remove_ad(h, iid):
-    """US の RUNNING キャンペーン全部からその出品の広告を外す。外せた / 元から無い = True。"""
+    """US の RUNNING キャンペーン全部からその出品の広告を外す (ミラーの10%は別キャンペーン・触らない)。"""
     import requests
     try:
         camps = requests.get(f"{MKT}/ad_campaign", headers=h,
@@ -156,21 +190,29 @@ def remove_ad(h, iid):
     return ok
 
 
-def send_offer(h, iid, offer_price):
-    """ウォッチしている人へオファーを送る。戻り (成功, 理由)。"""
-    import requests
-    body = {"allowCounterOffer": False, "message": MESSAGE,
-            "offerDuration": {"unit": "DAY", "value": OFFER_DAYS},
-            "offeredItems": [{"listingId": iid, "quantity": 1,
-                              "price": {"currency": "USD", "value": f"{offer_price:.2f}"}}]}
+def restore_ads(iids, log=print):
+    """US の広告 (8%) を付け直す。戻り: 付け直せた itemID の集合。"""
+    if not iids:
+        return set()
+    import ads_add_new_listings as A
+    for iid in iids:
+        remove_no_ad(iid)
     try:
-        r = requests.post(f"{NEG}/send_offer_to_interested_buyers", headers=h,
-                          data=json.dumps(body), timeout=60)
+        res = dict(A.create_ads(A._token(), [(iid, iid) for iid in iids]))
     except Exception as e:                                     # noqa: BLE001
-        return False, type(e).__name__
-    if r.status_code in (200, 201):
-        return True, ""
-    return False, f"HTTP {r.status_code}: {r.text[:160]}"
+        log(f"  ⚠ 広告を付け直せず ({type(e).__name__}) → 次回もう一度")
+        for iid in iids:
+            add_no_ad(iid)
+        return set()
+    ok = set()
+    for iid in iids:
+        r = res.get(iid, "")
+        if r == "OK" or "already" in r.lower() or "exist" in r.lower():
+            ok.add(iid)
+        else:
+            add_no_ad(iid)
+            log(f"  ⚠ {iid} 広告を付け直せず ({r}) → 次回もう一度")
+    return ok
 
 
 def add_no_ad(iid, path=None):
@@ -193,128 +235,191 @@ def remove_no_ad(iid, path=None):
         save_json(path, d)
 
 
-def settle_expired(ledger, picked_ids, live_ids, send=False, log=print):
-    """期限が切れたオファーの後始末 (I/O)。台帳の status を埋めて返す。
+def settle(ledger, drop_ids, live_ids, write=False, log=print, now=None):
+    """期限が来た物の後始末 (write=False は数えるだけ)。台帳の status を埋めて返す。
 
-    - 出品がもう無い (売れた / 終わった) → status "売れた・終了" (オファーで売れたかは注文で数える)
-    - まだ落とす候補 → "落とす" (呼び手が落とす)
-    - 落とす候補から外れた → 広告 (8%) を付け直して "広告を戻した" (外したまま放置しない)
-    status が付いた物は二度と処理しない。
+    送った → 期限切れ:  出品が無い = 売れた・終了 / 落とす候補 = 落とす / それ以外 = 広告を戻した
+    送る待ち → 2日:     落とす候補 = 落とす / それ以外 = (広告を外していれば戻して) 送らずに終了
     """
-    todo = [(iid, e) for iid, e in ledger.items()
-            if not e.get("status") and offer_state(e, datetime.datetime.now()) == "expired"]
+    now = now or datetime.datetime.now()
     back = []
-    for iid, e in todo:
+    for iid, e in ledger.items():
+        st = offer_state(e, now)
+        if st not in ("expired", "waiting_over"):
+            continue
         if live_ids is not None and iid not in live_ids:
             e["status"] = "売れた・終了"
-        elif iid in picked_ids:
+        elif iid in drop_ids:
             e["status"] = "落とす"
+        elif st == "waiting_over" and not e.get("ad_removed"):
+            e["status"] = "送らずに終了"
         else:
             back.append(iid)
     if back:
-        if not send:
-            log(f"  💌 期限が切れて落とす候補から外れた {len(back)}件 → 押した時に広告を付け直します")
+        if not write:
+            log(f"  💌 期限が来て落とさない {len(back)}件 → 押した時に US の広告を8%で付け直します")
         else:
-            try:
-                import ads_add_new_listings as A
-                for iid in back:
-                    remove_no_ad(iid)
-                res = dict(A.create_ads(A._token(), [(iid, iid) for iid in back]))
-                for iid in back:
-                    r = res.get(iid, "")
-                    if r == "OK" or "already" in r.lower() or "exist" in r.lower():
-                        ledger[iid]["status"] = "広告を戻した"
-                    else:
-                        add_no_ad(iid)
-                        log(f"  ⚠ {iid} 広告を付け直せず ({r}) → 次回もう一度")
-                log(f"  💌 期限切れ・落とさない {len(back)}件 の広告を付け直しました")
-            except Exception as e:                             # noqa: BLE001
-                log(f"  ⚠ 広告を付け直せず ({type(e).__name__}) → 次回もう一度")
-    if send and todo:
+            ok = restore_ads(back, log=log)
+            for iid in ok:
+                e = ledger[iid]
+                e["status"] = "広告を戻した" if offer_state(e, now) == "expired" else "送らずに終了"
+            if ok:
+                log(f"  💌 期限が来て落とさない {len(ok)}件 の US 広告を8%で付け直しました")
+    if write:
         save_json(OFFERS_PATH, ledger)
     return ledger
 
 
-def offer_before_drop(picked, is_psa, send=False, now=None, log=print, live_ids=None):
-    """落とす候補 [(tier, row)] → 落とす物だけ返す。オファーを送った / オファー中の物は外す。
+def plan_items(rows, ledger, now=None, log=print, reason="店全体"):
+    """出品 [{item_id, price, watch, title}] → 送る待ちの台帳行を足す (I/O: eBay・メルカリ・スニダン・シート)。
 
-    send=False (試し) は eBay に何も書かず、送る予定を出すだけ。
+    戻り: 足した itemID の集合。送れない物は理由を log に出すだけ。
     """
     now = now or datetime.datetime.now()
-    ledger = load_json(OFFERS_PATH, {})
-    settle_expired(ledger, {str(r.get("item_id")) for _t, r in picked}, live_ids, send=send, log=log)
-    keep, offering, expired, plan = [], [], [], []
-    for t, r in picked:
-        iid = str(r.get("item_id") or "")
-        st = offer_state(ledger.get(iid), now)
-        if st == "offering":
-            offering.append(iid)
-            continue
-        if st == "expired" and (ledger.get(iid) or {}).get("status") == "落とす":
-            expired.append(iid)
-        keep.append((t, r))
-    if offering:
-        log(f"  💌 オファー中 {len(offering)}件 は期限まで落としません")
-    if expired:
-        log(f"  💌 オファーの期限が切れて売れなかった {len(expired)}件 を落とします")
-    cands = [(t, r) for t, r in keep if is_psa(r) and str(r.get("item_id")) not in ledger
-             and float(str(r.get("watch") or 0).replace(",", "") or 0) > 0]
-    if not cands:
-        return keep
+    rows = [r for r in rows if str(r.get("item_id")) not in ledger
+            or (offer_state(ledger[str(r.get("item_id"))], now) == "done"
+                and not recently_sent(ledger[str(r.get("item_id"))], now))]
+    if not rows:
+        return set()
     try:
         h = _headers()
     except Exception as e:                                     # noqa: BLE001
-        log(f"  ⚠ eBay の鍵を読めずオファーは送りません ({type(e).__name__}) → 今までどおり落とします")
-        return keep
+        log(f"  ⚠ eBay の鍵を読めずオファーの一覧を作れません ({type(e).__name__})")
+        return set()
     el = eligible_ids(h)
     if el is None:
-        log("  ⚠ オファーを送れる出品の一覧が取れない → 今までどおり落とします")
-        return keep
-    cands = [(t, r) for t, r in cands if str(r.get("item_id")) in el]
-    if not cands:
-        log("  💌 落とす候補に、eBay がオファーを送らせてくれる出品はありません")
-        return keep
+        log("  ⚠ オファーを送れる出品の一覧が取れない → 一覧に載せません")
+        return set()
+    rows = [r for r in rows if str(r.get("item_id")) in el]
+    if not rows:
+        return set()
     import psa_hoju_fill as H
     import offer_calc as O
-    rows = {H._cell(x, H.B): x for x in H._read_high()[1:] if H._cell(x, H.B)}
+    sheet = {H._cell(x, H.B): x for x in H._read_high()[1:] if H._cell(x, H.B)}
     p = O.fetch()
     ck = next(k for k in p["cats"] if "TCG" in k)
-    sent = set()
-    for t, r in cands:
+    added = set()
+    for r in rows:
         iid = str(r.get("item_id"))
         price = float(str(r.get("price") or 0).replace(",", "") or 0)
-        row = rows.get(iid)
-        urls = ([H._cell(row, 0)] + [H._cell(row, H.AUX0 + k) for k in range(H.AUXN)]) if row else []
+        row = sheet.get(iid)
+        if not row or H._cell(row, H.CATEGORY) != "TCG":
+            continue                                           # PSA だけ (仕入元の見方が PSA 用)
+        urls = [H._cell(row, 0)] + [H._cell(row, H.AUX0 + k) for k in range(H.AUXN)]
         costs = buyable_costs(urls)
-        pct, offer, basis, why = choose_discount(
-            price, costs,
-            lambda op, c: O.calc_py(p, "US計算", ck, "US", op, c, promo_on=False, listed=price))
+        profit = lambda op, c, _p=price: O.calc_py(p, "US計算", ck, "US", op, c, promo_on=False, listed=_p)  # noqa: E731
+        pct, offer, basis, why = choose_discount(price, costs, profit)
         title = (r.get("title") or "")[:40]
         if pct is None:
-            log(f"     ✗ {iid} 送らない ({why}) {title}")
+            log(f"     ✗ {iid} 載せない ({why}) {title}")
             continue
-        plan.append(iid)
-        line = f"{iid} ${price:.2f} → ${offer:.2f} ({pct}%引き・仕入 ¥{basis:,} で計算) {title}"
-        if not send:
-            log(f"     → 送る予定: {line}")
-            continue
-        if not remove_ad(h, iid):
-            log(f"     ✗ {iid} 広告を外せず送らない (落とします) {title}")
-            continue
-        add_no_ad(iid)
-        ok, err = send_offer(h, iid, offer)
-        if not ok:
-            log(f"     ✗ {iid} オファーを送れず ({err}) → 落とします")
-            continue
-        ledger[iid] = {"sent": now.isoformat(timespec="seconds"),
-                       "expires": (now + datetime.timedelta(days=OFFER_DAYS, hours=1)).isoformat(timespec="seconds"),
-                       "price": price, "offer": offer, "pct": pct, "cost_basis": basis,
+        floor = floor_price(price, basis, profit)
+        ledger[iid] = {"status": WAITING, "planned": now.isoformat(timespec="seconds"), "reason": reason,
+                       "price": price, "pct": pct, "offer": offer, "floor": floor, "cost_basis": basis,
                        "costs": costs, "title": r.get("title") or ""}
-        save_json(OFFERS_PATH, ledger)
-        sent.add(iid)
-        log(f"     💌 送った: {line}")
+        added.add(iid)
+        log(f"     💌 一覧に載せた ({reason}): {iid} ${price:.2f} → {pct}%引き ${offer:.2f} "
+            f"/ 下限 ${floor} (仕入 ¥{basis:,}) {title}")
+    return added
+
+
+def offer_before_drop(picked, is_psa, send=False, now=None, log=print, live_ids=None):
+    """棚② の落とす候補 [(tier, row)] → 落とす物だけ返す。オファーの一覧に載る / 送った物は落とさない。
+
+    send=False (試し) は台帳を書かず、載せる予定を出すだけ。
+    """
+    now = now or datetime.datetime.now()
+    ledger = load_json(OFFERS_PATH, {})
+    drop_ids = {str(r.get("item_id")) for _t, r in picked}
+    settle(ledger, drop_ids, live_ids, write=send, log=log, now=now)
+    keep, hold = [], []
+    for t, r in picked:
+        iid = str(r.get("item_id") or "")
+        if offer_state(ledger.get(iid), now) in ("waiting", "offering"):
+            hold.append(iid)
+            continue
+        keep.append((t, r))
+    if hold:
+        log(f"  💌 オファーの一覧に載っている / 送った {len(hold)}件 は期限まで落としません")
+    cands = [r for t, r in keep if is_psa(r) and float(str(r.get("watch") or 0).replace(",", "") or 0) > 0]
+    new = plan_items(cands, ledger if send else dict(ledger), now=now, log=log, reason="棚②") if cands else set()
     if send:
-        log(f"  💌 落とす前のオファー: 送った {len(sent)}件 (台帳 {OFFERS_PATH})")
-        return [(t, r) for t, r in keep if str(r.get("item_id")) not in sent]
-    log(f"  💌 落とす前のオファー (試し): 送る予定 {len(plan)}件 — --end の時に送り、期限まで落としません")
-    return [(t, r) for t, r in keep if str(r.get("item_id")) not in set(plan)]
+        save_json(OFFERS_PATH, ledger)
+        if new:
+            log(f"  💌 落とす前のオファー: {len(new)}件を送る一覧に載せました (Seller Hub で拡張が送ります・2日送らなければ落とします)")
+    elif new:
+        log(f"  💌 落とす前のオファー (試し): {len(new)}件を送る一覧に載せる予定 — --end の時に載せ、落としません")
+    return [(t, r) for t, r in keep if str(r.get("item_id")) not in new]
+
+
+# ---------------------------------------------------------------- 拡張・神風から呼ぶ
+def waiting_list(now=None):
+    """送る待ちの一覧 (拡張が読む)。"""
+    now = now or datetime.datetime.now()
+    ledger = load_json(OFFERS_PATH, {})
+    return [dict(e, item_id=iid) for iid, e in ledger.items() if offer_state(e, now) == "waiting"]
+
+
+def prepare(iid):
+    """拡張が送る直前に呼ぶ: US の広告を外す。外せなければ送らない。"""
+    ledger = load_json(OFFERS_PATH, {})
+    e = ledger.get(iid)
+    if not e or e.get("status") != WAITING:
+        return {"ok": False, "error": "送る待ちに無い出品"}
+    if not remove_ad(_headers(), iid):
+        return {"ok": False, "error": "広告を外せなかった"}
+    add_no_ad(iid)
+    e["ad_removed"] = datetime.datetime.now().isoformat(timespec="seconds")
+    save_json(OFFERS_PATH, ledger)
+    return {"ok": True, "pct": e.get("pct")}
+
+
+def mark_sent(iid, pct=None):
+    """拡張が送れた時に呼ぶ: 台帳を「送った」にして期限 (96時間) を入れる。"""
+    ledger = load_json(OFFERS_PATH, {})
+    e = ledger.get(iid)
+    if not e:
+        return {"ok": False, "error": "台帳に無い出品"}
+    now = datetime.datetime.now()
+    e.update(status=SENT, sent=now.isoformat(timespec="seconds"),
+             expires=(now + datetime.timedelta(hours=OFFER_HOURS)).isoformat(timespec="seconds"))
+    if pct is not None:
+        e["pct_sent"] = pct
+    save_json(OFFERS_PATH, ledger)
+    return {"ok": True}
+
+
+def build_store_plan(log=print):
+    """店全体: eBay が送れるとした PSA 出品を一覧に載せる (神風のボタン)。期限の後始末もする。"""
+    import csv
+    import glob
+    ledger = load_json(OFFERS_PATH, {})
+    fun = sorted(glob.glob(os.path.join(HERE, "..", "funnel_output", "funnel_*.csv")))
+    rows = []
+    if fun:
+        with open(fun[-1], encoding="utf-8-sig", newline="") as f:
+            rows = [r for r in csv.DictReader(f) if (r.get("site") or "") == "US"]
+    live = {str(r.get("item_id")) for r in rows}
+    try:
+        import shelf_evict as SE
+        drops = set(load_json(SE.LAST_PSA_DROPS, {}).get("iids") or [])
+    except Exception:                                          # noqa: BLE001
+        drops = set()
+    settle(ledger, drops, live or None, write=True, log=log)
+    plan_items(rows, ledger, log=log, reason="店全体")
+    save_json(OFFERS_PATH, ledger)
+    w = waiting_list()
+    log(f"💌 送る一覧: {len(w)}件 (Edge で Seller Hub の出品中一覧を開き、右下の「オファーを送る」を押す)")
+    return w
+
+
+if __name__ == "__main__":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:                                          # noqa: BLE001
+        pass
+    if len(sys.argv) > 1 and sys.argv[1] == "plan":
+        build_store_plan()
+    else:
+        for e in waiting_list():
+            print(f"{e['item_id']} {e.get('reason')} {e.get('pct')}%引き ${e.get('offer')} 下限 ${e.get('floor')} {e.get('title', '')[:40]}")

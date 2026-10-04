@@ -1,4 +1,4 @@
-"""棚② 落とす前のオファー (2026-10-05 ユーザー確定)。"""
+"""オファーを送る仕組み (2026-10-05 ユーザー確定)。送るのは Seller Hub の画面から (拡張)。"""
 import datetime
 import os
 import sys
@@ -6,6 +6,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 
 import shelf_offer as SO  # noqa: E402
+
+NOW = datetime.datetime(2026, 10, 5, 12)
 
 
 def _profit(offer, cost):            # 仕入値に対して値段が十分なら黒字、の単純なモデル
@@ -22,46 +24,85 @@ def test_needs_two_buyable_sources():
     assert pct is None and "1本" in why
 
 
-def test_shallower_discount_then_none():
-    # 2番目 ¥22,000: 10%引き($180)は赤字・5%引き($190)は黒字
+def test_shallower_discount_but_not_below_5pct():
     pct, offer, _b, _w = SO.choose_discount(200.0, [9000, 22000], lambda o, c: o * 150 - c * 1.27)
-    assert pct is not None and pct < 10 and offer > 180.0
-    pct2, _o, _b2, why2 = SO.choose_discount(200.0, [9000, 40000], _profit)
-    assert pct2 is None and "赤字" in why2
+    assert pct is not None and 5 <= pct < 10 and offer > 180.0
+    pct2, _o, _b2, why2 = SO.choose_discount(200.0, [9000, 29000], _profit)   # 5%引き ($190) でも赤字
+    assert pct2 is None and "5%" in why2
 
 
-def test_offer_state_expiry():
-    now = datetime.datetime(2026, 10, 5, 12)
-    assert SO.offer_state(None, now) is None
-    assert SO.offer_state({"expires": "2026-10-07T13:00:00"}, now) == "offering"
-    assert SO.offer_state({"expires": "2026-10-05T11:00:00"}, now) == "expired"
+def test_floor_price_is_break_even_at_basis():
+    f = SO.floor_price(200.0, 15000, _profit)                 # 150*p >= 19500 → p >= 130
+    assert 130.0 <= f < 130.5
 
 
-def test_offering_items_are_not_dropped_and_expired_are(tmp_path, monkeypatch):
+def test_offer_states():
+    s = SO.offer_state
+    assert s(None, NOW) is None
+    assert s({"status": SO.WAITING, "planned": "2026-10-05T08:00:00"}, NOW) == "waiting"
+    assert s({"status": SO.WAITING, "planned": "2026-10-02T08:00:00"}, NOW) == "waiting_over"
+    assert s({"status": SO.SENT, "expires": "2026-10-08T00:00:00"}, NOW) == "offering"
+    assert s({"status": SO.SENT, "expires": "2026-10-04T00:00:00"}, NOW) == "expired"
+    assert s({"status": "落とす"}, NOW) == "done"
+
+
+def test_held_items_are_not_dropped(tmp_path, monkeypatch):
     p = tmp_path / "offers.json"
-    SO.save_json(str(p), {"A": {"expires": "2099-01-01T00:00:00"}, "B": {"expires": "2000-01-01T00:00:00"}})
+    SO.save_json(str(p), {"A": {"status": SO.SENT, "expires": "2099-01-01T00:00:00"},
+                          "W": {"status": SO.WAITING, "planned": NOW.isoformat()},
+                          "B": {"status": SO.SENT, "expires": "2000-01-01T00:00:00"}})
     monkeypatch.setattr(SO, "OFFERS_PATH", str(p))
-    picked = [(2, {"item_id": "A", "watch": 1}), (2, {"item_id": "B", "watch": 1}),
-              (2, {"item_id": "C", "watch": 0})]
-    got = SO.offer_before_drop(picked, lambda r: True, send=False, log=lambda *a: None)
-    assert [r["item_id"] for _t, r in got] == ["B", "C"]      # A はオファー中 / B は期限切れで落とす / C はウォッチ無し
+    monkeypatch.setattr(SO, "plan_items", lambda *a, **k: set())
+    picked = [(2, {"item_id": i, "watch": 1}) for i in ("A", "W", "B", "C")]
+    got = SO.offer_before_drop(picked, lambda r: True, send=False, now=NOW, log=lambda *a: None,
+                               live_ids={"A", "W", "B", "C"})
+    assert [r["item_id"] for _t, r in got] == ["B", "C"]     # 送った / 送る待ち は落とさない・期限切れは落とす
 
 
-def test_no_send_when_eligibility_unknown(tmp_path, monkeypatch):
+def test_new_offer_candidates_are_held_not_dropped(tmp_path, monkeypatch):
     monkeypatch.setattr(SO, "OFFERS_PATH", str(tmp_path / "o.json"))
+    monkeypatch.setattr(SO, "plan_items", lambda rows, ledger, **k: {"X"})
+    picked = [(2, {"item_id": "X", "watch": 3}), (2, {"item_id": "Y", "watch": 0})]
+    got = SO.offer_before_drop(picked, lambda r: True, send=False, now=NOW, log=lambda *a: None)
+    assert [r["item_id"] for _t, r in got] == ["Y"]
+
+
+def test_settle_sent_and_waiting(tmp_path, monkeypatch):
+    monkeypatch.setattr(SO, "OFFERS_PATH", str(tmp_path / "o.json"))
+    monkeypatch.setattr(SO, "NO_AD_PATH", str(tmp_path / "noad.json"))
+    old = "2000-01-01T00:00:00"
+    ledger = {"SOLD": {"status": SO.SENT, "expires": old}, "DROP": {"status": SO.SENT, "expires": old},
+              "KEEP": {"status": SO.SENT, "expires": old},
+              "WAIT_AD": {"status": SO.WAITING, "planned": old, "ad_removed": old},
+              "WAIT_NOAD": {"status": SO.WAITING, "planned": old},
+              "LIVE": {"status": SO.SENT, "expires": "2099-01-01T00:00:00"}}
+    calls = []
+    monkeypatch.setattr(SO, "restore_ads", lambda iids, log=None: calls.append(sorted(iids)) or set(iids))
+    SO.settle(ledger, {"DROP"}, {"DROP", "KEEP", "WAIT_AD", "WAIT_NOAD", "LIVE"}, write=True,
+              log=lambda *a: None, now=NOW)
+    assert ledger["SOLD"]["status"] == "売れた・終了"
+    assert ledger["DROP"]["status"] == "落とす"
+    assert ledger["KEEP"]["status"] == "広告を戻した"
+    assert ledger["WAIT_AD"]["status"] == "送らずに終了" and ledger["WAIT_NOAD"]["status"] == "送らずに終了"
+    assert calls == [["KEEP", "WAIT_AD"]]                     # 広告を外した物だけ付け直す
+    assert ledger["LIVE"]["status"] == SO.SENT
+
+
+def test_prepare_and_mark_sent(tmp_path, monkeypatch):
+    monkeypatch.setattr(SO, "OFFERS_PATH", str(tmp_path / "o.json"))
+    monkeypatch.setattr(SO, "NO_AD_PATH", str(tmp_path / "noad.json"))
+    SO.save_json(SO.OFFERS_PATH, {"X": {"status": SO.WAITING, "planned": NOW.isoformat(), "pct": 10}})
     monkeypatch.setattr(SO, "_headers", lambda: {})
-    monkeypatch.setattr(SO, "eligible_ids", lambda h: None)
-    sent = []
-    monkeypatch.setattr(SO, "send_offer", lambda *a: sent.append(a) or (True, ""))
-    picked = [(2, {"item_id": "X", "watch": 3, "price": 100})]
-    got = SO.offer_before_drop(picked, lambda r: True, send=True, log=lambda *a: None)
-    assert got == picked and sent == []                        # 一覧が取れない = 送らずに今までどおり落とす
+    monkeypatch.setattr(SO, "remove_ad", lambda h, iid: True)
+    assert SO.prepare("X")["ok"] and "X" in SO.no_ad_ids()
+    assert not SO.prepare("NOPE")["ok"]
+    assert SO.mark_sent("X", 10)["ok"]
+    e = SO.load_json(SO.OFFERS_PATH, {})["X"]
+    assert e["status"] == SO.SENT and e["expires"]
 
 
 def test_ads_tool_skips_no_ad_items(tmp_path, monkeypatch):
     import ads_add_new_listings as A
-    monkeypatch.setattr(SO, "NO_AD_PATH", str(tmp_path / "noad.json"))
-    SO.add_no_ad("111", str(tmp_path / "noad.json"))
     monkeypatch.setattr(SO, "no_ad_ids", lambda path=None: {"111"})
     assert A.create_ads("tok", [("L", "111")]) == []           # eBay を呼ばずに外す
 
@@ -71,21 +112,9 @@ def test_shelf_calls_offer_before_drop():
     assert "SO.offer_before_drop(picked" in src and "send=a.end" in src
 
 
-def test_expired_settlement(tmp_path, monkeypatch):
-    p = tmp_path / "offers.json"
-    monkeypatch.setattr(SO, "OFFERS_PATH", str(p))
-    monkeypatch.setattr(SO, "NO_AD_PATH", str(tmp_path / "noad.json"))
-    old = "2000-01-01T00:00:00"
-    ledger = {"SOLD": {"expires": old}, "DROP": {"expires": old}, "KEEP": {"expires": old},
-              "LIVE": {"expires": "2099-01-01T00:00:00"}}
-    SO.add_no_ad("KEEP", str(tmp_path / "noad.json"))
-    import ads_add_new_listings as A
-    calls = []
-    monkeypatch.setattr(A, "_token", lambda: "t")
-    monkeypatch.setattr(A, "create_ads", lambda tok, pairs: calls.append(pairs) or [(i, "OK") for _l, i in pairs])
-    SO.settle_expired(ledger, picked_ids={"DROP"}, live_ids={"DROP", "KEEP", "LIVE"}, send=True, log=lambda *a: None)
-    assert ledger["SOLD"]["status"] == "売れた・終了"
-    assert ledger["DROP"]["status"] == "落とす"
-    assert ledger["KEEP"]["status"] == "広告を戻した" and calls == [[("KEEP", "KEEP")]]
-    assert "status" not in ledger["LIVE"]                       # 期限前は触らない
-    assert "KEEP" not in SO.no_ad_ids(str(tmp_path / "noad.json"))
+def test_extension_never_uses_automated_offer_and_allows_counter():
+    src = open(os.path.join(os.path.dirname(__file__), "..", "tools", "sellerhub_grab", "content.js"),
+               encoding="utf-8").read()
+    assert "automated-offer-section" in src and "if (auto && auto.checked) auto.click()" in src
+    assert "counter-offer-section" in src and "if (counter && !counter.checked) counter.click()" in src
+    assert "/api/offers/prepare" in src and "/api/offers/sent" in src

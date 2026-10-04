@@ -2139,6 +2139,21 @@ SCRIPTS = [
                "有在庫・公式仕入の Tシャツ・ミラーは落としません。"
                "ルールは管理表タブ「棚②のルール (10/5 確定)」。",
     },
+    {
+        # ★2026-10-05 ユーザー「カウンターは受けたいね」「Seller Hub の画面から人が送る 拡張機能を作ってよ」:
+        #   API で送るとカウンターを受けられない。一覧はここで作り、Edge の拡張が Seller Hub の画面から送る
+        "category": None, "type": "utility",
+        "label": "💌 オファーの送る一覧を作る",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "shelf_offer.py", "plan"],
+        "params": [],
+        "skip_postprocess": True,
+        "tip": "ウォッチしている人へ送るオファーの一覧を作ります (PSA・eBay が送れるとした出品・"
+               "今買える仕入元2本以上・広告を外して最大10%引き・2番目に安い仕入元で赤字にならない範囲)。"
+               "作ったら Edge で Seller Hub の出品中一覧を開き、右下の「💌 一覧を全部送る」を押すと"
+               "拡張が1件ずつ送ります (カウンターを受ける・自動オファーは使わない)。期限の来た物の後始末もします。",
+        "open_url": "https://www.ebay.com/sh/lst/active?offers=sendNewOffers&source=filterbar&action=search",
+    },
     ]
 
 
