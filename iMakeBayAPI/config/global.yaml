@@ -274,9 +274,10 @@ return_profiles:
 # 出品前の3者合議 (iMakeBayAPI/listing_validator の Claude Haiku / Gemini / Groq)。
 # ★2026-10-04 ユーザー OK で停止。始めた頃 AI の答えが揺れたために入れた物で、今はカタログ値 + 決定論の照合
 #   (validate_row・CSV監査くん) で足りる。6月中旬以降に止めたのは1回 (誤り)。AI が使えない日は全件保留になっていた。
-#   戻す時は true。
+#   ★同日 ユーザー「精度に影響でない？」→ 継続に戻した (AI がタイトルを作る Tシャツ・モンベル等の見張り。PSA は元々通さない)。
+#   止める時は false。
 ai_consensus:
-  enabled: false
+  enabled: true
 
 # 絵柄の自動判定 (psa_art_match) — 目視画面に出す前に「同じ絵柄か」を Claude に見せる。
 # ★2026-08-30 ユーザー確定「目視したらいいだけなら、無駄な課金はやめたい」→ 停止。

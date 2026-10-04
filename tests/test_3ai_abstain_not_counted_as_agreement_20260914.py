@@ -75,14 +75,14 @@ def test_validate_and_report_prints_actual_agreement_label(capsys):
 
 
 def test_consensus_off_by_default_passes_on_deterministic_checks(capsys):
-    """★2026-10-04 ユーザー OK: 3者合議は既定で停止。決定論の照合を通れば出す (AI は呼ばない)。"""
+    """★2026-10-04: 3者合議を止めた時 (global.yaml ai_consensus.enabled: false) は決定論の照合だけで出す。"""
     V = _load()
     V.validate_row = lambda *a, **k: ([], [])
     called = []
     V.deliberate_3ai = lambda *a, **k: called.append(1)
     args = dict(title="t", specs={}, model="", category=15687, condition_id=1000,
                 price=1.0, pic_url="http://x")
-    assert V.consensus_enabled() is False
+    V.consensus_enabled = lambda *a, **k: False       # 止めた時の動き (既定は global.yaml)
     assert V.validate_and_report("c1", **args, catalog_confirmed=False) is True
     assert called == [] and "3者合議は停止中" in capsys.readouterr().out
 
