@@ -31,6 +31,7 @@ def test_refresh_from_revise_file(tmp_path, monkeypatch):
     J._save(str(mv), {"at": "2026-10-05T06:04:34+09:00", "items": MOVES})
     monkeypatch.setattr(J, "MOVES_PATH", str(mv))
     monkeypatch.setattr(J, "JUMP_PATH", str(jp))
+    monkeypatch.setattr(J, "DAILY_LOG", str(tmp_path / "daily.jsonl"))   # 本物の記録に書かない
     assert J.load_jump_priority() == ["UP3", "UP1"]
     monkeypatch.setattr(J, "MOVES_PATH", str(tmp_path / "none.json"))  # リバイスくんのファイルが無くても前の分は読める
     assert J.load_jump_priority() == ["UP3", "UP1"]
@@ -41,3 +42,17 @@ def test_hoju_priority_puts_price_jumps_before_shelf(monkeypatch):
     monkeypatch.setattr(J, "load_jump_priority", lambda: ["J1", "S1"])
     monkeypatch.setattr(R, "load_hoju_priority", lambda: ["S1", "S2"])
     assert H.load_shelf_priority() == ["J1", "S1", "S2"]
+
+
+def test_daily_count_is_logged(tmp_path, monkeypatch):
+    mv, jp, lg = tmp_path / "moves.json", tmp_path / "jump.json", tmp_path / "daily.jsonl"
+    J._save(str(mv), {"at": "2026-10-05T06:04:34+09:00", "items": MOVES})
+    monkeypatch.setattr(J, "MOVES_PATH", str(mv))
+    monkeypatch.setattr(J, "JUMP_PATH", str(jp))
+    monkeypatch.setattr(J, "DAILY_LOG", str(lg))
+    J.refresh()
+    J.refresh()                                                 # 同じ朝の分は2回数えない
+    import json
+    rows = [json.loads(x) for x in lg.read_text(encoding="utf-8").splitlines()]
+    assert rows == [{"date": "2026-10-05", "source_at": "2026-10-05T06:04:34+09:00", "min_ratio": 1.5,
+                     "moves": 4, "picked": 2}]

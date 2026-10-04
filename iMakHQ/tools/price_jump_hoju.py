@@ -21,6 +21,9 @@ import os
 
 MOVES_PATH = r"C:/dev/iMak_data/revise/price_moves_high.json"
 JUMP_PATH = r"C:/dev/iMak_data/hq/price_jump_priority.json"
+# ★2026-10-05 ADV 依頼: 1.5 は仮の線。毎朝「何件が優先に入ったか」を1行ずつ残し、10件前後に収まらず
+#   増えていくなら線を締める (ユーザー「優先ばかり増えると、優先の意味が薄れる」)
+DAILY_LOG = r"C:/dev/iMak_data/hq/price_jump_daily.jsonl"
 MIN_RATIO = 1.5
 KEEP_DAYS = 3
 
@@ -83,6 +86,14 @@ def refresh(now=None):
     data = {"at": now.isoformat(timespec="seconds"), "source_at": moves["at"], "min_ratio": MIN_RATIO,
             "items": merge(cur.get("items"), pick_jumps(moves.get("items"), day), now.date())}
     _save(JUMP_PATH, data)
+    try:
+        with open(DAILY_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"date": day, "source_at": moves["at"], "min_ratio": MIN_RATIO,
+                                "moves": len(moves.get("items") or []),
+                                "picked": sum(1 for x in data["items"] if x.get("date") == day)},
+                               ensure_ascii=False) + "\n")
+    except OSError:
+        pass
     return data
 
 
