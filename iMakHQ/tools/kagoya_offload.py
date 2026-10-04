@@ -1063,6 +1063,17 @@ def cycle():
         _save_state(st)
         return 0
     if st.get("job_date") == today and not rs["done"]:
+        # ★2026-10-04 ユーザー「むだに LOOP して使うとか、あり得ないよね」(抽出くんのトレジャーが落ちては毎時最初から
+        #   やり直し、有料 API を同じ候補に何千回もかけていた)。HQ の再開は済んだ分を飛ばすが、毎回同じ所で落ちると
+        #   1時間ごとに再開し続ける。進まないまま2回再開したら、それ以上は再開せず要対応にする
+        stop, st["resume_tries"] = resume_should_stop(st.get("resume_tries"), st.get("job_id"), rs.get("lines", 0))
+        if stop:
+            msg = (f"{datetime.datetime.now():%m/%d %H:%M} 今日の仕事が進まないまま {RESUME_MAX}回 再開して落ちた "
+                   f"({rs.get('lines', 0)}件済み) → 再開をやめた。run.log を見て直す")
+            print("⚠️要対応: " + msg)
+            st["last_error"] = msg
+            _save_state(st)
+            return 1
         # 今日の仕事が途中で止まった (サーバー再起動など) → 続きから再開
         print("↻ 今日の仕事が途中で止まっていた → 続きから再開")
         try:
@@ -1180,6 +1191,24 @@ def start_urgent_restock(cfg, st, today):
         start_remote(cfg, job)
         print(f"🚀 急ぎの探索 {len(targets)}件 (売り切れの次の仕入元 {len(targets) - nf} / 補0本の新しい出品 {nf})")
     st["sold_seen"] = sorted(seen | {H._cell(r, H.B) for r in new})
+
+
+RESUME_MAX = 2          # 進まないまま再開してよい回数
+
+
+def resume_should_stop(tries, job_id, lines, max_tries=RESUME_MAX):
+    """再開をやめるか (純関数)。戻り値 (やめるか, 新しい記録)。
+
+    tries = {"job_id", "lines" (前回再開した時の済み件数), "n" (進まずに再開した回数)}。
+    済み件数が増えていれば回数は0に戻す (進んでいる = 落ちても続きから進められている)。
+    """
+    t = dict(tries or {})
+    if t.get("job_id") != job_id or int(lines or 0) > int(t.get("lines", -1)):
+        t = {"job_id": job_id, "lines": int(lines or 0), "n": 0}
+    if t["n"] >= max_tries:
+        return True, t
+    t["n"] += 1
+    return False, t
 
 
 def start_remote_resume(cfg):
