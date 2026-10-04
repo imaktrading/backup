@@ -158,6 +158,15 @@ def fetch_existing_ads(tok):
 
 def create_ads(tok, pairs):
     """listingId を 8% で受け皿キャンペーンに追加。→ [(itemid, 結果)]。"""
+    # ★2026-10-05 棚② のオファーで広告を外した出品には付け直さない (ユーザー「広告を付ける対象からも外して」)
+    try:
+        import shelf_offer as _SO
+        _skip = _SO.no_ad_ids()
+        pairs = [(lb, iid) for lb, iid in pairs if str(iid) not in _skip]
+    except Exception:                                          # noqa: BLE001
+        pass
+    if not pairs:
+        return []
     body = {"requests": [{"listingId": iid, "bidPercentage": BID} for _lb, iid in pairs]}
     r = requests.post(f"{API}/ad_campaign/{CAMPAIGN_ID}/bulk_create_ads_by_listing_id",
                       headers=_headers(tok), data=json.dumps(body), timeout=120)
