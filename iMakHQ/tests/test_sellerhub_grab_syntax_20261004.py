@@ -27,3 +27,9 @@ def test_collect_takes_traffic_report():
 def test_extension_grabs_traffic_after_lqr():
     src = open(os.path.join(HERE, "content.js"), encoding="utf-8").read()
     assert 'sessionStorage.setItem(STAGE, "traffic")' in src and "function grabTraffic" in src
+
+
+def test_traffic_button_matched_by_exact_name():
+    """↓ は aria-label「Download active listings traffic report」で1つに決める (品質レポートを押していた)。"""
+    src = open(os.path.join(HERE, "content.js"), encoding="utf-8").read()
+    assert "Download active listings traffic report" in src

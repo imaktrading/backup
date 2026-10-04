@@ -124,16 +124,10 @@
   // 「Your listings」の欄の右の ↓ (Download)。名前 (aria-label / title / 文字 / 絵の名前) に download が入る物を探す。
   //   1つに決まらなければ押さない (間違った物を押さない)
   function trafficButton() {
-    const head = [...document.querySelectorAll("h1,h2,h3,h4")].find((h) => /Your listings/i.test(txt(h)));
-    let box = head;
-    for (let i = 0; box && i < 6 && !box.querySelector("table"); i++) box = box.parentElement;
-    const scope = box || document;
-    const name = (b) => [b.getAttribute("aria-label"), b.getAttribute("title"), txt(b),
-      ...[...b.querySelectorAll("use, svg")].map((u) => (u.getAttribute("href") || u.getAttribute("xlink:href") ||
-                                                         u.getAttribute("aria-label") || ""))].join(" ");
-    const hits = [...scope.querySelectorAll("button, [role=button], a")].filter(visible)
-      .filter((b) => /download/i.test(name(b)))
-      .filter((b) => !/quality report/i.test(name(b)));   // ★品質レポートのボタンを押していた (2026-10-04)
+    // ★2026-10-04 画面の控えで確かめた: ↓ は aria-label「Download active listings traffic report」の icon-btn。
+    //   名前で1つに決める (前は「download」を含む物を探していて、品質レポートのボタンを押していた)
+    const hits = [...document.querySelectorAll("button[aria-label]")].filter(visible)
+      .filter((b) => /^Download active listings traffic report$/i.test(b.getAttribute("aria-label").trim()));
     return hits.length === 1 ? hits[0] : (hits.length ? hits : null);
   }
 
