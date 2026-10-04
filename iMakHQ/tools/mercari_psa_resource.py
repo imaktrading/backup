@@ -1755,6 +1755,12 @@ def api_detail(url):
         return None
 
 
+def is_api_auction(it):
+    """API の検索結果の1件がオークションか (純関数)。検索の入口は全部これで落とす (2026-10-04)。"""
+    auc = getattr(it, "auction", None)
+    return auc is not None and bool(getattr(auc, "id_", None))
+
+
 def api_search(kw, by_price=False, limit=None):
     """メルカリ検索 (販売中) を API で → parse_mercari_items と同じ形 [{type,name,price,href,image}]。失敗は None。
 
@@ -1778,8 +1784,7 @@ def api_search(kw, by_price=False, limit=None):
         return None
     out = []
     for it in getattr(res, "items", None) or []:
-        auc = getattr(it, "auction", None)
-        if auc is not None and getattr(auc, "id_", None):
+        if is_api_auction(it):
             continue                                   # オークション
         name = getattr(it, "name", "") or ""
         if _is_lot(name):
@@ -1854,6 +1859,11 @@ class _ApiSource:
         time.sleep(_API_SLEEP)
         out = []
         for it in res.items:
+            # ★2026-10-04 (4回目の「補URL③に AUC」): 10/1 に API へ切り替えた時、この検索だけオークションを
+            #   落としていなかった (api_search は落としている)。ここが補URL の夜探しの入口で、検索結果の候補
+            #   (all_cands / loose / 版未確認) は詳細を開かずに控えに貯まり、そのまま目視に出ていた
+            if is_api_auction(it):
+                continue
             shops = "BEYOND" in str(getattr(it, "item_type", "") or "").upper()
             href = ("https://jp.mercari.com/shops/product/" if shops else "https://jp.mercari.com/item/") + it.id_
             self.kind[href] = "shops" if shops else "item"

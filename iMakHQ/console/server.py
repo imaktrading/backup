@@ -1221,9 +1221,15 @@ def _run_worker(script, cmd=None):
                              encoding="utf-8", errors="replace", bufsize=1,
                              creationflags=_flags)
         STATE["proc"] = p                                      # 止めるボタン用
+        _at_home = False
         for line in p.stdout:
             _log(line)
-            if _rcmd:
+            # ★2026-10-04 ユーザー「目視HTMLが2つ開いてないかな」: KAGOYA の席が空かず家で動いた時は、
+            #   確認画面の処理が自分でブラウザを開く。神風まで同じ行を拾って開くと2つになっていた
+            #   (補URL③ 10/3 18:54・19:36 / 10/4 16:00)。家で動くと分かったら中継で開くのをやめる
+            if "家で動かします" in line:
+                _at_home = True
+            if _rcmd and not _at_home:
                 _m = _REVIEW_RE.search(line)
                 if _m:
                     try:

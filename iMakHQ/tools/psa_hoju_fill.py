@@ -788,6 +788,8 @@ def filter_candidates_by_cost(cands, t, vals):
     keep, drop = [], []
     for c in (cands or []):
         p = prices.get(_norm_url(c.get("url")))
+        if p is None and isinstance(c.get("price"), int) and c["price"] > 0:
+            p = c["price"]                     # 値段表に無い時は候補が持っている値段 (目視待ちの棚卸しが書いた今の値段)
         (drop if candidate_cost_conflicts(p, now_cost, main_dead, min_gain)
          else keep).append(c)
     return keep, drop
@@ -2547,6 +2549,15 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
                 _pidp = mp.split_key(t.get("key"))[1]
             except Exception:                                  # noqa: BLE001
                 _PLLp, _uvp, _pidp = None, {}, ""
+            # ★2026-10-04 ユーザー報告「現在の仕入値より高いのもある」: 目視待ちから混ぜる分には値段の門が無かった
+            #   (通常の候補は filter_candidates_by_cost を通る)。同じ門を通す。買えないと分かった URL も出さない
+            try:
+                _ngp = set(mp.load_not_buyable() or {})
+            except Exception:                                  # noqa: BLE001
+                _ngp = set()
+            _pend_ok, _pend_cost = filter_candidates_by_cost(
+                [_p for _p in _pend if _p.get("url") not in _ngp], t, vals)
+            _pend = _pend_ok
             for _p in _pend:
                 if _norm_url(_p["url"]) in _have:
                     continue
