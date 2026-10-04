@@ -608,6 +608,10 @@ def _code_files():
         files += [os.path.join("iMakMercari", f) for f in os.listdir(mer)
                   if (f.endswith((".py", ".yaml", ".yml")) or f in MERCARI_TEXT_FILES)
                   and os.path.isfile(os.path.join(mer, f))]
+        # Tシャツのサイズ表画像 (ut_sizechart_image が GitHub の物と見比べる。無いと黙って付かない)
+        ad = os.path.join(mer, "assets")
+        if os.path.isdir(ad):
+            files += [os.path.join("iMakMercari", "assets", f) for f in os.listdir(ad) if f.endswith(".png")]
     return sorted(files)
 
 
