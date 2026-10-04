@@ -94,6 +94,28 @@
     return true;
   }
 
+  // 画面の押せる物と、開いている小窓の中身を控える (ダウンロード フォルダの sellerhub_traffic_dump_N.txt)
+  let dumpN = 0;
+  function dumpPage() {
+    dumpN += 1;
+    const pick = (el) => {
+      const r = el.getBoundingClientRect();
+      return [el.tagName.toLowerCase(), el.id ? "#" + el.id : "", (el.getAttribute("class") || "").slice(0, 80),
+              "role=" + (el.getAttribute("role") || ""), "aria=" + (el.getAttribute("aria-label") || ""),
+              "testid=" + (el.getAttribute("data-testid") || ""), "vis=" + (r.width > 0 && r.height > 0),
+              "text=" + txt(el).slice(0, 80)].join(" | ");
+    };
+    const els = [...document.querySelectorAll("button, a[href], [role=button], [role=menuitem], [role=option], " +
+                                               "[role=radio], [role=tab], input, select, label")];
+    const dialogs = [...document.querySelectorAll("[role=dialog], .lightbox-dialog, .se-dialog, dialog")]
+      .filter(visible).map((d) => d.outerHTML.slice(0, 30000));
+    const text = [`URL ${location.href}`, `時刻 ${new Date().toLocaleString()}`, `押せる物 ${els.length}`,
+                  ...els.map(pick), "", `開いている小窓 ${dialogs.length}`, ...dialogs].join("
+");
+    chrome.runtime.sendMessage({ type: "dump", n: dumpN, text });
+    log(`✅ 控えた (${dumpN}回目)。eBay の Download を押して小窓を出したら、もう一度押してください`);
+  }
+
   function lqrButton() {
     return [...document.querySelectorAll("#sh-perf-page-nsa button")]
       .find((b) => /Download listings quality report/i.test(txt(b)));
@@ -296,6 +318,10 @@
       });
       startButton("③ 自動 (作成→取得) を今すぐ", () => { location.hash = "shg-auto"; location.reload(); });
     });
+  } else if (location.pathname.startsWith("/sh/performance/traffic")) {
+    // ★2026-10-04 トラフィックレポート (前の90日との比較つき) も毎日落としたい (棚② の「埋もれた」判定)。
+    //   押す所を推測で書かないため、まず画面の作りを控える。ボタン → eBay の Download を押して小窓を出す → もう一度ボタン
+    startButton("画面の作りを控える (HQ 用)", dumpPage);
   } else if (location.pathname.startsWith("/sh/performance")) {
     if (sessionStorage.getItem(STAGE) === "lqr") {
       panel();

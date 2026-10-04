@@ -25,6 +25,13 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     chrome.storage.local.set({ shgLines: [`${new Date().toLocaleString()} 自動 開始`] });
   } else if (msg.type === "log") {
     addLine(`${new Date().toLocaleTimeString()} ${msg.msg}`);
+  } else if (msg.type === "dump") {
+    // ★2026-10-04 トラフィックの画面の作りを控える (HQ が押す所を作るため)
+    const b64 = btoa(unescape(encodeURIComponent(msg.text || "")));
+    chrome.downloads.download({
+      url: "data:text/plain;charset=utf-8;base64," + b64,
+      filename: `sellerhub_traffic_dump_${msg.n || 1}.txt`, conflictAction: "overwrite", saveAs: false,
+    });
   } else if (msg.type === "done") {
     addLine(`${new Date().toLocaleString()} 終了 (${msg.ok ? "成功" : "失敗"})`).then(writeLog);
     if (sender.tab && sender.tab.id != null) setTimeout(() => chrome.tabs.remove(sender.tab.id), 5000);
