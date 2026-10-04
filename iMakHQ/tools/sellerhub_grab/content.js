@@ -22,6 +22,7 @@
     { source: "Advertising", type: "Listing", label: "広告" },
   ];
   const FLAG = "shg_next_lqr";
+  const FLAG_TRAFFIC = "shg_next_traffic";
   const OLD_HOURS = 48;          // これより古い完成品しか無い = Schedule が動いていない
 
   const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
@@ -115,6 +116,30 @@
     log(`✅ 控えた (${dumpN}回目)。eBay の Download を押して小窓を出したら、もう一度押してください`);
   }
 
+  // 「Your listings」の欄の右の ↓ (Download)。名前 (aria-label / title / 文字 / 絵の名前) に download が入る物を探す。
+  //   1つに決まらなければ押さない (間違った物を押さない)
+  function trafficButton() {
+    const head = [...document.querySelectorAll("h1,h2,h3,h4")].find((h) => /Your listings/i.test(txt(h)));
+    let box = head;
+    for (let i = 0; box && i < 6 && !box.querySelector("table"); i++) box = box.parentElement;
+    const scope = box || document;
+    const name = (b) => [b.getAttribute("aria-label"), b.getAttribute("title"), txt(b),
+      ...[...b.querySelectorAll("use, svg")].map((u) => (u.getAttribute("href") || u.getAttribute("xlink:href") ||
+                                                         u.getAttribute("aria-label") || ""))].join(" ");
+    const hits = [...scope.querySelectorAll("button, [role=button], a")].filter(visible)
+      .filter((b) => /download/i.test(name(b)));
+    return hits.length === 1 ? hits[0] : (hits.length ? hits : null);
+  }
+
+  async function grabTraffic() {
+    let b = null;
+    for (let i = 0; i < 30 && !(b = trafficButton()); i++) await sleep(500);
+    if (!b) { log("❌ トラフィックの ↓ (Download) が見つかりません。画面の作りを控えるボタンを押して HQ に知らせてください"); return; }
+    if (Array.isArray(b)) { log(`❌ ↓ の候補が ${b.length}個あって決められません (押していません)`); return; }
+    b.click();
+    log("✅ トラフィックレポート: 押しました (前の90日との比較つき)");
+  }
+
   function lqrButton() {
     return [...document.querySelectorAll("#sh-perf-page-nsa button")]
       .find((b) => /Download listings quality report/i.test(txt(b)));
@@ -126,7 +151,7 @@
     if (!b) { log("❌ 品質レポートのボタンが見つかりません (画面が United States か確かめてください)"); return; }
     b.click();
     log("✅ 品質レポート: 押しました (出来上がるまで数十秒かかることがあります)");
-    log("✅ 5つとも押しました。夜のバッチがファネルの置き場へ移します");
+    log("✅ 品質レポートまで押しました。続けてトラフィックレポートを取ります");
   }
 
   function startButton(label, fn) {
@@ -318,19 +343,40 @@
       startButton("③ 自動 (作成→取得) を今すぐ", () => { location.hash = "shg-auto"; location.reload(); });
     });
   } else if (location.pathname.startsWith("/sh/performance/traffic")) {
-    // ★2026-10-04 トラフィックレポート (前の90日との比較つき) も毎日落としたい (棚② の「埋もれた」判定)。
-    //   押す所を推測で書かないため、まず画面の作りを控える。ボタン → eBay の Download を押して小窓を出す → もう一度ボタン
-    startButton("画面の作りを控える (HQ 用)", dumpPage);
+    // ★2026-10-04 トラフィックレポート (前の90日との比較つき) も毎日落とす (棚② の「埋もれた」判定)。
+    //   ユーザー「小窓でないよ。右の↓をおすだけ」: 「Your listings」の欄の右の ↓ (Download) を押す
+    if (sessionStorage.getItem(STAGE) === "traffic") {
+      panel();
+      log("自動 (続き): トラフィックレポート");
+      grabTraffic().then(async () => { await sleep(20000); finish(true); });
+    } else if (sessionStorage.getItem(FLAG_TRAFFIC) === "1") {
+      sessionStorage.removeItem(FLAG_TRAFFIC);
+      panel();
+      log("Seller Hub レポート取り (続き): トラフィックレポート");
+      grabTraffic().then(() => log("✅ 6つとも押しました。夜のバッチがファネルの置き場へ移します"));
+    } else {
+      startButton("トラフィックレポートだけ取る", grabTraffic);
+      startButton("画面の作りを控える (HQ 用)", dumpPage);
+    }
   } else if (location.pathname.startsWith("/sh/performance")) {
     if (sessionStorage.getItem(STAGE) === "lqr") {
       panel();
       log("自動 (続き): 品質レポート");
-      grabLqr().then(async () => { await sleep(30000); finish(true); });
+      // ★2026-10-04: 品質レポートの後にトラフィックレポートも取る
+      grabLqr().then(async () => {
+        await sleep(30000);
+        sessionStorage.setItem(STAGE, "traffic");
+        location.href = "https://www.ebay.com/sh/performance/traffic";
+      });
     } else if (sessionStorage.getItem(FLAG) === "1") {
       sessionStorage.removeItem(FLAG);
       panel();
       log("Seller Hub レポート取り (続き)");
-      grabLqr();
+      grabLqr().then(async () => {
+        await sleep(30000);
+        sessionStorage.setItem(FLAG_TRAFFIC, "1");
+        location.href = "https://www.ebay.com/sh/performance/traffic";
+      });
     } else {
       startButton("品質レポートだけ取る", grabLqr);
     }

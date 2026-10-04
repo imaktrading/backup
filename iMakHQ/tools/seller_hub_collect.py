@@ -22,7 +22,9 @@ DOWNLOADS = os.path.join(os.path.expanduser("~"), "Downloads")
 REPORT_DIR = r"C:\dev\iMak_data\seller_hub\reports"
 # listing_funnel.py が探す名前と同じ形 (あちらを変えたらここも)
 PATTERNS = ("*all-active-listings*.csv", "*inactive-listings*.csv", "*unsold-listings*.csv",
-            "*orders-report*.csv", "*promoted-listing*report*.csv", "Listing quality report*.xlsx")
+            "*orders-report*.csv", "*promoted-listing*report*.csv", "Listing quality report*.xlsx",
+            # ★2026-10-04 トラフィックレポート (前の90日との比較つき・棚② の「埋もれた」判定)
+            "eBay-ListingsTrafficReport-*.csv")
 
 
 def is_report(name):
