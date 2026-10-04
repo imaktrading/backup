@@ -1031,7 +1031,8 @@ def cmd_html(_argv):
     print(f"売れ筋 {summary['カード']}種類 — 出品済 {summary['出品済']} / "
           f"未出品 {summary['未出品']} / カタログ要補充 {summary['引けなかった']}")
     print(f"→ {CARDS_HTML}")
-    webbrowser.open("file:///" + CARDS_HTML.replace("\\", "/"))
+    from home_open import open_for_user
+    open_for_user(CARDS_HTML)               # KAGOYA で動いた時は家で開く (2026-10-04)
     return 0
 
 

@@ -383,9 +383,11 @@ def home_main(cwd, envs, args):
     print(f"🛰 KAGOYA で動かします (控え {n}本を送った)", flush=True)
     p = subprocess.Popen(remote_ssh_cmd(cfg, cwd, envs, args), stdout=subprocess.PIPE, creationflags=K.NOWIN,
                          stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
+    seen = []
     for line in p.stdout:
         sys.stdout.write(line)
         sys.stdout.flush()
+        seen.append(line)
     rc = p.wait()
     if rc == 75:
         print("🏠 KAGOYA の席が空いていないので家で動かします", flush=True)
@@ -400,6 +402,12 @@ def home_main(cwd, envs, args):
     if conflicts:
         print(f"⚠️ 家でも同じ時に書かれていた {len(conflicts)}本 (KAGOYA を優先・家の分は {run_dir} に保存): "
               + " / ".join(conflicts), flush=True)
+    # ★2026-10-04: KAGOYA で作った画面 (HTML・スプシ) を、取り込んだ後に家のブラウザで開く (home_open)
+    try:
+        import home_open as HO
+        HO.open_targets(HO.targets_in(seen))
+    except Exception as e:                                     # noqa: BLE001
+        print(f"⚠️ 画面を家で開けませんでした ({type(e).__name__})", flush=True)
     return man.get("rc", rc)
 
 
@@ -443,6 +451,18 @@ def _kill_previous_remote_runs():
         pass
 
 
+def seat_gb_from_envs(envs, default):
+    """--env IMAK_SEAT_GB=0.3 → 0.3。無い・読めなければ default (純関数)。"""
+    for e in envs or []:
+        if e.startswith("IMAK_SEAT_GB="):
+            try:
+                v = float(e.split("=", 1)[1])
+                return v if v > 0 else default
+            except ValueError:
+                return default
+    return default
+
+
 def remote_main(cwd, out_dir, envs, args):
     os.makedirs(out_dir, exist_ok=True)
     os.makedirs(HOME_DESK, exist_ok=True)
@@ -451,7 +471,10 @@ def remote_main(cwd, out_dir, envs, args):
         os.remove(os.path.join(out_dir, "out.tgz"))   # 前の回の結果を取り込まないように
     except OSError:
         pass
-    if not K.acquire_server_seat(BTN_SEAT, need_gb=BTN_NEED_GB):
+    # ★2026-10-04: API とシートだけの軽いボタンは小さい席で入る (offload.json の button_seat_gb → --env IMAK_SEAT_GB)。
+    #   KAGOYA は抽出くんの Chrome 等で空き 1.4GB 前後のことが多く、一律 1.2GB だと軽いボタンも家に戻っていた
+    need = seat_gb_from_envs(envs, BTN_NEED_GB)
+    if not K.acquire_server_seat(BTN_SEAT, need_gb=need):
         print("[KAGOYA] 席が取れない (空きメモリ不足)", flush=True)
         return 75
     t0 = time.time() - 2

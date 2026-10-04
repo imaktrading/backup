@@ -1144,7 +1144,8 @@ def main() -> int:
     print(f"✅ 生成: {OUT}")
     if "--verify" in sys.argv:
         verify(p)
-    webbrowser.open(OUT.as_uri())
+    from home_open import open_for_user
+    open_for_user(str(OUT))                 # KAGOYA で動いた時は家で開く (2026-10-04)
     return 0
 
 

@@ -1141,6 +1141,11 @@ def remote_command(script, cmd, cfg=None):
     envs = []
     for k, v in (script.get("env") or {}).items():
         envs += ["--env", "%s=%s" % (k, v)]
+    # ★2026-10-04: 軽いボタンの席の大きさ (offload.json の button_seat_gb。名前 or 「商材 名前」で当てる)
+    _sg = cfg.get("button_seat_gb") or {}
+    _gb = _sg.get(script.get("label")) or _sg.get("%s %s" % (script.get("category"), script.get("label")))
+    if _gb:
+        envs += ["--env", "IMAK_SEAT_GB=%s" % _gb]
     return [sys.executable, "-X", "utf8", "-u", tool, "--cwd", str(script["cwd"])] + envs + ["--"] + args
 
 
