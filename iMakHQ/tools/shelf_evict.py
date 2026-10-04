@@ -1163,7 +1163,8 @@ def main():
         #   (shelf_offer。送った物は期限まで落とさない。試しの時は送る予定を出すだけ)
         try:
             import shelf_offer as SO
-            picked = SO.offer_before_drop(picked, lambda r: cat_of(r) == "TCG", send=a.end)
+            picked = SO.offer_before_drop(picked, lambda r: cat_of(r) == "TCG", send=a.end,
+                                          live_ids={str(r.get("item_id")) for r in rows})
             total = sum(shelf_of(r) for _t, r in picked)
         except Exception as e:                                 # noqa: BLE001
             print(f"  ⚠ 落とす前のオファーを判定できず ({type(e).__name__}: {e}) → 今までどおり落とします")

@@ -173,24 +173,76 @@ def send_offer(h, iid, offer_price):
     return False, f"HTTP {r.status_code}: {r.text[:160]}"
 
 
-def add_no_ad(iid, path=NO_AD_PATH):
+def add_no_ad(iid, path=None):
+    path = path or NO_AD_PATH
     d = load_json(path, {"iids": []})
     if iid not in d.get("iids", []):
         d.setdefault("iids", []).append(iid)
         save_json(path, d)
 
 
-def no_ad_ids(path=NO_AD_PATH):
-    return set(load_json(path, {"iids": []}).get("iids") or [])
+def no_ad_ids(path=None):
+    return set(load_json(path or NO_AD_PATH, {"iids": []}).get("iids") or [])
 
 
-def offer_before_drop(picked, is_psa, send=False, now=None, log=print):
+def remove_no_ad(iid, path=None):
+    path = path or NO_AD_PATH
+    d = load_json(path, {"iids": []})
+    if iid in (d.get("iids") or []):
+        d["iids"] = [x for x in d["iids"] if x != iid]
+        save_json(path, d)
+
+
+def settle_expired(ledger, picked_ids, live_ids, send=False, log=print):
+    """期限が切れたオファーの後始末 (I/O)。台帳の status を埋めて返す。
+
+    - 出品がもう無い (売れた / 終わった) → status "売れた・終了" (オファーで売れたかは注文で数える)
+    - まだ落とす候補 → "落とす" (呼び手が落とす)
+    - 落とす候補から外れた → 広告 (8%) を付け直して "広告を戻した" (外したまま放置しない)
+    status が付いた物は二度と処理しない。
+    """
+    todo = [(iid, e) for iid, e in ledger.items()
+            if not e.get("status") and offer_state(e, datetime.datetime.now()) == "expired"]
+    back = []
+    for iid, e in todo:
+        if live_ids is not None and iid not in live_ids:
+            e["status"] = "売れた・終了"
+        elif iid in picked_ids:
+            e["status"] = "落とす"
+        else:
+            back.append(iid)
+    if back:
+        if not send:
+            log(f"  💌 期限が切れて落とす候補から外れた {len(back)}件 → 押した時に広告を付け直します")
+        else:
+            try:
+                import ads_add_new_listings as A
+                for iid in back:
+                    remove_no_ad(iid)
+                res = dict(A.create_ads(A._token(), [(iid, iid) for iid in back]))
+                for iid in back:
+                    r = res.get(iid, "")
+                    if r == "OK" or "already" in r.lower() or "exist" in r.lower():
+                        ledger[iid]["status"] = "広告を戻した"
+                    else:
+                        add_no_ad(iid)
+                        log(f"  ⚠ {iid} 広告を付け直せず ({r}) → 次回もう一度")
+                log(f"  💌 期限切れ・落とさない {len(back)}件 の広告を付け直しました")
+            except Exception as e:                             # noqa: BLE001
+                log(f"  ⚠ 広告を付け直せず ({type(e).__name__}) → 次回もう一度")
+    if send and todo:
+        save_json(OFFERS_PATH, ledger)
+    return ledger
+
+
+def offer_before_drop(picked, is_psa, send=False, now=None, log=print, live_ids=None):
     """落とす候補 [(tier, row)] → 落とす物だけ返す。オファーを送った / オファー中の物は外す。
 
     send=False (試し) は eBay に何も書かず、送る予定を出すだけ。
     """
     now = now or datetime.datetime.now()
     ledger = load_json(OFFERS_PATH, {})
+    settle_expired(ledger, {str(r.get("item_id")) for _t, r in picked}, live_ids, send=send, log=log)
     keep, offering, expired, plan = [], [], [], []
     for t, r in picked:
         iid = str(r.get("item_id") or "")
@@ -198,7 +250,7 @@ def offer_before_drop(picked, is_psa, send=False, now=None, log=print):
         if st == "offering":
             offering.append(iid)
             continue
-        if st == "expired":
+        if st == "expired" and (ledger.get(iid) or {}).get("status") == "落とす":
             expired.append(iid)
         keep.append((t, r))
     if offering:

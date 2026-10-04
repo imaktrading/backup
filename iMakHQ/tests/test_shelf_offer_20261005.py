@@ -69,3 +69,23 @@ def test_ads_tool_skips_no_ad_items(tmp_path, monkeypatch):
 def test_shelf_calls_offer_before_drop():
     src = open(os.path.join(os.path.dirname(__file__), "..", "tools", "shelf_evict.py"), encoding="utf-8").read()
     assert "SO.offer_before_drop(picked" in src and "send=a.end" in src
+
+
+def test_expired_settlement(tmp_path, monkeypatch):
+    p = tmp_path / "offers.json"
+    monkeypatch.setattr(SO, "OFFERS_PATH", str(p))
+    monkeypatch.setattr(SO, "NO_AD_PATH", str(tmp_path / "noad.json"))
+    old = "2000-01-01T00:00:00"
+    ledger = {"SOLD": {"expires": old}, "DROP": {"expires": old}, "KEEP": {"expires": old},
+              "LIVE": {"expires": "2099-01-01T00:00:00"}}
+    SO.add_no_ad("KEEP", str(tmp_path / "noad.json"))
+    import ads_add_new_listings as A
+    calls = []
+    monkeypatch.setattr(A, "_token", lambda: "t")
+    monkeypatch.setattr(A, "create_ads", lambda tok, pairs: calls.append(pairs) or [(i, "OK") for _l, i in pairs])
+    SO.settle_expired(ledger, picked_ids={"DROP"}, live_ids={"DROP", "KEEP", "LIVE"}, send=True, log=lambda *a: None)
+    assert ledger["SOLD"]["status"] == "売れた・終了"
+    assert ledger["DROP"]["status"] == "落とす"
+    assert ledger["KEEP"]["status"] == "広告を戻した" and calls == [[("KEEP", "KEEP")]]
+    assert "status" not in ledger["LIVE"]                       # 期限前は触らない
+    assert "KEEP" not in SO.no_ad_ids(str(tmp_path / "noad.json"))
