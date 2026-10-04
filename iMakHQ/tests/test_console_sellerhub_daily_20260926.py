@@ -16,3 +16,10 @@ def test_opens_once_per_day():
 
 def test_url_carries_the_auto_marker():
     assert S.SELLERHUB_AUTO_URL.endswith("#shg-auto")
+
+
+def test_opens_in_edge_not_default_browser():
+    # ★2026-10-05 ユーザー「エッジにそろえよう」: 拡張は Edge に入れた
+    import inspect
+    src = inspect.getsource(S.sellerhub_daily)
+    assert "subprocess.Popen([EDGE, SELLERHUB_AUTO_URL])" in src

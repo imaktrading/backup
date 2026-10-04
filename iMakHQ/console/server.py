@@ -1539,9 +1539,14 @@ def sellerhub_daily():
     try:
         with open(SELLERHUB_STAMP, "w", encoding="utf-8") as f:
             f.write(today)
-        import webbrowser
-        webbrowser.open(SELLERHUB_AUTO_URL)
-        _log("📊 Seller Hub のレポート取りを開きました (1日1回・ブラウザの拡張が進めます)")
+        # ★2026-10-05 ユーザー「エッジにそろえよう」: 拡張は Edge に入れた。既定のブラウザ (Chrome) で
+        #   開くと、拡張の無い方が立ち上がる (8GB の PC で Chrome を立ち上げた直後に落ちた)。Edge で開く
+        try:
+            subprocess.Popen([EDGE, SELLERHUB_AUTO_URL])
+        except OSError:
+            import webbrowser
+            webbrowser.open(SELLERHUB_AUTO_URL)
+        _log("📊 Seller Hub のレポート取りを Edge で開きました (1日1回・Edge の拡張が進めます)")
     except Exception as e:                                     # noqa: BLE001
         _log("⚠️ Seller Hub のレポート取りを開けませんでした: %s" % e)
 

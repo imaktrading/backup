@@ -1,5 +1,5 @@
 // 経過の記録とタブ閉じ (2026-09-26)。
-// 起動は出品くん Console (1日1回): Downloads を #shg-auto 付きでいつものブラウザに開く。
+// 起動は出品くん Console (1日1回): Downloads を #shg-auto 付きでEdge で開く (2026-10-05 Chrome から Edge へ)。
 // あとは content.js が作成 → 完成待ち → 取得 → 品質レポートまで進め、"done" を送ってくる。
 // 経過は ダウンロード フォルダの sellerhub_grab_log.txt に書く (うまく行かなかった時に読む)。
 
