@@ -172,7 +172,11 @@ def _normalize_size(s: str) -> str:
 
 
 def _normalize_color(c: str) -> str:
-    return (c or "").strip().upper().replace(" ", "")
+    # ★ 2026-10-04: 数字だけの色コードは先頭の 0 を落として比べる。graniph の "001" は
+    #   スプシ (USER_ENTERED) が数字の 1 に変えるので、次の回に一致せず毎回 5 行ずつ
+    #   行を足していた (358900159400 が 10/02〜10/04 で 35 行に増殖)。
+    c = (c or "").strip().upper().replace(" ", "")
+    return str(int(c)) if c.isdigit() else c
 
 
 def match_supplier_skus_with_sheet(
