@@ -60,6 +60,8 @@ MIRROR_DIRS = [r"C:/dev/iMak_data/hq/market_sold/getitem",
                r"C:/dev/iMak/iMakeBayAPI/cache/psa_certs"]
 # 絵柄の照合などが読む鍵 (KAGOYA の鍵は credentials に置いてある・中身は家と同じを確認済)
 REMOTE_KEY_COPY = (r"C:\dev\iMak_data\credentials\api_key.txt", r"C:\dev\iMak\iMakTCG\API key.txt")
+# ★2026-10-04: モンベル・Tシャツの新規 (iMakMercari) も同じ鍵を自分のフォルダから読む (家で中身が同じことを確認済)
+REMOTE_KEY_COPY_EXTRA = (r"C:\dev\iMak\iMakMercari\API key.txt",)
 # 取り込む場所 (KAGOYA でボタンの間に変わったファイルを探す)。抽出くん等の置き場は入れない
 # ★2026-10-02: 家のデスクトップを名指しで書く道具がある (03_PSA再仕入れ候補_*.csv 等)。
 #   KAGOYA にも同じ場所を作って書かせ、書いた物は家の同じ場所に戻す (C:\dev の外は "ABS/C/..." で運ぶ)
@@ -239,6 +241,17 @@ def mirror_todo(sent, files):
 
 
 SYNC_TOKENS = [r"C:/dev/iMak_data/credentials/ebay_oauth_token_sell.json"]
+# ★2026-10-04: 出品前の3者合議 (iMakeBayAPI/listing_validator) が読む鍵。KAGOYA に無く、モンベル新規の
+#   試走で3件とも「Claude/Gemini/Groq 利用不可」→ 保留 → CSV 0件になった (PSA 自動も KAGOYA で動けば同じ)
+SYNC_KEYS = [r"C:/dev/iMak/iMakeBayAPI/API key.txt",
+             r"C:/dev/iMak/iMakAudit/gemini_key.txt",
+             r"C:/dev/iMak/iMakAudit/groq_key.txt"]
+
+
+def file_fingerprint(data):
+    """ファイルの中身の要約。無ければ None (純関数)。"""
+    import hashlib
+    return hashlib.sha256(data).hexdigest()[:16] if data else None
 
 
 def token_fingerprint(data):
@@ -294,11 +307,18 @@ def push(cfg, run_dir, st=None):
             if fp and st.get("token_sent:" + os.path.basename(p)) != fp:
                 tf.add(p, arcname=_rel(p))
                 st["token_sent:" + os.path.basename(p)] = fp
+        # 出品前の3者合議 (listing_validator) の鍵。変わった時だけ送る
+        for p in SYNC_KEYS:
+            fp = file_fingerprint(_read(p))
+            if fp and st.get("key_sent:" + _rel(p)) != fp:
+                tf.add(p, arcname=_rel(p))
+                st["key_sent:" + _rel(p)] = fp
     if K._scp_to(cfg, tgz, K.REMOTE_ROOT + r"\button_push.tgz") != 0:
         raise RuntimeError("控えを送れなかった")
     src, dst = REMOTE_KEY_COPY
+    extra = "".join(rf'if (-not (Test-Path "{d}")) {{ Copy-Item "{src}" "{d}" }}; ' for d in REMOTE_KEY_COPY_EXTRA)
     rc, out = K._ssh(cfg, rf'tar -xzf {K.REMOTE_ROOT}\button_push.tgz -C C:\dev; '
-                          rf'if (-not (Test-Path "{dst}")) {{ Copy-Item "{src}" "{dst}" }}; "ok"')
+                          rf'if (-not (Test-Path "{dst}")) {{ Copy-Item "{src}" "{dst}" }}; ' + extra + '"ok"')
     if rc != 0 or "ok" not in out:
         raise RuntimeError(f"控えの展開に失敗: {out[:200]}")
     return n

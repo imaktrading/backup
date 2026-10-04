@@ -80,3 +80,20 @@ def test_imakmercari_code_is_sent_to_kagoya():
     import kagoya_offload as K
     files = [f.replace("\\\\", "/") for f in K._code_files()]
     assert any(f.replace("\\\\", "/").endswith("ut_catalog_values.py") for f in files)
+
+
+def test_validator_keys_are_synced_to_kagoya():
+    """出品前の3者合議の鍵を KAGOYA に送る (無いと全件「保留」→ CSV 0件・2026-10-04 モンベル試走)。"""
+    assert any(p.endswith("iMakeBayAPI/API key.txt") for p in KB.SYNC_KEYS)
+    assert any(p.endswith("gemini_key.txt") for p in KB.SYNC_KEYS)
+    assert any(p.endswith("groq_key.txt") for p in KB.SYNC_KEYS)
+    assert KB.file_fingerprint(b"abc") == KB.file_fingerprint(b"abc") != KB.file_fingerprint(b"abd")
+    assert KB.file_fingerprint(b"") is None
+
+
+def test_server_matches_category_label_for_seat():
+    import server as SV
+    cfg = {"remote_buttons": ["Montbell 新規"], "button_seat_gb": {"Montbell 新規": 0.6}}
+    cmd = SV.remote_command({"label": "新規", "category": "Montbell", "cwd": "c:/x"},
+                            ["python", "montbell_listing.py"], cfg)
+    assert "IMAK_SEAT_GB=0.6" in cmd
