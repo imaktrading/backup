@@ -243,13 +243,17 @@ def _run_job_body(job_path: str) -> None:
             return None
 
     detail_fn = _detail_fn if DETAIL_BACKEND == "api" else None
+    # ★2026-10-04 HQ依頼: 家が積んだclaimed (job.json) をそのまま使う。 無ければ空集合
+    # (従来通り。 cert読み直しは防げないが落ちない)
+    claimed = {"urls": set(job.get("claimed_urls") or []),
+               "certs": set(job.get("claimed_certs") or [])}
 
     kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
     kill_orphan_chromedriver()
     try:
         payload = psa10.collect(treasure_args, dump_path=Path(dump_path_str), resume=resume, on_flush=None,
                                 should_pause=should_pause_now, urls_override=urls_override,
-                                detail_fn=detail_fn)
+                                detail_fn=detail_fn, claimed=claimed)
     finally:
         if api_client is not None:
             api_client.close()
@@ -374,14 +378,20 @@ def build_job(today: str) -> dict:
     import run_harvest_mercari_psa10 as psa10  # noqa: PLC0415
     from sheet_writer_mercari_search import load_keys_all_tabs  # noqa: PLC0415
     from sheet_writer_mercari_seller import open_seller_staging_sheet  # noqa: PLC0415
+    from sheet_writer import load_claimed_supply  # noqa: PLC0415
 
     rows = treasure_keywords.load_rows()
     keywords = treasure_keywords.build_keywords(rows)
     limits = treasure_keywords.build_cost_limits(rows)
     cost_cfg = psa10.load_cost_sanity()
     known = load_keys_all_tabs(open_seller_staging_sheet())
+    # ★2026-10-04 HQ依頼: KAGOYAはスプシ認証を持たないので、家で取ったcert/url単位の
+    # 既知仕入元をjobに積んで送る (サーバー側で読み直しを防ぐ。 無ければ従来通り空集合)。
+    claimed = load_claimed_supply()
     return {"job_id": f"treasure-{today}", "keywords": keywords, "card_limits": limits,
-            "cost_max_jpy": cost_cfg["max_jpy"], "known_keys": sorted(known)}
+            "cost_max_jpy": cost_cfg["max_jpy"], "known_keys": sorted(known),
+            "claimed_urls": sorted(claimed.get("urls") or []),
+            "claimed_certs": sorted(claimed.get("certs") or [])}
 
 
 def remote_busy(cfg) -> bool:

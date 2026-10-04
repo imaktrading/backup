@@ -277,13 +277,16 @@ def _run_job_body(job_path: str) -> None:
             return None
 
     detail_fn = _detail_fn if DETAIL_BACKEND == "api" else None
+    # ★2026-10-04 HQ依頼: 家が積んだclaimed (job.json) をそのまま使う
+    claimed = {"urls": set(job.get("claimed_urls") or []),
+               "certs": set(job.get("claimed_certs") or [])}
 
     kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
     kill_orphan_chromedriver()
     try:
         payload = psa10.collect(chara_args, dump_path=Path(dump_path_str), resume=resume, on_flush=None,
                                 should_pause=should_pause_now, urls_override=urls_override,
-                                detail_fn=detail_fn)
+                                detail_fn=detail_fn, claimed=claimed)
     finally:
         if api_client is not None:
             api_client.close()
@@ -415,13 +418,18 @@ def build_job(today: str) -> dict:
     import run_harvest_mercari_psa10 as psa10  # noqa: PLC0415
     from sheet_writer_mercari_search import load_keys_all_tabs  # noqa: PLC0415
     from sheet_writer_mercari_seller import open_seller_staging_sheet  # noqa: PLC0415
+    from sheet_writer import load_claimed_supply  # noqa: PLC0415
 
     rows = chara_keywords.load_rows()
     keywords = chara_keywords.build_keywords(rows)
     cost_cfg = psa10.load_cost_sanity()
     known = load_keys_all_tabs(open_seller_staging_sheet())
+    # ★2026-10-04 HQ依頼: treasure版と同じ、cert単位の既知仕入元を家で取ってjobに積む
+    claimed = load_claimed_supply()
     return {"job_id": f"chara-{today}", "keywords": keywords,
-            "cost_max_jpy": cost_cfg["max_jpy"], "known_keys": sorted(known)}
+            "cost_max_jpy": cost_cfg["max_jpy"], "known_keys": sorted(known),
+            "claimed_urls": sorted(claimed.get("urls") or []),
+            "claimed_certs": sorted(claimed.get("certs") or [])}
 
 
 def remote_busy(cfg) -> bool:
