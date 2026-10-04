@@ -98,22 +98,27 @@
   // 画面の押せる物と、開いている小窓の中身を控える (ダウンロード フォルダの sellerhub_traffic_dump_N.txt)
   let dumpN = 0;
   function dumpPage() {
+    // ★2026-10-04: 画面全体だと大きすぎてファイルにならなかった → 「Your listings」の周りと、文字の無いボタンだけ控える
     dumpN += 1;
-    const pick = (el) => {
-      const r = el.getBoundingClientRect();
-      return [el.tagName.toLowerCase(), el.id ? "#" + el.id : "", (el.getAttribute("class") || "").slice(0, 80),
-              "role=" + (el.getAttribute("role") || ""), "aria=" + (el.getAttribute("aria-label") || ""),
-              "testid=" + (el.getAttribute("data-testid") || ""), "vis=" + (r.width > 0 && r.height > 0),
-              "text=" + txt(el).slice(0, 80)].join(" | ");
-    };
-    const els = [...document.querySelectorAll("button, a[href], [role=button], [role=menuitem], [role=option], " +
-                                               "[role=radio], [role=tab], input, select, label")];
-    const dialogs = [...document.querySelectorAll("[role=dialog], .lightbox-dialog, .se-dialog, dialog")]
-      .filter(visible).map((d) => d.outerHTML.slice(0, 30000));
-    const text = [`URL ${location.href}`, `時刻 ${new Date().toLocaleString()}`, `押せる物 ${els.length}`,
-                  ...els.map(pick), "", `開いている小窓 ${dialogs.length}`, ...dialogs].join("\r\n");
+    const head = [...document.querySelectorAll("h1,h2,h3,h4")].find((h) => /Your listings/i.test(txt(h)));
+    let box = head ? head.parentElement : null;
+    for (let i = 0; box && i < 3 && box.parentElement && !box.querySelector("table"); i++) box = box.parentElement;
+    let around = "";
+    if (box) {
+      const c = box.cloneNode(true);
+      c.querySelectorAll("table, tbody, img").forEach((t) => t.remove());
+      around = c.outerHTML.slice(0, 20000);
+    }
+    const iconBtns = [...document.querySelectorAll("button, [role=button], a")].filter(visible)
+      .filter((b) => !txt(b)).map((b) => b.outerHTML.slice(0, 600));
+    const named = [...document.querySelectorAll("button, [role=button], a")].filter(visible)
+      .filter((b) => /download|export/i.test((b.getAttribute("aria-label") || "") + " " + txt(b)))
+      .map((b) => b.outerHTML.slice(0, 600));
+    const text = [`URL ${location.href}`, `時刻 ${new Date().toLocaleString()}`,
+                  `見出し Your listings ${head ? "あり" : "なし"}`, "", "== download/export の名前のボタン", ...named,
+                  "", "== 文字の無いボタン", ...iconBtns.slice(0, 60), "", "== Your listings の周り", around].join("\r\n");
     chrome.runtime.sendMessage({ type: "dump", n: dumpN, text });
-    log(`✅ 控えた (${dumpN}回目)。eBay の Download を押して小窓を出したら、もう一度押してください`);
+    log(`✅ 控えた (${dumpN}回目・${Math.round(text.length / 1000)}KB)。ダウンロードに sellerhub_traffic_dump_${dumpN}.txt`);
   }
 
   // 「Your listings」の欄の右の ↓ (Download)。名前 (aria-label / title / 文字 / 絵の名前) に download が入る物を探す。
@@ -127,7 +132,8 @@
       ...[...b.querySelectorAll("use, svg")].map((u) => (u.getAttribute("href") || u.getAttribute("xlink:href") ||
                                                          u.getAttribute("aria-label") || ""))].join(" ");
     const hits = [...scope.querySelectorAll("button, [role=button], a")].filter(visible)
-      .filter((b) => /download/i.test(name(b)));
+      .filter((b) => /download/i.test(name(b)))
+      .filter((b) => !/quality report/i.test(name(b)));   // ★品質レポートのボタンを押していた (2026-10-04)
     return hits.length === 1 ? hits[0] : (hits.length ? hits : null);
   }
 
