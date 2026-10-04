@@ -9,7 +9,12 @@ _SRC = (Path(__file__).resolve().parent.parent / "iMakHQ" / "control_panel.py").
 
 
 def test_psa_button_runs_gate_not_old_mercari_only():
+    # ★2026-10-04: ① のボタンは ①→②→③ を続けて走らせる psa_restock_chain.py を起動する (ユーザー「ボタン分けずに」)。
+    #   その最初の手順が gate であることを固定する (旧 Mercari 単体に戻っていないこと)
     i = _SRC.index("🛒 PSA 再仕入れ ① 目視")
-    block = _SRC[i:i + 600]
-    assert '"psa_resource_gate.py"' in block, "PSA再仕入れ照合ボタンが gate を起動していない"
+    block = _SRC[i:i + 1500]
+    assert '"psa_restock_chain.py"' in block, "PSA再仕入れ①ボタンが一連の処理を起動していない"
     assert '"mercari_psa_resource.py"' not in block, "旧Mercari単体スクリプトに戻っている"
+    chain = (Path(__file__).resolve().parent.parent / "iMakHQ" / "tools" / "psa_restock_chain.py").read_text(
+        encoding="utf-8")
+    assert chain.index('"psa_resource_gate.py"') < chain.index('"psa_restock_build.py"')

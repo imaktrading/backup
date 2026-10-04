@@ -969,7 +969,7 @@ def run_job(kind=None, index=None, params=None, amount=None):
 ORPHAN_HINTS = ("psa_to_csv.py", "tshirt_listing.py", "gshock_to_csv.py", "psa_hoju_fill.py",
                 "ut_hoju_fill.py", "ut_identify.py", "ichibankuji_restock.py", "sold_restock.py",
                 "cull_end.py", "shelf_evict.py", "newcand_confirm.py", "psa_restock_build.py",
-                "psa_resource_gate.py", "mercari_to_ebay_csv.py", "workman_listing.py",
+                "psa_resource_gate.py", "psa_restock_chain.py", "mercari_to_ebay_csv.py", "workman_listing.py",
                 "montbell_listing.py", "csv_auditor.py")
 
 

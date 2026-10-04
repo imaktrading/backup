@@ -17,7 +17,7 @@
     restock: {
       title: "再仕入れ", target: "売り切れ (在庫0)", purpose: "また買える仕入元を見つけて在庫を戻す",
       cols: ["① 仕入元を決める", "② 目視・CSV", "③ 確認・数量を戻す"],
-      rows: [["PSA", ["psa_gate", "restock_build", "restock_wb"]],
+      rows: [["PSA", ["psa_gate", null, null]],     // ②③ は ① から続けて走る (2026-10-04)
              ["UT", ["ut_restock_search", "ut_restock_confirm", "ut_restore"]],
              ["一番くじ", ["kuji_supply", "kuji_refresh", null]]],
       side: { head: "売れた分 (仕入元は生きている)", kind: "sold_restock", note: "全商材まとめて · 夜間でも1晩10件まで戻す" }
@@ -45,6 +45,7 @@
   };
   var STATE_LABEL = { todo: "要対応", night: "夜間で自動", hold: "止めている", done: "残りなし", error: "数えられない", unknown: "未集計" };
 
+  var HIDDEN_KINDS = ["restock_build", "restock_wb"];   // PSA 再仕入れ ②③ (① から続けて走る・2026-10-04)
   var jobs = {}, jobList = [], buttons = [], running = null, logAfter = 0, toastTimer, drawerHidden = true, schLoaded = false;
   // 今日やることの「状態の1行」と「期限のある物」(2026-09-29)。各所が材料を入れ、renderStrip が描く
   var STRIP = { counts: null, night: null, watch: null, integrity: null, errors: [], offer: null, order: null }, autoRecounted = false;
@@ -411,7 +412,9 @@
 
   // ---------------------------------------------------------------- 取り込み
   function paintJobs(d) {
-    jobList = d.jobs || [];
+    // ★2026-10-04 ユーザー「②③もボタン分けて、私が押す必要ないもんね」: PSA 再仕入れ ① が ②③ まで続けて走るので
+    //   ②③ はこの画面に出さない (旧パネルには残る。やり直しは ① を押し直せば ③ まで走る)
+    jobList = (d.jobs || []).filter(function (j) { return HIDDEN_KINDS.indexOf(j.kind) < 0; });
     jobs = {};
     jobList.forEach(function (j) { jobs[j.kind] = j; });
     var at = d.counts_at ? d.counts_at.replace("T", " ").slice(5, 16) : "まだ数えていません";
@@ -798,7 +801,7 @@
   //   サーバの入れ替え中などに失敗すると **そのまま止まっていた**。失敗したら数秒後にやり直す。
   function bootstrap() {
     return getJSON("/api/buttons").then(function (d) {
-      buttons = d.buttons || [];
+      buttons = (d.buttons || []).filter(function (b) { return HIDDEN_KINDS.indexOf(b.badge) < 0; });
       return refreshJobs();
     }).then(refreshHome).catch(function () {
       $("shop-at").textContent = "サーバーに繋がりません — 3秒後にやり直します";

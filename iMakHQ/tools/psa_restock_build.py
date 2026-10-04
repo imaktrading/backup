@@ -491,11 +491,12 @@ def main():
     ng = len(failed) + len(ended)
     print(f"\n在庫を戻した {len(sent)}件 / もう戻っていた {len(already)}件 / 見送り {held}件" + (f" / ⚠️要対応 {ng}件 {failed + ended}" if ng else "")
           + ("" if ng else " → ✅ 正常"))
-    if write and (sent or already):
+    # ★2026-10-04: ① 目視のボタンから一連で走る時 (psa_restock_chain) は、③ を chain が毎回1回だけ回す
+    if write and (sent or already) and not os.environ.get("PSA_RESTOCK_CHAIN"):
         print("\n▶ ③ 確認を続けて回します (商品管理シートの仕入元・売り切れ・「実行済」を揃える)")
         r = subprocess.run([sys.executable, os.path.join(here, "psa_restock_writeback.py")], cwd=here)
         if r.returncode != 0:
-            print(f"⚠️要対応: ③ が異常終了 (returncode={r.returncode})。③ ボタンを押し直してください")
+            print(f"⚠️要対応: ③ が異常終了 (returncode={r.returncode})。PSA 再仕入れ ① を押し直してください (③ まで走ります)")
             return 1
     return 1 if ng else 0
 
