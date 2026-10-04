@@ -379,12 +379,17 @@
     // ★2026-10-05 オファーを送る仕組みを作る前の下調べ (画面の作りを控えるだけ・何も押さない)
     // ★2.9: 小窓が開くとページが覆われて、このボタンを押せない (ユーザー「あいたまま、押せない」)。
     //   先にボタンを押しておき、次に「Send offers」の小窓 (sio-modal-root) が開いて中身が出たら自動で控える
+    // ★3.0: 小窓が開いたままでもキーボードの Alt+D で控えられる
+    document.addEventListener("keydown", (e) => {
+      if (e.altKey && (e.key === "d" || e.key === "D")) { e.preventDefault(); dumpOffer(); }
+    }, true);
     startButton("① これを押す → ② 行の Send offers を押す (開いたら自動で控える)", () => {
       log("待っています: 行の「Send offers」を押して小窓を開いてください");
       const t0 = Date.now();
       const iv = setInterval(() => {
-        const m = document.querySelector("[data-testid=sio-modal-root]");
-        const open = m && !m.hasAttribute("hidden") && /counteroffer|Percent off|Amount off/i.test(txt(m));
+        // ★3.0: 同じ作りの隠れた小窓が先にあり、querySelector (先頭1つ) では開いた方を見ていなかった
+        const open = [...document.querySelectorAll("[data-testid=sio-modal-root], [role=dialog]")]
+          .some((m) => !m.hasAttribute("hidden") && visible(m) && /counteroffer/i.test(txt(m)));
         if (open) {
           clearInterval(iv);
           setTimeout(dumpOffer, 2000);            // 中身が出そろうのを待つ
