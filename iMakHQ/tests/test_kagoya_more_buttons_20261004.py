@@ -109,3 +109,11 @@ def test_gacha_review_relays_on_kagoya(monkeypatch, capsys, tmp_path):
                  ledger_path=str(tmp_path / "ledger.json"))
     out = capsys.readouterr().out
     assert "ブラウザで確認してください → http://127.0.0.1:18799/" in out
+
+
+def test_mercari_templates_sent_but_not_key():
+    """iMakMercari の説明文テンプレは送り、鍵 (API key.txt) は送らない (2026-10-04 ワークマン)。"""
+    import kagoya_offload as K
+    files = [os.path.basename(f) for f in K._code_files() if "iMakMercari" in f]
+    assert "NEW_workman.txt" in files and "NEW.txt" in files
+    assert "API key.txt" not in files

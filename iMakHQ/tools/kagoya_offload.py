@@ -606,9 +606,13 @@ def _code_files():
     mer = os.path.join(REPO, "iMakMercari")
     if os.path.isdir(mer):
         files += [os.path.join("iMakMercari", f) for f in os.listdir(mer)
-                  if f.endswith((".py", ".yaml", ".yml")) and os.path.isfile(os.path.join(mer, f))]
+                  if (f.endswith((".py", ".yaml", ".yml")) or f in MERCARI_TEXT_FILES)
+                  and os.path.isfile(os.path.join(mer, f))]
     return sorted(files)
 
+
+# iMakMercari の説明文テンプレ (ワークマン新規が KAGOYA で FileNotFoundError・2026-10-04)。鍵 (API key.txt) は入れない
+MERCARI_TEXT_FILES = ("NEW.txt", "NEW_workman.txt", "USED.txt")
 
 TCG_DATA_FILES = ("cert_overrides.json", "promo_overrides.json", "popular_characters.json",
                   "PSA10.txt", "PSA10_snkrdunk.txt")
