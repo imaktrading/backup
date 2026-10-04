@@ -110,8 +110,7 @@
     const dialogs = [...document.querySelectorAll("[role=dialog], .lightbox-dialog, .se-dialog, dialog")]
       .filter(visible).map((d) => d.outerHTML.slice(0, 30000));
     const text = [`URL ${location.href}`, `時刻 ${new Date().toLocaleString()}`, `押せる物 ${els.length}`,
-                  ...els.map(pick), "", `開いている小窓 ${dialogs.length}`, ...dialogs].join("
-");
+                  ...els.map(pick), "", `開いている小窓 ${dialogs.length}`, ...dialogs].join("\r\n");
     chrome.runtime.sendMessage({ type: "dump", n: dumpN, text });
     log(`✅ 控えた (${dumpN}回目)。eBay の Download を押して小窓を出したら、もう一度押してください`);
   }
