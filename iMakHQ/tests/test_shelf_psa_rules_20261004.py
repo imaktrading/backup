@@ -98,3 +98,10 @@ def test_priority_files_roundtrip(tmp_path):
     R.write_hoju_priority([{"item_id": "1", "verdict": R.HOJU}, {"item_id": "2", "verdict": R.DROP}], p)
     assert R.load_hoju_priority(p) == ["1"]
     assert R.load_hoju_priority(str(tmp_path / "none.json")) == []
+
+
+def test_kagoya_gets_hoju_priority():
+    import kagoya_button as KB
+    assert R.HOJU_PRIORITY_PATH in KB.PUSH_EXTRA
+    src = open(os.path.join(os.path.dirname(__file__), "..", "tools", "kagoya_offload.py"), encoding="utf-8").read()
+    assert "load_shelf_priority()" in src

@@ -716,6 +716,9 @@ def build_job(today):
     fill = H.select_backfill_targets(vals, max_backups=H.CONFIRM_MAX_BACKUPS, watch=watch)
     swap = H.select_backfill_targets(vals, max_backups=H.AUXN + 1, min_backups=H.CONFIRM_MAX_BACKUPS,
                                      watch=watch)
+    # ★2026-10-04 棚② の「補優先」を先に探す (途中で止まっても先に済むように)
+    _prio = H.load_shelf_priority()
+    fill, swap = H.put_priority_first(fill, _prio), H.put_priority_first(swap, _prio)
     try:
         restock = H.restock_targets()
     except Exception as e:                                       # noqa: BLE001

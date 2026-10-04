@@ -43,6 +43,7 @@ FUNNEL_DIR = r"C:/dev/iMak/iMakHQ/funnel_output"     # 並び順に使う最新�
 PUSH_EXTRA = [
     r"C:/dev/iMak_data/hq/market_sold/ledger.csv",
     r"C:/dev/iMak_data/hq/exposure_watch/swap_priority.json",
+    r"C:/dev/iMak_data/hq/shelf2_hoju_priority.json",      # ★2026-10-04 棚② の補優先 (補URL③の先頭へ)
     r"C:/dev/iMak_data/hq/night_state/hoju.json",
     r"C:/dev/iMak_data/hq/night_state/psawarm.json",
     r"C:/dev/iMak_data/hq/night_state/weekly.json",
