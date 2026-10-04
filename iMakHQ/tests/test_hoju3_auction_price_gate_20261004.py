@@ -70,3 +70,28 @@ def test_cache_item_urls_only_individual_items():
 def test_console_does_not_relay_open_when_run_falls_back_home():
     src = open(os.path.join(HERE, "..", "console", "server.py"), encoding="utf-8").read()
     assert '"家で動かします" in line' in src and "if _rcmd and not _at_home:" in src
+
+
+def test_drop_unbuyable_now_before_screen():
+    """画面に出す直前にメルカリ個人出品を確かめ、買えない物は出さずに台帳へ (2026-10-04「まだAUCでてる」)。"""
+    cands = [{"url": "https://jp.mercari.com/item/m1"}, {"url": "https://jp.mercari.com/item/m2"},
+             {"url": "https://snkrdunk.com/apparels/1/used/2"}, {"url": "https://jp.mercari.com/item/m3"}]
+    remembered = []
+    out = H.drop_unbuyable_now(
+        cands, check=lambda urls: ({urls[0]: True, urls[1]: False}, {}, [urls[2]]),
+        remember=lambda u, why: remembered.append(u))
+    assert [c["url"][-2:] for c in out] == ["m1", "/2", "m3"]
+    assert remembered == ["https://jp.mercari.com/item/m2"]
+
+
+def test_drop_unbuyable_now_keeps_all_when_check_fails():
+    cands = [{"url": "https://jp.mercari.com/item/m1"}]
+
+    def boom(urls):
+        raise RuntimeError("x")
+    assert H.drop_unbuyable_now(cands, check=boom, remember=lambda u, w: None) == cands
+
+
+def test_screen_calls_drop_unbuyable_now():
+    src = open(os.path.join(HERE, "..", "tools", "psa_hoju_fill.py"), encoding="utf-8").read()
+    assert "cands = drop_unbuyable_now(cands)" in src

@@ -1833,6 +1833,32 @@ def moved_target_indices(item_targets, fresh_rows):
     return out
 
 
+def drop_unbuyable_now(cands, check=None, remember=None):
+    """画面に出す前に、メルカリ個人出品の候補が今そのまま買えるか確かめる。買えない物を除く (I/O 注入可)。
+
+    check(urls) → ({url: True/False}, _, [確かめられなかった url]) (= mercari_psa_resource.api_stock_check)
+    remember(url, why) = 買えない台帳に書く。確かめられなかった物は残す。
+    """
+    urls = [c.get("url") for c in (cands or []) if "jp.mercari.com/item/" in (c.get("url") or "")]
+    if not urls:
+        return list(cands or [])
+    try:
+        if check is None or remember is None:
+            import mercari_psa_resource as _mp
+            check = check or _mp.api_stock_check
+            remember = remember or _mp.remember_not_buyable
+        ok, _t, _unk = check(urls)
+    except Exception:                                          # noqa: BLE001  確かめられない = 今までどおり出す
+        return list(cands or [])
+    bad = {u for u, v in ok.items() if v is False}
+    for u in bad:
+        try:
+            remember(u, "オークション/売り切れ (補URL③ 画面に出す前の確認)")
+        except Exception:                                      # noqa: BLE001
+            pass
+    return [c for c in cands if c.get("url") not in bad]
+
+
 def dead_existing_aux(confirmed, item_targets, vals, aux_max=None):
     """書く出品の今の補のうち、**今は買えないと確かめた** 物 (正規化URL の集合)。I/O。
 
@@ -2581,6 +2607,12 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             auto_same.append((t, _same))
             if not cands:
                 continue                                # 見る物が残らない = 画面に出さない
+        # ★2026-10-04 ユーザー「補URL③入れ替えで、まだAUCでてるね」: 控えに前から貯まった候補は詳細を開いていない。
+        #   画面に出す直前に、メルカリ個人出品が今そのまま買えるかを API で確かめ、買えない
+        #   (オークション・売り切れ・消えた) 物は出さずに台帳へ。確かめられなかった物は今までどおり出す
+        cands = drop_unbuyable_now(cands)
+        if not cands:
+            continue
         cn = t["_card_no"]
         idx = len(items)
         # 多変種(同番号で catalog に2変種以上=別アート/色/パラレル/Gold)か → UI に⚠️バッジ出す。
