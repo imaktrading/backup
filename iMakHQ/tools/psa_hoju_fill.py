@@ -2374,12 +2374,20 @@ def load_swap_priority(path=SWAP_PRIORITY_PATH):
 
 
 def load_shelf_priority():
-    """棚② (shelf_evict) が「補優先」と決めた itemID。読めなければ空 = 今までどおり。"""
-    try:
-        import shelf_psa_rules as _R
-        return _R.load_hoju_priority()
-    except Exception:                                          # noqa: BLE001
-        return []
+    """補優先の itemID = **値段が大きく動いた出品** (price_jump_hoju) → 棚② (shelf_evict) が補優先と決めた出品。
+
+    読めなければ空 = 今までどおり。
+    ★2026-10-05 ユーザー「価格変動 大きいものは、優先的に補を探しに行かないとだめだよ」: 値段が跳ねた =
+      安い仕入元が切れて高い1本だけ残った合図 (下がった = 別のカードを掴んだ疑い)。棚②より先に並べる。
+    """
+    out = []
+    for mod, fn in (("price_jump_hoju", "load_jump_priority"), ("shelf_psa_rules", "load_hoju_priority")):
+        try:
+            m = __import__(mod)
+            out += [i for i in getattr(m, fn)() if i not in out]
+        except Exception:                                      # noqa: BLE001
+            pass
+    return out
 
 
 def add_shelf_priority_targets(targets, vals, prio):
