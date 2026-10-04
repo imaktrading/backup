@@ -306,7 +306,10 @@ def run_review(items: list, *, open_browser: bool = True, timeout_sec: int = 108
     _STATE["items"], _STATE["result"] = ask, None
     _EVENT.clear()
     server = None
-    for p in range(SERVER_PORT, SERVER_PORT + 10):
+    # ★2026-10-04 KAGOYA 移管: KAGOYA で動く時は決まった番号 (IMAK_REVIEW_PORT) で出し、
+    #   神風が ssh の中継でこの番号を家のブラウザで開く (psa_resource_confirm と同じ作法)
+    _fixed = os.environ.get("IMAK_REVIEW_PORT")
+    for p in ([int(_fixed)] if _fixed else range(SERVER_PORT, SERVER_PORT + 10)):
         try:
             server = HTTPServer(("127.0.0.1", p), _Handler)
             break
@@ -318,6 +321,9 @@ def run_review(items: list, *, open_browser: bool = True, timeout_sec: int = 108
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{server.server_port}/"
     print(f"  🌐 目視画面: {url}  ({len(ask)}件)")
+    if os.environ.get("IMAK_NO_BROWSER"):
+        print(f"  ブラウザで確認してください → {url}", flush=True)   # 神風がこの行を見て家で開く
+        open_browser = False
     if open_browser:
         try:
             import subprocess

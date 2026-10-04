@@ -97,3 +97,15 @@ def test_server_matches_category_label_for_seat():
     cmd = SV.remote_command({"label": "新規", "category": "Montbell", "cwd": "c:/x"},
                             ["python", "montbell_listing.py"], cfg)
     assert "IMAK_SEAT_GB=0.6" in cmd
+
+
+def test_gacha_review_relays_on_kagoya(monkeypatch, capsys, tmp_path):
+    """ガチャの目視画面を KAGOYA で出す時は決まった番号で出し、中継の合図の行を出す (2026-10-04)。"""
+    import gacha_review as G
+    monkeypatch.setenv("IMAK_NO_BROWSER", "1")
+    monkeypatch.setenv("IMAK_REVIEW_PORT", "18799")
+    monkeypatch.setattr(G._EVENT, "wait", lambda timeout=None: False)
+    G.run_review([{"url": "u1", "title": "t", "photos": []}], open_browser=True, timeout_sec=0,
+                 ledger_path=str(tmp_path / "ledger.json"))
+    out = capsys.readouterr().out
+    assert "ブラウザで確認してください → http://127.0.0.1:18799/" in out
