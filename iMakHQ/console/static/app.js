@@ -397,7 +397,12 @@
     return getJSON("/api/defender").then(function (d) {
       var on = d.on === true, unknown = d.on === null || d.on === undefined;
       STRIP.defender = [on ? "warn" : "", "Defender 対象外 (C:\\dev) <b>" + (unknown ? "不明" : on ? "ON" : "OFF") + "</b>",
-        '<button type="button" class="stlink" data-defender="' + (on ? "off" : "on") + '">' + (on ? "OFF にする" : "ON にする") + "</button>"];
+        // ★同日 ユーザー「ONとOFFがいるのでは？」: 2つ並べ、今の状態の方を塗る (押しても同じ状態なら何も変わらない)
+        ["on", "off"].map(function (m) {
+          var cur = !unknown && (m === "on") === on;
+          return '<button type="button" class="stlink" data-defender="' + m + '"' +
+            (cur ? ' style="background:var(--warn,#e0a030);color:#000;font-weight:700"' : "") + ">" + m.toUpperCase() + "</button>";
+        }).join(" ")];
       renderStrip();
     }).catch(function () {});
   }
