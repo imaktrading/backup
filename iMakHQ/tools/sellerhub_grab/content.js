@@ -228,7 +228,8 @@
     const items = (w && w.items) || [];
     if (!items.length) { log("送る一覧が空です (神風の「💌 オファーの送る一覧を作る」を先に)"); return; }
     if (!/offers=sendNewOffers/.test(location.search)) {
-      log("「Send offers - eligible」の一覧に移ります。移ったらもう一度押してください");
+      log("「Send offers - eligible」の一覧に移って、そのまま続けます");
+      sessionStorage.setItem("shg_offer_mode", mode);          // ★3.2: 移った後に自動で続ける
       location.href = "https://www.ebay.com/sh/lst/active?offers=sendNewOffers&source=filterbar&action=search";
       return;
     }
@@ -499,6 +500,11 @@
     // ★3.1 (2026-10-05): 神風の「送る一覧」を Seller Hub の画面から送る (カウンターを受けるため)。
     //   いきなり全部は送らない: 試し (入れるだけ) → 1件送る → 全部 の順で確かめる
     startButton("💌 試し: 1件を小窓に入れる (送らない)", () => sendOffers("try"));
+    const _pending = sessionStorage.getItem("shg_offer_mode");
+    if (_pending) {
+      sessionStorage.removeItem("shg_offer_mode");
+      setTimeout(() => sendOffers(_pending), 1500);            // 一覧が出そろうのを少し待つ
+    }
     startButton("💌 1件だけ送る", () => sendOffers("one"));
     startButton("💌 一覧を全部送る", () => sendOffers("all"));
   } else if (location.pathname.startsWith("/sh/performance/traffic")) {

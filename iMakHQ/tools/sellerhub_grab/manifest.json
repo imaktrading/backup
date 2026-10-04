@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Seller Hub レポート取り",
-  "version": "3.1",
+  "version": "3.2",
   "description": "Seller Hub のファネル用レポートを自動で落とす / 神風の一覧のオファーを Seller Hub の画面から送る",
   "permissions": [
     "tabs",
