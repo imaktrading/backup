@@ -334,7 +334,7 @@
   }
   function renderStrip() {
     if (!$("today-strip")) return;
-    var oj = STRIP.offer, dj = STRIP.order, chips = [STRIP.counts, STRIP.night, STRIP.watch, STRIP.integrity];
+    var oj = STRIP.offer, dj = STRIP.order, chips = [STRIP.counts, STRIP.night, STRIP.watch, STRIP.integrity, STRIP.defender];
     if (oj) chips.push(oj.state === "error" ? ["warn", "オファー 数えられない", ""]
                        : [oj.n ? "warn" : "", "オファー <b>" + (oj.n || 0) + "件</b>", ""]);
     // ★2026-09-29 ユーザー「これに仕入れ待ち件数を表示を追加したら」: [取り込む] はここに1つだけ (常に)
@@ -390,6 +390,29 @@
   }
   refreshIntegrity();
   setInterval(refreshIntegrity, 600000);
+
+  // ★2026-10-04 ユーザー「ここにボタン付けてくれない？ON/OFFで。わすれちゃうから」:
+  //   Windows Defender の検査の対象外 (C:\dev)。押すと Windows の確認 (管理者) が出る → 「はい」
+  function refreshDefender() {
+    return getJSON("/api/defender").then(function (d) {
+      var on = d.on === true, unknown = d.on === null || d.on === undefined;
+      STRIP.defender = [on ? "warn" : "", "Defender 対象外 (C:\\dev) <b>" + (unknown ? "不明" : on ? "ON" : "OFF") + "</b>",
+        '<button type="button" class="stlink" data-defender="' + (on ? "off" : "on") + '">' + (on ? "OFF にする" : "ON にする") + "</button>"];
+      renderStrip();
+    }).catch(function () {});
+  }
+  refreshDefender();
+  setInterval(refreshDefender, 600000);
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("button[data-defender]");
+    if (!b) return;
+    b.disabled = true;
+    b.textContent = "Windows の確認で「はい」…";
+    post("/api/defender", { on: b.dataset.defender === "on" }).then(function () {
+      setTimeout(refreshDefender, 8000);
+      setTimeout(refreshDefender, 20000);
+    });
+  });
 
   // ---------------------------------------------------------------- 置き場が無いボタン
   function paintLeftovers() {

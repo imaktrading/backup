@@ -1317,6 +1317,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, get_watcher())
         if u.path == "/api/agents":
             return self._json(200, get_agents())
+        if u.path == "/api/defender":
+            # ★2026-10-04 ユーザー「ここにボタン付けてくれない？ON/OFFで」: Defender の検査の対象外 (C:\dev)
+            if TOOLS not in sys.path:
+                sys.path.insert(0, TOOLS)
+            import defender_toggle as DT
+            return self._json(200, DT.status())
         if u.path == "/api/integrity":
             # ★2026-09-29: 毎朝のデータの見張り (tools/data_integrity_watch.py) の結果
             try:
@@ -1419,6 +1425,11 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/stop":
             code, obj = stop_job()
             return self._json(code, obj)
+        if u.path == "/api/defender":
+            if TOOLS not in sys.path:
+                sys.path.insert(0, TOOLS)
+            import defender_toggle as DT
+            return self._json(200, DT.request(bool(body.get("on"))))
         if u.path == "/api/research/open":
             try:
                 return self._json(200, research_open(body.get("preset"), body.get("tabs"),
