@@ -107,14 +107,14 @@ def test_ads_tool_skips_no_ad_items(tmp_path, monkeypatch):
     assert A.create_ads("tok", [("L", "111")]) == []           # eBay を呼ばずに外す
 
 
-def test_shelf_calls_offer_before_drop():
-    src = open(os.path.join(os.path.dirname(__file__), "..", "tools", "shelf_evict.py"), encoding="utf-8").read()
-    assert "SO.offer_before_drop(picked" in src and "send=a.end" in src
-
-
-def test_extension_never_uses_automated_offer_and_allows_counter():
-    src = open(os.path.join(os.path.dirname(__file__), "..", "tools", "sellerhub_grab", "content.js"),
-               encoding="utf-8").read()
-    assert "automated-offer-section" in src and "if (auto && auto.checked) auto.click()" in src
-    assert "counter-offer-section" in src and "if (counter && !counter.checked) counter.click()" in src
-    assert "/api/offers/prepare" in src and "/api/offers/sent" in src
+def test_offers_are_not_sent_anymore():
+    """★2026-10-05 ユーザー判断: こちらからオファーを送らない (以前も数件しか売れず、96時間は出品を直せず取り消せない)。
+    棚②は落とす前のオファーを通さず、拡張も出品中一覧では動かない。"""
+    here = os.path.join(os.path.dirname(__file__), "..")
+    src = open(os.path.join(here, "tools", "shelf_evict.py"), encoding="utf-8").read()
+    assert "SO.offer_before_drop(" not in src
+    import json
+    man = json.load(open(os.path.join(here, "tools", "sellerhub_grab", "manifest.json"), encoding="utf-8"))
+    assert not any("lst/active" in m for c in man["content_scripts"] for m in c["matches"])
+    cp = open(os.path.join(here, "control_panel.py"), encoding="utf-8").read()
+    assert "💌 オファーの送る一覧を作る" not in cp

@@ -489,25 +489,10 @@
       });
       startButton("③ 自動 (作成→取得) を今すぐ", () => { location.hash = "shg-auto"; location.reload(); });
     });
-  } else if (location.pathname.startsWith("/sh/lst/active")) {
-    // ★2026-10-05 オファーを送る仕組みを作る前の下調べ (画面の作りを控えるだけ・何も押さない)
-    // ★2.9: 小窓が開くとページが覆われて、このボタンを押せない (ユーザー「あいたまま、押せない」)。
-    //   先にボタンを押しておき、次に「Send offers」の小窓 (sio-modal-root) が開いて中身が出たら自動で控える
-    // ★3.0: 小窓が開いたままでもキーボードの Alt+D で控えられる
-    document.addEventListener("keydown", (e) => {
-      if (e.altKey && (e.key === "d" || e.key === "D")) { e.preventDefault(); dumpOffer(); }
-    }, true);
-    // ★3.1 (2026-10-05): 神風の「送る一覧」を Seller Hub の画面から送る (カウンターを受けるため)。
-    //   いきなり全部は送らない: 試し (入れるだけ) → 1件送る → 全部 の順で確かめる
-    startButton("💌 試し: 1件を小窓に入れる (送らない)", () => sendOffers("try"));
-    const _pending = sessionStorage.getItem("shg_offer_mode");
-    if (_pending) {
-      sessionStorage.removeItem("shg_offer_mode");
-      setTimeout(() => sendOffers(_pending), 1500);            // 一覧が出そろうのを少し待つ
-    }
-    startButton("💌 1件だけ送る", () => sendOffers("one"));
-    startButton("💌 一覧を全部送る", () => sendOffers("all"));
-  } else if (location.pathname.startsWith("/sh/performance/traffic")) {
+  }
+  // ★2026-10-05 (3.3): 出品中一覧でのオファー送り (3.1〜3.2) はやめた (ユーザー判断: こちらからオファーを送らない)。
+  //   sendOffers 等の関数は残すが、どのページからも呼ばない (manifest からも出品中一覧を外した)
+  if (location.pathname.startsWith("/sh/performance/traffic")) {
     // ★2026-10-04 トラフィックレポート (前の90日との比較つき) も毎日落とす (棚② の「埋もれた」判定)。
     //   ユーザー「小窓でないよ。右の↓をおすだけ」: 「Your listings」の欄の右の ↓ (Download) を押す
     if (sessionStorage.getItem(STAGE) === "traffic") {

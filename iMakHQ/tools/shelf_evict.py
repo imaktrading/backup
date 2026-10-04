@@ -1158,16 +1158,9 @@ def main():
             print(f"     → {PRICE_DOWN_FIRST_PATH}")
         except Exception as e:                                 # noqa: BLE001
             print(f"  ⚠ 値下げ候補を書けず ({type(e).__name__})")
-    if picked and cat_of:
-        # ★2026-10-05 ユーザー確定: 落とす前に、ウォッチしている人へ広告を外した10%引きのオファーを1回送る
-        #   (shelf_offer。送った物は期限まで落とさない。試しの時は送る予定を出すだけ)
-        try:
-            import shelf_offer as SO
-            picked = SO.offer_before_drop(picked, lambda r: cat_of(r) == "TCG", send=a.end,
-                                          live_ids={str(r.get("item_id")) for r in rows})
-            total = sum(shelf_of(r) for _t, r in picked)
-        except Exception as e:                                 # noqa: BLE001
-            print(f"  ⚠ 落とす前のオファーを判定できず ({type(e).__name__}: {e}) → 今までどおり落とします")
+    # ★2026-10-05 ユーザー判断: 落とす前のオファーはやめた (こちらからオファーを送らない)。
+    #   以前送った時も数件しか売れず、送ると96時間は出品を直せず取り消せない (仕入元が切れたら終了しかない)。
+    #   欲しい人はベストオファーで自分から送ってくる (過去30日 22件)。shelf_offer.py は使っていない
     if not picked:
         print("  落とせる候補がありません")
         return 0

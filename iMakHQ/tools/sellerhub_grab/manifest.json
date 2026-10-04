@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Seller Hub レポート取り",
-  "version": "3.2",
-  "description": "Seller Hub のファネル用レポートを自動で落とす / 神風の一覧のオファーを Seller Hub の画面から送る",
+  "version": "3.3",
+  "description": "Seller Hub のファネル用レポートを出品くん Console の起動時 (1日1回) に自動で作って落とす",
   "permissions": [
     "tabs",
     "downloads",
@@ -15,16 +15,12 @@
     {
       "matches": [
         "https://www.ebay.com/sh/reports/downloads*",
-        "https://www.ebay.com/sh/performance*",
-        "https://www.ebay.com/sh/lst/active*"
+        "https://www.ebay.com/sh/performance*"
       ],
       "js": [
         "content.js"
       ],
       "run_at": "document_idle"
     }
-  ],
-  "host_permissions": [
-    "http://127.0.0.1:8770/*"
   ]
 }
