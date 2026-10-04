@@ -46,7 +46,14 @@ PUSH_EXTRA = [
     r"C:/dev/iMak_data/hq/night_state/hoju.json",
     r"C:/dev/iMak_data/hq/night_state/psawarm.json",
     r"C:/dev/iMak_data/hq/night_state/weekly.json",
+    # ★2026-10-04 ファネル分析を KAGOYA へ: 取り下げ済みの itemID (リバイスくんの控え・読むだけ。
+    #   iMak_data/revise は SCAN_ROOTS に無い = KAGOYA で書かれても家には戻さない)
+    r"C:/dev/iMak_data/revise/cull_done_item_ids.txt",
 ]
+# ★2026-10-04: Seller Hub のレポート (家のブラウザの拡張で落とし、夜に日付フォルダへ移る・1日 約10MB)。
+#   ファネルが読む。直近の日付フォルダだけを、増えた・変わった物だけ送る
+REPORTS_DIR = r"C:/dev/iMak_data/seller_hub/reports"
+REPORTS_DAYS = 3
 # 読むだけの控えの山 (eBay から取った出品の控え 約2,200本・65MB)。初回に全部、あとは増えた・変わった分だけ送る
 MIRROR_DIRS = [r"C:/dev/iMak_data/hq/market_sold/getitem",
                # ★2026-10-03 PSA 新規: PSA の cert の控え (約2,500本・1.3MB)。KAGOYA で足された分は SCAN_ROOTS で戻る
@@ -210,6 +217,22 @@ def _rel(p):
     return os.path.relpath(p, DEV).replace(os.sep, "/")
 
 
+def recent_report_files(root=REPORTS_DIR, days=REPORTS_DAYS):
+    """直近 days 個の日付フォルダ (YYYYMMDD) の中のファイル → {root からの相対パス: mtime}。"""
+    try:
+        ds = sorted(d for d in os.listdir(root) if d.isdigit() and len(d) == 8
+                    and os.path.isdir(os.path.join(root, d)))[-days:]
+    except OSError:
+        return {}
+    out = {}
+    for d in ds:
+        for dp, _dn, fn in os.walk(os.path.join(root, d)):
+            for f in fn:
+                fp = os.path.join(dp, f)
+                out[os.path.relpath(fp, root).replace(os.sep, "/")] = os.path.getmtime(fp)
+    return out
+
+
 def mirror_todo(sent, files):
     """前に送った時から増えた・変わった物だけ (純関数)。sent / files は {名前: mtime}。"""
     return sorted(k for k, m in files.items() if sent.get(k) != m)
@@ -244,6 +267,12 @@ def push(cfg, run_dir, st=None):
             for f in mirror_todo(sent, files):
                 tf.add(os.path.join(d, f), arcname=_rel(os.path.join(d, f)))
                 sent[f] = files[f]
+        rep = recent_report_files()
+        rsent = st.setdefault("button_mirror", {}).setdefault(_rel(REPORTS_DIR), {})
+        for f in mirror_todo(rsent, rep):
+            fp = os.path.join(REPORTS_DIR, f)
+            tf.add(fp, arcname=_rel(fp))
+            rsent[f] = rep[f]
         for p in _push_files():
             data = _read(p)
             if data is None:

@@ -64,3 +64,19 @@ def test_html_tools_use_home_open():
     for f in ("offer_calc.py", "market_ledger.py"):
         src = open(os.path.join(HERE, "..", "tools", f), encoding="utf-8").read()
         assert "open_for_user(" in src
+
+
+def test_recent_report_files_only_last_days(tmp_path):
+    """Seller Hub のレポートは直近の日付フォルダだけ送る (ファネルを KAGOYA で動かすため・2026-10-04)。"""
+    for d in ("20261001", "20261002", "20261003", "資料"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "a.csv").write_text("x", encoding="utf-8")
+    got = KB.recent_report_files(str(tmp_path), days=2)
+    assert sorted(got) == ["20261002/a.csv", "20261003/a.csv"]
+
+
+def test_imakmercari_code_is_sent_to_kagoya():
+    """iMakMercari の部品 (ut_catalog_values 等) も KAGOYA へ送る (ファネルで ModuleNotFoundError だった)。"""
+    import kagoya_offload as K
+    files = [f.replace("\\\\", "/") for f in K._code_files()]
+    assert any(f.replace("\\\\", "/").endswith("ut_catalog_values.py") for f in files)

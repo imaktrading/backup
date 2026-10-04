@@ -600,6 +600,13 @@ def _code_files():
         d = os.path.join(tcg, sub)
         if os.path.isdir(d):
             files += [os.path.join("iMakTCG", sub, f) for f in os.listdir(d) if f.endswith(exts)]
+    # ★2026-10-04: iMakMercari の部品と表 (ut_catalog_values・ut_title_names.yaml 等)。
+    #   ファネル (shelf_evict の台帳読み) が KAGOYA で ModuleNotFoundError → 前回の写しに落ちていた。
+    #   Tシャツ・モンベル・ワークマンの新規もここのコード
+    mer = os.path.join(REPO, "iMakMercari")
+    if os.path.isdir(mer):
+        files += [os.path.join("iMakMercari", f) for f in os.listdir(mer)
+                  if f.endswith((".py", ".yaml", ".yml")) and os.path.isfile(os.path.join(mer, f))]
     return sorted(files)
 
 
