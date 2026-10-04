@@ -1045,13 +1045,18 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
 
     today = datetime.date.today().isoformat()
     if targets is None:
-        targets = select_backfill_targets(_read_high(), max_backups=max_backups,
+        _vals = _read_high()
+        targets = select_backfill_targets(_vals, max_backups=max_backups,
                                           watch=load_watch_by_item())
         label = f"補<{max_backups}"
+        # ★2026-10-04 棚② の「補優先」は補の本数に関係なく探す (補5本でも、もっと安い補を探して値段を下げる)
+        targets = add_shelf_priority_targets(targets, _vals, load_shelf_priority())
     else:
         label = "RESTOCK候補"       # 呼び手が対象を決めた(= 再仕入れ候補の先読み)
     cache = {} if fresh else _load_cache()
     todo = targets if fresh else targets_needing_search(targets, cache, today)
+    # ★2026-10-04 棚② の「補優先」は夜の検索でも先に探す (limit で切られて後回しにならないように)
+    todo = put_priority_first(todo, load_shelf_priority())
     total_targets = len(targets)
     skipped = total_targets - len(todo)
     # ★2026-08-15: 空振りが続く対象を今夜の枠から外す (limit を切る前に間引く)。
@@ -2368,6 +2373,26 @@ def load_swap_priority(path=SWAP_PRIORITY_PATH):
         return []
 
 
+def load_shelf_priority():
+    """棚② (shelf_evict) が「補優先」と決めた itemID。読めなければ空 = 今までどおり。"""
+    try:
+        import shelf_psa_rules as _R
+        return _R.load_hoju_priority()
+    except Exception:                                          # noqa: BLE001
+        return []
+
+
+def add_shelf_priority_targets(targets, vals, prio):
+    """補優先の出品を、補の本数の上限で外れていても対象に足す (純関数)。"""
+    if not prio:
+        return targets
+    have = {t.get("itemID") for t in targets}
+    want = set(prio)
+    extra = [t for t in select_backfill_targets(vals, max_backups=AUXN + 1)
+             if t.get("itemID") in want and t.get("itemID") not in have]
+    return list(targets) + extra
+
+
 def put_priority_first(targets, prio):
     """prio の itemID を先頭へ (prio の順)。それ以外は元の並びのまま (純関数)。"""
     rank = {iid: k for k, iid in enumerate(prio or [])}
@@ -2416,6 +2441,9 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     targets = rotate_by_last_shown(targets, load_last_shown())
     if min_backups >= CONFIRM_MAX_BACKUPS:             # 入れ替えボタン単独: クリックされない出品から先に
         targets = put_priority_first(targets, load_swap_priority())
+    # ★2026-10-04 棚② の新ルール: 落とす前に「補優先」と決めた出品は、補充・入れ替えとも一番先に出す
+    #   (安い補が見つかれば値段が下がる。見つからなければ次の判定で落ちる)。
+    targets = put_priority_first(targets, load_shelf_priority())
     # ★2026-09-29 ユーザー「補充のついでに、高い予備を安い候補に替えるところまで1回で済ませて」。
     #   補充 (補0〜3本) の後ろに 入れ替え (補4〜5本) の出品も並べ、同じ目視で片づける。
     #   補充を先に置くのは 9/9 の理由 (丸腰の補充が入れ替えに埋もれない) を守るため。
@@ -2426,7 +2454,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
                                           min_backups=CONFIRM_MAX_BACKUPS, watch=load_watch_by_item(),
                                           market_sold=_msold)
         _swap_t = put_priority_first(rotate_by_last_shown(_swap_t, load_last_shown()),
-                                     load_swap_priority())
+                                     load_shelf_priority() + load_swap_priority())
         targets = list(targets) + [t for t in _swap_t if t["itemID"] not in _have_iid]
     cache = _load_cache()
 

@@ -540,7 +540,7 @@ def needs_price_down_first(item_id, price_downs, bands=None):
 
 
 def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=None,
-         no_demand=None, price_downs=False, held=None):
+         no_demand=None, price_downs=False, held=None, psa_judge=None, decisions=None):
     """目標額に届くまで、順位の上から選ぶ。戻り: (選んだ行, 空く額) 純関数, test可。
 
     ① は 空く額の大きい順 (買えないので、少ない回数で目標に届くのが正しい)。
@@ -568,8 +568,19 @@ def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=No
         #   混ぜて1つのボタンにすると、重い方を軽い気持ちで押すことになる。
         if only_tier is not None and t != only_tier:
             continue
+        # ★2026-10-04 ユーザー確定「やってみよう」: PSA (TCG) の ② は棚②の新しい表 + 市場の門で決める
+        #   (shelf_psa_rules。表の正本は管理表タブ「棚②の新ルール案 (HQ)」)。落とすのは表で「取下げ」かつ
+        #   市場の門を通らなかった物だけ。補優先・残すは held へ (補優先は補URL③が先に探す)。
+        #   G-SHOCK / Tシャツ は今までどおり「値下げ済みなら落とす」。
+        if (t == TIER_STALE and price_downs is not False and psa_judge is not None
+                and cat_of and cat_of(r) == "TCG"):
+            d = psa_judge(r)
+            if decisions is not None:
+                decisions.append(d)
+            if d.get("verdict") != "取下げ":
+                continue                  # 補優先・残す (内訳は decisions。値下げ候補とは別)
         # price_downs=False は「値下げ履歴の判定をしない」(ラベルの件数など表示用の呼び出し)
-        if t == TIER_STALE and price_downs is not False and needs_price_down_first(r.get("item_id"), price_downs, _BANDS):
+        elif t == TIER_STALE and price_downs is not False and needs_price_down_first(r.get("item_id"), price_downs, _BANDS):
             if held is not None:
                 held.append(r)
             continue
@@ -966,18 +977,88 @@ def count_workload():
         #   Google の 503 で落ちることがあり、そのたびボタンの件数が消える (実測)。
         #   ここは表示なので、守りは押した時 (main) に効かせれば足りる。
         _keep, _nd = set(), no_demand_ids(rows)
+        # ★2026-10-04: PSA は棚②の新しい表で決めるので、件数も前回の判定 (市場の門の後) で数える。
+        #   値下げの台帳はローカルの JSON なので読んでよい (eBay・市場の API は叩かない)。
+        _pj = _last_psa_judge()
+        _pd = load_price_downs() if _pj is not None else False
         mpicked, mtotal = pick(rows, float("inf"), shelf_of, cat_of, only_tier=TIER_STALE,
-                               restock_pending=_keep, no_demand=_nd)
+                               restock_pending=_keep, no_demand=_nd, price_downs=_pd, psa_judge=_pj)
         out.update(max_picked=len(mpicked), max_amount=mtotal)
         if target > 0:
             picked, total = pick(rows, target, shelf_of, cat_of, only_tier=TIER_STALE,
-                                 restock_pending=_keep, no_demand=_nd)
+                                 restock_pending=_keep, no_demand=_nd, price_downs=_pd, psa_judge=_pj)
             byt = collections.Counter(t for t, _r in picked)
             out.update(picked=len(picked), amount=total,
                        tier1=byt.get(TIER_OOS, 0), tier2=byt.get(TIER_STALE, 0))
     except Exception as e:                                     # noqa: BLE001
         out["error"] = f"{type(e).__name__}: {e}"[:60]
     return out
+
+
+def _psa_judge(price_downs):
+    """PSA の ② を棚②の新しい表 + 市場の門で決める関数を作る (I/O: 補の有無・表示レポート・市場)。"""
+    import shelf_psa_rules as R
+    import psa_hoju_fill as H
+    bands = load_price_down_bands()
+    aux = {}
+    try:
+        for r in H._read_high()[1:]:
+            iid = H._cell(r, H.B)
+            if iid:
+                aux[iid] = H._backup_count(r) > 0
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 補の有無を読めず ({type(e).__name__}) → PSA の ② は今回落としません")
+        return lambda r: {"item_id": r.get("item_id"), "verdict": R.KEEP, "code": "補の有無が読めない"}
+    traffic, tf = R.load_traffic()
+    print(f"  📊 表示レポート: {os.path.basename(tf) if tf else '無し (閲覧が要る行は落としません)'}")
+    market = R.Market()
+    if market.err:
+        print(f"  ⚠ 市場の検索 API に繋がらない ({market.err}) → 市場の門は全部「残す」")
+
+    def judge(r):
+        iid = str(r.get("item_id") or "")
+        down = not needs_price_down_first(iid, price_downs, bands)
+        return R.judge(r, aux.get(iid, False), down, traffic, market)
+    return judge
+
+
+LAST_PSA_DROPS = r"C:/dev/iMak_data/hq/shelf2_last_psa_drops.json"
+
+
+def _save_last_psa_drops(ids):
+    """最後に判定した PSA の「取下げ」(ボタンの件数用。表示のたびに市場 API を叩かない)。"""
+    try:
+        with open(LAST_PSA_DROPS, "w", encoding="utf-8") as f:
+            json.dump({"at": datetime.datetime.now().isoformat(timespec="seconds"),
+                       "iids": list(ids)}, f, ensure_ascii=False)
+    except OSError:
+        pass
+
+
+def _last_psa_judge():
+    """ボタンの件数用の判定: 前回押した時 (試しも含む) に「取下げ」だった物だけ数える。無ければ None。"""
+    try:
+        with open(LAST_PSA_DROPS, encoding="utf-8") as f:
+            ids = set(json.load(f).get("iids") or [])
+    except (OSError, ValueError):
+        return None
+    return lambda r: {"verdict": "取下げ" if str(r.get("item_id") or "") in ids else "残す"}
+
+
+def _report_psa_decisions(decisions, ended=False):
+    """PSA の判定の内訳を出し、台帳と補優先の一覧を書く (I/O)。"""
+    import shelf_psa_rules as R
+    _save_last_psa_drops([d["item_id"] for d in decisions if d.get("verdict") == R.DROP])
+    c = collections.Counter(d["verdict"] for d in decisions)
+    print(f"\n  🃏 PSA の ② を新しい表で判定: {len(decisions)}件 → "
+          f"取下げ {c.get(R.DROP, 0)} / 補優先 {c.get(R.HOJU, 0)} / 残す {c.get(R.KEEP, 0)}")
+    for code, n in collections.Counter(d["code"] for d in decisions).most_common():
+        print(f"     {code}: {n}")
+    ids = R.write_hoju_priority(decisions)
+    print(f"     → 補優先 {len(ids)}件 を補URL③・夜の検索の先頭に回します ({R.HOJU_PRIORITY_PATH})")
+    if ended:
+        R.log_decisions(decisions)
+        print(f"     → 判定を台帳に残しました ({R.DECISIONS_PATH})")
 
 
 def main():
@@ -1042,10 +1123,16 @@ def main():
     print(f"  🛡 ①は「生涯ずっと需要ゼロ」の {len(_nd)}件 に限ります "
           f"(需要があった分は再仕入れへ)")
     _downs = load_price_downs()
-    _held = []
+    _held, _decisions = [], []
+    _judge = _psa_judge(_downs) if _downs is not None else None
     picked, total = pick(rows, target, shelf_of, cat_of,
                          only_tier=(int(a.tier) if getattr(a, "tier", None) else None),
-                         restock_pending=_keep, no_demand=_nd, price_downs=_downs, held=_held)
+                         restock_pending=_keep, no_demand=_nd, price_downs=_downs, held=_held,
+                         psa_judge=_judge, decisions=_decisions)
+    if _decisions:
+        _report_psa_decisions(_decisions, ended=a.end)
+    else:
+        _save_last_psa_drops([])
     if _downs is None:
         print("  🛡 値下げの履歴 (リバイスくんの台帳) が読めない → ② は今回落としません (判断できない)")
     if _held:
