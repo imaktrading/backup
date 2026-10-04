@@ -30,7 +30,7 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     const b64 = btoa(unescape(encodeURIComponent(msg.text || "")));
     chrome.downloads.download({
       url: "data:text/plain;charset=utf-8;base64," + b64,
-      filename: `sellerhub_traffic_dump_${msg.n || 1}.txt`, conflictAction: "overwrite", saveAs: false,
+      filename: `${msg.name || "sellerhub_traffic_dump"}_${msg.n || 1}.txt`, conflictAction: "overwrite", saveAs: false,
     });
   } else if (msg.type === "done") {
     addLine(`${new Date().toLocaleString()} 終了 (${msg.ok ? "成功" : "失敗"})`).then(writeLog);

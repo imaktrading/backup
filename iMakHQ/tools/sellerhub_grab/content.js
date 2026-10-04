@@ -121,6 +121,30 @@
     log(`✅ 控えた (${dumpN}回目・${Math.round(text.length / 1000)}KB)。ダウンロードに sellerhub_traffic_dump_${dumpN}.txt`);
   }
 
+  // ★2026-10-05 オファーを画面から送る (カウンターを受けるため・API では受けられない) 前に、
+  //   「Send offer」の小窓の作りを控える。押す所を推測で作らない (1回で作り切るため)
+  let offerDumpN = 0;
+  function dumpOffer() {
+    offerDumpN += 1;
+    const strip = (el) => {
+      const c = el.cloneNode(true);
+      c.querySelectorAll("img, svg, script, style").forEach((t) => t.remove());
+      return c.outerHTML;
+    };
+    const dialogs = [...document.querySelectorAll("[role=dialog], [aria-modal=true], .lightbox-dialog, .drawer-dialog")]
+      .filter(visible).map((d) => strip(d).slice(0, 60000));
+    const offerBtns = [...document.querySelectorAll("button, [role=button], a, [role=menuitem]")].filter(visible)
+      .filter((b) => /offer/i.test((b.getAttribute("aria-label") || "") + " " + txt(b)))
+      .map((b) => b.outerHTML.slice(0, 800));
+    const row = [...document.querySelectorAll("tr")].find((r) => /\d{12}/.test(txt(r)));
+    const text = [`URL ${location.href}`, `時刻 ${new Date().toLocaleString()}`,
+                  `開いている小窓 ${dialogs.length}`, "", "== offer の名前の付いた押せる物", ...offerBtns,
+                  "", "== 小窓の中身", ...dialogs,
+                  "", "== 一覧の1行目", row ? strip(row).slice(0, 20000) : "(無し)"].join("\r\n");
+    chrome.runtime.sendMessage({ type: "dump", n: offerDumpN, text, name: "sellerhub_offer_dump" });
+    log(`✅ 控えた (${offerDumpN}回目・${Math.round(text.length / 1000)}KB)。ダウンロードに sellerhub_offer_dump_${offerDumpN}.txt`);
+  }
+
   // 「Your listings」の欄の右の ↓ (Download)。名前 (aria-label / title / 文字 / 絵の名前) に download が入る物を探す。
   //   1つに決まらなければ押さない (間違った物を押さない)
   function trafficButton() {
@@ -342,6 +366,9 @@
       });
       startButton("③ 自動 (作成→取得) を今すぐ", () => { location.hash = "shg-auto"; location.reload(); });
     });
+  } else if (location.pathname.startsWith("/sh/lst/active")) {
+    // ★2026-10-05 オファーを送る仕組みを作る前の下調べ (画面の作りを控えるだけ・何も押さない)
+    startButton("オファーの小窓の作りを控える (HQ 用)", dumpOffer);
   } else if (location.pathname.startsWith("/sh/performance/traffic")) {
     // ★2026-10-04 トラフィックレポート (前の90日との比較つき) も毎日落とす (棚② の「埋もれた」判定)。
     //   ユーザー「小窓でないよ。右の↓をおすだけ」: 「Your listings」の欄の右の ↓ (Download) を押す
