@@ -42,5 +42,13 @@ def test_chain_tells_step2_not_to_run_step3_itself():
 
 def test_kamikaze_hides_steps_2_and_3():
     js = open(os.path.join(HERE, "..", "console", "static", "app.js"), encoding="utf-8").read()
-    assert 'var HIDDEN_KINDS = ["restock_build", "restock_wb"]' in js
+    i = js.index("var HIDDEN_KINDS")
+    assert '"restock_build", "restock_wb"' in js[i:i + 120]
     assert '["PSA", ["psa_gate", null, null]]' in js
+
+
+def test_kamikaze_hides_sold_restock_button():
+    """売れた分を補充は目視なし・毎晩自動 → 神風に押すボタンを出さない (2026-10-04)。"""
+    js = open(os.path.join(HERE, "..", "console", "static", "app.js"), encoding="utf-8").read()
+    i = js.index("var HIDDEN_KINDS")
+    assert '"sold_restock"' in js[i:i + 300]

@@ -20,7 +20,7 @@
       rows: [["PSA", ["psa_gate", null, null]],     // ②③ は ① から続けて走る (2026-10-04)
              ["UT", ["ut_restock_search", "ut_restock_confirm", "ut_restore"]],
              ["一番くじ", ["kuji_supply", "kuji_refresh", null]]],
-      side: { head: "売れた分 (仕入元は生きている)", kind: "sold_restock", note: "全商材まとめて · 夜間でも1晩10件まで戻す" }
+      side: { head: "売れた分 (仕入元は生きている)", kind: "sold_restock", note: "全商材まとめて · 毎晩自動で戻す (1晩10件まで)・押すボタンは無し" }
     }
   };
   var SHELF_KINDS = ["cull_end", "shelf_evict"];
@@ -45,7 +45,8 @@
   };
   var STATE_LABEL = { todo: "要対応", night: "夜間で自動", hold: "止めている", done: "残りなし", error: "数えられない", unknown: "未集計" };
 
-  var HIDDEN_KINDS = ["restock_build", "restock_wb"];   // PSA 再仕入れ ②③ (① から続けて走る・2026-10-04)
+  var HIDDEN_KINDS = ["restock_build", "restock_wb",   // PSA 再仕入れ ②③ (① から続けて走る・2026-10-04)
+                      "sold_restock"];                  // 売れた分を補充 (目視なし・毎晩自動。ユーザー「ボタン化する意味ある？」10/4)
   var jobs = {}, jobList = [], buttons = [], running = null, logAfter = 0, toastTimer, drawerHidden = true, schLoaded = false;
   // 今日やることの「状態の1行」と「期限のある物」(2026-09-29)。各所が材料を入れ、renderStrip が描く
   var STRIP = { counts: null, night: null, watch: null, integrity: null, errors: [], offer: null, order: null }, autoRecounted = false;
