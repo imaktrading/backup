@@ -135,6 +135,37 @@ def _upload_via_api(result, targets: list) -> list | None:
     return uploads
 
 
+PRICE_MOVES_PATH = Path(r"C:/dev/iMak_data/revise/price_moves_high.json")
+
+
+def _write_price_moves(result, uploads: list, out: Path = PRICE_MOVES_PATH) -> None:
+    """値段が動いた出品を全部、共有領域に書く (HQ の補優先が読む。2026-10-05 ADV 依頼).
+
+    メールの「価格変動 大きい順 上位10件」と同じ物を、10件で切らずに全件。判定は足さない。
+    ※ メールの [HIGH] はシート名 (HIGH/LOW/公式) で、しきい値ではない。sheet 列で渡す。
+    """
+    import json
+    moves = [c for c in result.revisable
+             if c.current_usd and c.new_usd and abs(c.new_usd - c.current_usd) >= 0.01]
+    moves.sort(key=lambda c: abs(c.new_usd - c.current_usd), reverse=True)
+    data = {
+        "at": datetime.now(JST).isoformat(timespec="seconds"),
+        "sent_ok": all(u["success"] for u in uploads) if uploads else False,
+        "items": [{"item_id": c.item_id, "sheet": c.source_sheet, "category": c.category,
+                   "old_usd": c.current_usd, "new_usd": c.new_usd,
+                   "diff_usd": round(c.new_usd - c.current_usd, 2),
+                   "ratio": round(c.new_usd / c.current_usd, 3), "title": c.title}
+                  for c in moves],
+    }
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.replace(out)
+    except OSError as e:
+        _log(f"[daily] price_moves 書き出し失敗: {e}")
+
+
 def _build_summary_body(result, uploads: list, dry_run: bool) -> str:
     now = datetime.now(JST)
     n_revise = len(result.revisable)
@@ -278,6 +309,9 @@ def run_daily(dry_run: bool = False) -> int:
                             "attempts": 0, "error": None, "would_upload": True})
         else:
             uploads.append(_upload_one(csv_path, label, dry_run=False))
+
+    if not dry_run:
+        _write_price_moves(result, uploads)
 
     # Step 4: 結果メール
     mail_rc = _send_summary(result, uploads, dry_run=dry_run)

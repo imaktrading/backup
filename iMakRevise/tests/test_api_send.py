@@ -72,3 +72,18 @@ def test_run_daily_uses_api_and_skips_chrome(monkeypatch, tmp_path):
     monkeypatch.setattr(rd, "_send_summary", lambda *a, **k: 0)
     monkeypatch.setattr(rd, "_log", lambda line: None)
     assert rd.run_daily(dry_run=False) == 0
+
+
+def test_price_moves_written_all_rows_both_directions(tmp_path):
+    import json
+    import revise.run_daily as rd
+    C = lambda i, cur, new, sheet="HIGH": SimpleNamespace(item_id=i, source_sheet=sheet, category="TCG",
+                                                         current_usd=cur, new_usd=new, title="t")
+    result = SimpleNamespace(revisable=[C(f"u{i}", 10.0, 11.0 + i) for i in range(12)]
+                             + [C("down", 492.98, 200.98, "LOW"), C("same", 50.0, 50.0)])
+    out = tmp_path / "m.json"
+    rd._write_price_moves(result, [{"success": True}], out=out)
+    d = json.loads(out.read_text(encoding="utf-8"))
+    ids = [x["item_id"] for x in d["items"]]
+    assert len(ids) == 13 and ids[0] == "down" and "same" not in ids
+    assert d["items"][0]["diff_usd"] == -292.0 and d["items"][0]["sheet"] == "LOW" and d["sent_ok"] is True
