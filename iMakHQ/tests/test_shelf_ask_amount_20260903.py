@@ -17,7 +17,8 @@ _SRC = open(os.path.join(_HQ, "control_panel.py"), encoding="utf-8").read()
 
 def test_shelf_button_asks_for_the_amount():
     i = _SRC.index('"label": "📉 棚② ')
-    assert '"ask_amount": True' in _SRC[i:i + 900]
+    # ★2026-10-05 ユーザー「上限は不要」「元々入れてないでしょ」: 金額は聞かない
+    assert '"ask_amount": False' in _SRC[i:i + 900]
 
 
 def test_amount_is_passed_as_a_flag():

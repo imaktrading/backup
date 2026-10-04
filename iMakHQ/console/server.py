@@ -247,10 +247,8 @@ def shelf_note(p):
             return format(round(float(p.get(k) or 0)), ",")
         except (TypeError, ValueError):
             return "0"
-    s = "空く額 $%s (今日の目標 $%s)" % (usd("amount"), usd("target"))
-    if _num(p.get("max_picked")):
-        s += "\n落とせる対象の全部 (上限・落とすべき量ではない): %d件 $%s" % (_num(p.get("max_picked")), usd("max_amount"))
-    return s
+    # ★2026-10-05 ユーザー「上限は不要」: 押すとルールで落とす物を全部落とす (今日の目標額は無い)
+    return "空く額 $%s (ルールで落とす物を全部)" % usd("amount")
 
 
 def shelf_looks_unread(shelf_rows):

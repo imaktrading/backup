@@ -15,12 +15,12 @@ def test_今日の分を落とし切ったら0件(monkeypatch):
     monkeypatch.setattr(SE, "evicted_today_amount", lambda *a, **k: 3468.0)
     monkeypatch.setattr(SE, "_load", lambda *a, **k: ([], lambda r: 0, lambda r: ""))
     got = SE.count_workload()
-    assert got["target"] == 0
-    assert got["picked"] == 0
+    assert got["picked"] == got["max_picked"]        # ★2026-10-05 上限なし: 落とした額では減らさない
 
 
 def test_まだ落としていなければ目標が立つ(monkeypatch):
     monkeypatch.setattr(SE, "listed_today_amount", lambda *a, **k: 2773.0)
     monkeypatch.setattr(SE, "evicted_today_amount", lambda *a, **k: 0.0)
     monkeypatch.setattr(SE, "_load", lambda *a, **k: ([], lambda r: 0, lambda r: ""))
-    assert SE.count_workload()["target"] > 0
+    got = SE.count_workload()
+    assert got["picked"] == got["max_picked"] and got["error"] == ""

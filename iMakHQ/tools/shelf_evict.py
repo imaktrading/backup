@@ -934,8 +934,9 @@ def count_workload():
         #   3件 落とした直後もボタンは 3件 のままで「押しても件数が減りませんでした」と
         #   出ていた (実際は押しても『今日はもう落とす分がありません』で何も起きない)。
         #   main() と同じ remaining_target を通す (二重実装しない)。
-        target = remaining_target(listed, evicted_today_amount(), RATIO)
-        out["listed_today"], out["target"] = listed, target
+        # ★2026-10-05 ユーザー「上限は不要」: 落とす量は理由 (棚②のルール) で決まる。出品額に合わせた上限は無い
+        target = float("inf")
+        out["listed_today"] = listed
         # ★2026-09-03: 目標額を聞けるようにしたので、ボタンには **今日いくらまで空けられるか**
         #   (=対象すべて) を出す。今日の出品額しか出さないと「押せる上限」が分からない。
         #   出品が0件の日でも上限は出す (target<=0 でも先へ進む)。
@@ -983,8 +984,9 @@ def count_workload():
         _pd = load_price_downs() if _pj is not None else False
         mpicked, mtotal = pick(rows, float("inf"), shelf_of, cat_of, only_tier=TIER_STALE,
                                restock_pending=_keep, no_demand=_nd, price_downs=_pd, psa_judge=_pj)
-        out.update(max_picked=len(mpicked), max_amount=mtotal)
-        if target > 0:
+        out.update(max_picked=len(mpicked), max_amount=mtotal, picked=len(mpicked), amount=mtotal,
+                   tier2=len(mpicked))
+        if False:                          # 上限を外したので「今日の目標」で切らない (2026-10-05)
             picked, total = pick(rows, target, shelf_of, cat_of, only_tier=TIER_STALE,
                                  restock_pending=_keep, no_demand=_nd, price_downs=_pd, psa_judge=_pj)
             byt = collections.Counter(t for t, _r in picked)
@@ -1080,6 +1082,10 @@ def main():
     listed = listed_today_amount()
     if a.amount is not None:
         target = a.amount
+    elif True:
+        # ★2026-10-05 ユーザー「上限は不要」(Gemini の「1日15〜20件に分散」案も見たうえで)。
+        #   棚②のルールで「取下げ」と決まった物を全部落とす。--amount を渡した時だけ金額で切る。
+        target = float("inf")
     else:
         # ★2026-09-03: 目標が「今日の出品額」だけだと、**押すたびに同じ額が落ちる**
         #   (実測: 空欄で2回押して $14,939 + $15,624 = 出品額の2倍)。
@@ -1088,7 +1094,10 @@ def main():
         target = remaining_target(listed, _done_today, a.ratio)
         if _done_today:
             print(f"  ℹ 今日すでに ${_done_today:,.0f} 落としています → 残り ${target:,.0f}")
-    print(f"今日の出品額 ${listed:,.0f} × {a.ratio} = **落とす目標 ${target:,.0f}**")
+    if target == float("inf"):
+        print("落とす量の上限なし: ルールで「取下げ」と決まった物を全部落とします")
+    else:
+        print(f"落とす上限 ${target:,.0f}")
 
     # ★まず live 一覧で ①(数量0) を埋める。ここはレポートもファネルも要らず常に最新。
     #   足りない時だけ ②(表示回数の少ない順) のためにファネルを読む (古ければそう出す)。
