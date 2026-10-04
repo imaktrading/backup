@@ -114,10 +114,11 @@ def table_verdict(age, has_aux, down, watch, views, ch):
 
     views=None = 閲覧が分からない (レポートに無い)。「見られていない」が要る行では落とさない。
     """
-    if age >= CAP_AGE and grown(ch):
-        return KEEP, "0b 伸びている"
-    if age >= CAP_AGE and buried(ch):
-        return DROP, "11b 埋もれた"
+    # ★2026-10-05 ユーザー「ケツは90日では？」: 90日を超えたら例外なく落とす。
+    #   旧 0b (前の90日より表示が伸びている → 残す) は90日超を無期限に残すのでケツと矛盾した (10/5 時点 56件)。
+    #   旧 11b (埋もれた) もこの1行に含まれる。grown / buried は残す (表示の材料として)
+    if age >= CAP_AGE:
+        return DROP, "90日 (ケツ)"
     if has_aux:
         if age < MID_AGE:
             if down and not watch:
@@ -243,7 +244,7 @@ def judge(row, has_aux, down, traffic, market=None):
     out = {"item_id": iid, "title": row.get("title") or "", "age": int(age), "price": price,
            "aux": has_aux, "down": down, "watch": watch, "views": views, "table": code,
            "verdict": v, "code": code, "market": None}
-    if v == DROP and code != "11b 埋もれた":
+    if v == DROP:
         st = None if (market is None or age >= CAP_AGE) else market.stat(out["title"], iid)
         out["market"] = st
         out["verdict"], out["code"] = market_verdict(age, price, st)

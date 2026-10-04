@@ -20,13 +20,14 @@ def test_table_rows():
     assert t(70, True, False, False, 50, None)[1].startswith("⑩ ")
     assert t(70, True, True, True, 50, None) == (R.HOJU, "⑨ 補優先")
     assert t(70, True, False, True, 50, None) == (R.HOJU, "⑩b 補優先")
-    assert t(95, True, False, True, 50, None) == (R.DROP, "⑪ 90日")
+    assert t(95, True, False, True, 50, None) == (R.DROP, "90日 (ケツ)")
     assert t(40, False, False, False, 3, None)[1].startswith("⑫")
     assert t(40, False, False, False, 6, None)[0] == R.HOJU          # ⑬ 見られた
     assert t(40, False, False, False, None, None)[0] == R.KEEP       # 閲覧不明は落とさない
     assert t(65, False, False, True, 99, None)[1].startswith("⑭")
-    assert t(95, True, True, False, 0, UP) == (R.KEEP, "0b 伸びている")
-    assert t(95, False, False, False, 0, DOWN) == (R.DROP, "11b 埋もれた")
+    # ★2026-10-05 ケツは90日: 表示が伸びていても90日を超えたら落とす (旧 0b は廃止)
+    assert t(95, True, True, False, 0, UP) == (R.DROP, "90日 (ケツ)")
+    assert t(95, False, False, False, 0, DOWN) == (R.DROP, "90日 (ケツ)")
     assert t(60, True, False, True, 0, DOWN)[0] == R.HOJU            # 伸び/埋もれは90日以上だけ
 
 
