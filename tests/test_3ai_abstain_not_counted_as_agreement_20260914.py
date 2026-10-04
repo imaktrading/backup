@@ -58,6 +58,7 @@ def test_all_ai_respond_reports_full_count():
 
 def test_validate_and_report_prints_actual_agreement_label(capsys):
     V = _load()
+    V.consensus_enabled = lambda *a, **k: True        # ★2026-10-04 既定は停止。有効にした時の表示を確かめる
     V.validate_row = lambda *a, **k: ([], [])
     V._check_acceptable = lambda *a, **k: (False, "")
     V.deliberate_3ai = lambda *a, **k: {
@@ -71,3 +72,24 @@ def test_validate_and_report_prints_actual_agreement_label(capsys):
     out = capsys.readouterr().out
     assert "2AI合意 (Groq: 利用不可)" in out
     assert "✅ 3AI合意" not in out
+
+
+def test_consensus_off_by_default_passes_on_deterministic_checks(capsys):
+    """★2026-10-04 ユーザー OK: 3者合議は既定で停止。決定論の照合を通れば出す (AI は呼ばない)。"""
+    V = _load()
+    V.validate_row = lambda *a, **k: ([], [])
+    called = []
+    V.deliberate_3ai = lambda *a, **k: called.append(1)
+    args = dict(title="t", specs={}, model="", category=15687, condition_id=1000,
+                price=1.0, pic_url="http://x")
+    assert V.consensus_enabled() is False
+    assert V.validate_and_report("c1", **args, catalog_confirmed=False) is True
+    assert called == [] and "3者合議は停止中" in capsys.readouterr().out
+
+
+def test_deterministic_error_still_rejects_when_consensus_off():
+    V = _load()
+    V.validate_row = lambda *a, **k: (["必須が空"], [])
+    args = dict(title="t", specs={}, model="", category=15687, condition_id=1000,
+                price=1.0, pic_url="http://x")
+    assert V.validate_and_report("c1", **args, catalog_confirmed=False) is False

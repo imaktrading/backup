@@ -743,6 +743,18 @@ def _append_hold_log(idx, title, deliberation):
 DETERMINISTIC_ON_CONFIRMED = True
 
 
+def consensus_enabled(cfg_path=None):
+    """出品前の3者合議を使うか (global.yaml の ai_consensus.enabled・既定 false)。読めなければ false。"""
+    import os as _os
+    p = cfg_path or _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "config", "global.yaml")
+    try:
+        import yaml
+        with open(p, encoding="utf-8") as f:
+            return bool(((yaml.safe_load(f) or {}).get("ai_consensus") or {}).get("enabled", False))
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
 def validate_and_report(idx, title, specs, model, category, condition_id, price, pic_url, condition_desc="",
                         psa_brand=None, psa_card_number=None,
                         use_gemini=True, use_groq=True, intermediate=False,
@@ -772,6 +784,17 @@ def validate_and_report(idx, title, specs, model, category, condition_id, price,
                 print(f"       ⚠️ {w}")
         print(f"    → この商品はCSVに含めません")
         return False
+
+    # ★2026-10-04 ユーザー OK: 3者合議を止める (global.yaml ai_consensus.enabled: false)。
+    #   始めた頃 AI の答えが揺れたために入れた物で、今はタイトル・Item Specifics をカタログから機械的に作り、
+    #   決定論の照合 (validate_row・CSV監査くん) で見ている。6月中旬以降に止めたのは1回 (9/13・誤り) だけ。
+    #   AI が使えない日は全件「保留」になる (10/4 KAGOYA で発生)。決定論の error は上で reject 済 = 誤出品はしない
+    if not consensus_enabled():
+        if warnings:
+            for w in warnings:
+                print(f"       ⚠️ {w}")
+        print(f"    ✅ 決定論PASS (3者合議は停止中)")
+        return True
 
     # catalog ID-hit / 人手verify済 → 身元は SSOT で確定。決定論チェック(validate_row)を通った時点で PASS。
     # flaky な 3AI 合議は通さない (API障害による誤BLOCK を排除)。誤出品はしない: error は上で reject 済。

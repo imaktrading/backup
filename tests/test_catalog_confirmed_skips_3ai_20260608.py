@@ -26,6 +26,7 @@ def _load():
 
 
 def _setup(V):
+    V.consensus_enabled = lambda *a, **k: True      # ★2026-10-04 既定は停止。有効にした時の分岐を確かめる
     V.validate_row = lambda *a, **k: ([], [])          # error 無し
     V._check_acceptable = lambda *a, **k: (False, "")   # 許容ショートカット無効
     calls = {"n": 0}
