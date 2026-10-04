@@ -51,14 +51,14 @@ def test_cull_excludes_unknown_age():
     """
     rows = [
         _row("a", age=100),          # OK
-        _row("b", age=13),           # 既知の若さ → もう待たされない (OK)
+        _row("b", age=13),           # ★2026-10-04 30日未満 → 待つ (除外)
         _row("c", age=0),            # age不明 → fail-closed 除外
-        _row("d", age=14),           # OK
+        _row("d", age=30),           # 30日 → OK
         _row("e", flags="RESTOCK", age=100),  # CULL でない → 除外
     ]
     _cull, eligible, picked = cull_end.select(rows, today=_OLD)
     ids = {r["item_id"] for r in eligible}
-    assert ids == {"a", "b", "d"}
+    assert ids == {"a", "d"}
     assert all(cull_end._i(r["age_days"]) >= cull_end.MIN_AGE for r in picked)
 
 
@@ -108,7 +108,9 @@ def test_this_month_comes_first_and_by_price():
         _row("cur_big", age=15, price=800),    # 今月 (8/9)
     ]
     _c, _e, picked = cull_end.select(rows, today=today)
-    assert [r["item_id"] for r in picked] == ["cur_big", "cur_small", "old"]
+    # ★2026-10-04: MIN_AGE 1 → 30 (若い出品は落とさない)。当月出品は必ず30日未満なので対象に残らない
+    #   (当月を先に落とす並びは「月末の出品枠」のためで、10/1 の枠の引き上げで前提が無くなった)
+    assert [r["item_id"] for r in picked] == ["old"]
 
 
 def test_cull_custom_cap():

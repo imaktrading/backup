@@ -114,8 +114,9 @@ def test_status_cull_pending_reasons():
     unknown_age = LF.oos_status(_row(item_id="9", age_days=0), cull_ids={"9"}, done_ids=set())
     assert "出品日 不明" in unknown_age
 
+    # ★2026-10-04: MIN_AGE 1 → 30。30日未満は「出品 30日未満」として待つ
     known_young = LF.oos_status(_row(item_id="9", age_days=1), cull_ids={"9"}, done_ids=set())
-    assert "次回" in known_young, "既知の年齢 (1日) は、もう待たされない"
+    assert "30日未満" in known_young, "30日未満の出品は取下げを待つ"
 
     # ★2026-08-31: MIN_PRICE (旧$100) を撤廃。在庫0×需要ゼロは価格を問わず対象。
     known_cheap = LF.oos_status(_row(item_id="9", price=20), cull_ids={"9"}, done_ids=set())

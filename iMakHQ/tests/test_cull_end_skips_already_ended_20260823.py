@@ -112,10 +112,11 @@ def test_live_rows_feed_select_unchanged():
       age=5 の "b" は今月出品 (1/10) → 先頭、age=99 の "a" は前月以前 → その後。
     """
     import datetime
+    # ★2026-10-04: MIN_AGE 1 → 30 (ユーザー「若い出品 (30日未満) は外す。２日だからね」)。age=5 は待つ
     rows = C.rows_from_live(_live(_it("a", age=99), _it("b", age=5)))
     cull, eligible, picked = C.select(rows, today=datetime.date(2030, 1, 15))
     assert len(cull) == 2
-    assert [r["item_id"] for r in eligible] == ["b", "a"], "age=5 (既知) がもう待たされていない"
+    assert [r["item_id"] for r in eligible] == ["a"], "30日未満 (age=5) は取下げの対象にしない"
 
 
 def test_live_missing_fields_mean_zero():
