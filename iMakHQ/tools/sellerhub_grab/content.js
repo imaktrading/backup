@@ -33,7 +33,7 @@
     if (p) return p;
     p = document.createElement("div");
     p.id = "shg-panel";
-    p.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:99999;background:#fff;" +
+    p.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;background:#fff;" +
       "border:2px solid #0654ba;border-radius:8px;padding:12px 14px;font:13px/1.5 sans-serif;" +
       "box-shadow:0 4px 16px rgba(0,0,0,.2);max-width:360px;color:#111";
     document.body.appendChild(p);
@@ -377,7 +377,23 @@
     });
   } else if (location.pathname.startsWith("/sh/lst/active")) {
     // ★2026-10-05 オファーを送る仕組みを作る前の下調べ (画面の作りを控えるだけ・何も押さない)
-    startButton("オファーの小窓の作りを控える (HQ 用)", dumpOffer);
+    // ★2.9: 小窓が開くとページが覆われて、このボタンを押せない (ユーザー「あいたまま、押せない」)。
+    //   先にボタンを押しておき、次に「Send offers」の小窓 (sio-modal-root) が開いて中身が出たら自動で控える
+    startButton("① これを押す → ② 行の Send offers を押す (開いたら自動で控える)", () => {
+      log("待っています: 行の「Send offers」を押して小窓を開いてください");
+      const t0 = Date.now();
+      const iv = setInterval(() => {
+        const m = document.querySelector("[data-testid=sio-modal-root]");
+        const open = m && !m.hasAttribute("hidden") && /counteroffer|Percent off|Amount off/i.test(txt(m));
+        if (open) {
+          clearInterval(iv);
+          setTimeout(dumpOffer, 2000);            // 中身が出そろうのを待つ
+        } else if (Date.now() - t0 > 5 * 60000) {
+          clearInterval(iv);
+          log("5分たっても小窓が開かなかったのでやめました");
+        }
+      }, 500);
+    });
   } else if (location.pathname.startsWith("/sh/performance/traffic")) {
     // ★2026-10-04 トラフィックレポート (前の90日との比較つき) も毎日落とす (棚② の「埋もれた」判定)。
     //   ユーザー「小窓でないよ。右の↓をおすだけ」: 「Your listings」の欄の右の ↓ (Download) を押す
