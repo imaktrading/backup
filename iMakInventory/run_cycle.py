@@ -90,6 +90,9 @@ LOCK_WAIT_POLL_SEC = 60
 #   延び (SHEET 3.2〜4.1h / CAND 2.2〜3.7h)、共有 lock 側が1日 20h 超で埋まって、CAND がはみ出た分
 #   SHEET が 45 分待って skip された (09-29 07:30)。取下げに直結する SHEET を優先し、SHEET の lock 待ちも
 #   180 分に延ばした (タスクの引数 --lock-wait-minutes 180)。
+# ★ 2026-10-05 ユーザー判断: CAND は 1日1回のまま 05:00 → 15:20 に。17:00 からの新規出品に間に合わせる。
+#   メルカリ API 化で CAND は 30 分台 (05:00 実測 33 分)。SHEET (13:30〜15:10 頃) と lock・profile を共有するので
+#   その後に置き、SHEET が延びた時は --lock-wait-minutes 90 で待つ。
 CYCLE_INTERVAL_HOURS = {"SHEET": 6, "LOW": 8, "CAND": 24}   # 各 label の巡回間隔 (Task Scheduler と対)
 
 # label ごとに「どの行を見るか」(2026-09-19 ユーザー判断)。
