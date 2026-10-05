@@ -1038,14 +1038,46 @@ def has_image(cand):
     return bool(img) and (str(img).startswith("http") or Path(img).exists())
 
 
-def drop_no_image(cands):
-    """画像の無い候補を外す。
+def is_english_row(language, name_jp):
+    """カタログの行が英語版か (純関数)。language='en'、または language が空で日本語名も無い行。
 
-    ★2026-10-05 ユーザー「英語版なら、目視画面に出さないで。画像がないと判断してしまう」:
-      カタログは英語版の画像しか無い行の画像を入れない (9/22 確定・483行)。
-      「画像なし」の枠が並ぶと、見比べられないのに選ぶ物があるように見える。出さない。
+    実測 (2026-10-05・画像が空の TCG 行): en 269 / 空+日本語名なし 207 (bandai_tcg_plus の英語版)、
+    ja 73 / 空+日本語名あり 3 (日本語版)。
     """
-    return [c for c in (cands or []) if has_image(c)]
+    lang = (language or "").strip().lower()
+    if lang:
+        return lang == "en"
+    return not (name_jp or "").strip()
+
+
+def _english_pids(category, pids):
+    """候補の product_id のうち、カタログで英語版の行の物 (I/O)。読めなければ空 = 何も外さない。"""
+    if not pids:
+        return set()
+    try:
+        con = sqlite3.connect(str(CATALOG_DB))
+        try:
+            q = ",".join("?" * len(pids))
+            rows = con.execute(f"SELECT product_id, language, name_jp FROM products "
+                               f"WHERE category = ? AND product_id IN ({q})", [category] + list(pids)).fetchall()
+        finally:
+            con.close()
+    except Exception:                                          # noqa: BLE001 読めない時は外さない
+        return set()
+    return {pid for pid, lang, nj in rows if is_english_row(lang, nj)}
+
+
+def drop_no_image(cands, category=""):
+    """画像が無く、しかも英語版の行の候補だけを外す。
+
+    ★2026-10-05 ユーザー「出す必要のない英語版だけ出さないやで。日本語版は、画像がなくても出してや。
+      画像なしのエラーが分からないから」: カタログは英語版の画像しか無い行に画像を入れない (9/22 確定)。
+      日本語版で画像が無いのはカタログの欠け = 「画像なし」と見えないと気づけないので残す。
+    """
+    cands = list(cands or [])
+    no_img = [c[0] for c in cands if not has_image(c)]
+    eng = _english_pids(category, no_img)
+    return [c for c in cands if has_image(c) or c[0] not in eng]
 
 
 def candidate_card_html(cert, cand, t, i, html=None):
@@ -1470,7 +1502,8 @@ class _ReviewHandler(BaseHTTPRequestHandler):
                 cert = (q.get("cert") or [""])[0]
                 text = (q.get("q") or [""])[0]
                 t = _TARGETS_BY_CERT.get(cert) or {}
-                found = drop_no_image(search_candidates(t.get("category", ""), text, brand=t.get("brand", "")))
+                found = drop_no_image(search_candidates(t.get("category", ""), text, brand=t.get("brand", "")),
+                                      t.get("category", ""))
                 html = []
                 for i, cand in enumerate(found, 1):
                     candidate_card_html(cert, cand, t, i, html)
@@ -2361,7 +2394,7 @@ def _build_target_for_cert(cert: str):
         # ★PSA は両面を撮っている。両面カード (FW の LEADER 等) では **裏写真の方が
         #   catalog の表面画像と一致する**。片面しか出さないと照合できない (2026-08-09)
         "cert_image_url_back": meta.get("CardImageUrlBack", ""),
-        "candidates": drop_no_image(candidates),
+        "candidates": drop_no_image(candidates, category),
         "is_promo": is_promo, "promo_proposed": promo_proposed,
     }
 
@@ -2867,7 +2900,7 @@ def run_post_psa_review(csv_path: str, append_log_func) -> bool:
             "supply_image_url": _supply_pic_by_cert(cert),
         "cert_image_url": meta.get("CardImageUrl", ""),
             "cert_image_url_back": meta.get("CardImageUrlBack", ""),
-            "candidates": drop_no_image(candidates),
+            "candidates": drop_no_image(candidates, category),
         })
 
     append_log_func(f"  verify 済 skip: {skipped_verified} 件\n")
