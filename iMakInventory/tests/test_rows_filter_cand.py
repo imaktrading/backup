@@ -115,3 +115,12 @@ def test_crash_recorder_writes_reason_to_file(tmp_path, monkeypatch):
     body = (tmp_path / "cycle_crash.log").read_text(encoding="utf-8")
     assert "RuntimeError" in body and "検証用の落下" in body
     assert "巡回が落ちました" in body
+
+
+def test_not_listed_9999_rows_are_dropped():
+    """2026-10-05 ユーザー判断: itemID=9999 (出品しない) は どの巡回でも見ない."""
+    from monitor_listings import drop_not_listed_rows
+    rows = _rows() + [{"row_index": 6, "item_id": "9999", "url": "https://jp.mercari.com/item/m5"},
+                      {"row_index": 7, "item_id": " 9999 ", "url": "https://jp.mercari.com/item/m6"}]
+    got = drop_not_listed_rows(rows)
+    assert [r["row_index"] for r in got] == [2, 3, 4, 5]

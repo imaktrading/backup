@@ -1301,6 +1301,15 @@ def filter_rows_by_item_id(rows: list, rows_filter: str) -> list:
     return [r for r in rows if bool((r.get("item_id") or "").strip()) is want_id]
 
 
+def drop_not_listed_rows(rows: list) -> list:
+    """itemID="9999" (出品しないと決めた行) を巡回から外す (純関数).
+
+    ★ 2026-10-05 ユーザー判断「9999 は管理しなくていい」。出品が無いので取下げも復活も起きず、
+    SHEET で毎回 59 行を読むだけになっていた。SHEET / LOW / CAND すべてで外す。
+    """
+    return [r for r in rows if (r.get("item_id") or "").strip() != NOT_LISTED_ITEM_ID]
+
+
 def resolve_profile_dirs(sheet_label: str) -> tuple:
     """(mercari_profile, amazon_profile) を label 別に決める.
 
@@ -1505,6 +1514,11 @@ def process_sheet(
     #   fail-OPEN にはならない: 候補は itemID が無く取下げ対象が存在しないため、
     #   CAND 巡回が止まっても「売れるのに取り下げ損ねる」は起きない。
     #   itemID が入った時点で次回から自動的に listed 側に回る (行の移動は不要)。
+    _before_9999 = len(rows)
+    rows = drop_not_listed_rows(rows)
+    if len(rows) < _before_9999:
+        log(f"  出品しない行 (itemID=9999) を外す: {_before_9999} → {len(rows)} 件")
+
     if rows_filter != "all":
         before = len(rows)
         rows = filter_rows_by_item_id(rows, rows_filter)
