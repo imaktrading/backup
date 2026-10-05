@@ -1189,8 +1189,10 @@ def main():
                 _entry["mercari"] = _m       # 成功/在庫なし(確定)のみキャッシュ
             _rcache[_iids[i]] = _entry
     try:
-        with open(_cache_path, "w", encoding="utf-8") as _f:
-            _json.dump(_rcache, _f, ensure_ascii=False)
+        # ★2026-10-05: 読めなかった時 (_rcache={}) や --fresh でも過去の分を消さない。
+        #   補URL の夜探しと同じ保存口 (ディスクにだけある出品を残す・一時ファイル経由) を使う
+        import psa_hoju_fill as _H
+        _H._save_cache(_rcache, _cache_path)
     except Exception as e:
         print(f"  ⚠ 研究キャッシュ保存skip ({type(e).__name__}: {e})")
 

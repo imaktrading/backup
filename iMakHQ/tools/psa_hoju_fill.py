@@ -915,8 +915,34 @@ def _load_cache(path=CACHE_PATH):
         return {}
 
 
+def keep_disk_entries(cache, disk):
+    """保存する中身に、ディスクにだけある出品を足して返す (純関数)。同じ出品は cache を優先。
+
+    ★2026-10-05: 控えが 1,142件 → 今日の307件に消えた (6:00〜13:06)。_load_cache は読めないと {} を返すので、
+      読み損ねた手が「{} + 今日の結果」をそのまま保存すると過去の分が全部消える。この控えを消す書き手は無いので、
+      保存の時にディスクの出品を必ず残す。
+    """
+    out = dict(disk or {})
+    out.update(cache or {})
+    return out
+
+
 def _save_cache(cache, path=CACHE_PATH):
     import json
+    # ★2026-10-05: 保存直前にディスクを読み、ディスクにだけある出品は残す (keep_disk_entries)。
+    #   ディスクの控えが有るのに読めない時は書かない (空で上書きして消すより、今回の結果を捨てる方が安全)
+    if os.path.exists(path):
+        disk = None
+        for _ in range(3):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    disk = json.load(f)
+                break
+            except Exception:                                  # noqa: BLE001  置き換えの最中など
+                time.sleep(1)
+        if not isinstance(disk, dict):
+            raise RuntimeError(f"控え {os.path.basename(path)} を読めないので書かない (消さないため)")
+        cache = keep_disk_entries(cache, disk)
     # ★2026-09-24: 一時ファイルに書いてから置き換える (書いている最中に PC が落ちても、壊れた/空のファイルを残さない)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
