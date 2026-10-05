@@ -1032,6 +1032,22 @@ def search_candidates(category, query, brand="", limit=30):
     return out
 
 
+def has_image(cand):
+    """候補に見比べられる画像があるか (candidate_card_html と同じ判定)。"""
+    img = cand[1] if len(cand) > 1 else ""
+    return bool(img) and (str(img).startswith("http") or Path(img).exists())
+
+
+def drop_no_image(cands):
+    """画像の無い候補を外す。
+
+    ★2026-10-05 ユーザー「英語版なら、目視画面に出さないで。画像がないと判断してしまう」:
+      カタログは英語版の画像しか無い行の画像を入れない (9/22 確定・483行)。
+      「画像なし」の枠が並ぶと、見比べられないのに選ぶ物があるように見える。出さない。
+    """
+    return [c for c in (cands or []) if has_image(c)]
+
+
 def candidate_card_html(cert, cand, t, i, html=None):
     """候補カード1枚分の HTML (最初の一覧と、番号で探し直した結果で共用する)。
 
@@ -1454,7 +1470,7 @@ class _ReviewHandler(BaseHTTPRequestHandler):
                 cert = (q.get("cert") or [""])[0]
                 text = (q.get("q") or [""])[0]
                 t = _TARGETS_BY_CERT.get(cert) or {}
-                found = search_candidates(t.get("category", ""), text, brand=t.get("brand", ""))
+                found = drop_no_image(search_candidates(t.get("category", ""), text, brand=t.get("brand", "")))
                 html = []
                 for i, cand in enumerate(found, 1):
                     candidate_card_html(cert, cand, t, i, html)
@@ -2345,7 +2361,7 @@ def _build_target_for_cert(cert: str):
         # ★PSA は両面を撮っている。両面カード (FW の LEADER 等) では **裏写真の方が
         #   catalog の表面画像と一致する**。片面しか出さないと照合できない (2026-08-09)
         "cert_image_url_back": meta.get("CardImageUrlBack", ""),
-        "candidates": candidates,
+        "candidates": drop_no_image(candidates),
         "is_promo": is_promo, "promo_proposed": promo_proposed,
     }
 
@@ -2851,7 +2867,7 @@ def run_post_psa_review(csv_path: str, append_log_func) -> bool:
             "supply_image_url": _supply_pic_by_cert(cert),
         "cert_image_url": meta.get("CardImageUrl", ""),
             "cert_image_url_back": meta.get("CardImageUrlBack", ""),
-            "candidates": candidates,
+            "candidates": drop_no_image(candidates),
         })
 
     append_log_func(f"  verify 済 skip: {skipped_verified} 件\n")
