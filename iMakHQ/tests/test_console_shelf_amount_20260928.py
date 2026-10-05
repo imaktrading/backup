@@ -14,13 +14,13 @@ import server as S  # noqa: E402
 
 def test_shelf_note_shows_amount_target_and_max():
     # ★2026-10-05 ユーザー「上限は不要」: 今日の目標額は無くなった。押すとルールで落とす物を全部落とす
-    p = {"picked": 465, "amount": 473473.84, "max_picked": 465, "max_amount": 473473.84}
-    assert S.shelf_note(p) == "空く額 $473,474 (ルールで落とす物を全部)"
+    p = {"picked": 50, "amount": 41448.2, "max_picked": 294, "max_amount": 314060}
+    assert S.shelf_note(p) == "空く額 $41,448 (今日の分・1日50件まで) / 対象の全部 294件 (残りは明日以降)"
     assert "今日の目標" not in S.shelf_note(p)
 
 
 def test_shelf_note_without_max():
-    assert S.shelf_note({"amount": 120.4}) == "空く額 $120 (ルールで落とす物を全部)"
+    assert S.shelf_note({"amount": 120.4}) == "空く額 $120 (今日の分・1日50件まで)"
 
 
 def test_tip_is_not_cut_at_160():
