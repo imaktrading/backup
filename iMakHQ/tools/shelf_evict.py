@@ -63,7 +63,7 @@ CSV_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__
 
 TIER_OOS, TIER_STALE = 1, 2
 TIER_NAME = {TIER_OOS: "① 買えない & 需要ゼロ",
-             TIER_STALE: "② TCG/G-SHOCK 30日超・未販売 (ウォッチ0・200日超 → 売れない作品 → ウォッチ少ない順)"}
+             TIER_STALE: "② 30日超・未販売 (全商材・棚②の表で取下げ / ウォッチ0・200日超 → 売れない作品 → ウォッチ少ない順)"}
 # 出品からこれ未満は「まだ判定できない」ので触らない。
 MIN_AGE_DAYS = 30
 # ★②(仕入元が活きている分)を落とすカテゴリ。
@@ -1155,7 +1155,7 @@ def main():
         if _done_today:
             print(f"  ℹ 今日すでに ${_done_today:,.0f} 落としています → 残り ${target:,.0f}")
     if target == float("inf"):
-        print("落とす量の上限なし: ルールで「取下げ」と決まった物を全部落とします")
+        print(f"落とす量: ルールで「取下げ」と決まった物を、並び順の上から1日{daily_cap()}件まで (今日すでに {evicted_today_count()}件)")
     else:
         print(f"落とす上限 ${target:,.0f}")
 
