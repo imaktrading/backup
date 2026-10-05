@@ -97,6 +97,25 @@ def tab_of(argv):
     return TABS["treasure"]
 
 
+def pick_buyable(add, limit, check=None):
+    """足す候補を上から見て、メルカリで今も買える物だけ limit 件選ぶ。戻り (選んだ, 外した数)。"""
+    if check is None:
+        import mercari_psa_resource as mp
+
+        def check(url):
+            d = mp.api_detail(url)
+            return bool(d and d.get("buyable"))
+    out, skipped = [], 0
+    for i, row in add:
+        if len(out) >= limit:
+            break
+        if check(row[0]):
+            out.append((i, row))
+        else:
+            skipped += 1
+    return out, skipped
+
+
 def main(argv):
     import psa_hoju_fill as H
     tab = tab_of(argv)
@@ -109,6 +128,15 @@ def main(argv):
     print(f"中間スプシ {len(tr)}行 → HIGH に足す {len(add)}行 / 塗る {len(paint)}行")
     print(f"  7万円超 {n['over']} / 値段が読めない {n['noprice']} / もう HIGH にある {n['in_high']} / "
           f"タブ内の重複 {n['dup_tab']}")
+    lim = next((int(a.split("=", 1)[1]) for a in argv if a.startswith("--limit=")), None)
+    if lim is not None:
+        # ★2026-10-05 ユーザー「200追加して」: 一度に全部 (3,474行) 入れると新規の目視が溢れるので件数で区切る。
+        #   入れる前にメルカリで今も買えるかを確かめ、買える物だけを上から lim 件 (10/5 の抜き取りで 9割が買えた)
+        add, skipped = pick_buyable(add, lim)
+        allowed = {i for i, _r in add}
+        planned = {i for i, _r in plan(tr, hi)[0]}
+        paint = [i for i in paint if i not in planned or i in allowed]   # 入れなかった行は塗らない (次回の候補)
+        print(f"  --limit={lim}: 買える物を {len(add)}行 選んだ (確かめて売り切れ・読めないで外した {skipped}行)")
     if "--write" not in argv:
         print("★書くなら --write")
         return 0
