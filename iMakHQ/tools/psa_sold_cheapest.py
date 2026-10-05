@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, r"C:\dev\iMak\iMakeBayAPI")
 
 OUT = Path(r"C:\dev\iMak_data\hq\psa_sold_cheapest.html")
+OUT_OFFERS = Path(r"C:\dev\iMak_data\hq\psa_offer_cheapest.html")    # オファーの分は別の画面 (売れた分を上書きしない)
 # 画面に出したメルカリの候補 {注文番号: {"at": 日付, "ids": [m…]}}。注文の取り込み (order_purchase_sync) が
 # 購入履歴と結ぶ時の候補に足す (2026-10-04 ユーザー OK: この画面から買った物も自動で結ぶ)
 SHOWN = Path(r"C:\dev\iMak_data\hq\psa_sold_shown_candidates.json")
@@ -187,8 +188,11 @@ def _e(v):
     return _html.escape("" if v is None else str(v))
 
 
-def build_html(orders):
-    """orders: [{order, item_id, title, ship_by, sold_usd, cost_jpy, ref_images, key, note, cands}] → HTML。"""
+def build_html(orders, offers=False):
+    """orders: [{order, item_id, title, ship_by, sold_usd, cost_jpy, ref_images, key, note, cands}] → HTML。
+
+    offers=True はオファーが来ている出品 (まだ売れていない) の画面。見出しと注文欄だけ変える。
+    """
     from viewer_zoom import ZOOM_CSS, ZOOM_JS, ZOOM_OVERLAY, zoom_button
     rows = []
     for o in orders:
@@ -223,8 +227,10 @@ def build_html(orders):
         cost = f"出品時の仕入値 ¥{o['cost_jpy']:,}" if isinstance(o.get("cost_jpy"), int) else ""
         rows.append(
             f"<section><h2>{_e(o['title'])}</h2>"
-            f"<div class='meta'>注文 {_e(o['order'])} / itemID {_e(o['item_id'])} / 発送期限 {_e(o.get('ship_by'))}"
-            f" / 売値 {_e(o.get('sold_usd'))} / {cost} / KEY {_e(o.get('key'))}</div>"
+            + (f"<div class='meta'>itemID {_e(o['item_id'])} / {_e(o.get('sold_usd'))} / {cost} / KEY {_e(o.get('key'))}</div>"
+               if offers else
+               f"<div class='meta'>注文 {_e(o['order'])} / itemID {_e(o['item_id'])} / 発送期限 {_e(o.get('ship_by'))}"
+               f" / 売値 {_e(o.get('sold_usd'))} / {cost} / KEY {_e(o.get('key'))}</div>")
             + (f"<div class='note'>{_e(o['note'])}</div>" if o.get("note") else "")
             + f"<div class='best'>{best}</div>"
             f"<div class='wrap'><div class='refs'><div class='src'>① 売った現物 / カタログ</div>{refs}</div>"
@@ -245,10 +251,14 @@ padding:0 5px;margin-right:3px;display:inline-block;margin-bottom:2px}.nm{color:
 .noimg{display:flex;width:156px;height:200px;align-items:center;justify-content:center;background:#eee}
 .go{display:inline-block;margin-top:4px}
 """
-    return ("<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>PSA 売れた分の仕入れ先</title>"
+    head = "オファーが来ている PSA の仕入れ先" if offers else "PSA10 売れた分の仕入れ先"
+    return ("<!doctype html><html lang='ja'><head><meta charset='utf-8'>"
+            f"<title>{'オファーの仕入れ先' if offers else 'PSA 売れた分の仕入れ先'}</title>"
             f"<style>{css}{ZOOM_CSS}</style></head><body>"
-            f"<h1>PSA10 売れた分の仕入れ先 ({len(orders)}件)</h1>"
-            "<p style='font-size:13px'>左が売った現物。候補は買える物を安い順に。"
+            f"<h1>{head} ({len(orders)}件)</h1>"
+            + ("<p style='font-size:13px'>今より安い仕入元があれば、その値段でオファーを判断できます。"
+               if offers else "")
+            + "<p style='font-size:13px'>左が" + ("出品中の現物" if offers else "売った現物") + "。候補は買える物を安い順に。"
             "<span class='ok'>条件OK</span> = 補URL と同じ条件 (版確認済・送料込み・評価100以上 or Shops)。"
             "オレンジの印は条件外 (買う前に中身を確かめる)。</p>"
             + "".join(rows) + ZOOM_OVERLAY + f"<script>{ZOOM_JS}</script></body></html>")
@@ -407,9 +417,31 @@ def load_waiting_orders(item_filter=None):
     return out
 
 
+def offer_targets(offers):
+    """オファーの一覧 → 探す対象 [{order, item_id, title, ship_by, sold_usd, sku, note}] (純関数)。
+
+    ★2026-10-05 ユーザー「オファー判定の時も、売れたPSAの仕入先を探すがあると助かる。
+      より安い仕入先を見つけて、オファーの判断をするから」。PSA の出品だけ・同じ出品は1回。
+    """
+    out, seen = [], set()
+    for o in offers or []:
+        iid = str(o.get("itemId") or "")
+        if not iid or iid in seen:
+            continue
+        if o.get("cat") != "TCG(PSA10)" and "PSA" not in (o.get("title") or "").upper():
+            continue
+        seen.add(iid)
+        sym = o.get("sym") or "$"
+        out.append({"order": "", "item_id": iid, "title": o.get("title") or "", "ship_by": "",
+                    "sold_usd": f"オファー {sym}{o.get('price')} (出品 {sym}{o.get('list')})", "sku": "",
+                    "note": f"オファー {sym}{o.get('price')} / 期限 {o.get('expire', '')} / バイヤー {o.get('buyer', '')}"})
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--item", help="この itemID だけ")
+    ap.add_argument("--offers", action="store_true", help="オファーが来ている PSA の出品を探す (売れる前)")
     ap.add_argument("--no-open", action="store_true")
     ap.add_argument("--no-sync", action="store_true", help="先に注文の取り込みをしない")
     a = ap.parse_args(argv)
@@ -423,24 +455,32 @@ def main(argv=None) -> int:
 
     # ★2026-10-04 ユーザー「すでに仕入れた出品も表示されている。スプシ更新のタイミングを調整して」:
     #   仕入済のチェックは「注文の取り込み」が購入履歴と結んだ時に付く。先に取り込んでから仕入れ待ちを読む
-    if not a.no_sync:
-        print("▶ 先に注文の取り込み (購入履歴と結ぶ) をします", flush=True)
-        try:
-            import order_purchase_sync as _ops
-            _ops.main(["--write"])
-        except Exception as e:                                 # noqa: BLE001
-            print(f"  ⚠ 注文の取り込みに失敗 ({type(e).__name__}: {str(e)[:80]}) — 前回の状態のまま探します", flush=True)
-    orders = load_waiting_orders(a.item)
-    print(f"仕入れ待ちの PSA: {len(orders)}件")
-    if not orders:
-        print("✅ 仕入れ待ちの PSA はありません")
-        return 0
+    if a.offers:
+        import offer_calc
+        orders = offer_targets(offer_calc.fetch_offers())
+        print(f"オファーが来ている PSA: {len(orders)}件")
+        if not orders:
+            print("✅ オファーが来ている PSA はありません")
+            return 0
+    else:
+        if not a.no_sync:
+            print("▶ 先に注文の取り込み (購入履歴と結ぶ) をします", flush=True)
+            try:
+                import order_purchase_sync as _ops
+                _ops.main(["--write"])
+            except Exception as e:                             # noqa: BLE001
+                print(f"  ⚠ 注文の取り込みに失敗 ({type(e).__name__}: {str(e)[:80]}) — 前回の状態のまま探します", flush=True)
+        orders = load_waiting_orders(a.item)
+        print(f"仕入れ待ちの PSA: {len(orders)}件")
+        if not orders:
+            print("✅ 仕入れ待ちの PSA はありません")
+            return 0
     sheets = W._sheets()
     aux = S.PRODUCT_COL_AUX_START
     done = []
     for i, o in enumerate(orders, 1):
         _l, _n, row = W.find_row(sheets, o.get("sku", ""), o["item_id"])
-        note = ""
+        note = o.get("note", "")
         key = cert = ""
         urls = []
         cost = None
@@ -460,7 +500,7 @@ def main(argv=None) -> int:
             if not o["title"]:
                 o["title"] = row[2]
         else:
-            note = "商品管理シートに行が見つかりません (タイトルだけで探しています)"
+            note = " / ".join(x for x in (note, "商品管理シートに行が見つかりません (タイトルだけで探しています)") if x)
         if not key:
             key = key_from_title(o["title"])
             if key:
@@ -493,11 +533,12 @@ def main(argv=None) -> int:
     for d in done:
         store = merge_shown(store, ops.norm_order(d.get("order")), shown_ids(d["cands"]), _dt.date.today())
     save_shown(store)
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(build_html(done), encoding="utf-8")
-    print(f"✅ 目視画面: {OUT}")
+    out = OUT_OFFERS if a.offers else OUT
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(build_html(done, offers=a.offers), encoding="utf-8")
+    print(f"✅ 目視画面: {out}")
     if not a.no_open:
-        webbrowser.open(OUT.as_uri())
+        webbrowser.open(out.as_uri())
     return 0
 
 

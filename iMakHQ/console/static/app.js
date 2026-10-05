@@ -39,7 +39,7 @@
     fix: ["価格見直し", "タイトル改修"],
     // ★2026-09-19 ユーザー「出品くんコンソールにオファーがないね」。
     //   旧パネルでは上段の青ボタンで、この画面のどこにも出ていなかった。
-    offer: ["オファー対応", "ミラーに広告・オファー"],
+    offer: ["オファー対応", "ミラーに広告・オファー", "オファーの PSA の安い仕入元"],
     order: ["注文の取り込み", "仕入れ先を探す"],
     shelf: ["取下再出品", "再仕入れ一覧"]
   };
@@ -354,10 +354,13 @@
         '<span class="d">来ていません</span><span class="ugo"></span></div>');
     }
     if (oj && oj.n) {
+      // ★2026-10-05 ユーザー「オファー判定の時も、売れたPSAの仕入先を探すがあると助かる」
+      var opb = buttons.filter(function (b) { return b.label.indexOf("オファーの PSA の安い仕入元") >= 0; })[0];
       big.push('<div class="u"><span class="k">オファー (返事の期限は受信から約1日)</span>' +
         '<span class="t"><b>' + num(oj) + "</b>件 来ています</span>" +
-        '<span class="d">国・出品価格・仕入値つきの一覧をブラウザで開きます</span>' +
-        '<span class="ugo">' + (oj.runnable ? jobBtn(oj, "オファー対応").replace("<button", '<button class="run hot"') : "") + "</span></div>");
+        '<span class="d">国・出品価格・仕入値つきの一覧をブラウザで開きます。PSA は今より安い仕入元も探せます</span>' +
+        '<span class="ugo">' + (oj.runnable ? jobBtn(oj, "オファー対応").replace("<button", '<button class="run hot"') : "") +
+        (opb ? " " + jobBtn(opb, "安い仕入元を探す") : "") + "</span></div>");
     }
     // ★2026-10-04 ユーザー「今日やることのオファーのようにして。右に注文、左にオファーの２枠で」:
     //   9/29 にやめた仕入れ待ちの大きな枠を、売れた PSA の仕入れ先を探すボタン付きで戻す
