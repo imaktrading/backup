@@ -35,7 +35,7 @@ def test_zero_target_returns_no_error():
     """今日まだ出品していない = 目標0円 → 候補0件・エラーなし。"""
     got = SE.count_workload()
     assert got["error"] == ""
-    assert got["picked"] == got["max_picked"]        # ★2026-10-05 上限なし = 対象を全部
+    assert got["picked"] == min(got["max_picked"], max(0, SE.daily_cap() - SE.evicted_today_count()))  # ★10/5 1日50件        # ★2026-10-05 上限なし = 対象を全部
 
 
 def test_picks_something_when_target_is_set(monkeypatch):
@@ -46,7 +46,7 @@ def test_picks_something_when_target_is_set(monkeypatch):
     monkeypatch.setattr(SE, "evicted_today_amount", lambda *a, **k: 0.0)
     got = SE.count_workload()
     assert got["error"] == ""
-    assert got["picked"] == got["max_picked"]        # ★2026-10-05 出品額で切らない
+    assert got["picked"] == min(got["max_picked"], max(0, SE.daily_cap() - SE.evicted_today_count()))  # ★10/5 1日50件        # ★2026-10-05 出品額で切らない
     assert got["picked"] >= 0        # 環境の funnel/live 有無に依存するので下限だけ確認
     assert got["amount"] >= 0.0
 

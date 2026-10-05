@@ -680,8 +680,39 @@ def evicted_today_amount(today=None, path=None):
         return 0.0
 
 
+# ★2026-10-05 ユーザー「一気に落とすのはアレだね」→「じゃ、50で」: ② は1日50件まで (並び順の上から)。
+#   溜まっている 294件 (10/5) は約1週間で片付き、その後は1日10件前後しか増えないので実質上限なし。
+#   値は設定ファイル (shelf_evict_settings.json の "daily_cap") で変えられる
+DEFAULT_DAILY_CAP = 50
+
+
+def daily_cap(path=SETTINGS_PATH):
+    try:
+        with open(path, encoding="utf-8") as f:
+            v = (json.load(f) or {}).get("daily_cap")
+        return int(v) if v is not None else DEFAULT_DAILY_CAP
+    except Exception:                                          # noqa: BLE001
+        return DEFAULT_DAILY_CAP
+
+
+def evicted_today_count(today=None, path=None):
+    """今日すでに棚で落とした件数 (I/O)。読めなければ 0。"""
+    import json as _j
+    today = (today or datetime.date.today()).isoformat()
+    try:
+        with io.open(path or EVICTED_LOG, encoding="utf-8") as f:
+            return int(_f((_j.load(f) or {}).get(today + "#n", 0)))
+    except Exception:                                          # noqa: BLE001
+        return 0
+
+
+def cap_today(picked, cap, done_today):
+    """今日あと何件落としてよいかで切る (純関数)。picked は並び順どおり。"""
+    return picked[:max(0, cap - done_today)]
+
+
 def remember_evicted(amount, today=None, path=None):
-    """落とした額を今日ぶんに足す。書けなくても処理は止めない。"""
+    """落とした額と件数を今日ぶんに足す。書けなくても処理は止めない。"""
     import json as _j
     path = path or EVICTED_LOG
     today = (today or datetime.date.today()).isoformat()
@@ -692,7 +723,8 @@ def remember_evicted(amount, today=None, path=None):
         except Exception:                                      # noqa: BLE001
             data = {}
         data[today] = _f(data.get(today, 0)) + _f(amount)
-        for old in sorted(data)[:-14]:
+        data[today + "#n"] = int(_f(data.get(today + "#n", 0))) + 1          # ★2026-10-05 1日50件の数え
+        for old in sorted(data)[:-28]:
             data.pop(old, None)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with io.open(path, "w", encoding="utf-8") as f:
@@ -993,8 +1025,9 @@ def count_workload():
         _pd = load_price_downs() if _pj is not None else False
         mpicked, mtotal = pick(rows, float("inf"), shelf_of, cat_of, only_tier=TIER_STALE,
                                restock_pending=_keep, no_demand=_nd, price_downs=_pd, psa_judge=_pj)
-        out.update(max_picked=len(mpicked), max_amount=mtotal, picked=len(mpicked), amount=mtotal,
-                   tier2=len(mpicked))
+        _cap = cap_today(mpicked, daily_cap(), evicted_today_count())       # ★2026-10-05 1日50件まで
+        out.update(max_picked=len(mpicked), max_amount=mtotal, picked=len(_cap),
+                   amount=sum(shelf_of(r) for _t, r in _cap), tier2=len(_cap))
         if False:                          # 上限を外したので「今日の目標」で切らない (2026-10-05)
             picked, total = pick(rows, target, shelf_of, cat_of, only_tier=TIER_STALE,
                                  restock_pending=_keep, no_demand=_nd, price_downs=_pd, psa_judge=_pj)
@@ -1188,6 +1221,13 @@ def main():
     # ★2026-10-05 ユーザー判断: 落とす前のオファーはやめた (こちらからオファーを送らない)。
     #   以前送った時も数件しか売れず、送ると96時間は出品を直せず取り消せない (仕入元が切れたら終了しかない)。
     #   欲しい人はベストオファーで自分から送ってくる (過去30日 22件)。shelf_offer.py は使っていない
+    if target == float("inf") and picked:
+        _cap, _done = daily_cap(), evicted_today_count()
+        _all = len(picked)
+        picked = cap_today(picked, _cap, _done)
+        total = sum(shelf_of(r) for _t, r in picked)
+        if len(picked) < _all:
+            print(f"  📏 1日{_cap}件まで (今日すでに {_done}件) → 並び順の上から {len(picked)}件 / 対象 {_all}件 (残りは明日以降)")
     if not picked:
         print("  落とせる候補がありません")
         return 0

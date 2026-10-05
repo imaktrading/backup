@@ -15,7 +15,7 @@ def test_今日の分を落とし切ったら0件(monkeypatch):
     monkeypatch.setattr(SE, "evicted_today_amount", lambda *a, **k: 3468.0)
     monkeypatch.setattr(SE, "_load", lambda *a, **k: ([], lambda r: 0, lambda r: ""))
     got = SE.count_workload()
-    assert got["picked"] == got["max_picked"]        # ★2026-10-05 上限なし: 落とした額では減らさない
+    assert got["picked"] == min(got["max_picked"], max(0, SE.daily_cap() - SE.evicted_today_count()))  # ★10/5 1日50件        # ★2026-10-05 上限なし: 落とした額では減らさない
 
 
 def test_まだ落としていなければ目標が立つ(monkeypatch):
@@ -23,4 +23,4 @@ def test_まだ落としていなければ目標が立つ(monkeypatch):
     monkeypatch.setattr(SE, "evicted_today_amount", lambda *a, **k: 0.0)
     monkeypatch.setattr(SE, "_load", lambda *a, **k: ([], lambda r: 0, lambda r: ""))
     got = SE.count_workload()
-    assert got["picked"] == got["max_picked"] and got["error"] == ""
+    assert got["picked"] == min(got["max_picked"], max(0, SE.daily_cap() - SE.evicted_today_count()))  # ★10/5 1日50件 and got["error"] == ""

@@ -125,3 +125,16 @@ def test_all_categories_branch_on_aux_and_market_gate_is_psa_only():
         assert S.tier_of({"qty": 1, "age_days": 200, "item_id": "x"}, category=cat) is None
     for cat in ("G-shock", "モンベル", "バッグ", "一番くじ"):
         assert S.tier_of({"qty": 1, "age_days": 31, "item_id": "x"}, category=cat) == S.TIER_STALE
+
+
+def test_daily_cap_50(tmp_path):
+    """★2026-10-05 ユーザー「一気に落とすのはアレだね」→「じゃ、50で」"""
+    assert S.DEFAULT_DAILY_CAP == 50
+    picked = [(2, {"item_id": str(i)}) for i in range(120)]
+    assert len(S.cap_today(picked, 50, 0)) == 50
+    assert [r["item_id"] for _t, r in S.cap_today(picked, 50, 48)] == ["0", "1"]   # 並び順の上から
+    assert S.cap_today(picked, 50, 60) == []
+    p = str(tmp_path / "log.json")
+    S.remember_evicted(10.0, path=p)
+    S.remember_evicted(5.0, path=p)
+    assert S.evicted_today_count(path=p) == 2 and S.evicted_today_amount(path=p) == 15.0
