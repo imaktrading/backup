@@ -1048,6 +1048,17 @@ def build_restock_html(items):
         _pn = _s(it.get("price_now"))
         # ★2026-07-30: 同じカードの **別出品** が同じ回に出ると「さっきやったのと同じ」に見える。
         #   別物 (それぞれに補URLが要る) と分かるようにバッジで明示する。
+        # ★2026-10-06 (ADV 依頼): 今ある仕入元・補URL の値段を並べる。候補と比べられれば、
+        #   同じ補の中に値段が桁違いの物 (別のカードの疑い) があっても人が気づける。判定はしない
+        _cs = it.get("current_supply") or []
+        cs_html = ""
+        if _cs:
+            _cells = []
+            for _lb, _u, _p in _cs:
+                _cells.append(f"<a href='{_html.escape(_u)}' target='_blank' style='color:#9cf'>"
+                              f"{_html.escape(_lb)} {('¥{:,}'.format(_p)) if _p else '¥?'}</a>")
+            cs_html = ("<div style='font-size:12px;margin:3px 0;color:#ccc'>今ある仕入元・補: "
+                       + " / ".join(_cells) + "</div>")
         _sib = it.get("siblings") or []
         sib_html = ("<div style='background:#443;color:#ffd;padding:3px 8px;border-radius:4px;"
                     "margin:3px 0;font-size:13px'>🔁 同じカードの<b>別出品</b>が同時に出ています"
@@ -1108,7 +1119,7 @@ def build_restock_html(items):
             f"<div class='card' id='c{idx}' data-idx='{idx}' data-ref=\"{_proxied(ref)}\">"
             f"<div class='cnt' id='cnt{idx}'>RESTOCK ✓(買う候補のみ残す)</div>"
             f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>"
-            f"{cat_html}{idf_html}{vuni_html}{mv_html}{sib_html}{cost_html}"
+            f"{cat_html}{idf_html}{vuni_html}{mv_html}{sib_html}{cost_html}{cs_html}"
             # ★2026-07-28: タイトル/eBayリンクは候補リストの**上**に置く(候補が縦に長いと
             # 下端がスクロールしないと見えず、何のカードを見ているか分からなくなるため)。
             f"<div class='t'>{_html.escape(_s(it.get('title')))}</div>{v8_html}"

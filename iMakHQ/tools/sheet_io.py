@@ -421,13 +421,39 @@ def drop_claimed_supply(rows, claimed):
     戻り: (足す行, 外した[(URL, 理由)])。同じ呼び出しの中での重複も1行にする。
     """
     keep, dropped, seen = [], [], set(claimed or ())
+
+    def _why(u):
+        return "HIGH に同じ仕入元が在る" if u in (claimed or ()) else "同時に足す行と重複"
+
+    aux = range(PRODUCT_COL_AUX_START, PRODUCT_COL_AUX_START + PRODUCT_AUX_MAX)
     for r in rows:
         url = (r[0] if r else "").strip()
         if is_one_of_a_kind(url):
             if url in seen:
-                dropped.append((url, "HIGH に同じ仕入元が在る" if url in (claimed or ()) else "同時に足す行と重複"))
+                dropped.append((url, _why(url)))
                 continue
             seen.add(url)
+        # ★2026-10-06 (ADV 依頼・ユーザー「目視に間違う可能性を出す作りが悪いなら直せよ」):
+        #   行を足す経路 (再仕入れの出品待ち行・トレジャー) は **補URL の列も一緒に入れる**のに、
+        #   ここは A列しか見ていなかった。実害: ゾロ OP06-118 の _p と _p1 の2行が
+        #   スニダンの同じ個体 2本を補に持った (1枚売れたらもう片方は履行できない)。
+        #   補の1点ものも同じ門に通す。押さえられている物は外して前に詰める (行は残す)
+        r = list(r)
+        kept_aux = []
+        for c in aux:
+            u = (r[c] if len(r) > c else "").strip()
+            if not u:
+                continue
+            if is_one_of_a_kind(u):
+                if u in seen:
+                    dropped.append((u, "補URL: " + _why(u)))
+                    continue
+                seen.add(u)
+            kept_aux.append(u)
+        if len(r) > PRODUCT_COL_AUX_START:
+            for i, c in enumerate(aux):
+                if len(r) > c:
+                    r[c] = kept_aux[i] if i < len(kept_aux) else ""
         keep.append(r)
     return keep, dropped
 
@@ -450,7 +476,8 @@ def append_product_rows(rows, value_input_option="RAW"):
     # ★1点ものの仕入元は、HIGH に既に在れば足さない (上の ONE_OF_A_KIND_SUPPLY)。黙って捨てない
     rows, dropped = drop_claimed_supply(rows, claimed_supply_urls(ws.get_all_values()))
     if dropped:
-        print(f"  ⚠️ 仕入元が既に HIGH に在るので足さなかった: {len(dropped)}行")
+        print(f"  ⚠️ 1点ものの仕入元が既に押さえられているので外した: {len(dropped)}本 "
+              f"(A列なら行ごと・補URLならその1本だけ)")
         for url, why in dropped[:20]:
             print(f"     - {why}: {url}")
     if not rows:

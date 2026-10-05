@@ -826,6 +826,22 @@ def add_existing_prices(price_by_idx, confirmed, item_targets, vals, prices=None
     return out
 
 
+def current_supply(r, prices, aux_max=None):
+    """その行の今の仕入元 (A) と補URL → [(呼び名, URL, 値段 or None)] (純関数)。
+
+    ★2026-10-06 (ADV 依頼・ユーザー「目視に間違う可能性を出す作りが悪いなら直せよ」):
+      同じ補の中に ¥12,000 と ¥830,000 が並ぶ組があった (別のカードが混ざった疑い)。目視は1件ずつで
+      比べようがないので、**今ある補の値段を候補と並べて出す**。判定は足さない (比べられる形にするだけ)。
+    """
+    out = []
+    for label, col in [("仕入元", 0)] + [(f"補{k + 1}", AUX0 + k) for k in range(aux_max or AUXN)]:
+        u = _cell(r, col)
+        if u:
+            p = (prices or {}).get(_norm_url(u))
+            out.append((label, u, int(p) if isinstance(p, (int, float)) and p > 0 else None))
+    return out
+
+
 def swap_baseline(now_cost, t, vals, prices, aux_max=None):
     """入れ替えの「¥1,000以上安い」を何と比べるか (純関数, test可)。
 
@@ -2066,14 +2082,20 @@ def build_confirm_context(vals, cache, today, verbose=False):
     used_by_others, guard_ok = {}, True
     try:
         import dup_guard as _dg0
-        for _r in vals[1:]:
-            _iid0 = _cell(_r, B)
-            if not (_iid0 and not _cell(_r, D)):      # live 出品のみ
+        for _n, _r in enumerate(vals[1:], 2):
+            if _cell(_r, D):                           # 売り切れの行は押さえていない
                 continue
+            _iid0 = _cell(_r, B)
+            # ★2026-10-06 (ADV 依頼): itemID の無い「出品待ち」の行も1点ものを押さえている。
+            #   live だけ見ていたので、出品前の行が持つスニダンの個体を別の出品の補に出していた
+            #   (ゾロ OP06-118 _p / _p1 が同じ2本を共有)。出品待ちの行は1点ものだけ数える
+            _owner = _iid0 or f"row:{_n}"
             for _u0 in [_cell(_r, A)] + [_cell(_r, AUX0 + k) for k in range(AUXN)]:
+                if not _iid0 and not sheet_io.is_one_of_a_kind(_u0):
+                    continue
                 _n0 = _dg0.norm_url(_u0)
                 if _n0:
-                    used_by_others.setdefault(_n0, set()).add(_iid0)
+                    used_by_others.setdefault(_n0, set()).add(_owner)
     except Exception as _e0:
         if verbose:
             print(f"  ⚠ 使用中URLマップを作れず、表示前の除外はskip ({type(_e0).__name__})")
@@ -2563,6 +2585,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
 
     # 当日キャッシュに候補がある対象だけを確証items化(idx=items内index→書込時に target へ戻す)
     items, item_targets = [], []
+    _cur_prices = None                                   # 今ある補の値段表 (画面に並べる・初回だけ読む)
     art_all_dropped = 0
     art_dropped_log = []
     try:
@@ -2702,9 +2725,16 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             _lab = prc.psa_label_facts(t.get("cert"), cn)
         except Exception:
             _lab = {}
+        if _cur_prices is None:                         # 値段表は1回だけ読む (読めなければ値段なしで並べる)
+            try:
+                import hoju_url_from_dupes as _hd2
+                _cur_prices = _price_cache_get(_hd2) or {}
+            except Exception:                           # noqa: BLE001
+                _cur_prices = {}
         items.append({"idx": idx, "title": (t.get("title") or "")[:90], "card_no": cn,
                       "ebay_url": _ebay_itm_url(iid), "ref_image": ref, "candidates": cands,
                       "multi_variant": _mv, "cost_now": _cost_now, "price_now": _price_now,
+                      "current_supply": current_supply(_rv, _cur_prices),
                       "siblings": _sib, "psa_label": _lab,
                       "catalog": prc.catalog_view(t.get("key"), t.get("title") or "")})
         item_targets.append(t)
