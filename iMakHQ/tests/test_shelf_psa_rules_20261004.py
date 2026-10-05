@@ -67,7 +67,7 @@ def test_judge_skips_market_after_cap_and_without_api():
     assert d["verdict"] == R.KEEP                                  # 市場を見ていない = 落とさない
 
 
-def test_pick_uses_psa_judge_only_for_tcg():
+def test_pick_uses_judge_for_all_categories():
     rows = [{"item_id": "P1", "qty": 1, "age_days": 40, "title": "a", "price": 10},
             {"item_id": "P2", "qty": 1, "age_days": 40, "title": "b", "price": 10},
             {"item_id": "G1", "qty": 1, "age_days": 40, "title": "c", "price": 10}]
@@ -76,8 +76,9 @@ def test_pick_uses_psa_judge_only_for_tcg():
     dec = []
     picked, _ = S.pick(rows, float("inf"), lambda r: 10.0, lambda r: cat[r["item_id"]],
                        price_downs={"G1": (100.0, 10.0)}, psa_judge=judge, decisions=dec)
-    assert [r["item_id"] for _t, r in picked] == ["P1", "G1"]      # G-SHOCK は今までどおり値下げ済みで落とす
-    assert [d["item_id"] for d in dec] == ["P1", "P2"]
+    # ★2026-10-05: G-SHOCK も同じ表で決める (値下げ済みかどうかではない)
+    assert [r["item_id"] for _t, r in picked] == ["P1"]
+    assert [d["item_id"] for d in dec] == ["P1", "P2", "G1"]
 
 
 def test_hoju_priority_goes_first_and_is_searched_even_when_full():
@@ -106,3 +107,21 @@ def test_kagoya_gets_hoju_priority():
     assert R.HOJU_PRIORITY_PATH in KB.PUSH_EXTRA
     src = open(os.path.join(os.path.dirname(__file__), "..", "tools", "kagoya_offload.py"), encoding="utf-8").read()
     assert "load_shelf_priority()" in src
+
+
+def test_all_categories_branch_on_aux_and_market_gate_is_psa_only():
+    """★2026-10-05 ユーザー「補があるかどうかにして」「全リスティングを対象に」。公式仕入・有在庫は除外。"""
+    row = {"item_id": "G", "title": "G-SHOCK GW-M5610U", "age_days": 70, "price": 150, "watch": 0}
+
+    class Boom:
+        def stat(self, *a):
+            raise AssertionError("PSA 以外で市場を引かない")
+    d = R.judge(row, False, False, {}, Boom(), use_market=False)
+    assert d["verdict"] == R.DROP and d["code"].startswith("⑭")          # 補なし 60日 → 落とす (市場の門なし)
+    row["age_days"] = 40
+    d = R.judge(row, False, False, {"G": (10.0, None)}, None, use_market=False)
+    assert d["verdict"] == R.KEEP                                          # 見られた G-SHOCK は残す (補優先ではない)
+    for cat in ("Tシャツ(公式等)", "公式サイト仕入", "有在庫", "有在庫？", None):
+        assert S.tier_of({"qty": 1, "age_days": 200, "item_id": "x"}, category=cat) is None
+    for cat in ("G-shock", "モンベル", "バッグ", "一番くじ"):
+        assert S.tier_of({"qty": 1, "age_days": 31, "item_id": "x"}, category=cat) == S.TIER_STALE

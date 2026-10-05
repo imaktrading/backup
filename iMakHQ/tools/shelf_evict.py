@@ -99,6 +99,13 @@ MIN_AGE_DAYS = 30
 #   **有在庫は全カテゴリ落とさない** (現物がある。動かすなら値下げ・オファー)。
 STALE_MAX_AGE = {"TCG": 30, "G-shock": 30, "Tシャツ": 30}
 STALE_CATEGORIES = tuple(STALE_MAX_AGE)
+# ★2026-10-05 ユーザー「全リスティングを対象にしないと、ずっと残ったままになるでしょ」「G-SHOCK・Tシャツに関わらず、
+#   補があるかどうかにして、モンベルとかポーターとかもあるわけだし」:
+#   ② は **全商材** が対象 (分かれ目は商材ではなく補があるかどうか・shelf_psa_rules の表)。外すのはこれだけ:
+#   ・公式仕入 (Tシャツ(公式等) / 公式サイト仕入): 「公式は値下がりがあるし、売り切れで自然淘汰されるから、除外して」
+#   ・有在庫 / 有在庫？: 「有在庫も除外」
+#   ・カテゴリが分からない (None): 判断できない物は落とさない
+SHELF_EXCLUDED = ("Tシャツ(公式等)", "公式サイト仕入", "有在庫", "有在庫？", None)
 
 ONHAND = "有在庫"
 # ★2026-09-15 ユーザー「じゃ、落とすグループに有在庫？にしておいて、後で調べる」:
@@ -276,7 +283,7 @@ def franchise_rank(title):
     return FRANCHISE_OTHER
 
 
-def tier_of(row, min_age=MIN_AGE_DAYS, category=None, stale_cats=STALE_CATEGORIES,
+def tier_of(row, min_age=MIN_AGE_DAYS, category=None, stale_cats=None,
             max_age=None, restock_pending=None, no_demand=None):
     """その出品を落とす順の何番に置くか。触らないものは None (純関数, test可)。
 
@@ -305,8 +312,10 @@ def tier_of(row, min_age=MIN_AGE_DAYS, category=None, stale_cats=STALE_CATEGORIE
         return TIER_OOS if iid in no_demand else None
     if _f(row.get("sold_qty")) + _f(row.get("sales90")) > 0:
         return None                       # 売れた実績あり
+    if category in SHELF_EXCLUDED:
+        return None                       # 公式仕入・有在庫・カテゴリ不明は落とさない (2026-10-05)
     if stale_cats and category not in stale_cats:
-        return None                       # 線を引けるデータが無いカテゴリは触らない
+        return None                       # 呼び手が絞った時だけ
     # ★2026-09-02: 一律 min_age ではなく **カテゴリごとの日数**で判定する。
     #   TCG を落とす日数(30)で G-shock を落とすと、まだ売れる時期の在庫を捨てる
     #   (G-shock は中央値284日で売れる)。
@@ -572,8 +581,8 @@ def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=No
         #   (shelf_psa_rules。表の正本は管理表タブ「棚②の新ルール案 (HQ)」)。落とすのは表で「取下げ」かつ
         #   市場の門を通らなかった物だけ。補優先・残すは held へ (補優先は補URL③が先に探す)。
         #   G-SHOCK / Tシャツ は今までどおり「値下げ済みなら落とす」。
-        if (t == TIER_STALE and price_downs is not False and psa_judge is not None
-                and cat_of and cat_of(r) == "TCG"):
+        if t == TIER_STALE and price_downs is not False and psa_judge is not None:
+            # ★2026-10-05: 全商材を同じ表で (補があるかどうか)。市場の門は PSA だけ (_psa_judge の中)
             d = psa_judge(r)
             if decisions is not None:
                 decisions.append(d)
@@ -997,19 +1006,31 @@ def count_workload():
     return out
 
 
-def _psa_judge(price_downs):
-    """PSA の ② を棚②の新しい表 + 市場の門で決める関数を作る (I/O: 補の有無・表示レポート・市場)。"""
-    import shelf_psa_rules as R
-    import psa_hoju_fill as H
-    bands = load_price_down_bands()
-    aux = {}
-    try:
-        for r in H._read_high()[1:]:
-            iid = H._cell(r, H.B)
+def _aux_by_item():
+    """itemID → 補URL が1本以上あるか。商品管理シート (HIGH・LOW) の両方から (I/O)。"""
+    import gspread
+    from google.oauth2.service_account import Credentials
+    import sheet_io as _S
+    gc = gspread.authorize(Credentials.from_service_account_file(
+        LF.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"]))
+    a0, n = _S.PRODUCT_COL_AUX_START, _S.PRODUCT_AUX_MAX
+    out = {}
+    for sid in LF.SHEET_IDS:
+        for r in gc.open_by_key(sid).get_worksheet_by_id(LF.SHEET_GID).get_all_values()[1:]:
+            iid = (r[1] if len(r) > 1 else "").strip()
             if iid:
-                aux[iid] = H._backup_count(r) > 0
+                out[iid] = any((r[k].strip() if len(r) > k else "") for k in range(a0, a0 + n))
+    return out
+
+
+def _psa_judge(price_downs, cat_of=None):
+    """② を棚②の表 (補があるかどうか) + 市場の門 (PSA だけ) で決める関数を作る (I/O: 補の有無・表示レポート・市場)。"""
+    import shelf_psa_rules as R
+    bands = load_price_down_bands()
+    try:
+        aux = _aux_by_item()
     except Exception as e:                                     # noqa: BLE001
-        print(f"  ⚠ 補の有無を読めず ({type(e).__name__}) → PSA の ② は今回落としません")
+        print(f"  ⚠ 補の有無を読めず ({type(e).__name__}) → ② は今回落としません")
         return lambda r: {"item_id": r.get("item_id"), "verdict": R.KEEP, "code": "補の有無が読めない"}
     traffic, tf = R.load_traffic()
     print(f"  📊 表示レポート: {os.path.basename(tf) if tf else '無し (閲覧が要る行は落としません)'}")
@@ -1020,7 +1041,11 @@ def _psa_judge(price_downs):
     def judge(r):
         iid = str(r.get("item_id") or "")
         down = not needs_price_down_first(iid, price_downs, bands)
-        return R.judge(r, aux.get(iid, False), down, traffic, market)
+        cat = cat_of(r) if cat_of else "TCG"
+        d = R.judge(r, aux.get(iid, False), down, traffic, market if cat == "TCG" else None,
+                    use_market=(cat == "TCG"))
+        d["category"] = cat
+        return d
     return judge
 
 
@@ -1052,8 +1077,10 @@ def _report_psa_decisions(decisions, ended=False):
     import shelf_psa_rules as R
     _save_last_psa_drops([d["item_id"] for d in decisions if d.get("verdict") == R.DROP])
     c = collections.Counter(d["verdict"] for d in decisions)
-    print(f"\n  🃏 PSA の ② を新しい表で判定: {len(decisions)}件 → "
+    print(f"\n  🃏 ② を棚②の表で判定 (全商材・公式仕入と有在庫は除く): {len(decisions)}件 → "
           f"取下げ {c.get(R.DROP, 0)} / 補優先 {c.get(R.HOJU, 0)} / 残す {c.get(R.KEEP, 0)}")
+    for cat, n in collections.Counter((d.get("category"), d["verdict"]) for d in decisions).most_common():
+        print(f"     {cat[0]} {cat[1]}: {n}")
     for code, n in collections.Counter(d["code"] for d in decisions).most_common():
         print(f"     {code}: {n}")
     ids = R.write_hoju_priority(decisions)
@@ -1121,7 +1148,7 @@ def main():
             return _l(row) if "_mirror" in row else _f2(row)
 
     print("対象: 仕入元が死んでいるもの(全カテゴリ) → "
-          f"{'/'.join(STALE_CATEGORIES)} の 期限超え・未販売を ウォッチ0・200日超 → 売れない作品 → ウォッチ少ない順")
+          "全商材 (公式仕入・有在庫は除く) の 30日超・未販売を 棚②の表 (補があるかどうか・PSA は市場の門) で")
     if target <= 0:
         print("  今日はまだ出品していないので、落とす分もありません")
         return 0
@@ -1133,7 +1160,7 @@ def main():
           f"(需要があった分は再仕入れへ)")
     _downs = load_price_downs()
     _held, _decisions = [], []
-    _judge = _psa_judge(_downs) if _downs is not None else None
+    _judge = _psa_judge(_downs, cat_of) if _downs is not None else None
     picked, total = pick(rows, target, shelf_of, cat_of,
                          only_tier=(int(a.tier) if getattr(a, "tier", None) else None),
                          restock_pending=_keep, no_demand=_nd, price_downs=_downs, held=_held,

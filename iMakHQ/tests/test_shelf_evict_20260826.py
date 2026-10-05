@@ -74,7 +74,8 @@ def test_earning_categories_are_left_alone_when_supply_alive():
     # ★2026-09-15 ユーザー「そだね」: 稼いでいるのは公式仕入の Tシャツ (9/14 在庫あり64件・売れ7)。
     #   メルカリ・ラクマ仕入の1点物 (35件・売れ0) だけ "Tシャツ" として30日で回す。公式仕入は今までどおり残す
     assert SE.tier_of(_row(age=200), category="Tシャツ(公式等)") is None
-    assert SE.tier_of(_row(age=200), category="一番くじ") is None
+    # ★2026-10-05 ユーザー「全リスティングを対象に」: 一番くじ等も対象 (補があるかどうかの表で決める)。公式仕入は除外のまま
+    assert SE.tier_of(_row(age=200), category="一番くじ") == SE.TIER_STALE
 
 
 def test_dead_supply_is_dropped_in_every_category():

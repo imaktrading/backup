@@ -57,7 +57,9 @@ class TestThirtyDayRotation:
 
     def test_other_categories_are_untouched(self):
         """線を引ける根拠が無いカテゴリは触らない。"""
-        assert E.tier_of(_row("1", age=999), category="T-Shirts") is None
+        # ★2026-10-05: 全商材が対象になった (公式仕入・有在庫・不明だけ除外)
+        assert E.tier_of(_row("1", age=999), category="T-Shirts") == E.TIER_STALE
+        assert E.tier_of(_row("1", age=999), category="Tシャツ(公式等)") is None
 
 
 class TestDropOrder:

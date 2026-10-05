@@ -233,7 +233,7 @@ class Market:
             return None
 
 
-def judge(row, has_aux, down, traffic, market=None):
+def judge(row, has_aux, down, traffic, market=None, use_market=True):
     """1件の判定 (market 以外は純関数)。戻り dict (verdict, code, 材料)。"""
     f = lambda v: float(str(v or 0).replace(",", "") or 0)        # noqa: E731
     iid = str(row.get("item_id") or "")
@@ -244,7 +244,10 @@ def judge(row, has_aux, down, traffic, market=None):
     out = {"item_id": iid, "title": row.get("title") or "", "age": int(age), "price": price,
            "aux": has_aux, "down": down, "watch": watch, "views": views, "table": code,
            "verdict": v, "code": code, "market": None}
-    if v == DROP:
+    if v == HOJU and not has_aux and not use_market:
+        # ★2026-10-05: 補が無い PSA 以外 (G-SHOCK 等) で見られた物は「残す」。補を探す仕組みが無い
+        out["verdict"], out["code"] = KEEP, "⑬' 補無・見られた (補を探す仕組みが無い商材)"
+    if v == DROP and use_market:                       # 市場の門は PSA だけ (カード番号で市場を引ける)
         st = None if (market is None or age >= CAP_AGE) else market.stat(out["title"], iid)
         out["market"] = st
         out["verdict"], out["code"] = market_verdict(age, price, st)

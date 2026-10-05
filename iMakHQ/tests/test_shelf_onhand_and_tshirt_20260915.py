@@ -89,5 +89,6 @@ def test_panel_tip_matches_the_rule():
     src = open(os.path.join(HQ, "control_panel.py"), encoding="utf-8").read()
     i = src.index('"label": "📉 棚② ')
     tip = src[i:i + 2500]
-    assert "有在庫" in tip and "Tシャツ" in tip
+    # ★2026-10-05: 全商材が対象になり、除外は「公式仕入」と「有在庫」(Tシャツという商材名では分けない)
+    assert "有在庫" in tip and "公式仕入" in tip
     assert "365日" not in tip[:tip.index('},')]

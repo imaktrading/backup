@@ -66,8 +66,11 @@ def test_other_categories_are_never_dropped_by_age():
     ★2026-09-15: Tシャツは **公式仕入 (取り下げると戻せない)** と **有在庫** を落とさない。
       メルカリ・ラクマ仕入の Tシャツだけ "Tシャツ" として30日で回す (test_shelf_onhand_and_tshirt_20260915)。
     """
-    for cat in ("Tシャツ(公式等)", SE.ONHAND, "フィギュア", "モンベル", "バッグ", None):
+    # ★2026-10-05 ユーザー「全リスティングを対象にしないと、ずっと残ったままになる」: 公式仕入・有在庫・不明だけ除外
+    for cat in ("Tシャツ(公式等)", SE.ONHAND, None):
         assert SE.tier_of(_row(age=9999), category=cat) is None
+    for cat in ("フィギュア", "モンベル", "バッグ"):
+        assert SE.tier_of(_row(age=9999), category=cat) == SE.TIER_STALE
 
 
 def test_sold_before_is_always_kept():
