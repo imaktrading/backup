@@ -51,7 +51,7 @@ def _col_letter(n):
     return chr(64 + n) if n <= 26 else "A" + chr(64 + n - 26)
 
 
-def next_flag(current, today):
+def next_flag(current, today, label="CULL"):
     """Q列の次の値を決める (純関数, test可)。
 
     ★2026-08-24 ユーザー決定: **回数を数える**。上限で止めない。
@@ -61,6 +61,9 @@ def next_flag(current, today):
       1回目は番号なし = 既に書いた 167件をそのまま1回目として使える。
     """
     cur = (current or "").strip()
+    if label != "CULL":
+        # ★2026-10-05 棚② は「棚② 日付」(新規出品で出し直さない印・sheet_io.is_shelf_dropped)。他の印は壊さず足す
+        return f"{cur} / {label} {today}" if cur else f"{label} {today}"
     if not cur:
         return f"CULL {today}"
     m = _CULL_RE.search(cur)
@@ -146,7 +149,7 @@ def find_result_files(days=2):
     return sorted(set(hits))
 
 
-def apply(ended_ids, commit=False, today=None):
+def apply(ended_ids, commit=False, today=None, label="CULL"):
     """取り下げ済みの itemID 集合 → B列を空 + Q列に印。処理した行数を返す。
 
     ★2026-08-24: 取下げを API 直送にしたので、**結果ファイルを介さずその場で呼べる**
@@ -175,7 +178,7 @@ def apply(ended_ids, commit=False, today=None):
                 continue
             cur = row[FLG_COL - 1].strip() if len(row) >= FLG_COL else ""
             ups.append({"range": f"{_col_letter(FLG_COL)}{n}",
-                        "values": [[next_flag(cur, today)]]})
+                        "values": [[next_flag(cur, today, label)]]})
             ups.append({"range": f"{_col_letter(ITEM_COL)}{n}", "values": [[""]]})
         if ups and commit:
             ws.batch_update(ups)

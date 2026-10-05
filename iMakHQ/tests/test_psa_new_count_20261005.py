@@ -27,3 +27,19 @@ def test_console_shows_it_in_today_strip():
     here = os.path.join(os.path.dirname(__file__), "..", "console")
     assert '"psa_new": lambda' in open(os.path.join(here, "counts.py"), encoding="utf-8").read()
     assert "新規に出せる PSA" in open(os.path.join(here, "static", "app.js"), encoding="utf-8").read()
+
+
+def test_shelf_dropped_rows_are_not_listed_again():
+    """★2026-10-05: 棚②で落とした行 (Q列「棚② 日付」) は出品済みと同じ扱い = 新規で出し直さない。取下げ (CULL) は戻す。"""
+    import sheet_io as S
+    import cull_writeback as CW
+    r = [""] * 35
+    r[8], r[16], r[17] = "123", "棚② 2026-10-05", "TCG"
+    c = [""] * 35
+    c[8], c[16], c[17] = "456", "CULL 2026-10-05", "TCG"
+    assert S.listed_certs([["h"], r, c]) == {"123"}
+    assert CW.next_flag("", "2026-10-05", "棚②") == "棚② 2026-10-05"
+    assert CW.next_flag("CULL 2026-09-01", "2026-10-05", "棚②") == "CULL 2026-09-01 / 棚② 2026-10-05"
+    assert CW.next_flag("", "2026-10-05") == "CULL 2026-10-05"
+    src = open(os.path.join(os.path.dirname(__file__), "..", "tools", "shelf_evict.py"), encoding="utf-8").read()
+    assert 'CW.apply(set(ok), commit=True, label="棚②")' in src

@@ -1296,9 +1296,9 @@ def main():
     if ended_ids:
         try:
             import cull_writeback as CW
-            n = CW.apply(ended_ids, commit=True)
+            n = CW.apply(ended_ids, commit=True, label="棚②")
             if n:
-                print(f"  ▶ 終わっていた分のスプシ後始末 → {n}行 (B列を空 + Q列に印)")
+                print(f"  ▶ 終わっていた分のスプシ後始末 → {n}行 (B列を空 + Q列に「棚② 日付」)")
         except Exception as e:                                 # noqa: BLE001
             print(f"  ⚠ 終わっていた分のスプシ後始末は次回に持ち越し: {type(e).__name__}: {e}")
     if not keep:
@@ -1324,8 +1324,9 @@ def main():
     ok = _verify_ended(ok)
     if ok:
         import cull_writeback as CW
-        n = CW.apply(set(ok), commit=True)
-        print(f"▶ スプシ更新 → {n}行 (B列を空 + Q列に印)")
+        # ★2026-10-05 棚② は「棚② 日付」の印 = 新規出品で出し直さない (取下げの CULL とは分ける)
+        n = CW.apply(set(ok), commit=True, label="棚②")
+        print(f"▶ スプシ更新 → {n}行 (B列を空 + Q列に「棚② 日付」= 新規で出し直さない)")
         try:
             import oos_status_refresh as OS
             OS.main_commit()

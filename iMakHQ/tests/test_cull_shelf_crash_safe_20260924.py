@@ -27,7 +27,7 @@ def test_done_ledger_writeback_runs_first_in_both():
 
 def test_already_ended_goes_through_sheet_cleanup():
     assert "CW.apply({r[\"item_id\"] for r in ended}, commit=True)" in SRC("cull_end.py")
-    assert "CW.apply(ended_ids, commit=True)" in SRC("shelf_evict.py")
+    assert 'CW.apply(ended_ids, commit=True, label="棚②")' in SRC("shelf_evict.py")   # ★10/5 棚②の印
 
 
 def test_shelf_records_amount_per_item():

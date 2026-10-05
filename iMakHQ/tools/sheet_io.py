@@ -114,9 +114,22 @@ def listed_certs(rows2d, itemid_col=PRODUCT_COL_ITEMID, cert_col=PRODUCT_COL_CER
                 continue
         iid = (r[itemid_col] or "").strip()
         cert = (r[cert_col] or "").strip()
-        if iid and cert:
+        if cert and (iid or is_shelf_dropped(r)):
             out.add(cert)
     return out
+
+
+# ★2026-10-05 棚② で落とした行は **出品済みと同じ扱い** (新規出品で出し直さない)。
+#   棚②の取下げは仕入元が生きたまま「売れなかった」ので落とす。取下げ (CULL・仕入元が死んだ) と同じく
+#   B列を空にするため、印を分けないと新規出品の対象に戻っていた (10/5 に落とした PSA 23件のうち9件が戻った)。
+#   ユーザー「後でわかるから、それがいいね」(Q列の印を「棚② 日付」に分ける)。
+PRODUCT_COL_FLG = 16        # Q (FLG)
+SHELF_MARK = "棚②"
+
+
+def is_shelf_dropped(row, flg_col=PRODUCT_COL_FLG):
+    """Q列に棚②の印がある行か (純関数)。"""
+    return SHELF_MARK in ((row[flg_col] if len(row) > flg_col else "") or "")
 
 
 LIVE_CACHE_PATH = r"C:\dev\iMak_data\hq\live_listings_cache.json"
