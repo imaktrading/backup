@@ -46,7 +46,8 @@ def test_short_set_fits_unchanged():
                    "C:Year Manufactured": "2019"})
     title = build_title_from_fields(f)
     # 2026-09-20: 余った枠は Gem Mint で埋める (ユーザー指示)
-    assert title == "PSA 10 Pokemon Japanese Unbroken Bonds #007/095 Pikachu 2019 Gem Mint"
+    # 2026-10-05: さらに余った枠は ゲーム名の直後に Card (ADV 依頼・ユーザー承認)
+    assert title == "PSA 10 Pokemon Card Japanese Unbroken Bonds #007/095 Pikachu 2019 Gem Mint"
 
 
 def test_character_never_cut_even_without_dash():

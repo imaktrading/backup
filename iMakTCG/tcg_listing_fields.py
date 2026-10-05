@@ -415,6 +415,8 @@ _GAME_TITLE_WORD = {
     "Dragon Ball Super Card Game": "Dragon Ball", "Gundam Card Game": "Gundam",
 }
 _TITLE_MAX = 80
+# セット名を前から短くする時、この語で始まる候補は使わない (2026-10-05 '& Legendary …' 事故)
+_SET_HEAD_SKIP = {"&", "-", "+", "/", ":", "and", "of", "the", "for", "für", "x"}
 
 
 def _game_word(c_game):
@@ -553,6 +555,10 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
             set_variants.append(tail)
         base_words = set_variants[-1].split()
         for i in range(1, len(base_words)):
+            # ★2026-10-05 (ADV 依頼・ユーザー承認): 先頭が記号・つなぎ語になる候補は使わない。
+            #   実害: 'Cp5: Mythical & Legendary Dream Shine Collection' → '& Legendary …' で始まるタイトル
+            if base_words[i].lower() in _SET_HEAD_SKIP:
+                continue
             set_variants.append(" ".join(base_words[i:]))
 
     # 各 Set 候補で、**入る任意要素だけを順に拾う** (高情報順)。
@@ -570,6 +576,17 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
         for opt in optional:
             if len(_assemble(ctoks + picked + [opt])) <= _TITLE_MAX:
                 picked.append(opt)
+        # ★2026-10-05 (ADV 依頼・ユーザー要望「レアリティが無くて語が足りない時に他の適切なワードは」):
+        #   `Card` を **最後に余った枠だけ** ゲーム名の直後に入れる (Gem Mint よりさらに後)。
+        #   買い手は「pokemon card japanese psa 10」と打つ。80字ギリギリの行は変わらない。
+        #   セット名などに既に Card がある時は足さない。
+        if game and game in ctoks:
+            done = _assemble(ctoks + picked)
+            if "card" not in _norm_words(done):
+                gi = ctoks.index(game) + 1
+                with_card = _assemble(ctoks[:gi] + ["Card"] + ctoks[gi:] + picked)
+                if len(with_card) <= _TITLE_MAX:
+                    return with_card
         return _assemble(ctoks + picked)
     # 最終手段 (Set を最短化しても core が超過): 従来の語境界 truncate
     title = _assemble(_core_tokens(set_variants[-1] if set_variants else ""))

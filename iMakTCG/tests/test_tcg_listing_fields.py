@@ -136,7 +136,8 @@ def test_title_blank_set_skipped():
     t = build_title_from_fields(map_specs_to_fields(specs, "2025"))
     assert "  " not in t                       # 二重スペース無し
     # 2026-09-20: 余った枠は Gem Mint で埋める (ユーザー指示) ので末尾に付く
-    assert t == "PSA 10 Pokemon Japanese #020/019 Marnie's Morpeko 2025 Gem Mint"
+    # 2026-10-05: さらに余った枠は ゲーム名の直後に Card (ADV 依頼・ユーザー承認)
+    assert t == "PSA 10 Pokemon Card Japanese #020/019 Marnie's Morpeko 2025 Gem Mint"
 
 
 # --- verify→build: forced_card_id で指定カードから決定論生成 ---
