@@ -543,7 +543,9 @@ def get_jobs():
                      "group": group_of(label), "tip": (s.get("tip") or "")[:400],
                      "runnable": runnable(s), "params": s.get("params") or [],
                      "ask_amount": bool(s.get("ask_amount")), "kagoya": is_remote(s, _remote_set()), **info})
-    return {"jobs": jobs, "counts_at": STATE["counts_at"], "counting": STATE["counting"],
+    # ★2026-10-05: 新規に出せる PSA の枚数 (今日やることの状態の1行に出す)
+    psa_new = (STATE["counts"] or {}).get("psa_new") or {}
+    return {"jobs": jobs, "psa_new": psa_new, "counts_at": STATE["counts_at"], "counting": STATE["counting"],
             "counts_error": STATE["counts_error"]}
 
 

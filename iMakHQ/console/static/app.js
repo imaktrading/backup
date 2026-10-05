@@ -341,6 +341,10 @@
     if (dj) chips.push([dj.n ? "warn" : "", "注文 仕入れ待ち <b>" + (dj.n == null ? "—" : dj.n) + "件</b>" +
                         (dj.note ? " · " + esc(dj.note).replace("最後の取り込み ", "最後の取り込み <b>") + "</b>" : " · 未取り込み"),
                         jobBtn(dj, "取り込む") + ' <a class="stlink" href="' + SALES_SHEET + '" target="_blank" rel="noopener">シート</a>']);
+    // ★2026-10-05 ユーザー「新規出品出来るカード枚数を…注文仕入れ待ち0件みたいに表示できる？」
+    var pn = STRIP.psaNew;
+    if (pn) chips.push(pn.n == null ? ["warn", "新規に出せる PSA 数えられない", ""]
+                       : ["", "新規に出せる PSA <b>" + pn.n + "枚</b>", ""]);
     $("today-strip").innerHTML = chips.concat(STRIP.errors || []).map(stChip).join("");
     var big = [];
     // 左注文・右オファーの2枠 (2026-10-04 ユーザー「注文は左にして」= .ord を先頭に並べる)。どちらかに件数があれば両方並べる (0件の側は「ありません」)
@@ -446,6 +450,7 @@
     jobList = (d.jobs || []).filter(function (j) { return HIDDEN_KINDS.indexOf(j.kind) < 0; });
     jobs = {};
     jobList.forEach(function (j) { jobs[j.kind] = j; });
+    STRIP.psaNew = d.psa_new && Object.keys(d.psa_new).length ? d.psa_new : null;   // ★2026-10-05 新規に出せる PSA
     var at = d.counts_at ? d.counts_at.replace("T", " ").slice(5, 16) : "まだ数えていません";
     $("shop-at").textContent = (d.counting ? "数え直し中… " : "") + at + " の件数" + (d.counts_error ? " (失敗)" : "");
     // ★2026-09-25: 数え直しが240秒で打ち切られ、昨日の件数 (入れ替え 11件・実際は 0件) が出たままだった。
