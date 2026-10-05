@@ -870,9 +870,17 @@ def _agents_worker():
                     got[h] = AB.remote(h)
                 except Exception as e:                           # noqa: BLE001 読めない PC は理由を出す
                     got[h] = {"rows": [], "stale": True, "at": "", "error": str(e)[:120]}
+            # ★2026-10-05 ユーザー「全担当が神風から起動できるように」(ssh で2分おきに聞く作りもユーザー承認):
+            #   KAGOYA (カタログ) は ssh で直接読み・起動する
+            for h in AB.REMOTE_LAUNCH_HOSTS:
+                try:
+                    got[h] = AB.remote_ssh(h)
+                except Exception as e:                           # noqa: BLE001
+                    got[h] = {"rows": [], "stale": True, "at": "", "error": str(e)[:120]}
             AGENTS["remote"], AGENTS["remote_at"] = got, time.time()
         for h, r in AGENTS["remote"].items():
-            machines.append({"host": h, "label": h, "via": "%s が5分ごとにスプシへ書く分" % h, **r})
+            via = ("%s を ssh で直接読む" % h) if h in AB.REMOTE_LAUNCH_HOSTS else ("%s が5分ごとにスプシへ書く分" % h)
+            machines.append({"host": h, "label": h, "via": via, **r})
         AGENTS["data"] = {"machines": machines, "at": datetime.datetime.now().strftime("%H:%M:%S")}
     except Exception as e:                                       # noqa: BLE001 画面に出して知らせる
         AGENTS["data"] = {"machines": [], "error": str(e)[:200],
@@ -1469,8 +1477,13 @@ class Handler(BaseHTTPRequestHandler):
                 if TOOLS not in sys.path:
                     sys.path.insert(0, TOOLS)
                 import agent_board as AB
-                ok, msg = AB.launch(str(body.get("key") or ""))
+                h = str(body.get("host") or "")
+                if h in AB.REMOTE_LAUNCH_HOSTS:          # KAGOYA の担当 (2026-10-05)
+                    ok, msg = AB.launch_remote(h, str(body.get("key") or ""))
+                else:
+                    ok, msg = AB.launch(str(body.get("key") or ""))
                 AGENTS["at"] = 0                         # 次の読込で一覧を取り直す
+                AGENTS["remote_at"] = 0
                 return self._json(200, {"ok": ok, "message": msg})
             except Exception as e:                       # noqa: BLE001 画面に出して知らせる
                 return self._json(200, {"ok": False, "message": str(e)[:200]})

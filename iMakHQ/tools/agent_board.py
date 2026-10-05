@@ -234,13 +234,19 @@ def local_agents(now=None):
 # 起動もそのショートカットを開くだけ = 手で押すのと同じ (claude_rc.cmd・版・窓の色がそのまま効く)。
 
 _ROSTER = {"at": 0.0, "rows": []}
+# ★2026-10-05: KAGOYA は担当をデスクトップ直下の .bat (例 Catalog.bat) で開いている。.bat も担当として読む
 _ROSTER_PS = (
     "[Console]::OutputEncoding = [Text.Encoding]::UTF8;"
-    "$d = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Claude';"
+    "$desk = [Environment]::GetFolderPath('Desktop'); $d = Join-Path $desk 'Claude';"
     "$ws = New-Object -ComObject WScript.Shell;"
-    "@(Get-ChildItem $d -Filter *.lnk -ErrorAction SilentlyContinue | ForEach-Object {"
+    "@(@(Get-ChildItem $d -Filter *.lnk -ErrorAction SilentlyContinue | ForEach-Object {"
     " $s = $ws.CreateShortcut($_.FullName);"
-    " [pscustomobject]@{label=$_.BaseName; args=$s.Arguments; lnk=$_.FullName} }) | ConvertTo-Json -Compress")
+    " [pscustomobject]@{label=$_.BaseName; args=$s.Arguments; lnk=$_.FullName; text=''} }) +"
+    " @(Get-ChildItem $desk -Filter *.bat -ErrorAction SilentlyContinue | ForEach-Object {"
+    " [pscustomobject]@{label=$_.BaseName; args=''; lnk=$_.FullName; text=[IO.File]::ReadAllText($_.FullName)} }))"
+    " | ConvertTo-Json -Compress")
+BAT_LABELS = {"CATALOG": "カタログ"}       # .bat の担当の画面の名前 (無ければ key のまま)
+REMOTE_LAUNCH_HOSTS = ("KAGOYA",)        # ssh で一覧を読み・起動できる PC
 
 
 def _norm(p):
@@ -257,6 +263,20 @@ def parse_shortcut(label, args, lnk):
     return None
 
 
+def parse_bat(label, text, path):
+    """デスクトップの .bat 1本 → {key, label, folder, lnk}。claude を --remote-control で開かない物は None (純関数)。"""
+    import re
+    if isinstance(text, dict):           # PowerShell 5.1 の Get-Content は {"value": ...} で JSON になる
+        text = text.get("value")
+    t = str(text or "")
+    k = re.search(r"--remote-control\s+([A-Za-z0-9_-]+)", t)
+    f = re.search(r'(?im)^\s*cd\s+(?:/d\s+)?"?([^"\r\n]+?)"?\s*$', t)
+    if not k or not f:
+        return None
+    key = k.group(1)
+    return {"key": key, "label": BAT_LABELS.get(key, label or key), "folder": f.group(1).strip(), "lnk": path}
+
+
 def read_roster(ttl=600):
     """担当の一覧 (I/O・10分とっておく)。読めなければ []。"""
     import time
@@ -268,7 +288,10 @@ def read_roster(ttl=600):
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         got = json.loads(r.stdout or "[]")
         got = got if isinstance(got, list) else [got]
-        rows = [x for x in (parse_shortcut(g.get("label", ""), g.get("args", ""), g.get("lnk", "")) for g in got) if x]
+        rows = [x for x in ((parse_bat(g.get("label", ""), g.get("text", ""), g.get("lnk", ""))
+                             if str(g.get("lnk", "")).lower().endswith(".bat")
+                             else parse_shortcut(g.get("label", ""), g.get("args", ""), g.get("lnk", "")))
+                            for g in got if g) if x]
     except Exception:                                          # noqa: BLE001 読めなければ起動ボタンを出さない
         rows = []
     _ROSTER.update(at=time.time(), rows=rows)
@@ -294,8 +317,8 @@ def merge_roster(rows, roster):
     return out
 
 
-def _rc_running(folder):
-    """この担当の起動用の窓 (cmd の claude_rc.cmd <folder>) が動いているか。調べられなければ True (起動しない側に倒す)。"""
+def _rc_running(folder, lnk=""):
+    """この担当の起動用の窓 (cmd の claude_rc.cmd <folder> / .bat) が動いているか。調べられなければ True (起動しない側に倒す)。"""
     ps = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8;"
           "@(Get-CimInstance Win32_Process -Filter \"Name='cmd.exe'\" | ForEach-Object { $_.CommandLine }) | ConvertTo-Json -Compress")
     try:
@@ -306,17 +329,43 @@ def _rc_running(folder):
         lines = lines if isinstance(lines, list) else [lines]
     except Exception:                                          # noqa: BLE001
         return True
-    return rc_in_cmdlines(folder, lines)
+    return rc_in_cmdlines(folder, lines, lnk)
 
 
-def rc_in_cmdlines(folder, cmdlines):
-    """cmd のコマンド行の中に、この担当の claude_rc.cmd 起動があるか (純関数)。"""
+def rc_in_cmdlines(folder, cmdlines, lnk=""):
+    """cmd のコマンド行の中に、この担当の claude_rc.cmd 起動 (または担当の .bat) があるか (純関数)。"""
     f = _norm(folder)
+    bat = _norm(lnk) if str(lnk).lower().endswith(".bat") else ""
     for c in cmdlines or []:
         low = str(c or "").replace("/", "\\").lower()
         if "claude_rc.cmd" in low and (f + " ") in (low + " "):
             return True
+        if bat and bat in low:
+            return True
     return False
+
+
+def open_on_desktop(path, key):
+    """担当の .lnk / .bat を、画面のある席で開く。
+
+    - 画面の前から (神風のサーバー): エクスプローラーに開かせる = ダブルクリックと同じ
+    - ssh から (KAGOYA を家から起動する時): ssh の席には画面が無いので、予約タスク (/it = ログオン中の
+      ユーザーの画面で動く) を作って走らせる。2026-10-05 KAGOYA で試験: RDP の席 (session 3) で開いた
+    """
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_CLIENT"):
+        tn = "iMak_Claude_" + key
+        user = os.environ.get("USERNAME") or "Administrator"
+        subprocess.run(["schtasks", "/create", "/tn", tn, "/tr", '"%s"' % path, "/sc", "once", "/st", "23:59",
+                        "/sd", "2030/01/01", "/it", "/ru", user, "/f"], capture_output=True, timeout=30)
+        r = subprocess.run(["schtasks", "/run", "/tn", tn], capture_output=True, timeout=30)
+        if r.returncode != 0:
+            raise RuntimeError("予約タスクで開けませんでした (rc=%s)" % r.returncode)
+        return
+    # ★os.startfile だと Console サーバーの環境 (Claude から再起動した時は CLAUDE_CODE_CHILD_SESSION 等) を
+    #   そのまま引き継ぎ、開いた担当が「子の会話」扱いで会話を保存しなくなった (2026-09-29 ADV)。
+    #   エクスプローラーに開かせる = デスクトップでダブルクリックしたのと同じ環境になる
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("CLAUDE", "ANTHROPIC"))}
+    subprocess.Popen(["explorer.exe", path], env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 def launch(key):
@@ -327,15 +376,49 @@ def launch(key):
     running = {_norm(w.get("cwd")) for w in list_windows()}
     # ★起動して20〜30秒は claude agents に出てこない → その間に2回押すと2つ開いた (2026-09-29 試験で実際に起きた)。
     #   起動用の窓 (claude_rc.cmd <folder>) が居るかも見る
-    if _norm(hit[0]["folder"]) in running or _rc_running(hit[0]["folder"]):
+    if _norm(hit[0]["folder"]) in running or _rc_running(hit[0]["folder"], hit[0]["lnk"]):
         return False, "%s はもう開いています (起動中を含む)" % hit[0]["label"]
-    # ★os.startfile だと Console サーバーの環境 (Claude から再起動した時は CLAUDE_CODE_CHILD_SESSION 等) を
-    #   そのまま引き継ぎ、開いた担当が「子の会話」扱いで会話を保存しなくなった (2026-09-29 ADV)。
-    #   エクスプローラーに開かせる = デスクトップでダブルクリックしたのと同じ環境になる
-    env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("CLAUDE", "ANTHROPIC"))}
-    subprocess.Popen(["explorer.exe", hit[0]["lnk"]], env=env,
-                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    open_on_desktop(hit[0]["lnk"], key)
     return True, "%s を起動しました" % hit[0]["label"]
+
+
+# ------------------------------------------------------------------ ssh で届く PC (KAGOYA) — 2026-10-05
+# 向こうでこのファイルを動かして一覧を JSON で受け取る / 起動させる。kagoya_offload の ssh を使う
+
+REMOTE_TOOLS = r"C:\dev\iMak\iMakHQ\tools"
+
+
+def _remote_py(args, timeout=60):
+    import kagoya_offload as K
+    rc, out = K._ssh(K._cfg(), "python -X utf8 %s\\agent_board.py %s" % (REMOTE_TOOLS, args), timeout=timeout)
+    if rc != 0:
+        raise RuntimeError((out or "ssh に失敗")[-200:])
+    return out
+
+
+def parse_json_out(out):
+    """ssh の出力から最後の JSON 行を取り出す (純関数)。無ければ None。"""
+    for ln in reversed(str(out or "").splitlines()):
+        ln = ln.strip()
+        if ln.startswith(("{", "[")):
+            try:
+                return json.loads(ln)
+            except ValueError:
+                continue
+    return None
+
+
+def remote_ssh(h):
+    """ssh で届く PC の一覧 → {at, stale, rows}。"""
+    rows = parse_json_out(_remote_py("json"))
+    if not isinstance(rows, list):
+        raise RuntimeError("一覧を読めませんでした")
+    return {"at": _dt.datetime.now().isoformat(timespec="seconds"), "stale": False, "rows": rows, "launch": True}
+
+
+def launch_remote(h, key):
+    got = parse_json_out(_remote_py("launch " + key, timeout=90)) or {}
+    return bool(got.get("ok")), got.get("message") or "%s で起動できませんでした" % h
 
 
 # ------------------------------------------------------------------ 別の PC と受け渡し
@@ -393,6 +476,13 @@ def main():
     cmd = (sys.argv[1:] or ["show"])[0]
     if cmd == "push":
         return push()
+    if cmd == "json":                    # ssh で読む側 (家の神風) に一覧を返す。ASCII にして文字化けを避ける
+        print(json.dumps(local_agents(), ensure_ascii=True))
+        return 0
+    if cmd == "launch":                  # 家の神風から ssh で起動させる
+        ok, msg = launch((sys.argv[2:] or [""])[0])
+        print(json.dumps({"ok": ok, "message": msg}, ensure_ascii=True))
+        return 0
     if cmd == "wake":
         # ★2026-09-29 ユーザー「依頼しているわけだから、すぐに処理してもらった方がいい」:
         #   依頼を置いた相手が閉じていたら起動し、一覧に出るまで待つ (その後 SendMessage で呼び鈴)
