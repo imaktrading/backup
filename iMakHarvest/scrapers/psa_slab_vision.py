@@ -53,6 +53,8 @@ def _clean(v) -> str:
 def _empty(error: str = "") -> dict:
     d = {k: "" for k in _FIELDS}
     d["error"] = error
+    d["input_tokens"] = 0
+    d["output_tokens"] = 0
     return d
 
 
@@ -77,6 +79,14 @@ def parse_response(text: str) -> dict:
     if not CERT_RE.match(out["cert"]):
         out["cert"] = ""
     return out
+
+
+def _with_usage(d: dict, msg) -> dict:
+    """返り値に実測トークン数を乗せる (2026-10-06 HQ/ADV依頼: 費用を先に計測する)。"""
+    u = getattr(msg, "usage", None)
+    d["input_tokens"] = getattr(u, "input_tokens", 0) or 0
+    d["output_tokens"] = getattr(u, "output_tokens", 0) or 0
+    return d
 
 
 def read_slab(image_urls: list[str], client=None,
@@ -105,5 +115,5 @@ def read_slab(image_urls: list[str], client=None,
         return _empty(f"{ERR_API}:{type(e).__name__}:{str(e)[:120]}")
     for b in (msg.content or []):
         if getattr(b, "text", None):
-            return parse_response(b.text)
-    return _empty(ERR_NO_TEXT)
+            return _with_usage(parse_response(b.text), msg)
+    return _with_usage(_empty(ERR_NO_TEXT), msg)

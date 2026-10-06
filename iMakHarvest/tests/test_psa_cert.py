@@ -276,7 +276,8 @@ def test_vision_parse_normal():
 def test_vision_parse_none_markers_become_empty():
     got = V.parse_response('{"cert":"NONE","grade":"NONE","label":"NONE",'
                            '"card_number":"NONE","year":"NONE"}')
-    assert all(v == "" for v in got.values())
+    text_fields = {k: v for k, v in got.items() if k not in ("input_tokens", "output_tokens")}
+    assert all(v == "" for v in text_fields.values())
 
 
 def test_vision_parse_drops_bad_cert_length():

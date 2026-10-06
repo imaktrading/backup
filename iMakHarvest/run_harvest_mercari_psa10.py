@@ -168,6 +168,8 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
     # 鑑定番号が読めなかった分 (= I列空欄でスプシに入れて目視で拾う。 2026-08-18 user 指示)
     unreadable: list[dict] = []
     by_keyword: dict = {}
+    # ★2026-10-06 HQ/ADV依頼: read_slab の実測トークン数を走行単位で積む (費用を先に計測)
+    vision_usage = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
 
     # 再開: 前回の JSON にある URL は処理済として飛ばす (収集自体は速いのでやり直す)
     done_urls: set[str] = set()
@@ -179,6 +181,8 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
             rej[k] = rej.get(k, 0) + v
         done_urls = set(resume.get("processed_urls") or [])
         by_keyword = dict(resume.get("by_keyword") or {})
+        for k, v in (resume.get("vision_usage") or {}).items():
+            vision_usage[k] = vision_usage.get(k, 0) + v
         _log(f"再開: 処理済 {len(done_urls)} URL / 既存候補 {len(cands)} 件 / "
              f"収集済の検索語 {len(by_keyword)} 語")
     processed: list[str] = list(done_urls)
@@ -194,7 +198,8 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                "failed_urls": failed_urls,
                "vision_errors": sorted(set(vision_errors)),
                "processed_urls": processed, "truncated": state["truncated"],
-               "by_keyword": by_keyword, "collected_urls": state["urls"]},
+               "by_keyword": by_keyword, "collected_urls": state["urls"],
+               "vision_usage": vision_usage},
               dump_path, quiet=True)
 
     # 本番で既に押さえてある仕入元は拾い直さない (URL は詳細フェッチの前に落とすので
@@ -247,7 +252,7 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                 continue
             try:
                 kept = _process_one(url, _get_driver, args, claimed, rej, vision_errors,
-                                    failed=failed_urls, detail_fn=detail_fn)
+                                    failed=failed_urls, detail_fn=detail_fn, usage=vision_usage)
                 consecutive_errors = 0
             except Exception as e:  # noqa: BLE001 - 1 件の失敗で走行全体を殺さない
                 rej["item_error"] += 1
@@ -310,11 +315,36 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
              f"原因: {uniq[:3]}")
     if state["truncated"]:
         _log("⚠️ 要対応: 途中で打ち切りました。 --resume-from-json で続きから再開できます")
+    _log_vision_cost(vision_usage, truncated=state["truncated"])
     return {"candidates": cands, "unreadable": unreadable, "collect_reject": rej,
             "failed_urls": failed_urls,
             "vision_errors": sorted(set(vision_errors)),
             "processed_urls": processed, "truncated": state["truncated"],
-            "by_keyword": by_keyword}
+            "by_keyword": by_keyword, "vision_usage": vision_usage}
+
+
+VISION_COST_LOG = Path("C:/dev/iMak_data/harvest/vision_cost_log.csv")
+# Haiku 4.5 単価 ($/1Mトークン、2026-10 時点)。 claude-api skill 確認済
+HAIKU_PRICE_PER_MTOK = {"input": 1.00, "output": 5.00}
+
+
+def _log_vision_cost(usage: dict, truncated: bool) -> None:
+    """走行1回ぶんの read_slab 呼び出し回数・トークン・概算金額を1行で残す
+    (2026-10-06 HQ/ADV依頼: 見積りでなく実測を先に。 置き場はこのCSV)。"""
+    calls = usage.get("calls", 0)
+    if not calls:
+        return  # vision を1回も呼んでいない走行は書かない (ノイズ)
+    in_tok = usage.get("input_tokens", 0)
+    out_tok = usage.get("output_tokens", 0)
+    cost = (in_tok / 1_000_000) * HAIKU_PRICE_PER_MTOK["input"] + \
+           (out_tok / 1_000_000) * HAIKU_PRICE_PER_MTOK["output"]
+    VISION_COST_LOG.parent.mkdir(parents=True, exist_ok=True)
+    is_new = not VISION_COST_LOG.exists()
+    with open(VISION_COST_LOG, "a", encoding="utf-8", newline="") as f:
+        if is_new:
+            f.write("timestamp,calls,input_tokens,output_tokens,est_usd,truncated\n")
+        f.write(f"{datetime.now().isoformat(timespec='seconds')},{calls},{in_tok},{out_tok},"
+                f"{cost:.4f},{truncated}\n")
 
 
 COST_SANITY_PATH = Path("C:/dev/iMak_data/shared/cost_sanity.json")
@@ -346,7 +376,8 @@ def cost_rejected(price_jpy, cfg: dict) -> bool:
     return False
 
 
-def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=None, detail_fn=None):
+def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=None, detail_fn=None,
+                  usage=None):
     """1 件を判定して 候補 dict を返す (対象外なら None)。 例外は呼出側で捕まえる.
 
     driver_getter: 呼ぶと Chrome driver を返す callable (未起動なら起動する。 lazy)。
@@ -411,6 +442,10 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
         return None
 
     vision = psa_slab_vision.read_slab(images)
+    if usage is not None:
+        usage["calls"] = usage.get("calls", 0) + 1
+        usage["input_tokens"] = usage.get("input_tokens", 0) + (vision.get("input_tokens") or 0)
+        usage["output_tokens"] = usage.get("output_tokens", 0) + (vision.get("output_tokens") or 0)
     if vision.get("error"):
         # こちらの障害 (残高切れ / rate limit 等)。 出品しない点は同じだが、
         # 黙って「不鮮明」に混ぜず 障害として最後に報告する
