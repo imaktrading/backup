@@ -237,7 +237,7 @@ def sweep_learned(path=None, db=CATALOG_DB, write=True):
                     out["fixed"].append((label, pid, new))
                 else:
                     out["dropped"].append((label, pid, why))
-            if not picks:
+            if not picks and not (ent or {}).get("not"):
                 data.pop(label, None)
     finally:
         con.close()

@@ -1910,8 +1910,10 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
             # ★2026-10-06 「同じ」と答えた仕入元の鑑定番号が分かれば (新規で打った物)、ラベルの記録にも足す
             import psa_hoju_fill as _PHF1
             _n_lab = _PLL.record_picks(_PHF1.same_label_picks(_uv, _PHF1._URL_CERT, prc._load_psa_cache() or {}, _PLL))
+            _n_lab += _PLL.record_nots(_PHF1.same_label_picks(_uv, _PHF1._URL_CERT, prc._load_psa_cache() or {},
+                                                              _PLL, want="diff"))
             if _n_lab:
-                print(f"  📘 鑑定番号の分かる仕入元をラベルの記録に足した: {_n_lab}件")
+                print(f"  📘 鑑定番号の分かる仕入元をラベルの記録に足した (同じ/違う): {_n_lab}件")
     except Exception as _e_uv:                                  # noqa: BLE001
         print(f"  ⚠ カード単位の記録skip ({type(_e_uv).__name__}: {_e_uv})")
     # ★2026-09-06: 「PSA10でない」= グレード対象外。「違う(精度事故)」に混ぜず、

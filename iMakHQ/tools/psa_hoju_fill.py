@@ -161,6 +161,7 @@ def load_same_verdicts():
 
 
 _URL_LABEL_PID = {}     # 仕入元 URL → ラベルの記録で決まるカード pid (set_label_context で作る)
+_URL_LABEL_NOT = {}     # 仕入元 URL → そのラベルで「違う」と答えたカードの集合
 _URL_CERT = {}          # 仕入元 URL → 鑑定番号 (商品管理シートの A と I)。補で「同じ」と答えたらラベルにも足す
 
 
@@ -187,9 +188,24 @@ def url_label_pids(rows2d, psa_cache, learned, pll):
     return out
 
 
+def url_label_nots(url_cert, psa_cache, learned, pll):
+    """{仕入元 URL: そのラベルで人が「違う」と答えたカードの集合}。純関数。"""
+    out = {}
+    for u, cert in (url_cert or {}).items():
+        meta = (psa_cache or {}).get(cert) or {}
+        if not meta:
+            continue
+        nots = set()
+        for cat in ("pokemon_tcg", "one_piece_tcg", "dragonball_scg", "gundam_tcg"):
+            nots |= set(((learned or {}).get(pll.key_for_psa(cat, meta)) or {}).get("not") or {})
+        if nots:
+            out[u] = nots
+    return out
+
+
 def set_label_context(rows2d):
     """補の目視の前に1回: 仕入元 URL → ラベルで決まるカード を作る。読めなければ空 (今までどおり目視)。"""
-    global _URL_LABEL_PID, _URL_CERT
+    global _URL_LABEL_PID, _URL_CERT, _URL_LABEL_NOT
     try:
         import psa_label_learned as pll
         import psa_resource_confirm as prc
@@ -197,19 +213,21 @@ def set_label_context(rows2d):
         _URL_LABEL_PID = url_label_pids(rows2d, prc._load_psa_cache() or {}, pll.load(), pll)
         _URL_CERT = {pll.norm_url(_cell(r, A)): _cell(r, CERT) for r in (rows2d or [])[1:]
                      if _cell(r, A) and _cell(r, CERT).isdigit()}
+        _URL_LABEL_NOT = url_label_nots(_URL_CERT, prc._load_psa_cache() or {}, pll.load(), pll)
     except Exception:                                          # noqa: BLE001
-        _URL_LABEL_PID, _URL_CERT = {}, {}
+        _URL_LABEL_PID, _URL_CERT, _URL_LABEL_NOT = {}, {}, {}
     return len(_URL_LABEL_PID)
 
 
-def same_label_picks(uv_items, url_cert, psa_cache, pll):
-    """補で「同じ」と答えた [(pid, url, 'same', 画面, タイトル)] → ラベルに足す [(ラベル, pid, 鑑定番号)]。純関数。"""
+def same_label_picks(uv_items, url_cert, psa_cache, pll, want="same"):
+    """補で答えた [(pid, url, 'same'|'diff', 画面, タイトル)] → ラベルに足す [(ラベル, pid, 鑑定番号)]。純関数。
+    want="diff" で「違う」の分 (record_nots に渡す)。"""
     out = []
     for it in uv_items or []:
         pid, url, verdict = it[0], it[1], it[2]
         cert = (url_cert or {}).get(pll.norm_url(url))
         meta = (psa_cache or {}).get(cert or "") or {}
-        if verdict != "same" or not meta:
+        if verdict != want or not meta:
             continue
         cat = pll.category_of(pid)
         k = pll.key_for_psa(cat, meta) if cat else ""
@@ -256,6 +274,8 @@ def split_known_same(cands, key, pll=None, uv=None):
         #   「違う」と答えた出品と同じタイトル は出さない (補の候補は、その eBay 出品の NG しか見ていなかった)
         if pll.url_verdict(pid, u, uv) == "diff" or (diff_title and pll.norm_title(c.get("name")) in diff_title):
             continue
+        if pid.split(":")[-1] in _URL_LABEL_NOT.get(pll.norm_url(u), ()):
+            continue                            # そのラベルで、このカードとは「違う」と答えたことがある
         # ★2026-10-06 その出品の鑑定番号のラベルでカードが決まる (新規で鑑定番号を打った出品)。
         #   違うカード → 出さない (番号違いを出さないのと同じ) / 同じカード → 印を付けて目視へ (自動では書かない)
         _lp = _URL_LABEL_PID.get(pll.norm_url(u))
@@ -3190,8 +3210,9 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             print(f"  📘 目視の同じ/違うをカード単位で記録: {_PLL.remember_url_verdicts(_uv)}件")
         # ★2026-10-06 「同じ」と答えた候補の鑑定番号が分かれば (新規で打った物)、ラベルの記録にも足す
         _n_lab = _PLL.record_picks(same_label_picks(_uv, _URL_CERT, prc._load_psa_cache() or {}, _PLL))
+        _n_lab += _PLL.record_nots(same_label_picks(_uv, _URL_CERT, prc._load_psa_cache() or {}, _PLL, want="diff"))
         if _n_lab:
-            print(f"  📘 鑑定番号の分かる候補をラベルの記録に足した: {_n_lab}件")
+            print(f"  📘 鑑定番号の分かる候補をラベルの記録に足した (同じ/違う): {_n_lab}件")
     except Exception as _e_uv:                                  # noqa: BLE001
         print(f"  ⚠ カード単位の記録skip ({type(_e_uv).__name__}: {_e_uv})")
 

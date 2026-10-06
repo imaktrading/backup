@@ -57,10 +57,48 @@ def remember(data, key, product_id, cert="", now=None):
     return data
 
 
+def remember_not(data, key, product_id, cert="", now=None):
+    """「このラベルはこのカードではない」を積む (純関数・data を書き換えて返す)。
+
+    ★2026-10-06 ユーザー「違うと判断したものは、残さないの？」: 補・再仕入れで「違う」と答えた候補の
+      鑑定番号が分かる時、ラベルには「同じ」しか残していなかった。同じラベルの別の個体がまた候補に出ていた。
+    """
+    if not key or not product_id:
+        return data
+    e = data.setdefault(key, {"picks": {}})
+    p = e.setdefault("not", {}).setdefault(product_id, {"times": 0, "certs": []})
+    p["times"] += 1
+    if cert and cert not in p["certs"]:
+        p["certs"].append(cert)
+    p["last_at"] = now or datetime.now().isoformat(timespec="seconds")
+    return data
+
+
+def is_not(data, key, product_id):
+    """そのラベルが、そのカードではないと人が答えたことがあるか。"""
+    return str(product_id or "").split(":")[-1] in (((data or {}).get(key) or {}).get("not") or {})
+
+
 def learned_pid(data, key):
-    """1つに決まっている時だけカタログIDを返す。割れていたら None。"""
-    picks = ((data or {}).get(key) or {}).get("picks") or {}
-    return next(iter(picks)) if len(picks) == 1 else None
+    """1つに決まっている時だけカタログIDを返す。割れていたら / 同じカードに「違う」も出ていたら None。"""
+    e = (data or {}).get(key) or {}
+    picks = e.get("picks") or {}
+    if len(picks) != 1:
+        return None
+    pid = next(iter(picks))
+    return None if pid in (e.get("not") or {}) else pid
+
+
+def record_nots(nots, path=PATH):
+    """[(key, product_id, cert)] の「違う」をまとめて覚える。覚えた件数を返す。"""
+    data, n = load(path), 0
+    for key, pid, cert in nots:
+        if key and pid:
+            remember_not(data, key, pid, cert=str(cert or ""))
+            n += 1
+    if n:
+        save(data, path)
+    return n
 
 
 def record_chosen(results, targets_by_cert, path=PATH):

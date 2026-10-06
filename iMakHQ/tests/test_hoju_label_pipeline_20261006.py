@@ -75,3 +75,24 @@ def test_diff_url_and_diff_title_are_not_shown_again(monkeypatch):
     same, rest = H.split_known_same([{"url": U1, "name": "a"}, {"url": U3, "name": "psa10 ルフィ 偽"},
                                      {"url": U2, "name": "別"}], "one_piece_tcg:OP09-118", L, uv)
     assert same == [] and [c["url"] for c in rest] == [U2]
+
+
+def test_label_not_is_kept_and_used(monkeypatch):
+    learned = {}
+    k = L.key_for_psa("one_piece_tcg", META["111"])
+    L.remember_not(learned, k, "OP09-118", cert="111")
+    assert L.is_not(learned, k, "one_piece_tcg:OP09-118")
+    L.remember(learned, k, "OP09-118")
+    assert L.learned_pid(learned, k) is None                  # 同じカードに「違う」も出ている → 決めない
+    nots = H.url_label_nots({L.norm_url(U1): "111"}, META, learned, L)
+    monkeypatch.setattr(H, "_URL_LABEL_PID", {})
+    monkeypatch.setattr(H, "_URL_LABEL_NOT", nots)
+    H._SNKR_MEMO.clear()
+    same, rest = H.split_known_same([{"url": U1, "name": "a"}], "one_piece_tcg:OP09-118", L, {"https://x/z": {}})
+    assert same == [] and rest == []
+
+
+def test_diff_answers_with_cert_go_to_label_not(monkeypatch):
+    monkeypatch.setattr(L, "category_of", lambda pid, db=None: "one_piece_tcg")
+    out = H.same_label_picks([("OP09-118", U1, "diff", "補URL③", "")], {L.norm_url(U1): "111"}, META, L, want="diff")
+    assert out == [(L.key_for_psa("one_piece_tcg", META["111"]), "OP09-118", "111")]
