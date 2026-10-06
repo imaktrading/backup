@@ -567,7 +567,35 @@
     renderStrip();
   }
 
+  // ★2026-10-06 ユーザー「あるべき姿に修正して」: あるべき姿の台帳と実物 (この PC・KAGOYA・夜の束・LAPTOP) の
+  //   突き合わせ結果を出す。止めてあって正常な物 (移設・廃止) は畳み、異常は担当名つきで上に並べる
+  var WHERE = { home: "この PC", kagoya: "KAGOYA", job_queue: "夜の束", laptop: "LAPTOP" };
+  var AST = { ok: ["done", "正常"], running: ["night", "実行中"], overlap: ["hold", "見送り"],
+              missing: ["error", "見つからない"], disabled: ["error", "止まっている"], failed: ["error", "失敗"],
+              stale: ["error", "動いていない"], ask: ["hold", "担当に確認中"], unknown: ["hold", "確かめられない"],
+              unknown_task: ["hold", "台帳に無い"] };
+  function paintAudit(a) {
+    var rows = (a.rows || []).slice().sort(function (x, y) {
+      var bx = (AST[x.status] || ["error"])[0] === "done" ? 1 : 0, by = (AST[y.status] || ["error"])[0] === "done" ? 1 : 0;
+      return bx - by;
+    });
+    var bad = rows.filter(function (r) { return (AST[r.status] || ["error"])[0] !== "done" && r.status !== "running"; }).length;
+    $("sch-at").textContent = (bad ? "要確認 " + bad + "件 / " : "全部 正常 / ") + rows.length + "件 (点検 " + String(a.at || "").slice(5, 16).replace("T", " ") + ")";
+    var html = rows.map(function (r) {
+      var c = AST[r.status] || ["error", r.status];
+      return '<div class="rw"><span class="t">' + esc(r.name) + ' <small>' + esc(WHERE[r.where] || r.where) + " · " + esc(r.owner) + "</small></span>" +
+        '<span class="d">' + esc(r.why || "") + "</span>" +
+        '<span class="chip ' + c[0] + '">' + esc(c[1]) + "</span></div>";
+    }).join("");
+    var ret = a.retired || [];
+    if (ret.length) {
+      html += '<details class="rw"><summary>止めてあって正常 (移設・廃止) ' + ret.length + "本</summary>" +
+        ret.map(function (r) { return '<div class="d">' + esc(r.name) + " — " + esc(r.why) + "</div>"; }).join("") + "</details>";
+    }
+    $("sch-rows").innerHTML = html;
+  }
   function paintTasks(d) {
+    if (d.audit && d.audit.rows) { paintAudit(d.audit); return; }
     var rows = d.tasks || [];
     $("sch-at").textContent = rows.length ? rows.length + "件" : "";
     // Windows の結果コード: 0=正常 / 267009=実行中 / 267011=まだ一度も動いていない / 1073807364=途中で止められた

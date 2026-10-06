@@ -920,11 +920,22 @@ def _watcher_loop():
         time.sleep(120 if (STATE.get("watcher") or {}).get("local") else 1800)
 
 
+SCHEDULE_AUDIT = r"C:/dev/iMak_data/hq/schedule_audit_last.json"
+
+
 def get_tasks():
     if STATE["tasks"] is None or time.time() - STATE["tasks_at"] > TASKS_TTL:
         STATE["tasks_at"] = time.time()
         threading.Thread(target=_tasks_worker, daemon=True).start()
-    return STATE["tasks"] or {"tasks": [], "loading": True}
+    out = dict(STATE["tasks"] or {"tasks": [], "loading": True})
+    # ★2026-10-06 ユーザー「あるべき姿に修正して」: この PC の予約だけでなく、夜の束・KAGOYA・LAPTOP を
+    #   あるべき姿の台帳と突き合わせた結果 (tools/schedule_audit.py が書く) を出す。止めてあって正常な物は畳む
+    try:
+        with open(SCHEDULE_AUDIT, encoding="utf-8") as f:
+            out["audit"] = json.load(f)
+    except Exception:                                          # noqa: BLE001
+        out["audit"] = None
+    return out
 
 
 def find_script(kind=None, index=None):
