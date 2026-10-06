@@ -475,6 +475,17 @@ def sheet_pending_rows(rows2d, decided, today=None, status=None):
     return out
 
 
+def answered_first(rows, decided, status):
+    """カタログが回答した追加依頼の行を先頭に (追加された → それ以外の回答の順)。他は今の並びのまま (純関数)。"""
+    def k(item):
+        url = (item[1][C_URL] or "").strip()
+        st = (status or {}).get(url) or {}
+        if not answered_after((decided or {}).get(url), st):
+            return 2
+        return 0 if st.get("status") == "added" else 1
+    return sorted(rows, key=k)
+
+
 def status_summary(decided, status):
     """依頼した行の結果の内訳 {回答待ち: n, added: n, …} (純関数)。最新の依頼より後の回答だけ数える。"""
     out = {}
@@ -1399,6 +1410,9 @@ def load_items(limit=DEFAULT_LIMIT, new_only=False, stats=None):
     if new_only:
         rows = only_new(rows)
     rows = order_rows(rows, load_demand())
+    # ★2026-10-06 ユーザー「UT 目視特定開いたけど、何が変わるの？」: カタログが回答した行 (追加依頼の結果) は
+    #   KEY 埋めより先に出す。20件の枠が KEY 埋めで埋まり、回答の来た行が1件も出ていなかった
+    rows = answered_first(rows, led, status)
     catalog = load_catalog()
     official = load_official_l1()
     stats["official"] = 0
@@ -1426,6 +1440,10 @@ def load_items(limit=DEFAULT_LIMIT, new_only=False, stats=None):
         oos = [p for p in keep if p.get("sold_out")]
         _url = (r[C_URL] or "").strip()
         _st = status.get(_url) or {}
+        # ★2026-10-06: カタログが「追加した」商品は候補の先頭に置く (文字の当たりが弱くても選べるように)
+        if answered_after(led.get(_url), _st) and _st.get("product_id"):
+            _hit = [p for p in catalog if p["pid"] == _st["product_id"]]
+            oos = _hit + [p for p in oos if p["pid"] != _st["product_id"]]
         _chk = ""
         if answered_after(led.get(_url), _st) and _st.get("product_id"):
             import psa_resource_confirm as _prc

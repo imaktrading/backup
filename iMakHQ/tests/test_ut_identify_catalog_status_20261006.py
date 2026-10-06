@@ -64,5 +64,18 @@ def test_check_in_catalog_reads_db_directly(tmp_path):
     assert U.check_in_catalog("", db) is None
 
 
+def test_answered_rows_come_first():
+    """回答の来た行は KEY 埋めより先 (ユーザー「UT 目視特定開いたけど、何が変わるの？」)。"""
+    def row(u):
+        r = [""] * 25
+        r[U.C_URL] = u
+        return r
+    rows = [(1, row("k1"), "sheet"), (2, row(URL), "tab"), (3, row("u3"), "tab")]
+    led = {URL: SENT, "u3": SENT}
+    st = {URL: {"status": "need_more", "at": "2026-10-06T12:00:00"},
+          "u3": {"status": "added", "at": "2026-10-06T12:00:00"}}
+    assert [i for i, _r, _s in U.answered_first(rows, led, st)] == [3, 2, 1]
+
+
 def test_load_status_missing_file_is_empty(tmp_path):
     assert U.load_status(str(tmp_path / "none.json")) == {}
