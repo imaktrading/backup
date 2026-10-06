@@ -34,3 +34,20 @@ def test_sweep_runs_after_writes_to_the_real_store():
     src = open(L.__file__, encoding="utf-8").read()
     assert src.count("        _sweep_after_write(path)") == 3  # record_nots / record_chosen / record_picks
     assert "if path != PATH:" in src                            # 試験の記録には かけない
+
+
+def test_reprint_rows_whose_body_is_alt_art():
+    """PRB02 の再録 (OP09-020_PRB02 → 本体 OP09-020_p2 の絵) は別絵柄のラベルと合う。
+    ST18 の再録 (OP05-060_ST18 → OP05-060_p3 の絵) は PSA が印を書かなくても合う。"""
+    op = "one_piece_tcg"
+    b = "ONE PIECE JAPANESE PRB02-PREMIUM BOOSTER -ONE PIECE CARD THE BEST- VOL.2"
+    assert G.pick(op, b, "COME/WE'LL FIGHT YOU ALTERNATE ART", "OP09-020_PRB02")[0] == "OP09-020_PRB02"
+    assert G.pick(op, b, "COME/WE'LL FIGHT YOU ALTERNATE ART", "OP09-020")[0] == ""    # PRB02 に絵が2つ
+    assert G.pick(op, "ONE PIECE JAPANESE STARTER DECK ST18-PURPLE MONKEY D. LUFFY", "MONKEY D. LUFFY",
+                  "OP05-060_ST18")[0] in ("OP05-060_ST18",)
+    assert G.has_alt_mark("CARROT SPECIAL")
+
+
+def test_alias_with_matching_body_returns_body():
+    assert G.pick("one_piece_tcg", "ONE PIECE JAPANESE OP01-ROMANCE DAWN", "DRACULE MIHAWK ALTERNATE ART",
+                  "OP01-070_OP-01")[0] == "OP01-070_p1"

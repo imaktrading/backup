@@ -38,7 +38,9 @@ _ALT_WORDS = ("ALTERNATE ART", "ALT.ART", "ALT. ART", "ALT ART", "PARALLEL", "WA
               "MANGA", "SPECIAL CARD", "-SP", " SP CARD",
               # ★2026-10-07 ボックストッパーは通常と別の絵柄 (OP02-059 ハンコック: カタログは _p1)。
               #   無いと刷りの確認が通常版 OP02-059 に「直して」いた
-              "BOX TOPPER")
+              "BOX TOPPER",
+              # ★2026-10-07 EB02 (アニメ25周年) は PSA が「CARROT SPECIAL」のように SPECIAL とだけ書く (別絵柄)
+              " SPECIAL ")
 # SP カード (WANTED 手配書柄など)。ALTERNATE ART だけのスラブは SP ではない
 _SP_WORDS = ("WANTED", "SPECIAL CARD", "SPECIAL ALTERNATE", "SPECIAL ALT", "-SP", " SP CARD")
 _ALT_PID_RE = re.compile(r"_(p\d*|SP)(_|$)")  # 小文字 p=パラレル / 大文字 P=プロモ (別物)
@@ -103,6 +105,16 @@ def row_is_alt(row):
             or bool(_ALT_PID_RE.search(str(row.get("product_id") or ""))))
 
 
+def row_alias_alt(row):
+    """カタログが別名でまとめた先 (本体) が別絵柄の行か。再録の行に多い (OP09-020_PRB02 → OP09-020_p2)。
+
+    ★2026-10-07: 名前に _p が無いので通常と見て、もう一つの PRB02 の別絵柄 (_PRB02_p1 = 別の絵) に「直して」いた。
+      ただし再録先では通常として刷られ、PSA が別絵柄の印を書かないこともある (ST18 のルフィ = OP05-060_p3 の絵)。
+      → この行は「別絵柄の印があっても無くても合う」扱いにする
+    """
+    return bool(_ALT_PID_RE.search(str(row.get("alias_of") or "")))
+
+
 def row_is_sp(row):
     sp = _specs(row)
     return ("SP" in str(sp.get("rarity") or "").upper()
@@ -130,7 +142,7 @@ def conflict(category, brand, subject, row):
         if code not in _norm(_row_set_text(row)):
             return "セット記号が違う (PSA=%s / 行=%s)" % (code, _row_set_text(row).strip()[:40])
         alt = has_alt_mark(subject)
-        if alt and not row_is_alt(row):
+        if alt and not (row_is_alt(row) or row_alias_alt(row)):
             return "PSA は別絵柄 (%s) だが行は通常" % subject
         if not alt and row_is_alt(row):
             return "PSA は通常だが行は別絵柄"
@@ -158,20 +170,31 @@ def conflict(category, brand, subject, row):
 _COLS = ("product_id", "set_name", "set_name_official", "specs", "source")
 
 
+def _alias_cols(con):
+    """alias_of 列がある DB か (試験の最小 DB には無い)。"""
+    try:
+        return "alias_of" in {r[1] for r in con.execute("pragma table_info(products)")}
+    except sqlite3.Error:
+        return False
+
+
 def _row(con, category, pid):
-    r = con.execute("select product_id, set_name, set_name_official, specs, source from products "
-                    "where category=? and product_id=?", (category, pid)).fetchone()
-    return dict(zip(_COLS, r)) if r else None
+    al = ", alias_of" if _alias_cols(con) else ""
+    r = con.execute("select product_id, set_name, set_name_official, specs, source%s from products "
+                    "where category=? and product_id=?" % al, (category, pid)).fetchone()
+    return dict(zip(_COLS + (("alias_of",) if al else ()), r)) if r else None
 
 
 def _siblings(con, category, base):
-    rows = con.execute("select product_id, set_name, set_name_official, specs, source from products "
-                       "where category=? and (product_id=? or product_id like ?)",
+    al = ", alias_of" if _alias_cols(con) else ""
+    rows = con.execute("select product_id, set_name, set_name_official, specs, source%s from products "
+                       "where category=? and (product_id=? or product_id like ?)" % al,
                        (category, base, base + "_%")).fetchall()
+    cols = _COLS + (("alias_of",) if al else ())
     # like の _ は1文字の何でもにも当たるので、自分で確かめ直す
     out = []
     for r in rows:
-        d = dict(zip(_COLS, r))
+        d = dict(zip(cols, r))
         if d["product_id"] == base or d["product_id"].startswith(base + "_"):
             if "dummy" not in d["product_id"].lower():
                 out.append(d)
@@ -186,8 +209,13 @@ def pick(category, brand, subject, current_pid, db=CATALOG_DB, con=None):
     own = con is None
     con = con or sqlite3.connect("file:%s?mode=ro" % db, uri=True)
     try:
-        why = conflict(category, brand, subject, _row(con, category, pid))
+        row = _row(con, category, pid)
+        why = conflict(category, brand, subject, row)
         if not why:
+            # ★2026-10-07 カタログの別名なら、本体もラベルと合う時は本体を返す (同じ現物は1つの ID に)
+            body = str((row or {}).get("alias_of") or "")
+            if body and body != pid and not conflict(category, brand, subject, _row(con, category, body)):
+                return body, "%s はカタログで %s にまとめられている" % (pid, body)
             return pid, ""
         if category not in ("one_piece_tcg", "gundam_tcg"):
             return "", why
@@ -246,17 +274,20 @@ def sweep_learned(path=None, db=CATALOG_DB, write=True):
             picks = (ent or {}).get("picks") or {}
             # ★2026-10-07 カタログが同じ現物の2行を alias_of でまとめた分は、本体の ID に寄せる
             #   (寄せないと、同じスラブに2つの ID が付いて「答えが割れた」に見え、ラベルが効かなくなっていた: 9ラベル)
-            for _bag in (picks, (ent or {}).get("not") or {}):
-                for pid in list(_bag):
-                    body = _alias_body(pid, con)
-                    if body and body != pid:
-                        _merge_pick(_bag, pid, body)
-                        out["fixed"].append((label, pid, body))
+            _nots = (ent or {}).get("not") or {}
+            for pid in list(_nots):
+                body = _alias_body(pid, con)
+                if body and body != pid:
+                    _merge_pick(_nots, pid, body)
             for pid in list(picks):
                 out["checked"] += 1
                 new, why = pick(category, brand, subject, pid, con=con)
-                # ★2026-10-07 選んだ行がカタログの別名なら本体へ (寄せた本体を別名に戻す往復を止める)
-                new = (_alias_body(new, con) or new) if new else new
+                # ★2026-10-07 選んだ行がカタログの別名なら本体へ。ただし本体もラベルと合う時だけ
+                #   (PRB02 の再録行の本体 OP09-020_p2 にはセット記号 PRB02 が無い → 寄せると外れてしまう)
+                if new:
+                    body = _alias_body(new, con)
+                    if body and body != new and not conflict(category, brand, subject, _row(con, category, body)):
+                        new = body
                 if new == pid:
                     continue
                 v = picks.pop(pid)
