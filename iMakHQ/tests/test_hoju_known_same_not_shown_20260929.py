@@ -21,7 +21,9 @@ def test_known_same_is_split_off():
     cands = [{"url": U + "1"}, {"url": U + "2"}, {"url": U + "3"}, {"url": U + "4"}]
     same, rest = H.split_known_same(cands, "pokemon_tcg:S12a-214", PLL, uv)
     assert [c["url"] for c in same] == [U + "1"]                 # このカードで「同じ」の物だけ
-    assert [c["url"] for c in rest] == [U + "2", U + "3", U + "4"]  # 別カードの「同じ」は効かせない
+    # 別カードの「同じ」は効かせない。★2026-10-06 このカードで「違う」と答えた物 (U2) は出さない
+    #   (ユーザー「同じ違うものも再度出てくるなら、それも無駄」)
+    assert [c["url"] for c in rest] == [U + "3", U + "4"]
 
 
 def test_without_records_everything_is_shown():

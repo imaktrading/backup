@@ -65,3 +65,13 @@ def test_sync_cert_pids(tmp_path):
     L.save({"111": {"key": "one_piece_tcg:OP09-118"}, "999": {"key": "one_piece_tcg:X"}}, str(cp))
     assert L.sync_cert_pids(str(lab), str(cp), META) == 1
     assert L.sync_cert_pids(str(lab), str(cp), META) == 0          # 二重には入らない
+
+
+def test_diff_url_and_diff_title_are_not_shown_again(monkeypatch):
+    monkeypatch.setattr(H, "_URL_LABEL_PID", {})
+    H._SNKR_MEMO.clear()
+    uv = {U1: {"OP09-118": {"v": "diff", "t": "PSA10 ルフィ 偽"}}}
+    U3 = "https://jp.mercari.com/item/m333"
+    same, rest = H.split_known_same([{"url": U1, "name": "a"}, {"url": U3, "name": "psa10 ルフィ 偽"},
+                                     {"url": U2, "name": "別"}], "one_piece_tcg:OP09-118", L, uv)
+    assert same == [] and [c["url"] for c in rest] == [U2]

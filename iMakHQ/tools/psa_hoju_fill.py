@@ -248,9 +248,14 @@ def split_known_same(cands, key, pll=None, uv=None):
             ok_title = {t for t in title_same_set(pll, uv, _p) if mp._name_matches_card(t, _cn)}
     except Exception:                                          # noqa: BLE001 決められなければタイトルでは書かない
         ok_title = set()
+    diff_title = title_diff_set(pll, uv, pid.split(":")[-1]) - ok_title
     same, rest = [], []
     for c in cands or []:
         u = c.get("url") or ""
+        # ★2026-10-06 ユーザー「同じ違うものも再度出てくるなら、それも無駄」: どの画面でも「違う」と答えた URL /
+        #   「違う」と答えた出品と同じタイトル は出さない (補の候補は、その eBay 出品の NG しか見ていなかった)
+        if pll.url_verdict(pid, u, uv) == "diff" or (diff_title and pll.norm_title(c.get("name")) in diff_title):
+            continue
         # ★2026-10-06 その出品の鑑定番号のラベルでカードが決まる (新規で鑑定番号を打った出品)。
         #   違うカード → 出さない (番号違いを出さないのと同じ) / 同じカード → 印を付けて目視へ (自動では書かない)
         _lp = _URL_LABEL_PID.get(pll.norm_url(u))
@@ -270,6 +275,20 @@ def split_known_same(cands, key, pll=None, uv=None):
             hit = bool(m and m.group(1) in ok_prod)
         (same if hit else rest).append(c)
     return same, rest
+
+
+def title_diff_set(pll, uv, pid):
+    """そのカードで人が「違う」と答えた出品のタイトルの集合 (「同じ」も出たタイトルは除く)。"""
+    k = ("d", id(uv))
+    if k not in _SNKR_MEMO:
+        same, diff = {}, {}
+        for _u, by_pid in (uv or {}).items():
+            for p, e in (by_pid or {}).items():
+                t = (e or {}).get("t")
+                if t:
+                    (same if e.get("v") == "same" else diff).setdefault(p, set()).add(t)
+        _SNKR_MEMO[k] = {p: d - same.get(p, set()) for p, d in diff.items()}
+    return _SNKR_MEMO[k].get(str(pid or "").split(":")[-1], set())
 
 
 def title_same_set(pll, uv, pid):
