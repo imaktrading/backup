@@ -106,7 +106,8 @@ _SHARED_PATHS = [os.path.join(WORKSPACE, "iMakeBayAPI")]
 
 from aspect_contract import (catalog_mismatch_findings,       # 2026-08-26 値の照合
                              contract_findings, load_contract,  # 2026-08-22 契約照合
-                             load_ebay_master)                  # 2026-09-01 Card Name 突合
+                             load_ebay_master,                  # 2026-09-01 Card Name 突合
+                             ebay_master_path)                  # 2026-10-06 読めない時に出す
 
 
 # ---------------------------------------------------------------------------
@@ -1226,6 +1227,13 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
 
     # ★AI 段 (TitleAgent / Vision / AI総合レビュー) が落ちていないか。落ちていれば緑で終わらせない。
     degraded = ai_degraded(log_path, dc.get("claude", ""), csv_path)
+    # ★2026-10-06: eBay 正規表記マスタが読めない時は **黙らせない**。
+    #   読めないと `Hydreigon ex` → `Hydreigon Ex` のような eBay 正規化済みの行を
+    #   「カタログと違う」に倒して除外してしまう (KAGOYA で requests/ が無く実際に起きた)。
+    if _ebay_master_unreadable():
+        degraded = tuple(degraded or ()) + (
+            f"eBay正規表記マスタが読めない ({ebay_master_path()}) "
+            "→ 大文字小文字だけ違う行を誤って除外する恐れ",)
 
     _report(project, csv_path, dry_run, len(rows), exclude_idx, ship_fixes,
             catalog_items, program_items, seo_notes, cat_req, prog_req,
@@ -2243,6 +2251,14 @@ def read_run_logs(log_path="", csv_path="", run_logs_dir=""):
         except OSError:
             continue
     return txt
+
+
+def _ebay_master_unreadable():
+    """eBay 正規表記マスタが読めないか (読めない = 誤除外の恐れ)。2026-10-06。"""
+    try:
+        return load_ebay_master() is None
+    except Exception:                                          # noqa: BLE001
+        return True
 
 
 def ai_degraded(log_path="", claude_text="", csv_path="", run_logs_dir=""):

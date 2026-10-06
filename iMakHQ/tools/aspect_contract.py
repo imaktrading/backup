@@ -28,7 +28,25 @@ CONTRACT_PATH = Path(r"C:/dev/iMak_data/catalog/_contract_aspects.yaml")
 # eBay 実取得マスタ (commerce/taxonomy/v1, 2026-08-21 fetch)。`apply_ebay_filter_to_row` が
 # catalog の値を eBay 正規値に書き換えた分 (例 'Greninja ex' -> 'Greninja Ex') を、
 # 監査の catalog 突合で誤検出にしないために使う。読めなければ None (= 突合しない・従来どおり)。
-EBAY_MASTER_PATH = Path(r"C:/dev/iMak_data/hq/requests/ebay_183454_facet_master_20260821.json")
+# ★2026-10-06: 置き場を `requests/` (依頼書の箱) から `ebay_master/` に移した。
+#   requests/ は KAGOYA に同期されず、サーバーで監査が走ると **読めないまま黙って**
+#   大文字小文字の差を全部「カタログと違う」に倒していた (= 正しい行が除外される)。
+#   古い置き場も当分は見る (まだ移っていない機械のため)。
+EBAY_MASTER_CANDIDATES = (
+    Path(r"C:/dev/iMak_data/hq/ebay_master/ebay_183454_facet_master_20260821.json"),
+    Path(r"C:/dev/iMak_data/hq/requests/ebay_183454_facet_master_20260821.json"),
+)
+
+
+def ebay_master_path():
+    """読める方のマスタを返す。どれも無ければ先頭 (エラー文に出す用)。純関数寄り。"""
+    for p in EBAY_MASTER_CANDIDATES:
+        if p.exists():
+            return p
+    return EBAY_MASTER_CANDIDATES[0]
+
+
+EBAY_MASTER_PATH = ebay_master_path()
 
 # 契約の対象は Item Specifics (C:*) だけ。価格・送料・画像等は表の管轄外。
 _PREFIX = "C:"
@@ -129,7 +147,7 @@ def _values(v):
 
 def load_ebay_master(path=None):
     """eBay 実取得マスタを読む。{aspect名: {"all": [...], ...}}。読めなければ None。"""
-    p = Path(path) if path else EBAY_MASTER_PATH
+    p = Path(path) if path else ebay_master_path()
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except Exception:
