@@ -77,6 +77,8 @@ OUT_REASONS = [
     ("unclear", "写真で柄が分からない"),
     # ★2026-09-12 ユーザー「PSAの理由を流用できるものは追加して、仕入元売り切れとか」
     ("gone", "仕入元が売り切れ・ページが消えた"),
+    # ★2026-10-06 ユーザー「可になるまでやるか、カタログ化をいったん見送るか」
+    ("nocat_skip", "カタログ化を見送り (参考URLが見つからない)"),
     ("other", "その他"),
 ]
 # ★見送り = **商品は一致した**が今回は出さない (PSA の「見送り(商品は合っている)」と同じ意味)。
@@ -699,8 +701,11 @@ def parse_result(data):
         # ★2026-09-16: 参考URLは複数可 (スペース/改行/カンマ区切り)。1本ずつ見て URL だけ残す
         ref = " ".join(u for u in re.split(r"[\s,、]+", str(v.get("ref") or ""))
                        if re.match(r"^https?://\S+$", u))[:500]
+        # ★2026-10-06 「調べる」で可になった時の写真 (長辺500px以上) をカタログに渡す
+        imgs = [u for u in (v.get("imgs") or []) if isinstance(u, str) and re.match(r"^https?://\S+$", u)][:8]
         if work or ref:
-            info[idx] = {"work": work, "ref": ref}
+            info[idx] = {"work": work, "ref": ref, **({"imgs": imgs} if imgs else {}),
+                         **({"checked": "ok"} if v.get("checked") == "ok" else {})}
     return {"picks": picks, "skips": skips, "nocat": _ints(data.get("nocat")),
             "nocat_info": info,
             "outs": [o for o in outs if o["reason"]], "holds": _ints(data.get("holds"))}
@@ -960,6 +965,19 @@ function pickV(el){var box=el.closest('.it');
   if(cw){cw.style.display=el.dataset.design?'':'none';var cn=cw.querySelector('input.cn');
     if(el.dataset.design&&cn&&!cn.value)cn.value=el.dataset.char||el.dataset.charv||'';}
   setAct(box.querySelector('button.go'));}
+/* ★2026-10-06 参考URLをその場で調べて 可 / 否 を出す。可なら写真を並べる (メルカリの写真と見比べる) */
+function refChk(btn){var box=btn.closest('.it');var u=(box.querySelector('input.cu')||{}).value||'';u=u.trim().split(/\\s+/)[0]||'';
+  var out=box.querySelector('.refres');if(!u){out.innerHTML="<b style='color:#c00'>参考URLを入れてください</b>";return;}
+  out.innerHTML='調べています… (ページと写真の大きさを見るので10〜30秒)';box.dataset.refok='';box.dataset.refimgs='';
+  fetch('/api/refcheck?url='+encodeURIComponent(u)).then(function(r){return r.json();}).then(function(d){
+    var ok=d.verdict==='ok';box.dataset.refok=ok?'1':'';box.dataset.refimgs=JSON.stringify(d.images||[]);
+    var th=(d.images||[]).slice(0,8).map(function(x){return "<img src='"+x+"' style='height:110px;margin:2px;border:1px solid #ccc'>";}).join('');
+    out.innerHTML=(ok?"<b style='color:#060'>✅ 可</b> — ":"<b style='color:#c00'>❌ 否</b> — ")+(d.reason||'')
+      +(ok?"<div>"+th+"</div><div style='font-size:11px;color:#555'>同じ柄なら、このまま「確定」でカタログに依頼が届きます</div>"
+          :"<div style='font-size:11px;color:#555'>別のURLを入れて、もう一度「調べる」。見つからなければ「カタログ化を見送り」</div>");
+  }).catch(function(e){out.innerHTML="<b style='color:#c00'>調べられませんでした ("+e+")</b>";});}
+function skipCat(btn){var box=btn.closest('.it');var s=box.querySelector('select.rsn');if(s){s.value='nocat_skip';}
+  setAct(box.querySelector('button.ng[data-a="out"]'));}
 function lookup(inp){var box=inp.closest('.it');var q=inp.value.trim();
   if(!q||q===inp.dataset.asked)return;inp.dataset.asked=q;var slot=box.querySelector('.vslot');
   slot.innerHTML="<div class='one'>カタログを引いています… ("+q+")</div>";
@@ -997,7 +1015,8 @@ function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason
       else{skips.push({idx:idx,pid:b.dataset.pid,color:c,reason:r});}}
     else if(a==='cat'){nocat.push(idx);
       var w=((b.querySelector('input.cw')||{}).value||'').trim(),u=((b.querySelector('input.cu')||{}).value||'').trim();
-      if(w||u)nocatInfo[idx]={work:w,ref:u};}
+      var im=[];try{im=b.dataset.refok?JSON.parse(b.dataset.refimgs||'[]'):[];}catch(e){im=[];}
+      if(w||u)nocatInfo[idx]={work:w,ref:u,imgs:im,checked:b.dataset.refok?'ok':''};}
     else if(a==='out'){
       if(!r||r.indexOf('skip_')===0){noreason++;holds.push(idx);}else{outs.push({idx:idx,reason:r});}}
     else{holds.push(idx);}});
@@ -1120,8 +1139,14 @@ def build_html(items, catalog, summary=None):
                "カタログに無い→追加依頼</button>")
             + "<span class='catinfo' style='display:none'>"
             "作品名 <input class='cw' placeholder='任意: 分かれば' style='width:120px'> "
-            "参考URL <input class='cu' placeholder='任意: 公式ページ等 (複数可・スペース区切り)' "
-            "style='width:320px'>"
+            "参考URL <input class='cu' placeholder='公式ページ・記事などのURL' "
+            "style='width:300px'>"
+            # ★2026-10-06 ユーザー「参考URLを入れたら、すぐ調べて可否を返してほしい。否なら別のURLを探す。
+            #   可になるまでやるか、カタログ化をいったん見送るか」
+            "<button class='refchk' onclick='refChk(this)'>調べる</button>"
+            "<button class='ng' onclick='skipCat(this)' title='参考URLが見つからない。この行はカタログ化をやめる'>"
+            "カタログ化を見送り</button>"
+            "<div class='refres'></div>"
             "</span>"
             + "<button class='ng' data-a='out' onclick='setAct(this)'>対象外</button>"
             "<select class='rsn' onchange='pickRsn(this)'><option value=''>理由を選ぶ</option>"
@@ -1140,8 +1165,81 @@ def build_html(items, catalog, summary=None):
     return "".join(parts).encode("utf-8")
 
 
+_RE_PID = re.compile(r"\b(E\d{6})(?:-\d{3})?\b")
+_RE_UQ_GOODS = re.compile(r"(?:goods/|goods_\d{2}_|products/E?)(\d{6})")
+_RE_IMG = re.compile(r"""(?:<meta[^>]+(?:og:image|twitter:image)[^>]+content=|<img[^>]+(?:data-src|src)=)["']([^"']+)["']""",
+                     re.I)
+
+
+def ref_page_facts(url, html_text, catalog_pids=()):
+    """参考URLのページ → {pid, in_catalog, images (候補の URL)} (純関数)。
+
+    品番 (E+6桁) は URL とページの両方から探す。画像は og:image と <img> から、写真らしい物だけ。
+    """
+    from urllib.parse import urljoin
+    t = html_text or ""
+    m = _RE_PID.search(url or "") or _RE_PID.search(t)
+    pid = m.group(1) if m else ""
+    if not pid:
+        g = _RE_UQ_GOODS.search(url or "")
+        pid = ("E" + g.group(1)) if g else ""
+    full = f"{pid}-000" if pid else ""
+    in_cat = bool(full) and (full in set(catalog_pids) or pid in set(catalog_pids))
+    imgs, seen = [], set()
+    for src in _RE_IMG.findall(t):
+        u = urljoin(url, src.strip())
+        low = u.lower().split("?")[0]
+        if not low.startswith("http") or not low.endswith((".jpg", ".jpeg", ".png", ".webp")):
+            continue
+        if any(w in low for w in ("logo", "icon", "avatar", "sprite", "banner", "/ad/", "btn")):
+            continue
+        if u not in seen:
+            seen.add(u)
+            imgs.append(u)
+    return {"pid": full, "in_catalog": in_cat, "images": imgs}
+
+
+def check_ref_url(url, catalog_pids=(), max_check=10):
+    """参考URLを **その場で** 調べて、カタログに追加できる見込みを返す (I/O)。
+
+    ★2026-10-06 ユーザー「参考URLを入れたら、すぐ調べて可否を返してほしい。否なら別のURLを探す。
+      可になるまでやるか、カタログ化をいったん見送るか。このフローにして」
+    可 = 品番が取れた (カタログが公式から引ける) / または 長辺500px 以上の写真がある (柄の記録を作れる)。
+    戻り: {verdict: "ok"|"ng", reason, pid, in_catalog, images: [長辺500px以上の URL]}
+    """
+    import requests
+    sys.path.insert(0, r"C:\dev\iMak\iMakMercari")
+    from ut_catalog_values import image_big_enough
+    u = (url or "").strip()
+    if not re.match(r"^https?://", u):
+        return {"verdict": "ng", "reason": "URL ではありません (http から始まる物を入れてください)", "images": []}
+    try:
+        r = requests.get(u, timeout=25, headers={"User-Agent": "Mozilla/5.0"})
+        body, code = r.text, r.status_code
+    except Exception as e:                                     # noqa: BLE001
+        body, code = "", type(e).__name__
+    # 廃盤の公式ページは消えていることが多い (404)。URL に品番があれば、カタログは公式の記録から引ける
+    if code != 200 and not ref_page_facts(u, "", catalog_pids)["pid"]:
+        return {"verdict": "ng", "reason": f"ページを開けません ({code})", "images": []}
+    f = ref_page_facts(u, body if code == 200 else "", catalog_pids)
+    big = [x for x in f["images"][:max_check] if image_big_enough(x)]
+    if f["in_catalog"]:
+        return {"verdict": "ok", "reason": f"品番 {f['pid']} はもうカタログに在ります → 検索欄にこの品番を入れて選んでください",
+                **f, "images": big}
+    if f["pid"]:
+        return {"verdict": "ok", "reason": f"品番 {f['pid']} が取れました → カタログが公式から引けます", **f, "images": big}
+    if big:
+        return {"verdict": "ok", "reason": f"使える写真 (長辺500px以上) が {len(big)}枚あります → 柄の記録を作れます。"
+                                            "メルカリの写真と同じ柄か見てください", **f, "images": big}
+    return {"verdict": "ng", "reason": "品番も、使える写真 (長辺500px以上) もありません → 別のURLを探してください",
+            **f, "images": []}
+
+
 def lookup_api(path, query, catalog=None):
-    """画面の検索欄 → 候補カードの HTML。"""
+    """画面の検索欄 → 候補カードの HTML。/api/refcheck は参考URLの可否 (2026-10-06)。"""
+    if path == "/api/refcheck":
+        catalog = catalog if catalog is not None else load_catalog()
+        return check_ref_url(query.get("url") or "", [p["pid"] for p in catalog])
     if path != "/api/search":
         return None
     catalog = catalog if catalog is not None else load_catalog()
@@ -1529,7 +1627,10 @@ def save(items, res, now=None):
         req_rows.append({"url": r[C_URL].strip(), "title": r[C_TITLE], "color": r[C_COLOR],
                          "size": r[C_SIZE], "tag": r[C_TAG], "kw": r[C_KW],
                          "photo": photos[0] if photos else "", "photos": photos[:10],
-                         "work": _info.get("work", ""), "ref": _info.get("ref", "")})
+                         "work": _info.get("work", ""),
+                         # ★2026-10-06 「調べる」で可だった時は、その写真も参考URLの欄に並べて渡す
+                         "ref": " ".join([_info.get("ref", "")] + list(_info.get("imgs") or []))
+                                + (" (HQ で確認済み: 可)" if _info.get("checked") == "ok" else "")})
         add_led[r[C_URL].strip()] = {"decision": "nocat", "title": r[C_TITLE], "at": now,
                                      **{k: v for k, v in _info.items() if v}}
     for o in res["outs"]:
