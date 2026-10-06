@@ -160,6 +160,64 @@ def load_same_verdicts():
         return None, None
 
 
+_URL_LABEL_PID = {}     # 仕入元 URL → ラベルの記録で決まるカード pid (set_label_context で作る)
+_URL_CERT = {}          # 仕入元 URL → 鑑定番号 (商品管理シートの A と I)。補で「同じ」と答えたらラベルにも足す
+
+
+def url_label_pids(rows2d, psa_cache, learned, pll):
+    """商品管理シートの「仕入元 URL (A) + 鑑定番号 (I)」→ ラベルの記録で決まるカード {URL: pid}。純関数。
+
+    ★2026-10-06 ユーザー「補に出てくる前に新規しているわけで … パイプラインなんだよ」:
+      新規の目視で鑑定番号を打った出品は、補の候補にもなる。その出品のラベルでカードが決まるなら、
+      補で写真を見比べ直す必要は無い (実測: 補のメルカリ候補 4,427本のうち 561本が該当)。
+    """
+    out = {}
+    for r in (rows2d or [])[1:]:
+        u, cert = _cell(r, A), _cell(r, CERT)
+        if not (u and cert.isdigit()):
+            continue
+        meta = (psa_cache or {}).get(cert) or {}
+        if not meta:
+            continue
+        for cat in ("pokemon_tcg", "one_piece_tcg", "dragonball_scg", "gundam_tcg"):
+            pid = pll.learned_pid(learned, pll.key_for_psa(cat, meta))
+            if pid:
+                out[pll.norm_url(u)] = pid
+                break
+    return out
+
+
+def set_label_context(rows2d):
+    """補の目視の前に1回: 仕入元 URL → ラベルで決まるカード を作る。読めなければ空 (今までどおり目視)。"""
+    global _URL_LABEL_PID, _URL_CERT
+    try:
+        import psa_label_learned as pll
+        import psa_resource_confirm as prc
+        pll.sync_cert_pids()                       # 新規で打った鑑定番号の答えをラベルへ (毎回・差分だけ)
+        _URL_LABEL_PID = url_label_pids(rows2d, prc._load_psa_cache() or {}, pll.load(), pll)
+        _URL_CERT = {pll.norm_url(_cell(r, A)): _cell(r, CERT) for r in (rows2d or [])[1:]
+                     if _cell(r, A) and _cell(r, CERT).isdigit()}
+    except Exception:                                          # noqa: BLE001
+        _URL_LABEL_PID, _URL_CERT = {}, {}
+    return len(_URL_LABEL_PID)
+
+
+def same_label_picks(uv_items, url_cert, psa_cache, pll):
+    """補で「同じ」と答えた [(pid, url, 'same', 画面, タイトル)] → ラベルに足す [(ラベル, pid, 鑑定番号)]。純関数。"""
+    out = []
+    for it in uv_items or []:
+        pid, url, verdict = it[0], it[1], it[2]
+        cert = (url_cert or {}).get(pll.norm_url(url))
+        meta = (psa_cache or {}).get(cert or "") or {}
+        if verdict != "same" or not meta:
+            continue
+        cat = pll.category_of(pid)
+        k = pll.key_for_psa(cat, meta) if cat else ""
+        if k:
+            out.append((k, str(pid).split(":")[-1], cert))
+    return out
+
+
 def split_known_same(cands, key, pll=None, uv=None):
     """候補を (前に人が「同じ」と確かめた物, まだ見ていない物) に分ける (純関数に近い)。
 
@@ -178,10 +236,30 @@ def split_known_same(cands, key, pll=None, uv=None):
     if not pid:
         return [], list(cands or [])
     ok_prod = snkr_same_products(uv).get(pid.split(":")[-1], set())
+    # ★2026-10-06 ユーザー「目視で一致と回答しているのに、残さないのは無駄」: 一致済みと **同じタイトル** の出品に印を付ける。
+    #   ★ユーザー「目視を飛ばす話ではない」: 印を付けて目視に出すだけ (自動では書かない)。
+    #   印の条件: タイトルにカード番号が書いてある / 同じ番号に版違いの無いカード
+    #   (版違いがあると、出品者がパラレルと書かずに同じタイトルで出した別の版のことがある)
+    ok_title = set()
+    try:
+        _cat, _p = mp.split_key(key)
+        _cn = _card_no_from_key(key)
+        if _cn and not mp._is_multi_variant(_cn, _cat):
+            ok_title = {t for t in title_same_set(pll, uv, _p) if mp._name_matches_card(t, _cn)}
+    except Exception:                                          # noqa: BLE001 決められなければタイトルでは書かない
+        ok_title = set()
     same, rest = [], []
     for c in cands or []:
         u = c.get("url") or ""
+        # ★2026-10-06 その出品の鑑定番号のラベルでカードが決まる (新規で鑑定番号を打った出品)。
+        #   違うカード → 出さない (番号違いを出さないのと同じ) / 同じカード → 印を付けて目視へ (自動では書かない)
+        _lp = _URL_LABEL_PID.get(pll.norm_url(u))
+        if _lp and _lp != pid.split(":")[-1]:
+            continue
         hit = pll.url_verdict(pid, u, uv) == "same"
+        if not hit and (_lp or (ok_title and pll.norm_title(c.get("name")) in ok_title)):
+            rest.append(dict(c, **({"label_same": True} if _lp else {"title_same": True})))
+            continue
         if not hit:
             # ★2026-09-29 ユーザー確定「スニダンは、そうしてもらえると助かる」: スニダンは同じカードの
             #   出品が全部 **同じ商品ページ** (apparels/<番号>) の下に並ぶ。そのページの出品を一度
@@ -192,6 +270,14 @@ def split_known_same(cands, key, pll=None, uv=None):
             hit = bool(m and m.group(1) in ok_prod)
         (same if hit else rest).append(c)
     return same, rest
+
+
+def title_same_set(pll, uv, pid):
+    """そのカードで人が「同じ」と確かめたタイトルの集合 (「違う」の出たタイトルは除く)。"""
+    k = ("t", id(uv))
+    if k not in _SNKR_MEMO:
+        _SNKR_MEMO[k] = pll.title_same_cards(uv)
+    return _SNKR_MEMO[k].get(str(pid or "").split(":")[-1], set())
 
 
 _SNKR_PROD = re.compile(r"snkrdunk\.com/(?:en/)?apparels/(\d+)")
@@ -2369,6 +2455,7 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
     swap_targets = select_backfill_targets(vals, max_backups=AUXN + 1,
                                            min_backups=CONFIRM_MAX_BACKUPS)
     _pll, _uv = load_same_verdicts()
+    set_label_context(vals)                    # ★2026-10-06 仕入元 URL の鑑定番号 → ラベルでカード
     for t in list(c_targets) + list(swap_targets):
         is_swap = t["n_backups"] >= CONFIRM_MAX_BACKUPS
         cands, _ref, _why, _ = confirm_survivors(
@@ -2622,6 +2709,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             return cands, []
 
     _PLLs, _UVs = load_same_verdicts()
+    set_label_context(vals)                    # ★2026-10-06 仕入元 URL の鑑定番号 → ラベルでカード
     auto_same = []                  # [(target, [前に「同じ」と確かめた候補])] — 目視に出さず書く
     _scanned = 0
     for t in targets:
@@ -3063,16 +3151,28 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     try:
         import psa_label_learned as _PLL
         _uv = []
+        # ★2026-10-06 候補のタイトルも残す (同じタイトルの別の出品にも効かせる・title_same_cards)
+        _name_of = {}
+        for _it in items:
+            for _c in list(_it.get("candidates") or []) + list(_it.get("_auto") or []):
+                if isinstance(_c, dict) and _c.get("url"):
+                    _name_of[_PLL.norm_url(_c["url"])] = _c.get("name") or ""
         for _i, _urls in (confirmed or {}).items():
             if _i < len(item_targets):
                 _pid = mp.split_key(item_targets[_i].get("key"))[1]
-                _uv += [(_pid, _u, "same", "補URL③") for _u in (_urls or [])]
+                _uv += [(_pid, _u, "same", "補URL③", _name_of.get(_PLL.norm_url(_u), ""))
+                        for _u in (_urls or [])]
         for d in (res.get("diffs") or []):
             _i = d.get("idx")
             if _i is not None and _i < len(item_targets) and d.get("url"):
-                _uv.append((mp.split_key(item_targets[_i].get("key"))[1], d["url"], "diff", "補URL③"))
+                _uv.append((mp.split_key(item_targets[_i].get("key"))[1], d["url"], "diff", "補URL③",
+                            _name_of.get(_PLL.norm_url(d["url"]), "")))
         if _uv:
             print(f"  📘 目視の同じ/違うをカード単位で記録: {_PLL.remember_url_verdicts(_uv)}件")
+        # ★2026-10-06 「同じ」と答えた候補の鑑定番号が分かれば (新規で打った物)、ラベルの記録にも足す
+        _n_lab = _PLL.record_picks(same_label_picks(_uv, _URL_CERT, prc._load_psa_cache() or {}, _PLL))
+        if _n_lab:
+            print(f"  📘 鑑定番号の分かる候補をラベルの記録に足した: {_n_lab}件")
     except Exception as _e_uv:                                  # noqa: BLE001
         print(f"  ⚠ カード単位の記録skip ({type(_e_uv).__name__}: {_e_uv})")
 

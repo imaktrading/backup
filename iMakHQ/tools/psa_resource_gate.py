@@ -368,8 +368,12 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6, card_no=None, cat
             #   前に「同じ」と確かめた仕入元 (スニダンは同じ商品ページも) に印を付ける。
             #   画面に「✔ 前に同じと確認済み」と出し、見比べ直さなくて済むようにする
             import psa_hoju_fill as _PHF
-            _same, _ = _PHF.split_known_same(out, card_pid, _PLL, _uv)
+            _same, _rest = _PHF.split_known_same(out, card_pid, _PLL, _uv)
             _ids = {id(x) for x in _same}
+            # ★2026-10-06 ラベルで別のカードと分かった候補は出さない / 同じカードは印 (label_same) を付けて出す
+            _keep = {_PLL.norm_url(x.get("url")): x for x in _rest}
+            out = [x if id(x) in _ids else _keep[_PLL.norm_url(x.get("url"))] for x in out
+                   if id(x) in _ids or _PLL.norm_url(x.get("url")) in _keep]
             for x in out:
                 if id(x) in _ids:
                     x["known_same"] = True
@@ -1198,6 +1202,16 @@ def main():
 
     # --- 統合 + 出力 ---
     import datetime as _dt
+    # ★2026-10-06 ユーザー「全ては新規から始まった処理 … パイプラインなんだよ」: 補と同じく、
+    #   新規で鑑定番号を打った仕入元は ラベルの記録でカードを決める (違うカードは出さない / 同じは印を付けて目視)
+    try:
+        import psa_hoju_fill as _PHF0
+        import sheet_io as _sio0
+        _n_lab = _PHF0.set_label_context(_sio0._read_with_quota_retry(_sio0._product_ws().get_all_values))
+        if _n_lab:
+            print(f"  🏷 鑑定番号でカードの分かる仕入元: {_n_lab}本 (ラベルの記録)")
+    except Exception as _e_lab:                                    # noqa: BLE001 読めなければ今までどおり
+        print(f"  ⚠ ラベルの記録の読込skip ({type(_e_lab).__name__})")
     _judged_at = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")  # 可否判定(supply確認)の時刻
     MAX_AUX = 5  # 補URL列数 (AC-AG 相当)
     aux_cols = [f"補URL{k+1}" for k in range(MAX_AUX)]
@@ -1893,6 +1907,11 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
                 _uv.append((mp.split_key(restock_cands[_i].get("key"))[1], d["url"], "diff", "再仕入れ①"))
         if _uv:
             print(f"  📘 目視の同じ/違うをカード単位で記録: {_PLL.remember_url_verdicts(_uv)}件")
+            # ★2026-10-06 「同じ」と答えた仕入元の鑑定番号が分かれば (新規で打った物)、ラベルの記録にも足す
+            import psa_hoju_fill as _PHF1
+            _n_lab = _PLL.record_picks(_PHF1.same_label_picks(_uv, _PHF1._URL_CERT, prc._load_psa_cache() or {}, _PLL))
+            if _n_lab:
+                print(f"  📘 鑑定番号の分かる仕入元をラベルの記録に足した: {_n_lab}件")
     except Exception as _e_uv:                                  # noqa: BLE001
         print(f"  ⚠ カード単位の記録skip ({type(_e_uv).__name__}: {_e_uv})")
     # ★2026-09-06: 「PSA10でない」= グレード対象外。「違う(精度事故)」に混ぜず、

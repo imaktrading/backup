@@ -119,6 +119,30 @@ def backfill_picks(verified, meta_for, category_for, data):
     return out
 
 
+def sync_cert_pids(path=PATH, cert_path=None, psa_cache=None):
+    """新規の目視で鑑定番号を打って決めたカード (cert_expected_pid) → ラベルの記録へ。足した件数。
+
+    ★2026-10-06 ユーザー「パイプラインなんだよ」: 新規で決めた答えは鑑定番号ごとにしか残らず、
+      PSA のラベルが取れた後もラベルの記録に入っていなかった。ラベルが取れた分から毎回移す (二重には入らない)。
+    """
+    if psa_cache is None:
+        import psa_resource_confirm as _prc
+        psa_cache = _prc._load_psa_cache() or {}
+    data = load(path)
+    seen = {c for e in data.values() for p in (e.get("picks") or {}).values() for c in p.get("certs") or []}
+    picks = []
+    for cert, e in load(cert_path or CERT_PATH).items():
+        key = str((e or {}).get("key") or "")
+        meta = psa_cache.get(str(cert)) or {}
+        if cert in seen or ":" not in key or not meta:
+            continue
+        cat, pid = key.split(":", 1)
+        k = key_for_psa(cat, meta)
+        if k and pid:
+            picks.append((k, pid, cert))
+    return record_picks(picks, path) if picks else 0
+
+
 def record_picks(picks, path=PATH):
     """[(key, product_id, cert)] をまとめて覚える (補URLの確証から)。覚えた件数を返す。"""
     data, n = load(path), 0
@@ -196,16 +220,56 @@ def remember_url_verdicts(items, path=URL_PATH, now=None):
     """[(card_pid, url, 'same'|'diff', 画面名)] を覚える。覚えた件数を返す。後から来た判断で上書き。"""
     data, n = load(path), 0
     at = now or datetime.now().isoformat(timespec="seconds")
-    for pid, url, verdict, screen in items:
+    for it in items:
+        pid, url, verdict, screen = it[:4]
+        # ★2026-10-06 ユーザー「せっかく目視で一致と回答しているのに、残さないのは無駄」:
+        #   URL はスラブ1枚限り。**出品のタイトル** も残し、同じタイトルの別の出品にも効かせる (title_same_cards)
+        title = norm_title(it[4]) if len(it) > 4 else ""
         pid = str(pid or "").split(":")[-1].strip()
         u = norm_url(url)
         # 本物の仕入元 URL だけ (試験の架空 URL 'https://m/0' 等を本物の台帳に入れない)
         if not (pid and _is_real_url(u) and verdict in ("same", "diff")):
             continue
-        data.setdefault(u, {})[pid] = {"v": verdict, "at": at, "screen": screen}
+        data.setdefault(u, {})[pid] = {"v": verdict, "at": at, "screen": screen, **({"t": title} if title else {})}
         n += 1
     if n:
         save(data, path)
+    return n
+
+
+def norm_title(t):
+    """出品のタイトルの照合用 (全角半角・大小・空白の揺れだけ畳む)。純関数。"""
+    import re
+    import unicodedata
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", str(t or ""))).strip().upper()
+
+
+def title_same_cards(data):
+    """{カード pid: 人が「同じ」と確かめたタイトルの集合} — そのカードで「違う」が1本も無いタイトルだけ。純関数。
+
+    ★2026-10-06: メルカリでは同じ出品者が同じタイトルで何枚も出す。URL は1枚限りだが、
+      タイトルは次の出品にも効く (実測: 今の候補の控えで 76本が、一致済みと同じタイトル)。
+    """
+    same, diff = {}, {}
+    for _u, by_pid in (data or {}).items():
+        for p, e in (by_pid or {}).items():
+            t = (e or {}).get("t")
+            if t:
+                (same if e.get("v") == "same" else diff).setdefault(p, set()).add(t)
+    return {p: s - diff.get(p, set()) for p, s in same.items()}
+
+
+def backfill_titles(data, title_of):
+    """既にある判断に、タイトル (候補の控え {URL: タイトル}) を足す → 足した件数。data を書き換える。"""
+    n = 0
+    for u, by_pid in (data or {}).items():
+        t = norm_title((title_of or {}).get(norm_url(u)))
+        if not t:
+            continue
+        for e in (by_pid or {}).values():
+            if isinstance(e, dict) and not e.get("t"):
+                e["t"] = t
+                n += 1
     return n
 
 
