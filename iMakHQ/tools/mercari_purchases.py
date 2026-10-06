@@ -53,15 +53,27 @@ def normal_ua(major):
             "Chrome/%s.0.0.0 Safari/537.36" % (major or 154))
 
 
+def read_args(profile=PROFILE):
+    """購入履歴を読む Chrome の起動引数 (純関数)。
+
+    ★2026-10-06 ユーザー「おかしいよね。作りが」: 取り込み8回のうち読めたのはログイン直後の1回だけ。
+      切れた時は毎回 本人確認のやり直し (signin?acr_values=...) に飛ばされていた。
+      ログインは窓ありの普通の Chrome、読む時は窓なし (headless) で、メルカリからは別の端末に見える。
+      9/25 に名乗り (UA) だけ揃えたが変わらなかった → **読む時もログインと同じ窓ありで開く**。
+      窓は画面の外に置くので見えない。名乗りの上書きもしない (ログイン時と全く同じ Chrome にする)。
+    """
+    return [f"--user-data-dir={profile}", "--lang=ja-JP", "--window-size=1280,1400",
+            "--window-position=-2400,-2400"]
+
+
 def fetch_purchases():
-    """ログイン済みの専用 Chrome (窓なし) で読む (I/O)。ログインが切れていたら例外。"""
+    """ログイン済みの専用 Chrome (ログインと同じ窓あり・画面の外) で読む (I/O)。ログインが切れていたら例外。"""
     import undetected_chromedriver as uc
     from mercari_psa_resource import _chrome_major, _quiet_chromedriver
     _quiet_chromedriver()
     o = uc.ChromeOptions()
     maj = _chrome_major()
-    for a in (f"--user-data-dir={PROFILE}", "--headless=new", "--lang=ja-JP", "--window-size=1280,1400",
-              "--user-agent=" + normal_ua(maj)):
+    for a in read_args():
         o.add_argument(a)
     d = uc.Chrome(options=o, version_main=maj) if maj else uc.Chrome(options=o)
     try:
