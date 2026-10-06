@@ -326,7 +326,11 @@ def main():
             db_copy, rows = copy_db(tmp)
             st["db_rows"] = rows
             local_zip = os.path.join(tmp, f"iMak_daily_{stamp}.zip")
-            with zipfile.ZipFile(local_zip, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+            # ★2026-10-06: KAGOYA から戻した控え (offload_work/button/*/srv/manifest.json) は日付が
+            #   1970-01-01 で、zip が「1980年より前は入れられない」と ValueError で全体を落としていた。
+            #   1980年より前の日付は 1980-01-01 に丸めて入れる (中身はそのまま)
+            with zipfile.ZipFile(local_zip, "w", zipfile.ZIP_DEFLATED, compresslevel=6,
+                                 strict_timestamps=False) as z:
                 z.write(db_copy, "catalog/products.sqlite")
                 for p, rel, _ in files:
                     try:
