@@ -69,7 +69,9 @@ def main(argv=None):
         if not r:
             print(f"✗ {iid}: シートに無い → 送らない"); ng += 1; continue
         key, cert = r[S.PRODUCT_COL_KEY].strip(), r[S.PRODUCT_COL_CERT].strip()
-        f, err = T.build_listing_fields(cert, "One Piece TCG", forced_card_id=key.split(":")[-1])
+        game = {"dragonball_scg": "Dragon Ball Super Card Game", "gundam_tcg": "Gundam Card Game"}.get(
+            key.split(":")[0] if ":" in key else "", "One Piece TCG")
+        f, err = T.build_listing_fields(cert, game, forced_card_id=key.split(":")[-1])
         if not f:
             print(f"✗ {iid}: カタログから作れない ({err}) → 送らない"); ng += 1; continue
         cur = L.fetch_aspects(iid)
