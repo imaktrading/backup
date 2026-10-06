@@ -248,7 +248,7 @@ def design_color(color_jp):
     return ebay_color(color_jp)
 
 
-def build_values(product, color_name, size_text, mercari_text=""):
+def build_values(product, color_name, size_text, mercari_text="", work_en=""):
     """カタログの1商品 + 選んだ色 + メルカリのサイズ → 出品に写す値 (dict)。純関数。
 
     戻り keys: specs (Item Specifics の上書き) / size_jp / size_us / material_line /
@@ -288,6 +288,8 @@ def build_values(product, color_name, size_text, mercari_text=""):
     # №138: 作品名は表で公式英語表記に同定する。表に無ければ出さない (綴りのブレを止める)
     work = work_name_en([s.get("collab"), s.get("collab_official_name"), product.get("name"),
                          s.get("character_family")], load_works())
+    # ★2026-10-06 目視で人が入れた英語の作品名 (表に無い時だけ)。確定した時に表へ足す (ut_identify.add_work)
+    work = work or (work_en or "").strip()
     if not work:
         raise NotListable(f"作品名が対応表に無い: {(s.get('collab') or product.get('name') or '')[:30]} "
                           f"→ iMakMercari/ut_title_names.yaml に公式の英語表記を足す")
@@ -757,11 +759,21 @@ def values_for_url(url, size_text, ledger=None, title="", text=""):
     e = led.get((url or "").strip())
     if not e or e.get("decision") != "go":
         return None
+    return values_for_entry(e, size_text, title=title, text=text)
+
+
+def values_for_entry(e, size_text, title="", text="", work_en="", check_images=True):
+    """台帳の1行 (目視で決めた内容) → 写す値。出せない時は NotListable。
+
+    ★2026-10-06 目視の画面でも同じ判定を先に見せる (ut_identify の /api/preview) ために切り出した。
+      サイズは **目視で人が直した値 (size_hand) が最優先**、次にシートのサイズ欄 → 台帳 → タイトル。
+    """
     p = load_product(e.get("product_id") or "")
     if not p:
         raise NotListable(f"特定した商品 {e.get('product_id')} がカタログに無い")
-    size = next((s for s in (size_text, e.get("size"), title) if jp_size(s or "")), "")
-    v = build_values(p, e.get("color") or "", size, mercari_text=" ".join([title or "", text or ""]))
+    size = next((s for s in (e.get("size_hand"), size_text, e.get("size"), title) if jp_size(s or "")), "")
+    v = build_values(p, e.get("color") or "", size, mercari_text=" ".join([title or "", text or ""]),
+                     work_en=work_en)
     if is_design_listable(p):
         # ★2026-10-06 柄の記録: 目視で人が入れたキャラ名 (C) があれば、カタログがまだ写していなくても使う
         if not v["specs"].get("Character") and (e.get("character") or "").strip():
@@ -769,7 +781,7 @@ def values_for_url(url, size_text, ledger=None, title="", text=""):
         if not design_image_color_ok(p.get("images"), v["specs"]["Color"]):
             raise NotListable(f"カタログの画像の色 ({', '.join(sorted(image_colors(p.get('images'))))}) が"
                               f"メルカリの色 ({v['specs']['Color']}) と違う → 違う色の写真になるので出さない")
-        if not any(image_big_enough(u) for u in p.get("images") or []):
+        if check_images and not any(image_big_enough(u) for u in p.get("images") or []):
             raise NotListable("カタログの画像が小さい (長辺 500px 未満) → eBay が受け付けないので出さない")
     v["product_id"] = p["product_id"]
     # ★2026-09-13: 画像は **カタログが主役**。目視で「使わない」と外した画像も一緒に持つ

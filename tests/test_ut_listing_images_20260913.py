@@ -63,7 +63,8 @@ def test_values_carry_the_image_material():
     """目視の台帳 → 出品に写す値 に、画像の材料と外した画像が載ること。"""
     import io
     src = io.open(ROOT / "iMakMercari" / "ut_catalog_values.py", encoding="utf-8").read()
-    i = src.index("def values_for_url(")
+    # ★2026-10-06 values_for_url の本体は values_for_entry に分けた (目視の「出品の値」と同じ判定にするため)
+    i = src.index("def values_for_entry(")
     body = src[i:src.index("\ndef ", i + 1)]
     for k in ('"catalog_images"', '"color_codes"', '"img_drop"'):
         assert k in body, k
