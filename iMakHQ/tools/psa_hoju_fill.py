@@ -2801,6 +2801,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     set_label_context(vals)                    # ★2026-10-06 仕入元 URL の鑑定番号 → ラベルでカード
     auto_same = []                  # [(target, [前に「同じ」と確かめた候補])] — 目視に出さず書く
     label_routed = []               # ラベルで別のカードと分かった候補 → 補URL候補NG (= 新規の種の材料) へ
+    marks = {"label": 0, "title": 0}  # 印を付けて目視に出した候補の数 (2026-10-07 動いている証拠を走行ログに)
     _scanned = 0
     for t in targets:
         _scanned += 1
@@ -2869,6 +2870,8 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         _same, cands = split_known_same(cands, t.get("key"), _PLLs, _UVs)
         # ★2026-10-06 ラベルで別のカードと分かって外した候補は、捨てずに新規の種へ回す (label_routed)
         label_routed += label_diff_rows(t, _before, today)
+        marks["label"] += sum(1 for _c in cands if _c.get("label_same"))
+        marks["title"] += sum(1 for _c in cands if _c.get("title_same"))
         if _same:
             auto_same.append((t, _same))
             if not cands:
@@ -2985,6 +2988,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     if auto_same:
         print(f"  ✔ 前に「同じ」と確かめた候補 {sum(len(s) for _, s in auto_same)}本 "
               f"({len(auto_same)}出品) は目視に出さず、そのまま書きます")
+    print(f"  🏷 印を付けて目視に出す候補: ラベルで同じカード {marks['label']}本 / 一致済みと同じタイトル {marks['title']}本")
     if label_routed:
         print(f"  🏷 ラベルで別のカードと分かった候補 {len(label_routed)}本 → {NG_CAND_TAB} (新規の種の材料) へ回します")
     if not items and not auto_same:
