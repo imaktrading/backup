@@ -159,7 +159,7 @@ def test_button_has_tip_count_and_blue():
       ユーザーは青いものしか押さない = 青にしないと機能を消したのと同じ。
       証明番号は人が打つまで永遠に減らないので、残件があれば必ず青。
     """
-    i = _PANEL.index('"🌱 種→出品行に追加 (証明番号)"')
+    i = _PANEL.index('"🌱 PSA 種→出品行に追加 (証明番号)"')
     blk = _PANEL[i - 400:i + 900]
     assert '"badge": "newcand_high"' in blk, "badge が無い = 件数が出ない"
     assert '"tip":' in blk, "tip が無いと _attach_tip が呼ばれず件数も出ない"

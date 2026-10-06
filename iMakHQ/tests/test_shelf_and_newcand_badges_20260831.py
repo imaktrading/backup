@@ -90,7 +90,7 @@ def test_shelf_label_is_painted_onto_the_button_text():
 
 def test_newcand_button_now_has_a_tip_so_the_hint_actually_shows():
     """穴: tip が無いと _attach_tip 自体が呼ばれず、件数ヒントが一生出ない。"""
-    i = _SRC.index('"label": "🌱 捨てた候補→新規出品の種"')
+    i = _SRC.index('"label": "🌱 PSA 捨てた候補→新規出品の種"')
     j = _SRC.index("}", i)
     block = _SRC[i:j]
     assert '"tip":' in block, "tip が無い = ヒントが画面に付かない"
