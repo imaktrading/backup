@@ -562,14 +562,10 @@ def checked_html(chk, proxied=lambda u: u, status=""):
                 "<span style='color:#777'> — 写しは1時間おき。次の更新で出なければ、カタログに聞きます</span>")
     thumbs = "".join(f"<img src='{_html.escape(proxied(u))}' loading='lazy' "
                      "style='height:90px;margin:2px;border:1px solid #ccc'>" for u in chk["images"][:4])
-    src = chk.get("sources")
-    src_txt = (", ".join(f"{k}:{v}" for k, v in src.items()) if isinstance(src, dict)
-               else ", ".join(map(str, src)) if isinstance(src, list) else str(src or ""))
     use = ("<b style='color:#060'>出品に使える</b>" if chk["listable"]
            else "<b style='color:#a60'>まだ出品に使えない</b>")
     return ("<br>🔎 カタログを直接確認: <b>" + _html.escape(chk["name"] or "(名前なし)") + "</b>"
             + f" ／ 画像 <b>{len(chk['images'])}枚</b>"
-            + (f" ({_html.escape(src_txt[:80])})" if src_txt else "")
             + " ／ " + use
             + (f" ({_html.escape(chk['data_level'])})" if chk.get("data_level") else "")
             + (f"<div>{thumbs}</div>" if thumbs else "<br><b style='color:#c00'>⚠ 画像がありません</b>"))
@@ -586,14 +582,15 @@ def status_html(entry, st, chk_html=""):
                 f"({_html.escape(sent)}・回答待ち)" + (f" 参考URL {_html.escape(ref[:60])}" if ref else "") + "</div>")
     lab, color, hint = STATUS_LABEL.get(st.get("status"), (st.get("status"), "#333", ""))
     pid = st.get("product_id") or ""
-    return (f"<div class='nm' style='border-left:4px solid {color};padding:4px 8px;background:#fafafa'>"
-            f"📮 カタログの回答 ({_html.escape(str(st.get('at') or '')[:10])}): <b style='color:{color}'>{_html.escape(lab)}</b>"
+    # ★2026-10-06 ユーザー「何をしたらいいかわかりにくい」: 回答は1行。中身は「詳しく」の中
+    return (f"<details class='nm' style='border-left:4px solid {color};padding:2px 8px;background:#fafafa;font-size:12px'>"
+            f"<summary>📮 カタログの回答: <b style='color:{color}'>{_html.escape(lab)}</b>"
             + (f" — {_html.escape(pid)}" if pid else "")
-            + (f"<br><span style='color:#555'>{_html.escape(st.get('note') or '')}</span>" if st.get("note") else "")
+            + (f" — {_html.escape(hint)}" if hint else "") + " (詳しく)</summary>"
+            + (f"<span style='color:#555'>{_html.escape(st.get('note') or '')}</span>" if st.get("note") else "")
             + (f"<br><span style='color:#777'>使った参考URL: {_html.escape((st.get('ref_url') or ref)[:90])}</span>"
                if (st.get("ref_url") or ref) else "")
-            + (chk_html or "")
-            + (f"<br><b>{_html.escape(hint)}</b>" if hint else "") + "</div>")
+            + (chk_html or "") + "</details>")
 
 
 def _own_photos(r):
@@ -843,6 +840,10 @@ def _cards_html(cands, color_jp=""):
 
 
 _CSS = """
+.guide{background:#fffbe6;border:2px solid #e0b000;border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:14px}
+.guide ol{margin:4px 0 4px 20px;padding:0}.guide span{font-size:12px;color:#555}
+.steps{font-size:13px;margin:2px 0 4px;color:#999}.steps span{padding:1px 6px;border-radius:10px;background:#eee}
+.steps span.on{background:#0a7;color:#fff}.steps span.now{background:#e0b000;color:#000;font-weight:bold}
 body{font-family:sans-serif;margin:12px;background:#fafafa}
 h1{font-size:16px;margin:0 0 6px}.sum{font-size:12px;color:#555;margin-bottom:10px}
 .it{background:#fff;border:1px solid #ddd;border-radius:6px;padding:8px;margin-bottom:10px;display:flex;gap:10px}
@@ -986,10 +987,10 @@ function preview(el){var box=el.closest?el.closest('.it'):el;if(!box||!box.datas
   fetch('/api/preview?'+Object.keys(q).map(function(k){return k+'='+encodeURIComponent(q[k]);}).join('&'))
    .then(function(r){return r.json();}).then(function(d){
     if(d.need_work)lv.querySelector('.lww').style.display='';
-    if(d.ok){box.dataset.lvok='1';out.innerHTML="<b style='color:#060'>✅ 出品できる</b> — "
+    if(d.ok){box.dataset.lvok='1';steps(box);out.innerHTML="<b style='color:#060'>✅ 出品できる</b> — "
       +[d.work,d.character,d.color,(d.size_us?'US '+d.size_us+' (JP '+d.size_jp+')':'JP '+d.size_jp),d.dept]
         .filter(function(x){return x;}).join(' / ');}
-    else{out.innerHTML="<b style='color:#c00'>❌ このままでは出品で止まる</b> — "+(d.reason||'');}
+    else{steps(box);out.innerHTML="<b style='color:#c00'>❌ このままでは出品で止まる</b> — "+(d.reason||'');}
    }).catch(function(e){out.innerHTML="<b style='color:#c00'>確かめられませんでした ("+e+")</b>";});}
 /* ★2026-10-06 参考URLをその場で調べて 可 / 否 を出す。可なら写真を並べる (メルカリの写真と見比べる) */
 function refChk(btn){var box=btn.closest('.it');var u=(box.querySelector('input.cu')||{}).value||'';u=u.trim().split(/\\s+/)[0]||'';
@@ -1021,6 +1022,15 @@ function lookup(inp){var box=inp.closest('.it');var q=inp.value.trim();
 function pickRsn(sel){if(!sel.value)return;
   var a=sel.value.indexOf('skip_')===0?'skip':'out';
   setAct(sel.closest('.it').querySelector("button[data-a='"+a+"']"));}
+/* ★2026-10-06 行ごとの「やること」の進み具合 (済=緑 / 今=黄) */
+function steps(box){var a=box.dataset.act||'';var s1=box.querySelector('.steps .s1'),s2=box.querySelector('.steps .s2'),s3=box.querySelector('.steps .s3');
+  if(!s1)return;[s1,s2,s3].forEach(function(x){x.classList.remove('on','now');});
+  if(a&&a!=='go'){s1.classList.add('on');s2.classList.add('on');s3.classList.add('now');
+    s1.textContent='① '+({cat:'カタログに無い',out:'対象外',skip:'一致・見送り',hold:'保留'}[a]||a);s2.textContent='② (不要)';return;}
+  s1.textContent='① 同じ柄を押す';s2.textContent='② ✅ を確かめる';
+  if(!box.dataset.pid){s1.classList.add('now');return;}
+  s1.classList.add('on');if(box.dataset.lvok){s2.classList.add('on');s3.classList.add('now');}else{s2.classList.add('now');}}
+document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.it').forEach(steps);});
 function setAct(btn){var box=btn.closest('.it');
   box.querySelectorAll('.act button').forEach(function(b){b.classList.remove('sel');});
   btn.classList.add('sel');box.dataset.act=btn.dataset.a;
@@ -1032,7 +1042,8 @@ function setAct(btn){var box=btn.closest('.it');
   var ci=box.querySelector('.catinfo');if(ci)ci.style.display=btn.dataset.a==='cat'?'':'none';
   // ★2026-09-16: 「カタログに無い」はこれから入力する枠なので薄くしない
   box.classList.toggle('done',btn.dataset.a!=='go'&&btn.dataset.a!=='cat');
-  if(btn.dataset.a==='cat'){var cu=box.querySelector('input.cu');if(cu)cu.focus();}}
+  if(btn.dataset.a==='cat'){var cu=box.querySelector('input.cu');if(cu)cu.focus();}
+  steps(box);}
 function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason=0,nopick=0,nolv=0,nocatInfo={};
   document.querySelectorAll('.it').forEach(function(b){var a=b.dataset.act||'';var idx=parseInt(b.dataset.idx,10);
     var c=(b.querySelector('select.col')||{}).value||'';var r=(b.querySelector('select.rsn')||{}).value||'';
@@ -1095,9 +1106,16 @@ def build_html(items, catalog, summary=None):
              "border:1px dashed #bbb;border-radius:8px;color:#888;font-size:13px}"
              ".nop span{font-size:11px}</style>",
              "<h1>メルカリの新品 UT → カタログの商品を選ぶ</h1>",
+             # ★2026-10-06 ユーザー「何をしたらいいかわかりにくい、不親切」: やることを3つの番号で先頭に。説明はたたむ
+             "<div class='guide'><b>やること (1行ずつ)</b>"
+             "<ol><li>左の<b>メルカリの写真</b>と<b>同じ柄</b>を、右の候補から<b>1つ押す</b> (緑の枠になる)</li>"
+             "<li>その下の<b>「出品の値」が ✅</b> か見る。❌ なら理由の欄 (サイズ・色・作品名) を直す</li>"
+             "<li>全部の行が終わったら、右下の<b>「確定」</b></li></ol>"
+             "<span>同じ柄が無い時 → 「検索」で探す / 「カタログに無い→追加依頼」 / 出せない物は「対象外」 / 迷ったら「保留」"
+             " (<b>確信が無ければ選ばない</b>: 違う柄を出すと別デザイン発送になります)</span></div>",
              # ★2026-09-16 ユーザー「目的をわかるように HTML に書いておいて」
-             "<div class='sum' style='background:#eef6ff;border:1px solid #9cc'>"
-             "<b>この画面の目的</b> — 行によって目的が違います。"
+             "<details class='sum' style='background:#eef6ff;border:1px solid #9cc;padding:4px 8px'>"
+             "<summary><b>この画面の目的</b> (詳しく)</summary>行によって目的が違います。"
              "<ul style='margin:6px 0 0 18px;padding:0'>"
              "<li><b style='color:#06a'>出品中</b> と書いてある行 = <b>KEY を入れる</b>ため。"
              "KEY が無いと重複くんが二重出品を止められません。"
@@ -1105,12 +1123,9 @@ def build_html(items, catalog, summary=None):
              " (だからこの行では「売り切れ」「中古」の理由は出しません)。</li>"
              "<li><b>出品待ちの行</b> と <b>新しい候補</b> = これから出す商品を決めるため。"
              "出せない物 (売り切れ・中古・タグ無し) はここで対象外にします。</li>"
-             "</ul></div>",
+             "</ul>候補は<b>公式で買えない物だけ</b>。同じ柄で色違いがある商品だけ、色を選ぶ欄が出ます。</details>",
              catalog_summary_html(summary),
-             f"<div class='sum'>全 {len(items)}件。写真と同じ柄の商品を選んで「この商品」"
-             "(同じ柄で色違いがある商品だけ、色を選ぶ欄が出ます)。"
-             "候補は<b>公式で買えない物だけ</b>。無ければ検索欄に作品名・キャラ名・商品番号(6桁)。"
-             "<b>確信が無ければ選ばない</b> (違う柄を出すと別デザイン発送になります)。</div>"]
+             f"<div class='sum'>全 {len(items)}件</div>"]
     for it in items:
         r = it["row"]
         photos = _own_photos(r)
@@ -1144,6 +1159,8 @@ def build_html(items, catalog, summary=None):
             f"data-desc=\"{_html.escape((r[C_DESC] or '')[:300])}\">"
             f"{ph}<div class='body'>"
             f"<div class='t'>{_html.escape((r[C_TITLE] or '')[:110])}</div>"
+            "<div class='steps'><span class='s1'>① 同じ柄を押す</span> → <span class='s2'>② ✅ を確かめる</span>"
+            " → <span class='s3'>③ 右下の「確定」</span></div>"
             f"<div class='meta'>{_html.escape(price)} ｜ 色 {_html.escape(r[C_COLOR] or '?')} ｜ "
             f"サイズ {_html.escape(r[C_SIZE] or '?')}"
             + (" ｜ <b>出品待ちの行</b>" if it.get("src") == "sheet" and not (r[1] or "").strip()
