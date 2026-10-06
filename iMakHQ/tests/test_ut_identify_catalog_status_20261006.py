@@ -19,6 +19,8 @@ def test_answer_brings_row_back_before_7_days():
     assert not U._retry_nocat(SENT, today)                                        # 回答なし → 7日待つ
     assert U._retry_nocat(SENT, today, {"status": "wrong_ref", "at": "2026-10-06T12:00:00"})
     assert not U._retry_nocat(SENT, today, {"status": "added", "at": "2026-10-05T12:00:00"})  # 依頼より前の回答
+    # カタログは過去の回答を「その日の 00:00」で書く → 同じ日の回答は回答として扱う (2026-10-06 実物)
+    assert U._retry_nocat(SENT, today, {"status": "need_more", "at": "2026-10-06T00:00:00"})
 
 
 def test_status_html_and_summary():

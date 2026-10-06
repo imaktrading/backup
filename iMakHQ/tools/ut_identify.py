@@ -393,7 +393,9 @@ def answered_after(entry, st):
     """依頼 (台帳の nocat) より後にカタログの回答があるか (純関数)。"""
     if (entry or {}).get("decision") != "nocat" or not isinstance(st, dict) or not st.get("status"):
         return False
-    return str(st.get("at") or "") >= str((entry or {}).get("at") or "")
+    # ★日付だけで比べる。カタログは過去の回答を「その日の 00:00」で書く (2026-10-06 実物)。
+    #   時刻まで比べると、同じ日の朝に依頼して同じ日に答えた物が「依頼より前の回答」に見えた (33件全部)
+    return str(st.get("at") or "")[:10] >= str((entry or {}).get("at") or "")[:10]
 
 
 def _retry_nocat(entry, today=None, st=None):
@@ -505,7 +507,17 @@ def check_in_catalog(pid, db=DB_PATH):
     except Exception:                                          # noqa: BLE001
         return {"exists": None}
     if not r:
-        return {"exists": False}
+        # 柄の記録の束 (FP53723 = FP53723-01, -02 …) を指している回答がある (2026-10-06 実物)
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            try:
+                n = con.execute("select count(*) from products where category in ('uniqlo_ut','gu')"
+                                " and product_id like ?", (pid + "-%",)).fetchone()[0]
+            finally:
+                con.close()
+        except Exception:                                      # noqa: BLE001
+            n = 0
+        return {"exists": False, "group": n}
     try:
         imgs = [u for u in json.loads(r[1] or "[]") if u]
     except ValueError:
@@ -520,12 +532,18 @@ def check_in_catalog(pid, db=DB_PATH):
             "sources": s.get("image_sources") or s.get("images_source") or ""}
 
 
-def checked_html(chk, proxied=lambda u: u):
-    """check_in_catalog の結果 → 画面の1ブロック (純関数)。"""
+def checked_html(chk, proxied=lambda u: u, status=""):
+    """check_in_catalog の結果 → 画面の1ブロック (純関数)。status = カタログの回答の status。"""
     if chk is None:
         return ""
     if chk.get("exists") is None:
         return "<br><span style='color:#a60'>カタログを確かめられませんでした (DB が読めない)</span>"
+    if not chk["exists"] and chk.get("group"):
+        return (f"<br>🔎 カタログを直接確認: 1柄ではなく <b>柄の記録の束 ({chk['group']}柄)</b> を指しています。"
+                "検索欄に番号を入れると並びます")
+    if not chk["exists"] and status == "not_found":
+        return ("<br>🔎 カタログを直接確認: 品番は分かったが <b>カタログに行は無い</b> "
+                "(公式に画像も情報も残っていない)")
     if not chk["exists"]:
         return ("<br><b style='color:#c00'>⚠ こちらのカタログ (家の写し) にまだ在りません</b>"
                 "<span style='color:#777'> — 写しは1時間おき。次の更新で出なければ、カタログに聞きます</span>")
@@ -1345,7 +1363,7 @@ def load_items(limit=DEFAULT_LIMIT, new_only=False, stats=None):
         _chk = ""
         if answered_after(led.get(_url), _st) and _st.get("product_id"):
             import psa_resource_confirm as _prc
-            _chk = checked_html(check_in_catalog(_st["product_id"]), _prc._proxied)
+            _chk = checked_html(check_in_catalog(_st["product_id"]), _prc._proxied, _st.get("status", ""))
         items.append({"idx": i, "row": r, "src": _src, "cands": oos[:MAX_CANDS],
                       "cat_status": status_html(led.get(_url), _st, _chk),
                       "hidden_color": len(allc) - len(keep),
