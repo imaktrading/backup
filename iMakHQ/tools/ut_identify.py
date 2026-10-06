@@ -656,8 +656,14 @@ def parse_result(data):
             drop = [u.strip() for u in (p.get("drop") or []) if isinstance(u, str) and u.strip()]
             main = p.get("main") if isinstance(p.get("main"), str) else ""
             main = main.strip() if re.match(r"^https?://\S+$", (main or "").strip()) else ""
-            if pid and color and (reason or not need_reason):
+            # ★2026-10-06 柄の記録 (design_listable) は色の一覧を持たない → 色はメルカリの色 (save で入れる)。
+            #   人が入れたキャラ名 (char) はカタログに渡す (C)
+            design = bool(p.get("design"))
+            char = " ".join(str(p.get("char") or "").split())[:60]
+            if pid and (color or design) and (reason or not need_reason):
                 out.append({"idx": idx, "pid": pid, "color": color,
+                            **({"design": True} if design else {}),
+                            **({"char": char} if char else {}),
                             **({"reason": reason} if need_reason else {}),
                             **({"drop": drop} if drop else {}),
                             **({"main": main} if main and main not in drop else {})})
@@ -731,8 +737,12 @@ def load_catalog(db=DB_PATH):
         #   ★同日追記: フラグの無い fashion_press 行が3件あった (FP-102598 / FP-143930 / FP-143792)。
         #   フラグだけに頼ると漏れるので、**情報源 (source) でも**弾く。catalog に意図を照会中
         #   (catalog/requests/2026-09-14_fashion_press_rows_without_flags.md)。
-        if (s.get("not_for_listing") is True or s.get("data_level") == "fp_design"
-                or str(_src or "").startswith("fashion_press")):
+        # ★2026-10-06 (catalog 回答 2026-10-06_ut_discontinued_listable_and_status): 柄の記録のうち
+        #   作品名・画像がそろった行は data_level=design_listable に格上げされた (出品に使える)。これは候補に出す。
+        #   色・サイズはメルカリの文字から、キャラ名は カタログ / 人の入力 (C) から取る
+        design = s.get("data_level") == "design_listable" and s.get("not_for_listing") is not True
+        if not design and (s.get("not_for_listing") is True or s.get("data_level") == "fp_design"
+                           or str(_src or "").startswith("fashion_press")):
             continue
         try:
             imgs = json.loads(images or "[]") or s.get("image_urls") or []
@@ -744,7 +754,8 @@ def load_catalog(db=DB_PATH):
              "collab": s.get("collab") or "", "collab_official_name": s.get("collab_official_name") or "",
              "character_family": s.get("character_family") or "", "character": s.get("character") or "",
              "gender": s.get("gender") or "", "colors": colors, "images": imgs,
-             "sold_out": s.get("in_stock") is not True}
+             "sold_out": s.get("in_stock") is not True,
+             "design": design, "character_vision": s.get("character_vision") or ""}
         p["_tok"] = _tokens(p)
         p["_desc"] = norm(" ".join([name or "", s.get("long_description") or "",
                                     s.get("short_description") or ""]))
@@ -756,6 +767,15 @@ def load_catalog(db=DB_PATH):
 
 
 # ── 画面 ────────────────────────────────────────────────────────────
+def _charv_text(v):
+    """カタログの character_vision (写真から読んだキャラ名の候補) → 表示用の文字 (純関数)。"""
+    if isinstance(v, dict):
+        v = v.get("name") or v.get("character") or ""
+    if isinstance(v, (list, tuple)):
+        v = " / ".join(str(x.get("name") if isinstance(x, dict) else x) for x in v if x)
+    return str(v or "").strip()
+
+
 def _cards_html(cands, color_jp=""):
     import psa_resource_confirm as prc
     if not cands:
@@ -774,7 +794,10 @@ def _cards_html(cands, color_jp=""):
             f"data-colors=\"{_html.escape(json.dumps([c['name'] for c in p['colors']], ensure_ascii=False))}\" "
             f"data-imgs=\"{_html.escape(json.dumps(gal))}\" "
             f"data-raw=\"{_html.escape(json.dumps(gallery(p, dc)))}\" "
-            f"data-defcolor=\"{_html.escape(dc)}\" onclick='pickV(this)'>"
+            f"data-defcolor=\"{_html.escape(dc)}\" "
+            + (f"data-design='1' data-char=\"{_html.escape(p.get('character') or '')}\" "
+               f"data-charv=\"{_html.escape(_charv_text(p.get('character_vision')))}\" " if p.get("design") else "")
+            + "onclick='pickV(this)'>"
             + (f"<img class='main' src='{_html.escape(prc._proxied(img))}' loading='lazy' onerror='imgFail(this)'>"
                if img else "<div class='noimg'>画像なし</div>")
             + (f"<div class='th'>{thumbs}</div>" if thumbs else "")
@@ -785,7 +808,12 @@ def _cards_html(cands, color_jp=""):
             + ("" if p.get("sold_out") else
                "<div class='nm' style='color:#a40'>⚠ 公式で今買える (対象外)</div>")
             # ★色の一覧がカタログに無い商品は、選んでも色を決められず出品できない (catalog に確認中)
-            + ("" if p["colors"] else "<div class='nm' style='color:#a40'>色がカタログに無い</div>")
+            #   ★2026-10-06 柄の記録 (design_listable) は色をメルカリの文字から取るので出してよい
+            + ("<div class='nm' style='color:#06a'>柄の記録 (色はメルカリの表記)</div>"
+               + (f"<div class='nm'>キャラ: <b>{_html.escape(p['character'])}</b></div>" if p.get("character")
+                  else f"<div class='nm' style='color:#a60'>キャラ候補: {_html.escape(_charv_text(p.get('character_vision')) or '—')}</div>")
+               if p.get("design") else
+               ("" if p["colors"] else "<div class='nm' style='color:#a40'>色がカタログに無い</div>"))
             + (f"<div class='nm' style='color:#06a'>色違い {len(p['colors'])}色</div>"
                if len(p["colors"]) > 1 else "")
             + "<button class='zb' onclick='zoom(event,this)' title='メルカリの写真と公式画像を全部並べる'>🔍</button></div>")
@@ -916,6 +944,10 @@ function zoomPick(ev,btn){ev.preventDefault();ev.stopPropagation();var box=btn.c
 function pickV(el){var box=el.closest('.it');
   box.querySelectorAll('.v').forEach(function(v){v.classList.remove('sel');});
   el.classList.add('sel');box.dataset.pid=el.dataset.pid;fillColors(box,el);showImgs(box);
+  // ★2026-10-06 柄の記録: 色はメルカリの表記・キャラ名は人が入れる (候補を最初から入れておく)
+  box.dataset.design=el.dataset.design||'';var cw=box.querySelector('.cnwrap');
+  if(cw){cw.style.display=el.dataset.design?'':'none';var cn=cw.querySelector('input.cn');
+    if(el.dataset.design&&cn&&!cn.value)cn.value=el.dataset.char||el.dataset.charv||'';}
   setAct(box.querySelector('button.go'));}
 function lookup(inp){var box=inp.closest('.it');var q=inp.value.trim();
   if(!q||q===inp.dataset.asked)return;inp.dataset.asked=q;var slot=box.querySelector('.vslot');
@@ -945,7 +977,9 @@ function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason
     if(a==='go'){
       var drop=[];b.querySelectorAll('.imgpick img.off').forEach(function(i){if(i.dataset.raw)drop.push(decodeURIComponent(i.dataset.raw));});
       var f1=b.querySelector('.imgpick img.first');var main=f1&&f1.dataset.raw?decodeURIComponent(f1.dataset.raw):'';
-      if(!b.dataset.pid||!c){nocolor++;holds.push(idx);}else{picks.push({idx:idx,pid:b.dataset.pid,color:c,drop:drop,main:main});}}
+      var dz=b.dataset.design==='1';var cn=((b.querySelector('input.cn')||{}).value||'').trim();
+      if(!b.dataset.pid||(!c&&!dz)){nocolor++;holds.push(idx);}
+      else{picks.push({idx:idx,pid:b.dataset.pid,color:c,drop:drop,main:main,design:dz,char:dz?cn:''});}}
     else if(a==='skip'){
       if(!b.dataset.pid||!c){nocolor++;holds.push(idx);}
       else if(r.indexOf('skip_')!==0){noreason++;holds.push(idx);}
@@ -1064,6 +1098,8 @@ def build_html(items, catalog, summary=None):
             "onchange='lookup(this)'>"
             "<span class='colwrap' style='display:none'>色違いあり → 色 "
             "<select class='col'><option value=''></option></select></span>"
+            "<span class='cnwrap' style='display:none'>キャラ名 <input class='cn' "
+            "placeholder='写真の候補が入っています。違えば直す' style='width:180px'></span>"
             "<button class='go' data-a='go' onclick='setAct(this)'>この商品</button>"
             + ("<button class='skip' data-a='skip' onclick='setAct(this)' "
                "title='商品と色は合っているが、今回は出さない (高い / 出品者が不安)'>一致・見送り</button>"
@@ -1163,6 +1199,36 @@ def request_md(rows, today=None, existing=""):
             or "-")
         for r in new)
     return head + body
+
+
+def merge_character_inputs(existing, new):
+    """{product_id: キャラ名} を足す (純関数)。新しい入力が勝つ。空は足さない。"""
+    out = dict(existing or {})
+    out.update({k: v for k, v in (new or {}).items() if k and v})
+    return out
+
+
+def write_character_inputs(inputs, dir_path=CATALOG_REQ_DIR):
+    """人が入れたキャラ名をカタログに渡す (C)。requests/ut_character_input.json に {product_id: キャラ名}。
+
+    ★2026-10-06 カタログとの約束 (2026-10-06_ut_discontinued_listable_and_status_response.md 末尾):
+      カタログはこれを最優先で character に入れる。一時ファイルに書いてから置き換える。戻り: 書いた件数。
+    """
+    if not inputs:
+        return 0
+    path = os.path.join(dir_path, "ut_character_input.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            cur = json.load(f)
+        cur = cur if isinstance(cur, dict) else {}
+    except (OSError, ValueError):
+        cur = {}
+    out = merge_character_inputs(cur, inputs)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+    return len([k for k in inputs if inputs[k]])
 
 
 def write_catalog_request(rows, dir_path=CATALOG_REQ_DIR, today=None):
@@ -1404,7 +1470,7 @@ def save(items, res, now=None):
     catalog = {p["pid"]: p for p in load_catalog()}
     led = load_ledger()
     in_high = _high_urls()
-    add_rows, add_led = [], {}
+    add_rows, add_led, char_inputs = [], {}, {}
     for p in res["picks"]:
         it = by_idx.get(p["idx"])
         if not it or p["pid"] not in catalog:
@@ -1415,8 +1481,13 @@ def save(items, res, now=None):
         if it.get("src") != "sheet" and url not in in_high:
             add_rows.append(high_row(r))
             in_high.add(url)
+        # ★2026-10-06 柄の記録は色の一覧を持たないので、色はメルカリの表記 (出品くんが文字から写す)
+        color = p["color"] or ((r[C_COLOR] or "").strip() if p.get("design") else "")
+        if p.get("design") and p.get("char"):
+            char_inputs[p["pid"]] = p["char"]
         # サイズ欄が空の出品はタイトルから読む (決められない時は空のまま = 出品側で止まる)
-        add_led[url] = {"decision": "go", "product_id": p["pid"], "color": p["color"],
+        add_led[url] = {"decision": "go", "product_id": p["pid"], "color": color,
+                        **({"design": True, "character": p.get("char", "")} if p.get("design") else {}),
                         "title": r[C_TITLE], "size": r[C_SIZE] or _size_from(r[C_TITLE]),
                         "at": now, **({"img_drop": p["drop"]} if p.get("drop") else {}),
                         **({"img_main": p["main"]} if p.get("main") else {})}
@@ -1454,6 +1525,9 @@ def save(items, res, now=None):
     req_path, n_req = write_catalog_request(req_rows, CATALOG_REQ_DIR)
     if n_req:
         print(f"  📮 カタログに追加依頼: {n_req}件 → {os.path.basename(req_path)}")
+    n_char = write_character_inputs(char_inputs, CATALOG_REQ_DIR)
+    if n_char:
+        print(f"  📮 カタログにキャラ名を渡した: {n_char}件 → ut_character_input.json")
     led.update(add_led)
     save_ledger(led)
     return len(add_rows), len(add_led)
