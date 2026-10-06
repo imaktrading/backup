@@ -97,6 +97,28 @@ def key_for_psa(category, psa):
     return label_key(category, psa.get("Brand"), psa.get("CardNumber"), psa.get("Subject"))
 
 
+def backfill_picks(verified, meta_for, category_for, data):
+    """鑑定番号ごとの過去の答え (verified_certs) → ラベルに移す [(key, pid, cert)] (純関数)。
+
+    ★2026-10-06 ユーザー「何で移してないの？」: 9/22 にラベルで覚える仕組みを作った時、
+      **それまでの答え (鑑定番号ごと 1,179件) を移していなかった**。これから分だけ直して、
+      貯まっていた分を洗っていなかった。同じ鑑定番号が既にラベルに入っていれば二重に数えない。
+    """
+    seen = {c for e in (data or {}).values() for p in (e.get("picks") or {}).values()
+            for c in p.get("certs") or []}
+    out = []
+    for cert, r in (verified or {}).items():
+        cert = str(cert).strip()
+        pid = str((r or {}).get("product_id") or "").split(":")[-1].strip()
+        if not cert or cert in seen or (r or {}).get("choice") not in ("OK", "CHOSEN") or not pid:
+            continue
+        meta = meta_for(cert) or {}
+        key = key_for_psa(category_for(meta.get("Brand", "")), meta)
+        if key:
+            out.append((key, pid, cert))
+    return out
+
+
 def record_picks(picks, path=PATH):
     """[(key, product_id, cert)] をまとめて覚える (補URLの確証から)。覚えた件数を返す。"""
     data, n = load(path), 0
