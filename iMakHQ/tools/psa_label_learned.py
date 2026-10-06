@@ -44,6 +44,21 @@ def save(data, path=PATH):
     os.replace(tmp, path)
 
 
+def _sweep_after_write(path):
+    """書いた後に刷りの確認 (psa_variant_gate.sweep_learned) をかける。本物の記録の時だけ。
+
+    ★2026-10-07: 刷りの確認は 9/28 に作られたが **どこからも呼ばれていなかった** (手で回した時だけ)。
+      その間に書かれた答えは、カタログの別名 (alias_of) や刷り違いのまま残っていた。1回 0.3秒。
+    """
+    if path != PATH:
+        return
+    try:
+        import psa_variant_gate as _PVG
+        _PVG.sweep_learned(path=path)
+    except Exception:                                          # noqa: BLE001 確認できなくても書いた物は残す
+        pass
+
+
 def remember(data, key, product_id, cert="", now=None):
     """選ばれたカタログIDを積む (純関数・data を書き換えて返す)。"""
     if not key or not product_id:
@@ -98,6 +113,7 @@ def record_nots(nots, path=PATH):
             n += 1
     if n:
         save(data, path)
+        _sweep_after_write(path)
     return n
 
 
@@ -124,6 +140,7 @@ def record_chosen(results, targets_by_cert, path=PATH):
         n += 1
     if n:
         save(data, path)
+        _sweep_after_write(path)
     return n
 
 
@@ -190,6 +207,7 @@ def record_picks(picks, path=PATH):
             n += 1
     if n:
         save(data, path)
+        _sweep_after_write(path)
     return n
 
 

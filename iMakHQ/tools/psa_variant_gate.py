@@ -35,7 +35,10 @@ CATALOG_DB = r"C:/dev/iMak_data/catalog/products.sqlite"
 
 _OP_SET_RE = re.compile(r"\b(OP|ST|EB|PRB)-?(\d{2})\b")
 _ALT_WORDS = ("ALTERNATE ART", "ALT.ART", "ALT. ART", "ALT ART", "PARALLEL", "WANTED",
-              "MANGA", "SPECIAL CARD", "-SP", " SP CARD")
+              "MANGA", "SPECIAL CARD", "-SP", " SP CARD",
+              # ★2026-10-07 ボックストッパーは通常と別の絵柄 (OP02-059 ハンコック: カタログは _p1)。
+              #   無いと刷りの確認が通常版 OP02-059 に「直して」いた
+              "BOX TOPPER")
 # SP カード (WANTED 手配書柄など)。ALTERNATE ART だけのスラブは SP ではない
 _SP_WORDS = ("WANTED", "SPECIAL CARD", "SPECIAL ALTERNATE", "SPECIAL ALT", "-SP", " SP CARD")
 _ALT_PID_RE = re.compile(r"_(p\d*|SP)(_|$)")  # 小文字 p=パラレル / 大文字 P=プロモ (別物)
@@ -204,6 +207,24 @@ def pick(category, brand, subject, current_pid, db=CATALOG_DB, con=None):
             con.close()
 
 
+def _alias_body(pid, con):
+    """カタログで alias_of が付いた行なら、その本体の product_id。無ければ ""。"""
+    try:
+        r = con.execute("select alias_of from products where product_id=? limit 1", (pid,)).fetchone()
+    except sqlite3.Error:
+        return ""
+    return (r[0] or "").strip() if r else ""
+
+
+def _merge_pick(bag, old, new):
+    """picks / not の old を new に足し込んで消す (回数・鑑定番号を引き継ぐ)。"""
+    v = bag.pop(old)
+    tgt = bag.setdefault(new, {"times": 0, "certs": []})
+    tgt["times"] = tgt.get("times", 0) + v.get("times", 0)
+    tgt["certs"] = sorted(set(tgt.get("certs", [])) | set(v.get("certs", [])))
+    tgt["last_at"] = max(str(tgt.get("last_at") or ""), str(v.get("last_at") or ""))
+
+
 def sweep_learned(path=None, db=CATALOG_DB, write=True):
     """目視で覚えた答え (psa_label_learned.json) のうち、ラベルの刷りと合わない物を直す/消す。
 
@@ -223,9 +244,19 @@ def sweep_learned(path=None, db=CATALOG_DB, write=True):
                 continue
             category, brand, _num, subject = parts[0].lower(), parts[1], parts[2], "|".join(parts[3:])
             picks = (ent or {}).get("picks") or {}
+            # ★2026-10-07 カタログが同じ現物の2行を alias_of でまとめた分は、本体の ID に寄せる
+            #   (寄せないと、同じスラブに2つの ID が付いて「答えが割れた」に見え、ラベルが効かなくなっていた: 9ラベル)
+            for _bag in (picks, (ent or {}).get("not") or {}):
+                for pid in list(_bag):
+                    body = _alias_body(pid, con)
+                    if body and body != pid:
+                        _merge_pick(_bag, pid, body)
+                        out["fixed"].append((label, pid, body))
             for pid in list(picks):
                 out["checked"] += 1
                 new, why = pick(category, brand, subject, pid, con=con)
+                # ★2026-10-07 選んだ行がカタログの別名なら本体へ (寄せた本体を別名に戻す往復を止める)
+                new = (_alias_body(new, con) or new) if new else new
                 if new == pid:
                     continue
                 v = picks.pop(pid)
