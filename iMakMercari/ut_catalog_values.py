@@ -188,29 +188,103 @@ def chart_html(row, size_jp):
             f"data)</strong></p><ul>{items}</ul>") if items else ""
 
 
-def build_values(product, color_name, size_text):
+_WOMEN_WORDS = ("レディース", "ウィメンズ", "WOMEN", "女性用", "婦人")
+
+
+def is_design_listable(product):
+    """カタログの柄の記録 (廃盤 UT・2026-10-06 格上げ) の行か (純関数)。"""
+    s = (product or {}).get("specs") or {}
+    return s.get("data_level") == "design_listable" and s.get("not_for_listing") is not True
+
+
+def design_dept(text):
+    """柄の記録の行の Department (純関数)。カタログに性別が無いので、メルカリの文字から決める。
+
+    ★2026-10-06 ユーザー (UT 廃盤品のカタログ化 → 出品まで): レディース等と書いてあれば このカテゴリ
+      (Men's 15687) では出さない。書いていなければ Men (UT の大人用は男女兼用で、今の UT 出品も Men's)。
+    """
+    t = (text or "").upper()
+    return None if any(w.upper() in t for w in _WOMEN_WORDS) else "Men"
+
+
+# ユニクロの色番号 (goods_<2桁>_ / <2桁>_<品番>_) の帯 → eBay の色。公式の色番号の決まり (00-09 白〜黒 等)
+_UQ_CODE_COLORS = ((0, 1, "White"), (2, 8, "Gray"), (9, 9, "Black"), (10, 19, "Red"), (20, 29, "Orange"),
+                   (30, 39, "Brown"), (40, 49, "Yellow"), (50, 59, "Green"), (60, 69, "Blue"), (70, 79, "Purple"))
+_RE_UQ_CODE = re.compile(r"(?:goods_(\d{2})_\d{6}|/(\d{2})_\d{6}_)")
+_EBAY_NEAR = {"Gray": {"Gray", "Silver"}, "White": {"White", "Ivory", "Beige"}, "Brown": {"Brown", "Beige"},
+              "Red": {"Red", "Pink"}, "Purple": {"Purple", "Pink"}}
+
+
+def image_colors(urls):
+    """カタログの画像 URL の色番号 → eBay の色の集合 (純関数)。色番号が無い画像 (記事の写真等) は数えない。"""
+    out = set()
+    for u in urls or ():
+        m = _RE_UQ_CODE.search(u or "")
+        if not m:
+            continue
+        n = int(m.group(1) or m.group(2))
+        out |= {c for lo, hi, c in _UQ_CODE_COLORS if lo <= n <= hi}
+    return out
+
+
+def design_image_color_ok(urls, ebay_color):
+    """柄の記録の行: 画像に色番号があるなら、メルカリの色と合うか (純関数)。色番号の無い画像だけなら True。
+
+    ★2026-10-06: 公式の保存画像は1色の写真 (E440690 = 色62 水色)。メルカリが黒なのに水色の写真で出すと、
+      届いた物と写真が違う = SNAD。合わなければ出さない。
+    """
+    cs = image_colors(urls)
+    if not cs:
+        return True
+    return any(ebay_color in _EBAY_NEAR.get(c, {c}) for c in cs)
+
+
+def design_color(color_jp):
+    """柄の記録の行の Color (純関数)。カタログに色の一覧が無いので、メルカリの色の文字を eBay の16色に。
+
+    当たらなければ "" (推測で別の色にしない = その行は出さない)。日本語→eBay 色の表は Porter と同じ物を使う。
+    """
+    from porter_specs import ebay_color
+    return ebay_color(color_jp)
+
+
+def build_values(product, color_name, size_text, mercari_text=""):
     """カタログの1商品 + 選んだ色 + メルカリのサイズ → 出品に写す値 (dict)。純関数。
 
     戻り keys: specs (Item Specifics の上書き) / size_jp / size_us / material_line /
                origin_line / chart_html / collab_jp / is_gu
     出せない時は NotListable (理由付き)。
+    ★2026-10-06 柄の記録 (design_listable) の行は、カタログに性別・色の一覧・素材・原産国が無い。
+      色は目視で残したメルカリの色 (color_name)、性別はメルカリの文字 (mercari_text) から取り、
+      素材・原産国は空欄 (推測で埋めない)。
     """
     s = product["specs"]
+    design = is_design_listable(product)
     if product.get("category") == "gu":
         # whitelist_registry "tshirt" の Brand は Uniqlo だけ (strict)。GU を出すなら先にそこを決める
         raise NotListable("GU は Tシャツ新規の対象外 (Brand の決まりが UNIQLO 専用)")
     gender = (s.get("gender") or "").strip()
     dept = DEPT.get(gender.lower()) or DEPT.get(gender)
+    if not dept and design and not gender:
+        dept = design_dept(mercari_text)
     if not dept:
         raise NotListable(f"性別 {gender or '?'} はこのカテゴリ (Men's 15687) では出さない")
     col = next((c for c in s.get("color_variants") or [] if c.get("name") == color_name), None)
+    if (not col or not col.get("ebay_color")) and design and not s.get("color_variants"):
+        col = {"name": color_name, "ebay_color": design_color(color_name)}
     if not col or not col.get("ebay_color"):
         raise NotListable(f"色 {color_name} がカタログの色に無い")
     size = jp_size(size_text)
     if not size:
         raise NotListable(f"サイズを読めない: {size_text!r}")
-    mat_spec, mat_line = main_material(s.get("composition"))
-    coo_spec, coo_line = origin(s.get("countries_of_origin"))
+    if design and not s.get("composition"):
+        mat_spec, mat_line = "", ""                    # 廃盤の柄の記録: 素材は公式の記録が無い → 空欄 (推測しない)
+    else:
+        mat_spec, mat_line = main_material(s.get("composition"))
+    if design and not s.get("countries_of_origin"):
+        coo_spec, coo_line = "", ""                    # 同上: 原産国も空欄
+    else:
+        coo_spec, coo_line = origin(s.get("countries_of_origin"))
     # №138: 作品名は表で公式英語表記に同定する。表に無ければ出さない (綴りのブレを止める)
     work = work_name_en([s.get("collab"), s.get("collab_official_name"), product.get("name"),
                          s.get("character_family")], load_works())
@@ -655,7 +729,25 @@ def decision_for(url, ledger=None):
     return ((led.get((url or "").strip()) or {}).get("decision") or "")
 
 
-def values_for_url(url, size_text, ledger=None, title=""):
+MIN_PICTURE_PX = 500          # eBay の出品写真は長辺 500px 以上
+
+
+def image_big_enough(url, timeout=20):
+    """画像の長辺が 500px 以上か (I/O)。読めなければ False (出さない側)。"""
+    try:
+        import io
+        import requests
+        from PIL import Image
+        r = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return False
+        w, h = Image.open(io.BytesIO(r.content)).size
+        return max(w, h) >= MIN_PICTURE_PX
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
+def values_for_url(url, size_text, ledger=None, title="", text=""):
     """その仕入元URLが目視で特定済みなら、写す値 (dict)。特定されていなければ None。
 
     size_text: シートのサイズ欄。空なら台帳のサイズ、それも空なら **タイトル** から読む。
@@ -669,7 +761,16 @@ def values_for_url(url, size_text, ledger=None, title=""):
     if not p:
         raise NotListable(f"特定した商品 {e.get('product_id')} がカタログに無い")
     size = next((s for s in (size_text, e.get("size"), title) if jp_size(s or "")), "")
-    v = build_values(p, e.get("color") or "", size)
+    v = build_values(p, e.get("color") or "", size, mercari_text=" ".join([title or "", text or ""]))
+    if is_design_listable(p):
+        # ★2026-10-06 柄の記録: 目視で人が入れたキャラ名 (C) があれば、カタログがまだ写していなくても使う
+        if not v["specs"].get("Character") and (e.get("character") or "").strip():
+            v["specs"]["Character"] = e["character"].strip()
+        if not design_image_color_ok(p.get("images"), v["specs"]["Color"]):
+            raise NotListable(f"カタログの画像の色 ({', '.join(sorted(image_colors(p.get('images'))))}) が"
+                              f"メルカリの色 ({v['specs']['Color']}) と違う → 違う色の写真になるので出さない")
+        if not any(image_big_enough(u) for u in p.get("images") or []):
+            raise NotListable("カタログの画像が小さい (長辺 500px 未満) → eBay が受け付けないので出さない")
     v["product_id"] = p["product_id"]
     # ★2026-09-13: 画像は **カタログが主役**。目視で「使わない」と外した画像も一緒に持つ
     v["catalog_images"] = p.get("images") or []
