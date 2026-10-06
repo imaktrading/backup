@@ -485,8 +485,67 @@ def status_summary(decided, status):
     return out
 
 
-def status_html(entry, st):
-    """1行ぶんの「カタログに依頼した結果」(純関数)。依頼していなければ ''。"""
+def check_in_catalog(pid, db=DB_PATH):
+    """カタログの回答にある product_id を **こちらで直接引いて** 確かめる (I/O・読むだけ)。
+
+    ★2026-10-06 ユーザー「ちゃんとカタログに画像等が追加されたかが不透明」:
+      カタログの「追加した」という申告だけでなく、DB に行があるか・画像があるか・出品に使えるかを見る。
+      家の DB は KAGOYA の写し (毎時) なので、回答の直後はまだ無いことがある。
+    戻り: {exists, name, images, data_level, listable, sources} / pid が空なら None
+    """
+    if not pid:
+        return None
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            r = con.execute("select name, images, specs from products where category in ('uniqlo_ut','gu')"
+                            " and product_id = ?", (pid,)).fetchone()
+        finally:
+            con.close()
+    except Exception:                                          # noqa: BLE001
+        return {"exists": None}
+    if not r:
+        return {"exists": False}
+    try:
+        imgs = [u for u in json.loads(r[1] or "[]") if u]
+    except ValueError:
+        imgs = []
+    try:
+        s = json.loads(r[2] or "{}")
+    except ValueError:
+        s = {}
+    lvl = s.get("data_level") or ""
+    return {"exists": True, "name": r[0] or "", "images": imgs, "data_level": lvl,
+            "listable": not s.get("not_for_listing") and lvl not in ("fp_design", "images_only"),
+            "sources": s.get("image_sources") or s.get("images_source") or ""}
+
+
+def checked_html(chk, proxied=lambda u: u):
+    """check_in_catalog の結果 → 画面の1ブロック (純関数)。"""
+    if chk is None:
+        return ""
+    if chk.get("exists") is None:
+        return "<br><span style='color:#a60'>カタログを確かめられませんでした (DB が読めない)</span>"
+    if not chk["exists"]:
+        return ("<br><b style='color:#c00'>⚠ こちらのカタログ (家の写し) にまだ在りません</b>"
+                "<span style='color:#777'> — 写しは1時間おき。次の更新で出なければ、カタログに聞きます</span>")
+    thumbs = "".join(f"<img src='{_html.escape(proxied(u))}' loading='lazy' "
+                     "style='height:90px;margin:2px;border:1px solid #ccc'>" for u in chk["images"][:4])
+    src = chk.get("sources")
+    src_txt = (", ".join(f"{k}:{v}" for k, v in src.items()) if isinstance(src, dict)
+               else ", ".join(map(str, src)) if isinstance(src, list) else str(src or ""))
+    use = ("<b style='color:#060'>出品に使える</b>" if chk["listable"]
+           else "<b style='color:#a60'>まだ出品に使えない</b>")
+    return ("<br>🔎 カタログを直接確認: <b>" + _html.escape(chk["name"] or "(名前なし)") + "</b>"
+            + f" ／ 画像 <b>{len(chk['images'])}枚</b>"
+            + (f" ({_html.escape(src_txt[:80])})" if src_txt else "")
+            + " ／ " + use
+            + (f" ({_html.escape(chk['data_level'])})" if chk.get("data_level") else "")
+            + (f"<div>{thumbs}</div>" if thumbs else "<br><b style='color:#c00'>⚠ 画像がありません</b>"))
+
+
+def status_html(entry, st, chk_html=""):
+    """1行ぶんの「カタログに依頼した結果」(純関数)。依頼していなければ ''。chk_html = checked_html の結果。"""
     if (entry or {}).get("decision") != "nocat":
         return ""
     sent = (entry.get("at") or "")[:10]
@@ -502,6 +561,7 @@ def status_html(entry, st):
             + (f"<br><span style='color:#555'>{_html.escape(st.get('note') or '')}</span>" if st.get("note") else "")
             + (f"<br><span style='color:#777'>使った参考URL: {_html.escape((st.get('ref_url') or ref)[:90])}</span>"
                if (st.get("ref_url") or ref) else "")
+            + (chk_html or "")
             + (f"<br><b>{_html.escape(hint)}</b>" if hint else "") + "</div>")
 
 
@@ -1281,8 +1341,13 @@ def load_items(limit=DEFAULT_LIMIT, new_only=False, stats=None):
         #   公式で今買える商品は、メルカリから仕入れて出す物ではない (目的は「公式では買えない物」)
         oos = [p for p in keep if p.get("sold_out")]
         _url = (r[C_URL] or "").strip()
+        _st = status.get(_url) or {}
+        _chk = ""
+        if answered_after(led.get(_url), _st) and _st.get("product_id"):
+            import psa_resource_confirm as _prc
+            _chk = checked_html(check_in_catalog(_st["product_id"]), _prc._proxied)
         items.append({"idx": i, "row": r, "src": _src, "cands": oos[:MAX_CANDS],
-                      "cat_status": status_html(led.get(_url), status.get(_url)),
+                      "cat_status": status_html(led.get(_url), _st, _chk),
                       "hidden_color": len(allc) - len(keep),
                       "hidden_instock": len(keep) - len(oos),
                       "warn": tag_conflict(r[C_TAG], r[C_KW], catalog)})

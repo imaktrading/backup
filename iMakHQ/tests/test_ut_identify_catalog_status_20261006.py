@@ -41,5 +41,26 @@ def test_resend_same_day_with_new_ref_is_written():
     assert "news/2" in again
 
 
+def test_check_in_catalog_reads_db_directly(tmp_path):
+    """「追加した」の申告ではなく、DB の行・画像・出品に使えるかを直接見る (ユーザー「不透明」)。"""
+    import json as _j
+    import sqlite3
+    db = str(tmp_path / "p.sqlite")
+    con = sqlite3.connect(db)
+    con.execute("create table products (category, product_id, name, images, specs)")
+    con.execute("insert into products values ('uniqlo_ut','E1','鬼滅 UT', ?, ?)",
+                (_j.dumps(["https://image.uniqlo.com/a.jpg"]), _j.dumps({"data_level": "design_listable"})))
+    con.execute("insert into products values ('uniqlo_ut','FP1','柄', '[]', ?)",
+                (_j.dumps({"data_level": "fp_design", "not_for_listing": True}),))
+    con.commit(); con.close()
+    ok = U.check_in_catalog("E1", db)
+    assert ok["exists"] and ok["listable"] and len(ok["images"]) == 1
+    assert "出品に使える" in U.checked_html(ok) and "画像 <b>1枚</b>" in U.checked_html(ok)
+    fp = U.check_in_catalog("FP1", db)
+    assert not fp["listable"] and "画像がありません" in U.checked_html(fp)
+    assert "まだ在りません" in U.checked_html(U.check_in_catalog("NONE", db))
+    assert U.check_in_catalog("", db) is None
+
+
 def test_load_status_missing_file_is_empty(tmp_path):
     assert U.load_status(str(tmp_path / "none.json")) == {}
