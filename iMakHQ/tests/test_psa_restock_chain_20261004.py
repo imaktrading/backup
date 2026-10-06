@@ -27,7 +27,8 @@ def test_stops_when_step_fails():
 
 def test_button_one_runs_the_chain():
     import control_panel as cp
-    b = [s for s in cp.SCRIPTS if s["label"] == "🛒 PSA 再仕入れ ① 目視"][0]
+    # ★2026-10-06 ユーザー「ラベルが実行内容と違う」: ②③ まで走ることをラベルに書いた
+    b = [s for s in cp.SCRIPTS if s["label"] == "🛒 PSA 再仕入れ ①→③ 目視して在庫を戻す"][0]
     assert b["cmd"] == ["python", "psa_restock_chain.py"]
     assert any(s["label"].startswith("🛒 PSA 再仕入れ ②") for s in cp.SCRIPTS)   # やり直し用に残す
 
