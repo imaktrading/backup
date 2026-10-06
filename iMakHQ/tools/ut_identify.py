@@ -970,12 +970,19 @@ function refChk(btn){var box=btn.closest('.it');var u=(box.querySelector('input.
   var out=box.querySelector('.refres');if(!u){out.innerHTML="<b style='color:#c00'>参考URLを入れてください</b>";return;}
   out.innerHTML='調べています… (ページと写真の大きさを見るので10〜30秒)';box.dataset.refok='';box.dataset.refimgs='';
   fetch('/api/refcheck?url='+encodeURIComponent(u)).then(function(r){return r.json();}).then(function(d){
-    var ok=d.verdict==='ok';box.dataset.refok=ok?'1':'';box.dataset.refimgs=JSON.stringify(d.images||[]);
-    var th=(d.images||[]).slice(0,8).map(function(x){return "<img src='"+x+"' style='height:110px;margin:2px;border:1px solid #ccc'>";}).join('');
-    out.innerHTML=(ok?"<b style='color:#060'>✅ 可</b> — ":"<b style='color:#c00'>❌ 否</b> — ")+(d.reason||'')
-      +(ok?"<div>"+th+"</div><div style='font-size:11px;color:#555'>同じ柄なら、このまま「確定」でカタログに依頼が届きます</div>"
+    var ok=d.verdict==='ok';box.dataset.refok=ok?'1':'';box.dataset.refimgs='[]';
+    var th=(d.images||[]).slice(0,8).map(function(x){return "<img class='refpick' data-u='"+x+"' onclick='refPick(this)' title='同じ柄ならクリックで選ぶ' style='height:120px;margin:2px;border:3px solid #ccc;cursor:pointer'>";}).join('');
+    var head=ok?"<b style='color:#060'>✅ 可</b> — ":(d.verdict==='in_catalog'?"<b style='color:#06a'>ℹ カタログに在る</b> — ":"<b style='color:#c00'>❌ 否</b> — ");
+    out.innerHTML=head+(d.reason||'')
+      +(ok?"<div>"+th+"</div><div style='font-size:11px;color:#555'>同じ柄の写真を選び (緑の枠)、作品名を入れて「確定」。"
+           +"選んだ写真でカタログに登録されます</div>"
           :"<div style='font-size:11px;color:#555'>別のURLを入れて、もう一度「調べる」。見つからなければ「カタログ化を見送り」</div>");
+    out.querySelectorAll('img.refpick').forEach(function(i){i.src=i.dataset.u;});
   }).catch(function(e){out.innerHTML="<b style='color:#c00'>調べられませんでした ("+e+")</b>";});}
+function refPick(img){var box=img.closest('.it');img.classList.toggle('on');
+  img.style.borderColor=img.classList.contains('on')?'#0a7':'#ccc';
+  var sel=[];box.querySelectorAll('img.refpick.on').forEach(function(i){sel.push(i.dataset.u);});
+  box.dataset.refimgs=JSON.stringify(sel);}
 function skipCat(btn){var box=btn.closest('.it');var s=box.querySelector('select.rsn');if(s){s.value='nocat_skip';}
   setAct(box.querySelector('button.ng[data-a="out"]'));}
 function lookup(inp){var box=inp.closest('.it');var q=inp.value.trim();
@@ -1000,7 +1007,7 @@ function setAct(btn){var box=btn.closest('.it');
   // ★2026-09-16: 「カタログに無い」はこれから入力する枠なので薄くしない
   box.classList.toggle('done',btn.dataset.a!=='go'&&btn.dataset.a!=='cat');
   if(btn.dataset.a==='cat'){var cu=box.querySelector('input.cu');if(cu)cu.focus();}}
-function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason=0,nocatInfo={};
+function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason=0,nopick=0,nocatInfo={};
   document.querySelectorAll('.it').forEach(function(b){var a=b.dataset.act||'';var idx=parseInt(b.dataset.idx,10);
     var c=(b.querySelector('select.col')||{}).value||'';var r=(b.querySelector('select.rsn')||{}).value||'';
     if(a==='go'){
@@ -1013,10 +1020,12 @@ function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason
       if(!b.dataset.pid||!c){nocolor++;holds.push(idx);}
       else if(r.indexOf('skip_')!==0){noreason++;holds.push(idx);}
       else{skips.push({idx:idx,pid:b.dataset.pid,color:c,reason:r});}}
-    else if(a==='cat'){nocat.push(idx);
+    else if(a==='cat'){
       var w=((b.querySelector('input.cw')||{}).value||'').trim(),u=((b.querySelector('input.cu')||{}).value||'').trim();
       var im=[];try{im=b.dataset.refok?JSON.parse(b.dataset.refimgs||'[]'):[];}catch(e){im=[];}
-      if(w||u)nocatInfo[idx]={work:w,ref:u,imgs:im,checked:b.dataset.refok?'ok':''};}
+      // ★2026-10-06 可になった行は、同じ柄の写真を選び作品名を入れるまで確定しない (登録できない依頼を出さない)
+      if(b.dataset.refok&&(!im.length||!w)){nopick++;holds.push(idx);}
+      else{nocat.push(idx);if(w||u)nocatInfo[idx]={work:w,ref:u,imgs:im,checked:im.length?'ok':''};}}
     else if(a==='out'){
       if(!r||r.indexOf('skip_')===0){noreason++;holds.push(idx);}else{outs.push({idx:idx,reason:r});}}
     else{holds.push(idx);}});
@@ -1024,6 +1033,7 @@ function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason
     +'件 / 対象外 '+outs.length+'件 / 未結論 '+holds.length+'件';
   if(nocolor)msg+='\\n\\n商品か色が未選択 '+nocolor+'件 — 未結論に戻します';
   if(noreason)msg+='\\n\\n対象外/見送りなのに理由が未選択 '+noreason+'件 — 未結論に戻します';
+  if(nopick)msg+='\\n\\n調べて可なのに、同じ柄の写真か作品名が未選択 '+nopick+'件 — 未結論に戻します';
   if(!confirm(msg+'\\n\\nこの内容で確定しますか?'))return;
   _send({picks:picks,skips:skips,nocat:nocat,nocat_info:nocatInfo,outs:outs,holds:holds},
         '<h1>確定しました。ウィンドウを閉じてください。</h1>');}
@@ -1224,15 +1234,16 @@ def check_ref_url(url, catalog_pids=(), max_check=10):
     f = ref_page_facts(u, body if code == 200 else "", catalog_pids)
     big = [x for x in f["images"][:max_check] if image_big_enough(x)]
     if f["in_catalog"]:
-        return {"verdict": "ok", "reason": f"品番 {f['pid']} はもうカタログに在ります → 検索欄にこの品番を入れて選んでください",
+        return {"verdict": "in_catalog", "reason": f"品番 {f['pid']} はもうカタログに在ります → 検索欄にこの品番を入れて選んでください",
                 **f, "images": big}
-    if f["pid"]:
-        return {"verdict": "ok", "reason": f"品番 {f['pid']} が取れました → カタログが公式から引けます", **f, "images": big}
+    # ★2026-10-06 ユーザー「品番なんて取れる可能性低いやろ」: 可 = **使える写真がある時だけ**。
+    #   品番だけで写真が無い物は、カタログも登録できない (今の not_found と同じ) ので否
     if big:
-        return {"verdict": "ok", "reason": f"使える写真 (長辺500px以上) が {len(big)}枚あります → 柄の記録を作れます。"
-                                            "メルカリの写真と同じ柄か見てください", **f, "images": big}
-    return {"verdict": "ng", "reason": "品番も、使える写真 (長辺500px以上) もありません → 別のURLを探してください",
-            **f, "images": []}
+        return {"verdict": "ok", "reason": f"使える写真 (長辺500px以上) が {len(big)}枚あります → "
+                                            "メルカリの商品と**同じ柄の写真をクリックで選び**、作品名を入れて確定", **f, "images": big}
+    return {"verdict": "ng", "reason": "使える写真 (長辺500px以上) がありません"
+                                        + (f" (品番 {f['pid']} は取れたが画像が無い)" if f["pid"] else "")
+                                        + " → 別のURLを探してください", **f, "images": []}
 
 
 def lookup_api(path, query, catalog=None):
@@ -1630,7 +1641,7 @@ def save(items, res, now=None):
                          "work": _info.get("work", ""),
                          # ★2026-10-06 「調べる」で可だった時は、その写真も参考URLの欄に並べて渡す
                          "ref": " ".join([_info.get("ref", "")] + list(_info.get("imgs") or []))
-                                + (" (HQ で確認済み: 可)" if _info.get("checked") == "ok" else "")})
+                                + (" 【人が同じ柄と確認した写真・そのまま登録】" if _info.get("checked") == "ok" else "")})
         add_led[r[C_URL].strip()] = {"decision": "nocat", "title": r[C_TITLE], "at": now,
                                      **{k: v for k, v in _info.items() if v}}
     for o in res["outs"]:
