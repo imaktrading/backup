@@ -28,6 +28,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sheet_io
@@ -287,9 +288,14 @@ def split_known_same(cands, key, pll=None, uv=None):
     except Exception:                                          # noqa: BLE001 決められなければタイトルでは書かない
         ok_title = set()
     diff_title = title_diff_set(pll, uv, pid.split(":")[-1]) - ok_title
+    foreign_ng = not _is_en_card(pid.split(":")[-1])
     same, rest = [], []
     for c in cands or []:
         u = c.get("url") or ""
+        # ★2026-10-06 (「違う」の原因を数えた結果): 番号が合っていても海外版の出品が「違う」になっていた (8件)。
+        #   番号で拾う候補は海外版を見ていなかった (番号なしで拾う候補だけ見ていた)。うちのカードが英語版でなければ外す
+        if foreign_ng and _says_foreign(c.get("name")):
+            continue
         # ★2026-10-06 ユーザー「同じ違うものも再度出てくるなら、それも無駄」: どの画面でも「違う」と答えた URL /
         #   「違う」と答えた出品と同じタイトル は出さない (補の候補は、その eBay 出品の NG しか見ていなかった)
         if pll.url_verdict(pid, u, uv) == "diff" or (diff_title and pll.norm_title(c.get("name")) in diff_title):
@@ -315,6 +321,30 @@ def split_known_same(cands, key, pll=None, uv=None):
             hit = bool(m and m.group(1) in ok_prod)
         (same if hit else rest).append(c)
     return same, rest
+
+
+def _says_foreign(title):
+    """出品名が海外版を名乗るか (純関数)。語は mercari_psa_resource._FOREIGN_WORDS と同じ。"""
+    import mercari_psa_resource as mp
+    t = unicodedata.normalize("NFKC", title or "").upper()
+    return any(w.upper() in t for w in mp._FOREIGN_WORDS)
+
+
+_EN_CARD = {}
+
+
+def _is_en_card(pid):
+    """うちのカードがカタログで英語版か (英語版を売っている出品は、海外版の候補を外さない)。"""
+    if pid not in _EN_CARD:
+        try:
+            import sqlite3
+            con = sqlite3.connect("file:C:/dev/iMak_data/catalog/products.sqlite?mode=ro", uri=True)
+            r = con.execute("select language from products where product_id=? limit 1", (pid,)).fetchone()
+            con.close()
+            _EN_CARD[pid] = bool(r and str(r[0] or "").strip().lower() == "en")
+        except Exception:                                      # noqa: BLE001 分からなければ外さない
+            _EN_CARD[pid] = True
+    return _EN_CARD[pid]
 
 
 def title_diff_set(pll, uv, pid):

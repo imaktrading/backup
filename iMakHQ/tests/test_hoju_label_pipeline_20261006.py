@@ -110,3 +110,14 @@ def test_mark_is_kept_and_measured(tmp_path):
     L.remember_url_verdicts([("P1", U1, "same", "補URL③", "t", "label"), ("P1", U2, "diff", "補URL③", "t", "label"),
                              ("P2", U1, "same", "補URL③", "t", "")], path=str(p))
     assert L.mark_accuracy(L.load(str(p))) == {"label": {"same": 1, "diff": 1}}
+
+
+def test_foreign_listing_dropped_unless_our_card_is_english(monkeypatch):
+    monkeypatch.setattr(H, "_URL_LABEL_PID", {})
+    H._SNKR_MEMO.clear()
+    c = [{"url": U1, "name": "【PSA10】ブルック 英語版 ST01-011"}, {"url": U2, "name": "PSA10 ブルック ST01-011"}]
+    monkeypatch.setattr(H, "_EN_CARD", {"ST01-011": False, "ST01-011_p4": True})
+    _, rest = H.split_known_same(c, "one_piece_tcg:ST01-011", L, {"https://x/z": {}})
+    assert [x["url"] for x in rest] == [U2]
+    _, rest = H.split_known_same(c, "one_piece_tcg:ST01-011_p4", L, {"https://x/z": {}})
+    assert len(rest) == 2
