@@ -708,7 +708,15 @@ def parse_result(data):
         if work or ref:
             info[idx] = {"work": work, "ref": ref, **({"imgs": imgs} if imgs else {}),
                          **({"checked": "ok"} if v.get("checked") == "ok" else {})}
-    return {"picks": picks, "skips": skips, "nocat": _ints(data.get("nocat")),
+    merges = []
+    for m in data.get("merges") or []:
+        if not isinstance(m, dict):
+            continue
+        rep_pid = str(m.get("rep") or "").strip()
+        same = [x.strip() for x in (m.get("same") or []) if isinstance(x, str) and x.strip() and x.strip() != rep_pid]
+        if same and (rep_pid or len(same) > 1):
+            merges.append({"rep": rep_pid, "same": sorted(set(same))})
+    return {"picks": picks, "skips": skips, "merges": merges, "nocat": _ints(data.get("nocat")),
             "nocat_info": info,
             "outs": [o for o in outs if o["reason"]], "holds": _ints(data.get("holds"))}
 
@@ -729,9 +737,13 @@ def load_catalog(db=DB_PATH):
     # source 列が無い DB (テストの最小テーブル等) でも読めるようにする。無ければフラグだけで弾く
     _cols = {r[1] for r in con.execute("pragma table_info(products)")}
     _src_col = "source" if "source" in _cols else "null"
-    for pid, name, specs, images, _src in con.execute(
-            f"select product_id, name, specs, images, {_src_col} from products"
+    _alias_col = "alias_of" if "alias_of" in _cols else "null"
+    for pid, name, specs, images, _src, _alias in con.execute(
+            f"select product_id, name, specs, images, {_src_col}, {_alias_col} from products"
             " where category in ('uniqlo_ut','gu')"):
+        # ★2026-10-06 目視で「同じ物」とまとめた行 (カタログが alias_of で本体に寄せた) は候補に出さない
+        if (_alias or "").strip():
+            continue
         try:
             s = json.loads(specs or "{}")
         except ValueError:
@@ -834,7 +846,10 @@ def _cards_html(cands, color_jp=""):
                ("" if p["colors"] else "<div class='nm' style='color:#a40'>色がカタログに無い</div>"))
             + (f"<div class='nm' style='color:#06a'>色違い {len(p['colors'])}色</div>"
                if len(p["colors"]) > 1 else "")
-            + "<button class='zb' onclick='zoom(event,this)' title='メルカリの写真と公式画像を全部並べる'>🔍</button></div>")
+            + "<button class='zb' onclick='zoom(event,this)' title='メルカリの写真と公式画像を全部並べる'>🔍</button>"
+            # ★2026-10-06 ユーザー確定 (案A): 同じシャツが何件も出ていたら、人が「同じ物」を押してまとめる
+            "<button class='sameb' onclick='sameV(event,this)' title='選んだ商品と同じシャツ (写真違い) ならこれを押す。"
+            "カタログが1件にまとめます'>同じ物</button></div>")
     return (f"<div class='one'>カタログ候補 {len(cands)}件 — 柄を見て1つ選んでください</div>"
             f"<div class='vs'>{''.join(cards)}</div>")
 
@@ -862,6 +877,8 @@ h1{font-size:16px;margin:0 0 6px}.sum{font-size:12px;color:#555;margin-bottom:10
 .noimg{display:flex;align-items:center;justify-content:center;color:#999;border:1px dashed #ccc}
 .v .pid{font-weight:bold}.v .nm{color:#666}
 .v .zb{position:absolute;top:2px;right:2px;font-size:11px;padding:0 4px}
+.v .sameb{font-size:11px;margin-top:3px;padding:1px 6px}
+.v.same{border:2px dashed #e07000;background:#fff3e6}.v.same .sameb{background:#e07000;color:#fff}
 .one{font-size:12px;color:#076;font-weight:bold}.warn{font-size:12px;color:#a40}
 .act{margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px}
 button{font-size:12px;padding:3px 10px;border:1px solid #bbb;background:#fff;border-radius:4px;cursor:pointer}
@@ -1031,6 +1048,8 @@ function steps(box){var a=box.dataset.act||'';var s1=box.querySelector('.steps .
   if(!box.dataset.pid){s1.classList.add('now');return;}
   s1.classList.add('on');if(box.dataset.lvok){s2.classList.add('on');s3.classList.add('now');}else{s2.classList.add('now');}}
 document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.it').forEach(steps);});
+function sameV(ev,btn){ev.stopPropagation();var v=btn.closest('.v');if(v.classList.contains('sel'))return;
+  v.classList.toggle('same');}
 function setAct(btn){var box=btn.closest('.it');
   box.querySelectorAll('.act button').forEach(function(b){b.classList.remove('sel');});
   btn.classList.add('sel');box.dataset.act=btn.dataset.a;
@@ -1074,8 +1093,12 @@ function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason
   if(noreason)msg+='\\n\\n対象外/見送りなのに理由が未選択 '+noreason+'件 — 未結論に戻します';
   if(nolv)msg+='\\n\\n「出品の値」が ✅ になっていない '+nolv+'件 — 商品は記録しますが、このままでは出品で止まります';
   if(nopick)msg+='\\n\\n調べて可なのに、同じ柄の写真か作品名が未選択 '+nopick+'件 — 未結論に戻します';
+  var nm=document.querySelectorAll('.v.same').length;if(nm)msg+='\\n\\n「同じ物」'+nm+'件をカタログでまとめます';
   if(!confirm(msg+'\\n\\nこの内容で確定しますか?'))return;
-  _send({picks:picks,skips:skips,nocat:nocat,nocat_info:nocatInfo,outs:outs,holds:holds},
+  var merges=[];document.querySelectorAll('.it').forEach(function(b){var same=[];
+    b.querySelectorAll('.v.same').forEach(function(v){if(v.dataset.pid!==b.dataset.pid)same.push(v.dataset.pid);});
+    if(same.length&&(b.dataset.pid||same.length>1))merges.push({idx:parseInt(b.dataset.idx,10),rep:b.dataset.pid||'',same:same});});
+  _send({picks:picks,skips:skips,nocat:nocat,nocat_info:nocatInfo,outs:outs,holds:holds,merges:merges},
         '<h1>確定しました。ウィンドウを閉じてください。</h1>');}
 """
 
@@ -1111,7 +1134,8 @@ def build_html(items, catalog, summary=None):
              "<ol><li>左の<b>メルカリの写真</b>と<b>同じ柄</b>を、右の候補から<b>1つ押す</b> (緑の枠になる)</li>"
              "<li>その下の<b>「出品の値」が ✅</b> か見る。❌ なら理由の欄 (サイズ・色・作品名) を直す</li>"
              "<li>全部の行が終わったら、右下の<b>「確定」</b></li></ol>"
-             "<span>同じ柄が無い時 → 「検索」で探す / 「カタログに無い→追加依頼」 / 出せない物は「対象外」 / 迷ったら「保留」"
+             "<span><b>同じシャツが何件も並んでいたら</b>、選んだ以外の同じ物の「同じ物」を押す (カタログが1件にまとめます)<br>"
+             "同じ柄が無い時 → 「検索」で探す / 「カタログに無い→追加依頼」 / 出せない物は「対象外」 / 迷ったら「保留」"
              " (<b>確信が無ければ選ばない</b>: 違う柄を出すと別デザイン発送になります)</span></div>",
              # ★2026-09-16 ユーザー「目的をわかるように HTML に書いておいて」
              "<details class='sum' style='background:#eef6ff;border:1px solid #9cc;padding:4px 8px'>"
@@ -1452,6 +1476,38 @@ def merge_character_inputs(existing, new):
     return out
 
 
+def write_merge_inputs(merges, dir_path=CATALOG_REQ_DIR, now=None):
+    """目視で「同じ物」とした組をカタログに渡す (案A・2026-10-06 ユーザー確定)。
+
+    requests/ut_merge_input.json = [{rep, same:[...], at}]。rep = 人が選んだ商品 (空ならカタログが本体を決める)。
+    カタログは same の行を alias_of=rep で寄せる。同じ組は2回足さない。戻り: 足した組の数。
+    """
+    if not merges:
+        return 0
+    path = os.path.join(dir_path, "ut_merge_input.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            cur = json.load(f)
+        cur = cur if isinstance(cur, list) else []
+    except (OSError, ValueError):
+        cur = []
+    seen = {(c.get("rep", ""), tuple(c.get("same") or [])) for c in cur if isinstance(c, dict)}
+    now = now or datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    n = 0
+    for m in merges:
+        k = (m["rep"], tuple(m["same"]))
+        if k in seen:
+            continue
+        cur.append({"rep": m["rep"], "same": list(m["same"]), "at": now})
+        seen.add(k)
+        n += 1
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cur, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+    return n
+
+
 def write_character_inputs(inputs, dir_path=CATALOG_REQ_DIR):
     """人が入れたキャラ名をカタログに渡す (C)。requests/ut_character_input.json に {product_id: キャラ名}。
 
@@ -1788,6 +1844,9 @@ def save(items, res, now=None):
         print(f"  📮 カタログに追加依頼: {n_req}件 → {os.path.basename(req_path)}")
     if works_added:
         print(f"  📝 英語の作品名を対応表に足した: {works_added}件 → iMakMercari/ut_title_names.yaml")
+    n_mg = write_merge_inputs(res.get("merges") or [], CATALOG_REQ_DIR)
+    if n_mg:
+        print(f"  📮 カタログに「同じ物」を渡した: {n_mg}組 → ut_merge_input.json")
     n_char = write_character_inputs(char_inputs, CATALOG_REQ_DIR)
     if n_char:
         print(f"  📮 カタログにキャラ名を渡した: {n_char}件 → ut_character_input.json")
