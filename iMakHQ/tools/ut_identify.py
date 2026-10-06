@@ -365,13 +365,47 @@ def search_catalog(q, catalog, limit=MAX_CANDS):
 NOCAT_RETRY_DAYS = 7      # カタログ追加依頼を出した行を、もう一度見るまでの日数
 
 
-def _retry_nocat(entry, today=None):
+STATUS_LABEL = {   # カタログの回答 (ut_nocat_status.json の status) → 画面の言葉
+    "added": ("✅ 追加された", "#060", "候補に出ていれば選んでください"),
+    "pattern_only": ("🟡 柄は分かった (まだ出品に使えない)", "#a60", "作品名・キャラ名が決まると出品に使えるようになります"),
+    "need_more": ("🟠 手がかり不足", "#c50", "別の参考URL (記事・公式ページ) や作品名を入れて、もう一度「追加依頼」"),
+    "wrong_ref": ("🔴 参考URLが違った", "#c00", "別の参考URLを入れて、もう一度「追加依頼」"),
+    "not_found": ("⚫ 見つからなかった", "#555", "別の参考URLがあれば、もう一度「追加依頼」"),
+}
+
+
+def load_status(path=None):
+    """カタログが書く行ごとの結果 {メルカリURL: {status, product_id, ref_url, note, at}}。読めなければ {}。
+
+    ★2026-10-06 ユーザー「ちゃんと追加されたかどうかが、この画面でわかる様にならないかな？
+      渡した参考URLが違うなら、別のを探して渡し続けるから」。形はカタログと合意済み
+      (catalog/requests/2026-10-06_ut_discontinued_listable_and_status_response.md の 3)。
+    """
+    try:
+        with open(path or os.path.join(CATALOG_REQ_DIR, "ut_nocat_status.json"), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def answered_after(entry, st):
+    """依頼 (台帳の nocat) より後にカタログの回答があるか (純関数)。"""
+    if (entry or {}).get("decision") != "nocat" or not isinstance(st, dict) or not st.get("status"):
+        return False
+    return str(st.get("at") or "") >= str((entry or {}).get("at") or "")
+
+
+def _retry_nocat(entry, today=None, st=None):
     """「カタログに無い」で依頼を出した行を、もう一度目視に出す頃か (純関数)。
 
     ★カタログが追加したら候補が出るようになる。出しっぱなしだと二度と見ないので戻す。
+    ★2026-10-06: カタログが回答したら 7日を待たずにすぐ出す (結果を見て、違えば別のURLを渡し直せるように)。
     """
     if (entry or {}).get("decision") != "nocat":
         return False
+    if answered_after(entry, st):
+        return True
     try:
         t = datetime.datetime.fromisoformat(entry.get("at") or "")
     except ValueError:
@@ -379,13 +413,14 @@ def _retry_nocat(entry, today=None):
     return ((today or datetime.datetime.now()) - t).days >= NOCAT_RETRY_DAYS
 
 
-def pending_rows(src, decided, in_high, today=None):
+def pending_rows(src, decided, in_high, today=None, status=None):
     """中間タブ → 目視に出す行 [(行番号, row)]。純関数。
 
     出さない: URL 無し / 売り切れ印 / 台帳で決着済み / 商品管理シートに既にある URL。
-    ただし「カタログに無い」で依頼を出した行は NOCAT_RETRY_DAYS 後にまた出す。
+    ただし「カタログに無い」で依頼を出した行は NOCAT_RETRY_DAYS 後 (カタログが回答したらすぐ) にまた出す。
     """
     out = []
+    status = status or {}
     for i, r in enumerate(src[1:], start=2):
         r = list(r) + [""] * (_WIDTH - len(r))
         url = (r[C_URL] or "").strip()
@@ -393,7 +428,7 @@ def pending_rows(src, decided, in_high, today=None):
             continue
         if url in in_high:
             continue
-        if url in decided and not _retry_nocat(decided.get(url), today):
+        if url in decided and not _retry_nocat(decided.get(url), today, status.get(url)):
             continue
         out.append((i, r))
     return out
@@ -413,7 +448,7 @@ def _needs_key(r):
     return needs_catalog_key(r[C_KEY] if len(r) > C_KEY else "")
 
 
-def sheet_pending_rows(rows2d, decided, today=None):
+def sheet_pending_rows(rows2d, decided, today=None, status=None):
     """商品管理シートの **まだ出していない Tシャツ行** → 目視に出す行 [(行番号, row)]。純関数。
 
     ★2026-09-12 ユーザー「残36件も目視を終えたいね」。中間タブに来る前から
@@ -432,10 +467,42 @@ def sheet_pending_rows(rows2d, decided, today=None):
         url = (r[C_URL] or "").strip()
         if not url.startswith("http"):
             continue
-        if url in decided and not _retry_nocat(decided.get(url), today):
+        if url in decided and not _retry_nocat(decided.get(url), today, (status or {}).get(url)):
             continue
         out.append((i, r))
     return out
+
+
+def status_summary(decided, status):
+    """依頼した行の結果の内訳 {回答待ち: n, added: n, …} (純関数)。最新の依頼より後の回答だけ数える。"""
+    out = {}
+    for url, e in (decided or {}).items():
+        if (e or {}).get("decision") != "nocat":
+            continue
+        st = (status or {}).get(url)
+        k = st["status"] if answered_after(e, st) else "waiting"
+        out[k] = out.get(k, 0) + 1
+    return out
+
+
+def status_html(entry, st):
+    """1行ぶんの「カタログに依頼した結果」(純関数)。依頼していなければ ''。"""
+    if (entry or {}).get("decision") != "nocat":
+        return ""
+    sent = (entry.get("at") or "")[:10]
+    ref = entry.get("ref") or ""
+    if not answered_after(entry, st):
+        return (f"<div class='nm' style='background:#f4f4f4;padding:4px 8px;border-radius:4px'>📮 カタログに依頼中 "
+                f"({_html.escape(sent)}・回答待ち)" + (f" 参考URL {_html.escape(ref[:60])}" if ref else "") + "</div>")
+    lab, color, hint = STATUS_LABEL.get(st.get("status"), (st.get("status"), "#333", ""))
+    pid = st.get("product_id") or ""
+    return (f"<div class='nm' style='border-left:4px solid {color};padding:4px 8px;background:#fafafa'>"
+            f"📮 カタログの回答 ({_html.escape(str(st.get('at') or '')[:10])}): <b style='color:{color}'>{_html.escape(lab)}</b>"
+            + (f" — {_html.escape(pid)}" if pid else "")
+            + (f"<br><span style='color:#555'>{_html.escape(st.get('note') or '')}</span>" if st.get("note") else "")
+            + (f"<br><span style='color:#777'>使った参考URL: {_html.escape((st.get('ref_url') or ref)[:90])}</span>"
+               if (st.get("ref_url") or ref) else "")
+            + (f"<br><b>{_html.escape(hint)}</b>" if hint else "") + "</div>")
 
 
 def _own_photos(r):
@@ -821,8 +888,22 @@ function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason
 """
 
 
-def build_html(items, catalog):
-    """items → 目視ページ (bytes)。"""
+def catalog_summary_html(summary):
+    """依頼した行の結果の内訳 (画面の先頭)。純関数。依頼が無ければ ''。"""
+    if not summary:
+        return ""
+    names = {"waiting": "回答待ち", **{k: v[0] for k, v in STATUS_LABEL.items()}}
+    order = ["waiting", "added", "pattern_only", "need_more", "wrong_ref", "not_found"]
+    parts = [f"{_html.escape(names.get(k, k))} <b>{summary[k]}</b>" for k in order + sorted(set(summary) - set(order))
+             if summary.get(k)]
+    return ("<div class='sum' style='background:#fff8e6;border:1px solid #e0c080'>📮 カタログに追加依頼した行: "
+            + " ／ ".join(parts)
+            + "<br><span style='font-size:12px;color:#666'>回答が来た行はすぐこの画面に戻ります"
+              " (回答待ちの行は7日後)。違っていたら別の参考URLを入れて、もう一度「追加依頼」。</span></div>")
+
+
+def build_html(items, catalog, summary=None):
+    """items → 目視ページ (bytes)。summary = status_summary (カタログに依頼した行の内訳)。"""
     import psa_resource_confirm as prc
     import newcand_confirm as NC
     save_js = NC.SAVE_JS.replace("'imak_confirm_draft_'+location.port", "'imak_confirm_draft_ut_identify'")
@@ -844,6 +925,7 @@ def build_html(items, catalog):
              "<li><b>出品待ちの行</b> と <b>新しい候補</b> = これから出す商品を決めるため。"
              "出せない物 (売り切れ・中古・タグ無し) はここで対象外にします。</li>"
              "</ul></div>",
+             catalog_summary_html(summary),
              f"<div class='sum'>全 {len(items)}件。写真と同じ柄の商品を選んで「この商品」"
              "(同じ柄で色違いがある商品だけ、色を選ぶ欄が出ます)。"
              "候補は<b>公式で買えない物だけ</b>。無ければ検索欄に作品名・キャラ名・商品番号(6桁)。"
@@ -891,6 +973,7 @@ def build_html(items, catalog):
             + (f" ｜ タグの番号 <b>{_html.escape(r[C_TAG])}</b>" if r[C_TAG] else "")
             + f" ｜ {_html.escape((r[C_DESC] or '')[:80])}</div>"
             + (f"<div class='warn'>⚠ {_html.escape(it['warn'])}</div>" if it.get("warn") else "")
+            + (it.get("cat_status") or "")
             + (f"<div class='nm' style='font-size:11px;color:#666'>色が明らかに違う候補 "
                f"{it['hidden_color']}件を隠しました (出品者の色の書き違いなら 検索欄で全部出ます)</div>"
                if it.get("hidden_color") else "")
@@ -968,8 +1051,10 @@ def request_md(rows, today=None, existing=""):
     existing: 同じ日の依頼書が既にある時はその本文 (同じ URL は二度書かない)。
     """
     today = today or datetime.date.today()
-    have = set(re.findall(r"https?://\S+", existing))
-    new = [r for r in rows if (r.get("url") or "") not in have]
+    have = set(re.findall(r"https?://[^\s|)\]]+", existing))
+    # ★2026-10-06: 同じ行でも **新しい参考URL** を付けて出し直した時は書く (ユーザー「別のを探して渡し続ける」)
+    new = [r for r in rows if (r.get("url") or "") not in have
+           or any(u not in have for u in re.findall(r"https?://[^\s|)\]]+", r.get("ref") or ""))]
     if not new:
         return ""
     head = existing or (
@@ -1160,16 +1245,18 @@ def rest_breakdown(rows):
 def load_items(limit=DEFAULT_LIMIT, new_only=False, stats=None):
     led = load_ledger()
     prod = _product_values()
+    status = load_status()
+    stats = stats if stats is not None else {}
+    stats["catalog_status"] = status_summary(led, status)
     # ★2026-09-12: 中間タブ (抽出くんが集めた分) と 商品管理シートの **まだ出していない Tシャツ行**
     #   (前の運用で入った分) の両方を目視に出す
-    rows = [(i, r, "tab") for i, r in pending_rows(_read_src(), led, _high_urls(prod))]
-    rows += [(SHEET_IDX_BASE + i, r, "sheet") for i, r in sheet_pending_rows(prod, led)]
+    rows = [(i, r, "tab") for i, r in pending_rows(_read_src(), led, _high_urls(prod), status=status)]
+    rows += [(SHEET_IDX_BASE + i, r, "sheet") for i, r in sheet_pending_rows(prod, led, status=status)]
     if new_only:
         rows = only_new(rows)
     rows = order_rows(rows, load_demand())
     catalog = load_catalog()
     official = load_official_l1()
-    stats = stats if stats is not None else {}
     stats["official"] = 0
     # ★2026-09-16 ユーザー「そんなにないやろ」: 「残り全部で N件」だけだと、その N が
     #   KEY 埋めの数に見える (実際は 620件中 KEY 埋めは 38件だった)。内訳を出す。
@@ -1193,7 +1280,9 @@ def load_items(limit=DEFAULT_LIMIT, new_only=False, stats=None):
         # ★2026-09-12 ユーザー「公式で買えないものだけに対象を絞ってほしい」:
         #   公式で今買える商品は、メルカリから仕入れて出す物ではない (目的は「公式では買えない物」)
         oos = [p for p in keep if p.get("sold_out")]
+        _url = (r[C_URL] or "").strip()
         items.append({"idx": i, "row": r, "src": _src, "cands": oos[:MAX_CANDS],
+                      "cat_status": status_html(led.get(_url), status.get(_url)),
                       "hidden_color": len(allc) - len(keep),
                       "hidden_instock": len(keep) - len(oos),
                       "warn": tag_conflict(r[C_TAG], r[C_KW], catalog)})
@@ -1319,7 +1408,7 @@ def main():
         return 0
     n_c = sum(1 for it in items if it["cands"])
     print(f"  カタログ候補が並ぶ {n_c}件 / 候補なし (検索欄で探す) {len(items) - n_c}件")
-    page = build_html(items, load_catalog())
+    page = build_html(items, load_catalog(), summary=_stats.get("catalog_status"))
     if a.dry_run:
         out = os.path.join(os.environ.get("TEMP", _HERE), "ut_identify_preview.html")
         with open(out, "wb") as f:

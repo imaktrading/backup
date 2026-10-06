@@ -58,8 +58,9 @@ def _patch_rows(monkeypatch, rows, official):
     monkeypatch.setattr(U, "_product_values", lambda: [])
     monkeypatch.setattr(U, "_read_src", lambda: [])
     monkeypatch.setattr(U, "_high_urls", lambda prod=None: set())
-    monkeypatch.setattr(U, "pending_rows", lambda src, led, high: list(enumerate(rows, 2)))
-    monkeypatch.setattr(U, "sheet_pending_rows", lambda prod, led: [])
+    monkeypatch.setattr(U, "pending_rows", lambda src, led, high, **k: list(enumerate(rows, 2)))
+    monkeypatch.setattr(U, "sheet_pending_rows", lambda prod, led, **k: [])
+    monkeypatch.setattr(U, "load_status", lambda *a, **k: {})      # 2026-10-06 カタログの回答を読むようになった
     monkeypatch.setattr(U, "load_demand", lambda *a, **k: {})
     monkeypatch.setattr(U, "load_catalog", lambda db=None: CAT + [_p("E459207-000", "459207", tok=("naruto",))])
     monkeypatch.setattr(U, "load_official_l1", lambda: official)
