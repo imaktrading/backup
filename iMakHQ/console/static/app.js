@@ -570,7 +570,7 @@
   // ★2026-10-06 ユーザー「あるべき姿に修正して」: あるべき姿の台帳と実物 (この PC・KAGOYA・夜の束・LAPTOP) の
   //   突き合わせ結果を出す。止めてあって正常な物 (移設・廃止) は畳み、異常は担当名つきで上に並べる
   var WHERE = { home: "この PC", kagoya: "KAGOYA", job_queue: "夜の束", laptop: "LAPTOP" };
-  var AST = { ok: ["done", "正常"], running: ["night", "実行中"], overlap: ["hold", "見送り"],
+  var AST = { ok: ["done", "正常"], never: ["done", "初回待ち"], running: ["night", "実行中"], overlap: ["hold", "見送り"],
               missing: ["error", "見つからない"], disabled: ["error", "止まっている"], failed: ["error", "失敗"],
               stale: ["error", "動いていない"], ask: ["hold", "担当に確認中"], unknown: ["hold", "確かめられない"],
               unknown_task: ["hold", "台帳に無い"] };

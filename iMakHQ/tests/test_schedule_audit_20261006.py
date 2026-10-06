@@ -107,3 +107,11 @@ def test_台帳の実物が読めて_担当の置き場が全部ある():
         assert q["owner"] in owners
     names = [e["name"] for e in conf["expected"]] + list(conf["retired"]) + list(conf["ask"])
     assert len(names) == len(set(names)), "同じ予約が二重に載っている"
+
+
+def test_作ったばかりで初回待ちは異常にしない_次回が無ければ拾う():
+    a = {"state": "Ready", "last": "1999-11-30T00:00:00", "result": A.NEVER, "next": "2026-10-07T09:00:00"}
+    assert A.judge(_exp(), a, NOW)[0] == "never"
+    assert "never" not in A.BAD
+    b = dict(a, next="")
+    assert A.judge(_exp(), b, NOW)[0] == "stale"

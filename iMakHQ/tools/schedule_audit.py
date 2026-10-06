@@ -73,6 +73,9 @@ def judge(exp, actual, now):
     res = actual.get("result")
     if res == RUNNING or actual.get("state") == "Running":
         return "running", "実行中"
+    # ★まだ一度も動いていないが次回が決まっている (作ったばかり) は異常にしない
+    if res == NEVER and _ts(actual.get("next")):
+        return "never", "まだ一度も動いていない (初回 %s)" % _ts(actual.get("next")).strftime("%m/%d %H:%M")
     age_h = (now - last).total_seconds() / 3600 if last else None
     if res not in OK_CODES and res not in (None, NEVER, OVERLAP):
         return "failed", "前回 失敗 (結果 %s・%s)" % (res, last.strftime("%m/%d %H:%M") if last else "?")
