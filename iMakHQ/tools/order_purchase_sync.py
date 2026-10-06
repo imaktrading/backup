@@ -606,7 +606,9 @@ def main(argv):
     orders = fetch_orders()
     by_id = {norm_order(o.get("orderId")): o for o in orders}
     ws = _ws()
-    rows = ws.get_all_values()
+    # ★2026-10-06 18:27 429 (1分あたりの読み取り上限) で落ちた。他の読み取りと重なっただけなので待って読み直す
+    from sheet_io import _read_with_quota_retry
+    rows = _read_with_quota_retry(ws.get_all_values)
     # 足す行の NO. は数字の最大 +1
     nos = [int(r[C_NO]) for r in rows[1:] if r and r[C_NO].strip().isdigit()]
     existing = {norm_order(r[C_ORDER]) for r in rows[1:] if len(r) > C_ORDER and norm_order(r[C_ORDER])}
@@ -644,7 +646,7 @@ def main(argv):
         return 0
 
     # 足す直前に読み直して二重を防ぐ (別の窓・手入力と重なった時)
-    fresh = ws.get_all_values()
+    fresh = _read_with_quota_retry(ws.get_all_values)
     have = {norm_order(r[C_ORDER]) for r in fresh[1:] if len(r) > C_ORDER}
     add = [r for r in add if norm_order(r[C_ORDER]) not in have]
     if len(fresh) != len(rows):
@@ -661,10 +663,10 @@ def main(argv):
         ws.batch_update(updates, value_input_option="USER_ENTERED")
     last = start + len(add) - 1
     _format(ws, last)
-    fill_money(ws, by_id, ws.get_all_values())
-    link_purchases(ws, by_id, ws.get_all_values())
-    fill_mercari_cost(ws, ws.get_all_values())
-    st = _write_status(ws.get_all_values())
+    fill_money(ws, by_id, _read_with_quota_retry(ws.get_all_values))
+    link_purchases(ws, by_id, _read_with_quota_retry(ws.get_all_values))
+    fill_mercari_cost(ws, _read_with_quota_retry(ws.get_all_values))
+    st = _write_status(_read_with_quota_retry(ws.get_all_values))
     print(f"  書きました: 足した {len(add)}行 / 仕入れ待ち {st['waiting']}件"
           + (f" (いちばん早い発送期限 {st['earliest_ship_by']})" if st["earliest_ship_by"] else ""))
     return 0
