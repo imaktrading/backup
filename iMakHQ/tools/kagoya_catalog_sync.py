@@ -269,7 +269,10 @@ def pull_db(cfg, st, log=print):
             "except OSError:\n    w = 0\n"
             "sig = [round(s.st_mtime, 1), s.st_size, w]\n"
             "src = sqlite3.connect(f'file:{db}?mode=ro', uri=True, timeout=60)\n"
-            "ver = src.execute('select count(*), max(rowid) from products').fetchone()\n"
+            # ★2026-10-07: 既存の行の書き換え (alias_of を付ける等) は 行数・最大 rowid・本体の大きさが変わらず、
+            #   -wal の大きさも同じことがある → 「変わっていない」と見て 12時間 写しを取っていなかった。
+            #   書き換えた日時の最大と、別名の数も見る
+            "ver = src.execute('select count(*), max(rowid), max(updated_at), count(alias_of) from products').fetchone()\n"
             "print('SIG', json.dumps([sig, ver]))\n")
     rc, out = _py_remote(cfg, code, timeout=300)
     line = next((x for x in out.splitlines() if x.startswith("SIG ")), None)
