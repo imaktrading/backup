@@ -263,12 +263,15 @@ def remember_url_verdicts(items, path=URL_PATH, now=None):
         # ★2026-10-06 ユーザー「せっかく目視で一致と回答しているのに、残さないのは無駄」:
         #   URL はスラブ1枚限り。**出品のタイトル** も残し、同じタイトルの別の出品にも効かせる (title_same_cards)
         title = norm_title(it[4]) if len(it) > 4 else ""
+        # ★2026-10-06 その候補に付けていた印 (label / title)。印がどれだけ当たるかを後で測る (mark_accuracy)
+        mark = str(it[5] or "") if len(it) > 5 else ""
         pid = str(pid or "").split(":")[-1].strip()
         u = norm_url(url)
         # 本物の仕入元 URL だけ (試験の架空 URL 'https://m/0' 等を本物の台帳に入れない)
         if not (pid and _is_real_url(u) and verdict in ("same", "diff")):
             continue
-        data.setdefault(u, {})[pid] = {"v": verdict, "at": at, "screen": screen, **({"t": title} if title else {})}
+        data.setdefault(u, {})[pid] = {"v": verdict, "at": at, "screen": screen, **({"t": title} if title else {}),
+                                       **({"m": mark} if mark else {})}
         n += 1
     if n:
         save(data, path)
@@ -309,6 +312,21 @@ def backfill_titles(data, title_of):
                 e["t"] = t
                 n += 1
     return n
+
+
+def mark_accuracy(data):
+    """印 (label / title) を付けて目視に出した候補の答え → {印: {"same": n, "diff": n}}。純関数。
+
+    ★2026-10-06 ユーザー「目視を飛ばしてより効率的なフェーズに移行するときは、必ず必要になる」:
+      印の当たり率 (same / (same+diff)) が、目視を飛ばしてよいかを決める物差し。
+    """
+    out = {}
+    for by_pid in (data or {}).values():
+        for e in (by_pid or {}).values():
+            m = (e or {}).get("m")
+            if m and e.get("v") in ("same", "diff"):
+                out.setdefault(m, {"same": 0, "diff": 0})[e["v"]] += 1
+    return out
 
 
 def url_verdict(card_pid, url, data=None):

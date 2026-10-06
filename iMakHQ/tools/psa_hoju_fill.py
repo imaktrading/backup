@@ -203,6 +203,26 @@ def url_label_nots(url_cert, psa_cache, learned, pll):
     return out
 
 
+def label_diff_rows(t, cands, today):
+    """補の候補のうち、鑑定番号のラベルで **別のカード** と分かる物 → 補URL候補NG の行 (純関数)。
+
+    ★2026-10-06 ユーザー「違うものを残して、何かに有効活用できないの？」→「全部やろう」:
+      別のカードの PSA10 = そのカードの仕入元。捨てずに台帳へ残す。補URL候補NG は新規の種の画面の材料
+      (newcand_confirm.SRC_TABS) なので、そこでラベルのカードが最初から選ばれた状態で出る。
+    """
+    import mercari_psa_resource as mp
+    import psa_label_learned as pll
+    pid = mp.split_key(t.get("key"))[1].split(":")[-1] if t.get("key") else ""
+    out = []
+    for c in cands or []:
+        u = (c or {}).get("url") or ""
+        lp = _URL_LABEL_PID.get(pll.norm_url(u))
+        if pid and lp and lp != pid:
+            out.append([t.get("itemID", ""), t.get("cert", ""), u, (t.get("title") or "")[:60], today,
+                        (c.get("name") or "")[:60], c.get("price") or "", f"ラベルで別のカード ({lp})"])
+    return out
+
+
 def set_label_context(rows2d):
     """補の目視の前に1回: 仕入元 URL → ラベルで決まるカード を作る。読めなければ空 (今までどおり目視)。"""
     global _URL_LABEL_PID, _URL_CERT, _URL_LABEL_NOT
@@ -2750,6 +2770,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     _PLLs, _UVs = load_same_verdicts()
     set_label_context(vals)                    # ★2026-10-06 仕入元 URL の鑑定番号 → ラベルでカード
     auto_same = []                  # [(target, [前に「同じ」と確かめた候補])] — 目視に出さず書く
+    label_routed = []               # ラベルで別のカードと分かった候補 → 補URL候補NG (= 新規の種の材料) へ
     _scanned = 0
     for t in targets:
         _scanned += 1
@@ -2814,7 +2835,10 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         if not cands:
             continue
         # ★2026-09-29: 前に人が「同じ」と確かめた候補は目視に出さず、そのまま書く分にする
+        _before = list(cands)
         _same, cands = split_known_same(cands, t.get("key"), _PLLs, _UVs)
+        # ★2026-10-06 ラベルで別のカードと分かって外した候補は、捨てずに新規の種へ回す (label_routed)
+        label_routed += label_diff_rows(t, _before, today)
         if _same:
             auto_same.append((t, _same))
             if not cands:
@@ -2931,7 +2955,15 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     if auto_same:
         print(f"  ✔ 前に「同じ」と確かめた候補 {sum(len(s) for _, s in auto_same)}本 "
               f"({len(auto_same)}出品) は目視に出さず、そのまま書きます")
+    if label_routed:
+        print(f"  🏷 ラベルで別のカードと分かった候補 {len(label_routed)}本 → {NG_CAND_TAB} (新規の種の材料) へ回します")
     if not items and not auto_same:
+        if label_routed and not dry_run:
+            try:
+                from sheet_io import read_tab, write_rows_to_tab
+                write_rows_to_tab(NG_CAND_TAB, _merge_ng_rows(read_tab(NG_CAND_TAB), label_routed, NG_CAND_HEADER))
+            except Exception as e:                             # noqa: BLE001
+                print(f"  ⚠ {NG_CAND_TAB} 記録skip ({type(e).__name__}: {e})")
         print("  確証対象なし。終了。")
         return {"confirmed": 0, "written_rows": 0, "added_urls": 0}
     if dry_run:
@@ -3164,7 +3196,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     # --- 候補単位の「違う」を負例として台帳へ (2026-07-29) ---
     # ここが無いと、出品自体が確定した場合に「違う」の1クリックが警告1行で消えていた
     # (次回また同じ別カードが候補に並ぶ)。押した判断は必ず次回に効かせる。
-    _ng_new = []
+    _ng_new = list(label_routed)
     for d in (res.get("diffs") or []):
         _i, _u = d.get("idx"), (d.get("url") or "").strip()
         if _i is None or not _u or _i >= len(item_targets):
@@ -3191,21 +3223,23 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         import psa_label_learned as _PLL
         _uv = []
         # ★2026-10-06 候補のタイトルも残す (同じタイトルの別の出品にも効かせる・title_same_cards)
-        _name_of = {}
+        _name_of, _mark_of = {}, {}
         for _it in items:
             for _c in list(_it.get("candidates") or []) + list(_it.get("_auto") or []):
                 if isinstance(_c, dict) and _c.get("url"):
                     _name_of[_PLL.norm_url(_c["url"])] = _c.get("name") or ""
+                    _mark_of[_PLL.norm_url(_c["url"])] = ("label" if _c.get("label_same")
+                                                          else "title" if _c.get("title_same") else "")
         for _i, _urls in (confirmed or {}).items():
             if _i < len(item_targets):
                 _pid = mp.split_key(item_targets[_i].get("key"))[1]
-                _uv += [(_pid, _u, "same", "補URL③", _name_of.get(_PLL.norm_url(_u), ""))
-                        for _u in (_urls or [])]
+                _uv += [(_pid, _u, "same", "補URL③", _name_of.get(_PLL.norm_url(_u), ""),
+                         _mark_of.get(_PLL.norm_url(_u), "")) for _u in (_urls or [])]
         for d in (res.get("diffs") or []):
             _i = d.get("idx")
             if _i is not None and _i < len(item_targets) and d.get("url"):
                 _uv.append((mp.split_key(item_targets[_i].get("key"))[1], d["url"], "diff", "補URL③",
-                            _name_of.get(_PLL.norm_url(d["url"]), "")))
+                            _name_of.get(_PLL.norm_url(d["url"]), ""), _mark_of.get(_PLL.norm_url(d["url"]), "")))
         if _uv:
             print(f"  📘 目視の同じ/違うをカード単位で記録: {_PLL.remember_url_verdicts(_uv)}件")
         # ★2026-10-06 「同じ」と答えた候補の鑑定番号が分かれば (新規で打った物)、ラベルの記録にも足す
@@ -3213,6 +3247,12 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         _n_lab += _PLL.record_nots(same_label_picks(_uv, _URL_CERT, prc._load_psa_cache() or {}, _PLL, want="diff"))
         if _n_lab:
             print(f"  📘 鑑定番号の分かる候補をラベルの記録に足した (同じ/違う): {_n_lab}件")
+        # ★2026-10-06 印の当たり率 (目視を飛ばしてよいかの物差し)。貯まるほど確かになる
+        _acc = _PLL.mark_accuracy(_PLL.load(_PLL.URL_PATH))
+        if _acc:
+            print("  🎯 印の当たり率: " + " / ".join(
+                f"{ {'label': 'ラベル', 'title': 'タイトル'}.get(k, k)} {v['same']}/{v['same'] + v['diff']}"
+                for k, v in sorted(_acc.items())))
     except Exception as _e_uv:                                  # noqa: BLE001
         print(f"  ⚠ カード単位の記録skip ({type(_e_uv).__name__}: {_e_uv})")
 

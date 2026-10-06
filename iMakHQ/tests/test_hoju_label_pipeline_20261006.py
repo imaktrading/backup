@@ -96,3 +96,17 @@ def test_diff_answers_with_cert_go_to_label_not(monkeypatch):
     monkeypatch.setattr(L, "category_of", lambda pid, db=None: "one_piece_tcg")
     out = H.same_label_picks([("OP09-118", U1, "diff", "補URL③", "")], {L.norm_url(U1): "111"}, META, L, want="diff")
     assert out == [(L.key_for_psa("one_piece_tcg", META["111"]), "OP09-118", "111")]
+
+
+def test_label_diff_rows_route_to_new_candidates(monkeypatch):
+    monkeypatch.setattr(H, "_URL_LABEL_PID", {L.norm_url(U1): "OP01-001"})
+    t = {"itemID": "9", "cert": "5", "key": "one_piece_tcg:OP09-118", "title": "x"}
+    rows = H.label_diff_rows(t, [{"url": U1, "name": "n", "price": 100}, {"url": U2}], "2026-10-06")
+    assert rows == [["9", "5", U1, "x", "2026-10-06", "n", 100, "ラベルで別のカード (OP01-001)"]]
+
+
+def test_mark_is_kept_and_measured(tmp_path):
+    p = tmp_path / "u.json"
+    L.remember_url_verdicts([("P1", U1, "same", "補URL③", "t", "label"), ("P1", U2, "diff", "補URL③", "t", "label"),
+                             ("P2", U1, "same", "補URL③", "t", "")], path=str(p))
+    assert L.mark_accuracy(L.load(str(p))) == {"label": {"same": 1, "diff": 1}}

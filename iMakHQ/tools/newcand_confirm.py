@@ -642,9 +642,17 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
     except Exception:                                          # noqa: BLE001 読めなければ従来どおり
         _url_same = lambda u: ""                                # noqa: E731
         _cat_of = lambda pid: ""                                # noqa: E731
+    # ★2026-10-06 仕入元 URL の鑑定番号 (商品管理シート A+I) → ラベルの記録で決まるカード
+    try:
+        import psa_hoju_fill as _PHF
+        _PHF.set_label_context(sheet_io._read_with_quota_retry(sheet_io._product_ws().get_all_values))
+        _label_of = lambda u: _PHF._URL_LABEL_PID.get(_PLL.norm_url(u)) or ""    # noqa: E731
+    except Exception:                                          # noqa: BLE001 読めなければ従来どおり
+        _label_of = lambda u: ""                                # noqa: E731
     auto_aux, items, groups, over_cap = [], [], {}, []
     for p in all_items:
         no = p["card_no"]
+        _apply_label(p, _label_of(p["url"]))
         # ★2026-09-24: どこかの画面で目視して「この URL はカード B」と決まっていれば、それを使う
         #   (ユーザー「A が B と確定したら、どの処理で出てきても B として扱う」)
         _sp = _url_same(p["url"])
@@ -967,6 +975,8 @@ input.cert{font-size:12px;width:120px;padding:2px 4px}
 """
 
 _JS = """
+// ★2026-10-06 ラベルで決まったカードは最初から選んでおく (違えば押し直す)
+document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll(".v[data-label='1']").forEach(function(v){try{pickV(v);}catch(e){}});});
 function zoom(ev, el, side){
   ev.preventDefault(); ev.stopPropagation();
   var box=el.closest('.it');
@@ -1112,6 +1122,39 @@ window.addEventListener('load',function(){
 """
 
 
+def _apply_label(p, label_pid):
+    """候補 p の並びを、ラベルで決まったカードを先頭にする (候補に無ければカタログから足す)。"""
+    if not label_pid:
+        return
+    extra = None
+    if not any(v.get("pid") == label_pid for v in p.get("variants") or []):
+        try:
+            con = sqlite3.connect(DB_PATH)
+            con.row_factory = sqlite3.Row
+            r = con.execute(f"select {_CAND_COLS} from products where product_id=? limit 1",
+                            (label_pid,)).fetchone()
+            con.close()
+            extra = _row_to_cand(r) if r else None
+        except Exception:                                      # noqa: BLE001
+            extra = None
+    p["variants"] = label_first(p.get("variants"), label_pid, extra)
+
+
+def label_first(vs, label_pid, extra=None):
+    """ラベルで決まったカードを先頭に、印を付けて並べる (純関数)。候補に無ければ extra を足す。
+
+    ★2026-10-06 ユーザー「違うものを残して、何かに有効活用できないの？」→「全部やろう」:
+      補で「違う」と答えた候補でも、新規で鑑定番号を打った出品なら ラベルの記録でカードが分かる。
+      新規の種の画面で、そのカードを最初から選んだ状態で出す (目視は残す)。
+    """
+    if not label_pid:
+        return list(vs or [])
+    hit = [dict(v, label=True) for v in (vs or []) if v.get("pid") == label_pid]
+    if not hit and extra:
+        hit = [dict(extra, label=True)]
+    return hit + [v for v in (vs or []) if v.get("pid") != label_pid]
+
+
 def variant_cards_html(vs):
     """カタログ候補 → 並べて選ばせる HTML (純関数)。
 
@@ -1128,7 +1171,8 @@ def variant_cards_html(vs):
     # ★必ず画像付きで並べる。1件でもカードとして出す (文字だけだと見比べられない)。
     cards = "".join(
         f"<div class='v' data-pid=\"{_html.escape(v['pid'])}\" "
-        f"data-cat=\"{_html.escape(v['category'])}\" onclick='pickV(this)'>"
+        f"data-cat=\"{_html.escape(v['category'])}\" "
+        + ("data-label='1' " if v.get("label") else "") + "onclick='pickV(this)'>"
         + (f"<img src='{_html.escape(prc._proxied(v['image']))}' loading='lazy' "
            f"onerror='imgFail(this)'>"
            if v["image"] else
@@ -1137,6 +1181,7 @@ def variant_cards_html(vs):
         + f"<div class='pid'>{_html.escape(v['pid'])}</div>"
         + f"<div class='nm'>{_html.escape((v.get('name') or '')[:16])}</div>"
         + ("<div class='en'>英語版のみ</div>" if v.get("en_only") else "")
+        + ("<div class='en' style='color:#06a'>🏷 ラベルで決まったカード</div>" if v.get("label") else "")
         + f"<button class='zb' data-img=\"{_html.escape(prc._proxied(v['image']))}\" "
           f"data-pid=\"{_html.escape(v['pid'])}\" "
           f"onclick='zoom(event,this,\"cat\")'>🔍</button>"
