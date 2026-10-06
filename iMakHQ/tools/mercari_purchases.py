@@ -80,7 +80,8 @@ def fetch_purchases():
         d.get(URL)
         for _ in range(20):
             time.sleep(2)
-            if "/transaction/" in d.page_source:
+            # ★2026-10-06: ログインに飛ばされたら待たずに閉じる (窓ありにしたので、40秒タスクバーに居座っていた)
+            if "/transaction/" in d.page_source or "login.jp.mercari.com" in d.current_url:
                 break
         if "/mypage/purchases" not in d.current_url:
             raise RuntimeError("メルカリのログインが切れています (%s)" % d.current_url)
