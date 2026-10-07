@@ -39,6 +39,8 @@ except Exception:  # noqa: BLE001
 
 TREASURE_TAB = "mercari_psa10_treasure"
 COL_JUDGMENT = 36  # AJ: 上限判定 (上限内/超過/空欄) - このタブ専用の末尾追加列
+# ★2026-10-07 HQ依頼 (promo_60_add_dropped) 🥕「拾った物は捨てない」: 候補外の理由
+COL_REASON = 39
 
 
 def _log(m: str) -> None:
@@ -62,6 +64,10 @@ def _get_or_create_treasure_ws(sh):
     if len(header) < COL_JUDGMENT or header[COL_JUDGMENT - 1] != "上限判定":
         ws.update(range_name=f"{_col_to_letter(COL_JUDGMENT)}1",
                   values=[["上限判定"]], value_input_option="USER_ENTERED")
+    header = ws.row_values(1)
+    if len(header) < COL_REASON or header[COL_REASON - 1] != "候補外の理由":
+        ws.update(range_name=f"{_col_to_letter(COL_REASON)}1",
+                  values=[["候補外の理由"]], value_input_option="USER_ENTERED")
     return ws
 
 
@@ -92,7 +98,10 @@ def append_treasure_items(items: list[dict], known_keys: set | None = None) -> d
             continue
         seen_in_batch.add(key)
         row = _build_row(it)
-        row.append(it.get("cost_judgment") or "")
+        row.append(it.get("cost_judgment") or "")  # 36: 上限判定
+        row.append("")  # 37: 巡回ERR (他処理が使う列、ここでは書かない)
+        row.append("")  # 38: トレジャー (同上)
+        row.append(it.get("drop_reason") or "")  # 39: 候補外の理由
         new_rows.append(row)
 
     if not new_rows:
@@ -101,7 +110,7 @@ def append_treasure_items(items: list[dict], known_keys: set | None = None) -> d
 
     last_row = len(ws.get_all_values())
     next_row = last_row + 1
-    end_col_letter = _col_to_letter(COL_JUDGMENT)
+    end_col_letter = _col_to_letter(COL_REASON)
     end_row = next_row + len(new_rows) - 1
     try:
         short = end_row - int(getattr(ws, "row_count", 0) or 0)
@@ -200,6 +209,22 @@ def _treasure_items(kept: list[dict], unreadable: list[dict],
     return items
 
 
+def _dropped_items(dropped: dict) -> list[dict]:
+    """🥕「拾った物は捨てない」(2026-10-07 HQ依頼): collect(collect_dropped=True) が
+    積んだ候補外の分を、理由付きでスプシに書けるitem形に組み立てる。 鑑定番号は無い
+    (読んでいないので cert 空欄・候補扱いにはしない)。"""
+    items = []
+    for info in dropped.values():
+        items.append({
+            "url": info.get("url"), "title": info.get("title"), "condition": info.get("condition"),
+            "price_jpy": info.get("price_jpy"), "image_urls": info.get("image_urls"),
+            "description": info.get("description"), "cert": "",
+            "fill_high_columns": False, "category": "TCG",
+            "drop_reason": info.get("reason") or "",
+        })
+    return items
+
+
 def _run(args) -> int:
     # 仕入上限は HQ が共有領域に置く写しを読むだけ。 読めなければ 7時間走って
     # 全件素通しになる (fail-OPEN) ので、 走る前に止める。
@@ -265,10 +290,18 @@ def _run(args) -> int:
         return len(new_cands), len(new_unreadable)
 
     urls_override = None
+    collect_dropped = False
     if args.retry_failed_from_json:
         src = json.loads(Path(args.retry_failed_from_json).read_text(encoding="utf-8"))
         urls_override = list(src.get("failed_urls") or [])
         _log(f"失敗分だけ拾い直す: {len(urls_override)} URL (元 {args.retry_failed_from_json}・新規検索なし)")
+    if args.add_dropped_from_json:
+        src = json.loads(Path(args.add_dropped_from_json).read_text(encoding="utf-8"))
+        urls_override = list(src.get("collected_urls") or [])
+        treasure_args.skip_vision = True
+        collect_dropped = True
+        _log(f"候補外の理由だけ残す: {len(urls_override)} URL (元 {args.add_dropped_from_json}・"
+             f"新規検索なし・鑑定番号読み取りなし)")
 
     # ★2026-10-07 HQ依頼 (promo_60_failed_retry): 詳細取得がChrome頼みだとオークション形式
     # ページのセレクタが合わず「取得失敗」になる (出品は生きている・status=on_sale)。
@@ -285,7 +318,8 @@ def _run(args) -> int:
 
     try:
         payload = psa10.collect(treasure_args, dump_path=dump_path, resume=resume,
-                                on_flush=_flush, urls_override=urls_override, detail_fn=_detail_fn)
+                                on_flush=_flush, urls_override=urls_override, detail_fn=_detail_fn,
+                                collect_dropped=collect_dropped)
     finally:
         api_client.close()
 
@@ -300,8 +334,14 @@ def _run(args) -> int:
 
     rest_k = [c for c in kept if c.get("url") not in written]
     rest_u = [c for c in unreadable if c.get("url") not in written]
+    dropped_res = None
+    if collect_dropped:
+        dropped = payload.get("dropped") or {}
+        dropped_res = append_treasure_items(_dropped_items(dropped), known_keys=known)
+        _log(f"🥕 候補外の理由を足した: {dropped_res}")
     if not rest_k and not rest_u:
-        _log("[SHEET] 走行中に全部書込済")
+        if dropped_res is None:
+            _log("[SHEET] 走行中に全部書込済")
         run_marker.mark_finished(MARKER_PATH)
         return 0
 
