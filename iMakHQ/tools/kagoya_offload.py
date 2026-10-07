@@ -578,6 +578,10 @@ def _scp_from(cfg, remote, local, timeout=600):
 
 def _code_files():
     files = [os.path.join("iMakHQ", "tools", f) for f in os.listdir(HERE) if f.endswith(".py")]
+    # ★2026-10-08: ガチャの説明文テンプレ (ガチャ 新規 / 🤖自動 は KAGOYA で動く)。
+    #   一覧に無く、英国 VAT の項を足しても KAGOYA に届かなかった (古い写しのまま出品される)
+    if os.path.isfile(os.path.join(REPO, "iMakHQ", "GACHA.txt")):
+        files.append(os.path.join("iMakHQ", "GACHA.txt"))
     # ★2026-10-02: 一番くじ等が使う eBay の部品 (ebay_getitem_images / credentials 等)
     ebay = os.path.join(REPO, "iMakeBayAPI")
     files += [os.path.join("iMakeBayAPI", f) for f in os.listdir(ebay) if f.endswith(".py")]

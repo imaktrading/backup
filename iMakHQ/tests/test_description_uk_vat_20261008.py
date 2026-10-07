@@ -21,3 +21,14 @@ def test_uk_vat_section_before_ddu(rel):
     ddu = s.find("For Buyers in All Other Countries")
     assert uk != -1 and ddu != -1 and uk < ddu
     assert "&pound;135" in s and "Royal Mail" not in s[uk:ddu]   # 運ぶ会社を問わない書き方
+
+
+def test_templates_used_on_kagoya_are_sent():
+    # KAGOYA で動く生成 (PSA 自動・ガチャ・Tシャツ/モンベル/ワークマン) の説明文は KAGOYA へ送る一覧に入っている
+    import sys
+    sys.path.insert(0, os.path.join(ROOT, "iMakHQ", "tools"))
+    import kagoya_offload as K
+    sent = {p.replace("\\", "/") for p in K._code_files()}
+    for rel in ("iMakHQ/GACHA.txt", "iMakTCG/PSA10_snkrdunk.txt", "iMakMercari/NEW.txt",
+                "iMakMercari/NEW_workman.txt", "iMakMercari/USED.txt"):
+        assert rel in sent, rel
