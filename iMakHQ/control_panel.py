@@ -2424,6 +2424,15 @@ def after_run(script, returncode, append_log, run_log_text=None, listing_start_t
             run_post_no_go_sentinel(_latest_csv, append_log)
     except Exception as _e:
         append_log(f"\n⚠️ post_no_go_sentinel hook 失敗: {_e}\n")
+    # Step 6.5 (2026-10-07): 目視で OK したのに出品の手前で落ちた cert を理由付きで台帳へ。
+    #   2回落ちたら残務に回す。目視の画面は台帳を読んで「前回はこの理由で落ちた」を出す
+    #   (ユーザー「理由わからず手当せずに何回も出てくるものを防ぎたい」)
+    if _latest_csv and _verify_before_build:
+        try:
+            import build_fail_watch as _bfw
+            _bfw.run(run_log_text(), append_log)
+        except Exception as _e:
+            append_log(f"\n⚠️ build_fail_watch 失敗: {type(_e).__name__}: {_e}\n")
     # 全 process 完了通知 (= ユーザー要望 2026-05-31)
     # ★2026-08-23: 出品が途中で止まっていても、ここは常に「🎉 完了」と出ていた。
     #   9件中2件しか出ていない走行が成功に見えた。出し残しがあるなら締めを変える。

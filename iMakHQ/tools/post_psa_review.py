@@ -1381,10 +1381,9 @@ def _generate_html(targets: list[dict]) -> None:
         html.append(f'<div class=cert-info><b>Brand:</b> {t["brand"]}</div>')
         html.append(f'<div class=cert-info><b>Subject:</b> {t["subject"]}</div>')
         # ★2026-10-07 何回目の目視か。OK したのにまた出ている = 出品の手前で落ちている
-        if t.get("seen_times"):
+        if t.get("seen_times") or t.get("last_fail"):
             html.append(f'<div class=prior-note style="background:#4a2020;border-color:#e57373;color:#ffb4b4">'
-                        f'🔁 {int(t["seen_times"]) + 1}回目の目視 — 前に {int(t["seen_times"])}回 OK したのに出品まで行っていません'
-                        f' (出品くん側の不具合。答えはそのままで構いません)</div>')
+                        + repeat_note(t.get("seen_times"), t.get("last_fail")) + '</div>')
         # 既決の再確認: 前回の答えを見せて既定選択にする (毎回まっさらで聞き直さない)
         _pc = t.get("prior_choice")
         if _pc:
@@ -2567,6 +2566,19 @@ def repeat_counts(targets, vc):
     return sorted(out, key=lambda x: -x[1])
 
 
+def repeat_note(seen_times, last_fail):
+    """何回目の目視か + 前回 出品の手前で落ちた理由 + 残務の番号 (HTML 用の文・純関数)。"""
+    n = int(seen_times or 0)
+    head = (f"🔁 {n + 1}回目の目視 — 前に {n}回 OK したのに出品まで行っていません"
+            if n else "🔁 前回この cert は出品の手前で落ちました")
+    lf = last_fail or {}
+    why = (f"<br>落ちた理由 ({int(lf.get('fails') or 1)}回目): {_esc_attr(lf.get('reason') or '')}"
+           if lf.get("reason") else "<br>落ちた理由: 記録なし (2026-10-07 より前)")
+    todo = (f"<br>残務 {_esc_attr(lf.get('backlog'))} で直します。答えはそのままで構いません"
+            if lf.get("backlog") else "<br>もう一度落ちたら残務に回ります。答えはそのままで構いません")
+    return head + why + todo
+
+
 def sort_targets_prior_last(targets):
     """初見を上・既決を下に並べ替える (安定ソート・純関数)。"""
     return sorted(targets or [], key=lambda t: 1 if t.get("prior_choice") else 0)
@@ -2684,9 +2696,16 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
     # 何回目の目視か (0件でも必ず1行出す = 動いているかをログで確かめられる)
     _rep = repeat_counts(targets, _vc)
     _rep_n = dict(_rep)
+    try:
+        import build_fail_watch as _bfw          # 前の走行で出品の手前で落ちた理由の台帳
+        _fails = _bfw.load_ledger()
+    except Exception:                            # noqa: BLE001
+        _fails = {}
     for t in targets:
         if t["cert"] in _rep_n:
             t["seen_times"] = _rep_n[t["cert"]]
+        if t["cert"] in _fails:
+            t["last_fail"] = _fails[t["cert"]]
     append_log_func("  🔁 OK 済みなのに また目視に出た: %d件 / 目視 %d件%s%s" % (
         len(_rep), len(targets),
         (" " + ", ".join("%s(%d回OK済)" % (c, n) for c, n in _rep[:8])) if _rep else "", chr(10)))

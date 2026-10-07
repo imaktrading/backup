@@ -53,3 +53,66 @@ def test_repeat_counts_lists_certs_answered_before():
     t = [{"cert": "84299672"}, {"cert": "122484177"}, {"cert": "111"}, {"cert": "999"}]
     assert P.repeat_counts(t, vc) == [("122484177", 5), ("84299672", 2)]
     assert P.repeat_counts([{"cert": "999"}], vc) == []
+
+
+# ---- 理由を覚えて、繰り返したら残務へ (ユーザー「理由わからず手当せずに何回も出てくるものを防ぎたい」)
+LOG = """\
+ → #010 KIRA YAMATO ✓
+    ⏭️ Skip (刷りがPSAラベルと合わない): #122484177 ST04-010 — PSA はパラレル (COMMON+) だが行は通常
+ → #004 NEW GENESIS ✓
+    ❌ セルフチェック失敗 (#84299672):
+       ❌ タイトルに'ST11'があるが PSA brand に存在しない
+    → この商品はCSVに含めません
+    ⚠️ Skipping #84299672: selfcheck failed in build_row
+ → #088 RIKA SPECIAL ART ✓
+    🚫 PSA8 を検出(PSAページ) → **出品しない**
+    ⚠️ Skipping #137111174: selfcheck failed in build_row
+    #161378204: $118.98
+失敗: 84299672, 137111174
+"""
+
+
+def test_parse_fail_reasons_from_run_log():
+    import build_fail_watch as B
+    r, ok = B.parse_fail_reasons(LOG)
+    assert ok == {"161378204"}
+    assert r["122484177"].startswith("刷りがPSAラベルと合わない — ST04-010")
+    assert "ST11" in r["84299672"]
+    assert r["137111174"].startswith("PSA8 を検出")
+
+
+def test_backlog_after_second_fail_of_answered_cert_only_once():
+    import build_fail_watch as B
+    vc = {"122484177": {"choice": "OK", "product_id": "ST04-010", "times": 5}}
+    r = {"122484177": "刷り", "999": "未回答で落ちた"}
+    led, todo = B.update_ledger({}, r, set(), vc, "t1")
+    assert todo == [] and led["122484177"]["fails"] == 1 and "answered" not in led["999"]
+    led, todo = B.update_ledger(led, r, set(), vc, "t2")
+    assert [c for c, _ in todo] == ["122484177"]          # 目視の答えがある物だけ
+    led["122484177"]["backlog"] = "№600"
+    led, todo = B.update_ledger(led, r, set(), vc, "t3")
+    assert todo == []                                     # 同じ cert は1回だけ
+    led, _ = B.update_ledger(led, {}, {"122484177"}, vc, "t4")
+    assert "122484177" not in led                         # 出品できたら外す
+
+
+def test_run_writes_ledger_and_always_logs(tmp_path):
+    import json
+    import build_fail_watch as B
+    lp, vp = str(tmp_path / "l.json"), tmp_path / "v.json"
+    vp.write_text(json.dumps({"84299672": {"choice": "OK", "product_id": "ST11-004_p1", "times": 2}}), encoding="utf-8")
+    logs, added = [], []
+    B.run("", logs.append, ledger_path=lp, verified_path=str(vp))
+    assert logs[-1].startswith("🩹 目視 OK 済みなのに出品の手前で落ちた: 0件")   # 0件でも出す
+    for _ in range(2):
+        B.run(LOG, logs.append, ledger_path=lp, verified_path=str(vp),
+              add_backlog=lambda c, rec: added.append(c) or "№1")
+    assert added == ["84299672"]
+    assert json.loads(open(lp, encoding="utf-8").read())["84299672"]["backlog"] == "№1"
+
+
+def test_repeat_note_shows_reason_and_backlog():
+    import post_psa_review as P
+    s = P.repeat_note(5, {"reason": "刷り <x>", "fails": 2, "backlog": "№600"})
+    assert "6回目" in s and "刷り &lt;x&gt;" in s and "№600" in s
+    assert "記録なし" in P.repeat_note(1, None)
