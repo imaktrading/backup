@@ -96,3 +96,16 @@ def test_snapshot_reader_returns_shipping_profile(tmp_path):
                  "111,t,USD,10.98,US,1,DDP-A-P09\n222,t,USD,5.98,US,1,\n", encoding="utf-8")
     m = load_snapshot(p)
     assert m["111"]["shipping_profile_name"] == "DDP-A-P09" and m["222"]["shipping_profile_name"] is None
+
+
+def test_restock_hold_row_is_skipped_and_reported():
+    from revise.price_revise import COL_FLG_Q, COL_ITEM_ID, COL_N_PRICE, detect_candidates
+    def row(item, q=""):
+        r = [""] * 40
+        r[COL_ITEM_ID] = item
+        r[COL_N_PRICE] = "5000"
+        r[COL_FLG_Q] = q
+        return r
+    held = []
+    cands = detect_candidates([row("A"), row("B", "補充保留"), row("C", "x 補充保留 y")], hold_out=held)
+    assert [c.item_id for c in cands] == ["A"] and held == ["B", "C"]

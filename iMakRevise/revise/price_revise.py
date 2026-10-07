@@ -113,6 +113,8 @@ COL_N_PRICE = 13     # N (仕入れ価格 ¥)
 COL_CHECK_TIME = 14  # O (売り切れチェック時間)
 COL_CATEGORY = 17    # R (カテゴリ)
 COL_AH_PRICE = 33    # AH (前期 N ¥)
+COL_FLG_Q = 16       # Q (FLG。「補充保留」= HQ が人の判断で止めた行。リバイスも触らない 2026-10-07)
+RESTOCK_HOLD_MARK = "補充保留"
 COL_PRICEDOWN_FLG = 37  # AL (値下FLG(pp) = NO_CONVERT 値下げ幅%、HQ noconvert がフル同期書込)
 # AL 列は 2026-07-01 から数値pp (既定"5"、人手で"8"等に上書き可、空=非対象)。
 # 旧: 文字列 "値下5pp" 固定 → 廃止。
@@ -584,8 +586,11 @@ def should_revise(
 def detect_candidates(rows, threshold_pct: float = DEFAULT_THRESHOLD_PCT,
                        mode: str = "normal", source_sheet: str = "HIGH",
                        abnormal_delta_threshold: Optional[float] = None,
-                       schema: str = "high_low") -> list:
+                       schema: str = "high_low", hold_out: Optional[list] = None) -> list:
     """各行を ReviseCandidate に変換 (= スプシ filter pass のみ).
+
+    hold_out: Q列に「補充保留」がある行の ItemID をここに足して飛ばす (high_low のみ)。
+      リピーターの注文中などで、値段を動かすと高い方の注文がキャンセルになる行 (2026-10-07 HQ 依頼)。
 
     新 logic (2026-05-22): 起動判定はここでは行わない。eligible 行を返すだけ。
     後段の run_price_revise で V8 計算 + snapshot/cache 取得 + should_revise で最終判定。
@@ -628,6 +633,11 @@ def detect_candidates(rows, threshold_pct: float = DEFAULT_THRESHOLD_PCT,
             sku = var_size = var_color = ""
         # NO_CONVERT 値下FLG (AL列、high_low のみ。official synthetic row は 37 幅で index37 不在 → 空)
         pricedown_flag = (row[COL_PRICEDOWN_FLG] or "").strip() if len(row) > COL_PRICEDOWN_FLG else ""
+
+        if schema == "high_low" and len(row) > COL_FLG_Q and RESTOCK_HOLD_MARK in (row[COL_FLG_Q] or ""):
+            if hold_out is not None:
+                hold_out.append(item_id)
+            continue
 
         # スプシ filter (= スプシ条件 NG はここで弾く、URL filter 廃止)
         if _normalize.is_sold(sold_flag):
@@ -1258,6 +1268,7 @@ def run_price_revise(
         fetch_and_save_snapshot()
 
     # === Step 1: 全 sheet 読込 + filter pass (= eligible 抽出) ===
+    held_ids: list = []
     for sheet_key in sheet_keys:
         cfg = SHEETS[sheet_key]
         print(f"[revise] === sheet={sheet_key} ({cfg['label']}) ===")
@@ -1267,7 +1278,7 @@ def run_price_revise(
 
         sheet_candidates = detect_candidates(
             rows, threshold_pct=threshold_pct, mode=mode, source_sheet=sheet_key,
-            schema=schema,
+            schema=schema, hold_out=held_ids,
         )
         before = len(sheet_candidates)
         sheet_candidates = [c for c in sheet_candidates if c.item_id not in seen_item_ids]
@@ -1280,6 +1291,9 @@ def run_price_revise(
         print(f"[revise]   {sheet_key} eligible: {len(sheet_candidates)} 件 (filter pass)")
         all_candidates.extend(sheet_candidates)
 
+    # 補充保留の ItemID は他のシートに同じ ItemID があっても触らない
+    all_candidates = [c for c in all_candidates if c.item_id not in set(held_ids)]
+    print(f"[revise] 補充保留で飛ばした: {len(held_ids)} 件 {held_ids[:5]}")  # 0件でも出す
     result.candidates = all_candidates
     print(f"[revise] === 全 sheet 統合 eligible: {len(all_candidates)} 件 ===")
 
