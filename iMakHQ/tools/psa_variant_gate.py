@@ -48,7 +48,21 @@ _ALT_PID_RE = re.compile(r"_(p\d*|SP)(_|$)")  # 小文字 p=パラレル / 大�
 # (例 ST01-007_P_win = STANDARD BATTLE WINNER)。セット記号で見ると正しい行を外してしまう
 _PROMO_WORDS = ("WINNER", "PROMO", "FLAGSHIP", "CHAMPIONSHIP", "TOURNAMENT", "BATTLE", "EVENT",
                 "PRIZE", "JUMP", "CAMPAIGN", "GIFT", "PRE-RELEASE", "PRERELEASE", "FINALIST")
-_MIRROR_WORDS = ("MASTER BALL", "POKE BALL", "POKEBALL", "POKÉ BALL")
+_MIRROR_WORDS = ("MASTER BALL", "POKE BALL", "POKEBALL", "POKÉ BALL", "ROCKET REVERSE HOLO")
+
+
+def mirror_text(text):
+    """ラベル / 行の版の表記 → 揃えた形 ("MASTER BALL REVERSE HOLO" 等)。版の印が無ければ ""。純関数。
+
+    ★2026-10-07 カタログが版ごとの行 (<通常版>_mb / _pb / _rk・specs.variant_psa_text) を持つようになった
+      (catalog 回答 2026-10-07_pokemon_mirror_variants_need_own_rows_response.md)。ラベルと行の版を
+      この形で突き合わせる。版名なしの REVERSE HOLO はここでは見ない (まだ行が無い・従来どおり通常の行で出す)。
+    """
+    u = " ".join(str(text or "").upper().replace("POKÉ", "POKE").replace("POKEBALL", "POKE BALL").split())
+    for w in ("MASTER BALL", "POKE BALL", "ROCKET"):
+        if w + " REVERSE HOLO" in u:
+            return w + " REVERSE HOLO"
+    return ""
 _ALT_TYPES = ("alt_art", "parallel", "sp", "super_parallel", "manga")
 
 
@@ -162,8 +176,9 @@ def conflict(category, brand, subject, row):
             if not plus and is_para:
                 return "PSA は通常 (%s) だが行はパラレル" % m.group(1)
     elif category == "pokemon_tcg":
-        if has_mirror_mark(subject):
-            return "PSA はミラー (%s) だがカタログにミラーの行は無い" % subject
+        lab, row_v = mirror_text(subject), mirror_text(_specs(row).get("variant_psa_text"))
+        if lab != row_v:
+            return "PSA は %s だが行は %s" % (lab or "通常", row_v or "通常")
     return ""
 
 
@@ -217,7 +232,7 @@ def pick(category, brand, subject, current_pid, db=CATALOG_DB, con=None):
             if body and body != pid and not conflict(category, brand, subject, _row(con, category, body)):
                 return body, "%s はカタログで %s にまとめられている" % (pid, body)
             return pid, ""
-        if category not in ("one_piece_tcg", "gundam_tcg"):
+        if category not in ("one_piece_tcg", "gundam_tcg", "pokemon_tcg"):
             return "", why
         base = re.sub(r"_.*$", "", pid)
         good = [r for r in _siblings(con, category, base) if not conflict(category, brand, subject, r)]

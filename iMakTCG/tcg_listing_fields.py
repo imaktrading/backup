@@ -337,6 +337,9 @@ def _attach_promo(fields: dict, specs: dict, card_id: str):
         fields["_promo_needs_review"] = needs_review(specs, card_id)
     except Exception:
         fields["_is_promo"], fields["_promo"], fields["_promo_needs_review"] = False, "", False
+    # ★2026-10-07 ポケカのミラーの版の行 (<通常版>_mb / _pb / _rk) はカタログが PSA の表記を持つ
+    #   (specs.variant_psa_text)。タイトルに必ず入れる (版が違うと別の物 = 落とせない語)
+    fields["_mirror"] = " ".join(w.capitalize() for w in str(specs.get("variant_psa_text") or "").split())
 
 
 def map_specs_to_fields(specs: dict, year: str = ""):
@@ -457,6 +460,7 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
     num = fields.get("C:Card Number", "")
     lang_ja = fields.get("C:Language") == "Japanese"
     chara = fields.get("C:Character", "")
+    mirror = (fields.get("_mirror") or "").strip()
 
     def _norm_words(text):
         """比べる用の語 (小文字・記号落とし)。'Monkey D. Luffy' と 'Monkey D Luffy' を同じにする。"""
@@ -487,6 +491,8 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
         #   一部だけ被る物 (Set"Mega Brave" + Chara"Mega Venusaur") は今までどおり出す。
         if chara and not _all_words_in(chara, set_disp):
             core.append(chara)
+        if mirror:
+            core.append(mirror)
         return core
 
     core = _core_tokens(set_full)
