@@ -169,6 +169,10 @@ def main(argv=None) -> int:
     # 別の一覧(抜粋ファイル)から検索語・上限仕入れ値を作る時に使う
     ap.add_argument("--csv-path", default=None,
                     help="demand_market.csv の代わりに読む一覧 (列は同じ形式)")
+    # ★2026-10-07 HQ依頼 (2026-10-07_treasure_promo_60_failed_retry): 前回の
+    # debug/mercari_treasure_*.json の failed_urls だけ、検索せずに詳細取得をやり直す
+    ap.add_argument("--retry-failed-from-json", default=None,
+                    help="前回dumpの failed_urls だけ拾い直す (新規検索なし)")
     args = ap.parse_args(argv)
 
     from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
@@ -255,8 +259,14 @@ def _run(args) -> int:
         _log(f"  [SHEET] 途中書込: {res}")
         return len(new_cands), len(new_unreadable)
 
+    urls_override = None
+    if args.retry_failed_from_json:
+        src = json.loads(Path(args.retry_failed_from_json).read_text(encoding="utf-8"))
+        urls_override = list(src.get("failed_urls") or [])
+        _log(f"失敗分だけ拾い直す: {len(urls_override)} URL (元 {args.retry_failed_from_json}・新規検索なし)")
+
     payload = psa10.collect(treasure_args, dump_path=dump_path, resume=resume,
-                            on_flush=_flush)
+                            on_flush=_flush, urls_override=urls_override)
 
     kept = payload["candidates"]
     unreadable = payload.get("unreadable") or []
