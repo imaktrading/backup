@@ -165,6 +165,10 @@ def main(argv=None) -> int:
                     help="demand_market.csv の全語ではなく、この語だけで回す (パイプ区切り)")
     # 鑑定番号の読み取り(従量課金API)に上限を付ける。 0=無制限 (既定)
     ap.add_argument("--max-vision", type=int, default=0)
+    # ★2026-10-07 HQ依頼 (2026-10-07_treasure_promo_60): demand_market.csv でなく
+    # 別の一覧(抜粋ファイル)から検索語・上限仕入れ値を作る時に使う
+    ap.add_argument("--csv-path", default=None,
+                    help="demand_market.csv の代わりに読む一覧 (列は同じ形式)")
     args = ap.parse_args(argv)
 
     from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
@@ -197,9 +201,10 @@ def _run(args) -> int:
         _log(f"❌ 停止: 仕入上限の表を読めない ({_p.COST_SANITY_PATH}): {type(e).__name__}: {e}")
         return 2
     _log(f"仕入上限: ¥{cost_cfg['max_jpy']:,.0f} (共有領域の写しから)")
-    rows = treasure_keywords.load_rows()
+    csv_path = Path(args.csv_path) if args.csv_path else None
+    rows = treasure_keywords.load_rows(csv_path)
     if not rows:
-        _log(f"一覧が空 ({treasure_keywords.CSV_PATH}) → 何もしない")
+        _log(f"一覧が空 ({csv_path or treasure_keywords.CSV_PATH}) → 何もしない")
         return 0
 
     keywords = treasure_keywords.build_keywords(rows)
