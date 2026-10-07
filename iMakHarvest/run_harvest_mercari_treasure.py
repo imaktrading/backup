@@ -173,6 +173,11 @@ def main(argv=None) -> int:
     # debug/mercari_treasure_*.json の failed_urls だけ、検索せずに詳細取得をやり直す
     ap.add_argument("--retry-failed-from-json", default=None,
                     help="前回dumpの failed_urls だけ拾い直す (新規検索なし)")
+    # ★2026-10-07 HQ依頼 (2026-10-07_treasure_promo_60_add_dropped) 🥕「拾った物は捨てない」:
+    # 前回dumpの collected_urls 全部を対象に、候補にしなかった理由を残して書く (vision なし)
+    ap.add_argument("--add-dropped-from-json", default=None,
+                    help="前回dumpの collected_urls を対象に、候補外の理由をシートに足す"
+                         " (新規検索なし・鑑定番号読み取りなし)")
     args = ap.parse_args(argv)
 
     from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
@@ -265,8 +270,24 @@ def _run(args) -> int:
         urls_override = list(src.get("failed_urls") or [])
         _log(f"失敗分だけ拾い直す: {len(urls_override)} URL (元 {args.retry_failed_from_json}・新規検索なし)")
 
-    payload = psa10.collect(treasure_args, dump_path=dump_path, resume=resume,
-                            on_flush=_flush, urls_override=urls_override)
+    # ★2026-10-07 HQ依頼 (promo_60_failed_retry): 詳細取得がChrome頼みだとオークション形式
+    # ページのセレクタが合わず「取得失敗」になる (出品は生きている・status=on_sale)。
+    # kagoya_treasure_offload.py と同じAPI版detail_fnに切替、形式を問わず読めるようにする。
+    from scrapers.mercari_search_api import ApiSearchClient, fetch_detail_api  # noqa: PLC0415
+    api_client = ApiSearchClient()
+
+    def _detail_fn(u):
+        try:
+            return fetch_detail_api(api_client, u)
+        except Exception as e:  # noqa: BLE001 - API側の不調はChromeにフォールバック
+            _log(f"  ⚠️ 詳細(API版)失敗 ({type(e).__name__}) → この1件はChromeで読む")
+            return None
+
+    try:
+        payload = psa10.collect(treasure_args, dump_path=dump_path, resume=resume,
+                                on_flush=_flush, urls_override=urls_override, detail_fn=_detail_fn)
+    finally:
+        api_client.close()
 
     kept = payload["candidates"]
     unreadable = payload.get("unreadable") or []

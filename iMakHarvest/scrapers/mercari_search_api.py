@@ -216,6 +216,7 @@ def map_item_to_detail(d) -> dict:
         "description": getattr(d, "description", "") or "",
         "image_urls": list(getattr(d, "photos", None) or []),
         "in_stock": in_stock,
+        "is_auction": has_auction,
         "status": status,
         "shipping_included": ship_included,
         "seller_quality": {

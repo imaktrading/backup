@@ -101,7 +101,8 @@ def retry_urls_from(payload: dict, exclude: set | None = None) -> list[str]:
 
 
 def collect(args, dump_path=None, resume=None, urls_override=None,
-            on_flush=None, should_pause=None, detail_fn=None, claimed=None) -> dict:
+            on_flush=None, should_pause=None, detail_fn=None, claimed=None,
+            collect_dropped=False) -> dict:
     """収集 → 詳細 → Vision。
 
     ★途中で落ちても作業を捨てない (2026-08-17 の事故対策)。
@@ -161,7 +162,7 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
     cands, rej = [], {"sold": 0, "seller_rating": 0, "no_identity": 0,
                       "fetch_fail": 0, "no_image": 0, "cert_unreadable": 0,
                       "vision_error": 0, "already_claimed_url": 0,
-                      "already_claimed_cert": 0, "item_error": 0}
+                      "already_claimed_cert": 0, "item_error": 0, "auction": 0}
     vision_errors: list[str] = []
     # 未判定 (取得できなかった) URL。 件数だけ出して URL を捨てると拾い直せない
     failed_urls: list[str] = []
@@ -170,6 +171,8 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
     by_keyword: dict = {}
     # ★2026-10-06 HQ/ADV依頼: read_slab の実測トークン数を走行単位で積む (費用を先に計測)
     vision_usage = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
+    # ★2026-10-07 HQ依頼 🥕「拾った物は捨てない」: 候補にしなかった理由を残す (opt-in)
+    dropped: dict | None = {} if collect_dropped else None
 
     # 再開: 前回の JSON にある URL は処理済として飛ばす (収集自体は速いのでやり直す)
     done_urls: set[str] = set()
@@ -183,6 +186,8 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
         by_keyword = dict(resume.get("by_keyword") or {})
         for k, v in (resume.get("vision_usage") or {}).items():
             vision_usage[k] = vision_usage.get(k, 0) + v
+        if dropped is not None:
+            dropped.update(resume.get("dropped") or {})
         _log(f"再開: 処理済 {len(done_urls)} URL / 既存候補 {len(cands)} 件 / "
              f"収集済の検索語 {len(by_keyword)} 語")
     processed: list[str] = list(done_urls)
@@ -194,13 +199,15 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
         """途中経過を JSON に落とす。 これが 1 回だけだったのが 2026-08-17 の事故。"""
         if not dump_path:
             return
-        _dump({"candidates": cands, "unreadable": unreadable, "collect_reject": rej,
+        payload = {"candidates": cands, "unreadable": unreadable, "collect_reject": rej,
                "failed_urls": failed_urls,
                "vision_errors": sorted(set(vision_errors)),
                "processed_urls": processed, "truncated": state["truncated"],
                "by_keyword": by_keyword, "collected_urls": state["urls"],
-               "vision_usage": vision_usage},
-              dump_path, quiet=True)
+               "vision_usage": vision_usage}
+        if dropped is not None:
+            payload["dropped"] = dropped
+        _dump(payload, dump_path, quiet=True)
 
     # 本番で既に押さえてある仕入元は拾い直さない (URL は詳細フェッチの前に落とすので
     # 1 件あたり 約10秒 と Vision 1 回分が丸ごと浮く)
@@ -248,15 +255,18 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                 continue
             if dedupe_key(url) in claimed["urls"]:
                 rej["already_claimed_url"] += 1
+                _record_dropped(dropped, url, "already_claimed_url")
                 processed.append(url)
                 continue
             try:
                 kept = _process_one(url, _get_driver, args, claimed, rej, vision_errors,
-                                    failed=failed_urls, detail_fn=detail_fn, usage=vision_usage)
+                                    failed=failed_urls, detail_fn=detail_fn, usage=vision_usage,
+                                    dropped=dropped)
                 consecutive_errors = 0
             except Exception as e:  # noqa: BLE001 - 1 件の失敗で走行全体を殺さない
                 rej["item_error"] += 1
                 failed_urls.append(url)
+                _record_dropped(dropped, url, "item_error")
                 consecutive_errors += 1
                 _log(f"  ⚠️ {i}/{len(urls)} 取得エラー ({consecutive_errors}連続): "
                      f"{type(e).__name__}")
@@ -316,11 +326,15 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
     if state["truncated"]:
         _log("⚠️ 要対応: 途中で打ち切りました。 --resume-from-json で続きから再開できます")
     _log_vision_cost(vision_usage, truncated=state["truncated"])
-    return {"candidates": cands, "unreadable": unreadable, "collect_reject": rej,
+    result = {"candidates": cands, "unreadable": unreadable, "collect_reject": rej,
             "failed_urls": failed_urls,
             "vision_errors": sorted(set(vision_errors)),
             "processed_urls": processed, "truncated": state["truncated"],
             "by_keyword": by_keyword, "vision_usage": vision_usage}
+    if dropped is not None:
+        result["dropped"] = dropped
+        _log(f"🥕 候補外も残した: {len(dropped)}件 (理由付き・捨てていない)")
+    return result
 
 
 VISION_COST_LOG = Path("C:/dev/iMak_data/harvest/vision_cost_log.csv")
@@ -376,8 +390,24 @@ def cost_rejected(price_jpy, cfg: dict) -> bool:
     return False
 
 
+def _record_dropped(dropped, url, reason, detail=None):
+    """🥕 拾った物は捨てない (2026-10-07 ユーザー確定): 候補にしない判定も、
+    何を拾ったか (title/price/image) と理由を dropped に残す。 detail が無い
+    (fetch_fail 等) 時は url と理由だけになる。"""
+    if dropped is None:
+        return
+    row = {"url": url, "reason": reason}
+    if detail:
+        row["title"] = detail.get("title")
+        row["price_jpy"] = detail.get("price_jpy")
+        row["condition"] = detail.get("condition")
+        row["image_urls"] = detail.get("image_urls")
+        row["description"] = detail.get("description")
+    dropped[url] = row
+
+
 def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=None, detail_fn=None,
-                  usage=None):
+                  usage=None, dropped=None):
     """1 件を判定して 候補 dict を返す (対象外なら None)。 例外は呼出側で捕まえる.
 
     driver_getter: 呼ぶと Chrome driver を返す callable (未起動なら起動する。 lazy)。
@@ -386,6 +416,8 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
     (2026-10-02 段階②: 詳細取得もAPIにする時、 Chromeを使わずに済んだ分は driver を
     起動しない = メモリを使わない)。
     failed: 取得できなかった URL を貯めるリスト (= 未判定。 件数だけでなく URL を残す)。
+    dropped: {url: {...}} を渡すと、 候補にしなかった理由を捨てずに積む
+    (2026-10-07 HQ依頼 🥕「拾った物は捨てない」)。
     """
     detail = None
     q = None
@@ -402,22 +434,33 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
         rej["fetch_fail"] += 1
         if failed is not None:
             failed.append(url)
+        _record_dropped(dropped, url, "fetch_fail")
+        return None
+    # ★2026-10-07 HQ依頼: オークション形式は「取得失敗」と混ざらない専用枠で数える
+    # (買えない点は売り切れと同じだが、原因が別なので件数を混同しない。 使い道が
+    # 無いので候補にはしない・捨ててよい = dropped には積まず件数だけ残す)
+    if detail.get("is_auction"):
+        rej["auction"] = rej.get("auction", 0) + 1
         return None
     if not detail.get("in_stock"):
         rej["sold"] += 1
+        _record_dropped(dropped, url, "sold", detail)
         return None
 
     # ★トレジャーハントの門 (2026-09-20 HQ 依頼)。 Vision に投げる前に落として費用も省く
     if getattr(args, "strict_gates", False):
         if psa_grade_gate.is_foreign_edition(detail.get("title") or ""):
             rej["foreign_edition"] = rej.get("foreign_edition", 0) + 1
+            _record_dropped(dropped, url, "foreign_edition", detail)
             return None
         if cost_rejected(detail.get("price_jpy"), args.cost_cfg):
             rej["cost_over_limit"] = rej.get("cost_over_limit", 0) + 1
+            _record_dropped(dropped, url, "cost_over_limit", detail)
             return None
         if not treasure_keywords.card_cost_ok(
                 detail.get("title") or "", detail.get("price_jpy"), args.card_limits):
             rej["card_cost_over"] = rej.get("card_cost_over", 0) + 1
+            _record_dropped(dropped, url, "card_cost_over", detail)
             return None
 
     if q is None:
@@ -429,16 +472,26 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
         key = ("seller_rating" if (q.get("rating_count") or 0) < args.min_rating
                else "no_identity")
         rej[key] += 1
+        _record_dropped(dropped, url, key, detail)
         return None
 
     # ★複数枚のまとめ売りは採らない (2026-09-05 user 確定)。 Vision に投げる前に落とす
     if psa_grade_gate.is_bundle(detail.get("title") or ""):
         rej["bundle"] = rej.get("bundle", 0) + 1
+        _record_dropped(dropped, url, "bundle", detail)
         return None
 
     images = [u for u in (detail.get("image_urls") or []) if u.startswith("http")]
     if not images:
         rej["no_image"] += 1
+        _record_dropped(dropped, url, "no_image", detail)
+        return None
+
+    # ★2026-10-07 HQ依頼: 鑑定番号を読まずに理由だけ残す診断モード
+    # (拾い直しで候補外の理由を確かめる時に使う。 課金APIを呼ばない)
+    if getattr(args, "skip_vision", False):
+        rej["vision_skipped"] = rej.get("vision_skipped", 0) + 1
+        _record_dropped(dropped, url, "vision_skipped_未読取(要目視)", detail)
         return None
 
     # ★2026-10-07 HQ依頼: 鑑定番号の読み取り(従量課金API)に上限を付ける。
@@ -448,6 +501,7 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
         rej["vision_cap_reached"] = rej.get("vision_cap_reached", 0) + 1
         if failed is not None:
             failed.append(url)
+        _record_dropped(dropped, url, "vision_cap_reached", detail)
         return None
 
     vision = psa_slab_vision.read_slab(images)
@@ -460,6 +514,7 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
         # 黙って「不鮮明」に混ぜず 障害として最後に報告する
         rej["vision_error"] += 1
         vision_errors.append(vision["error"])
+        _record_dropped(dropped, url, "vision_error", detail)
         return None
     # 通信なしで落とせる分はここで落とす (公式照会は 1 cert 1 回に抑えたいため)
     gate = psa_cert.local_gate(vision, detail.get("title") or "")
@@ -474,9 +529,11 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
             if not psa_grade_gate.looks_like_psa10(title=detail.get("title") or "",
                                                    label=vision.get("label") or ""):
                 rej["not_psa10_listing"] = rej.get("not_psa10_listing", 0) + 1
+                _record_dropped(dropped, url, "not_psa10_listing", detail)
                 return None
             return _build_candidate(url, detail, q, images, vision,
                                     cert_readable=False)
+        _record_dropped(dropped, url, key, detail)
         return None
     # 同じ現物が別 URL で再出品されている場合は URL 突合では捕まらない。
     # cert は現物 1 枚に 1 つなので、 既知なら二重に押さえない
@@ -484,9 +541,11 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
                                            label=vision.get("label") or "",
                                            grade=vision.get("grade") or ""):
         rej["not_psa10_listing"] = rej.get("not_psa10_listing", 0) + 1
+        _record_dropped(dropped, url, "not_psa10_listing", detail)
         return None
     if vision["cert"] in claimed["certs"]:
         rej["already_claimed_cert"] += 1
+        _record_dropped(dropped, url, "already_claimed_cert", detail)
         return None
 
     return _build_candidate(url, detail, q, images, vision)
