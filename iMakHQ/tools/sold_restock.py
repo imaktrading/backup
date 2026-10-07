@@ -309,6 +309,26 @@ def pending_rows(want, sheets):
     return out
 
 
+def unshipped_item_ids(days=30):
+    """未発送 (追跡番号がまだ) の注文がある **台帳の出品の itemID** の集合 (I/O)。
+
+    ★2026-10-07 ユーザー「追跡番号を入れるまで再出品しない、をフローに」: PSA 再仕入れなど
+      ほかの出し直しの道からも使う。ミラー (豪州等) で売れても台帳の親の itemID に寄せる。
+    """
+    want = [(o, "") for o in orders_from_api(days)]
+    sheets = W._sheets()
+    out = set()
+    for o, _c in want:
+        if not order_pending(o):
+            continue
+        _l, _n, row = W.find_row(sheets, (o.get("Custom Label") or "").strip(), (o.get("Item Number") or "").strip())
+        if row is not None and len(row) > S.PRODUCT_COL_ITEMID and (row[S.PRODUCT_COL_ITEMID] or "").strip():
+            out.add(row[S.PRODUCT_COL_ITEMID].strip())
+        if (o.get("Item Number") or "").strip():
+            out.add(o["Item Number"].strip())
+    return out
+
+
 def restock_target(state, row, sold_item_id, item_col=S.PRODUCT_COL_ITEMID):
     """数量を戻す相手の itemID (純関数, test 可)。
 
@@ -558,7 +578,7 @@ def count_workload():
             if target in seen:          # 同じ出品が2回売れた (注文は2行) → 1回だけ
                 continue
             seen.add(target)
-            if (label, n) in pending and not has_spare_supply(row, _nb):   # 未発送で ほかに買える仕入元が無い
+            if (label, n) in pending:   # ★2026-10-07 未発送 (追跡番号がまだ) の注文がある間は戻さない
                 out["blocked"] = out.get("blocked", 0) + 1
                 continue
             _key = (row[S.PRODUCT_COL_KEY] or "").strip() if len(row) > S.PRODUCT_COL_KEY else ""
@@ -674,6 +694,7 @@ def main():
     _retired = load_retired()
     _retired_hit = 0
     hold_hit = 0
+    pending_hit = 0
     seen = set()
     pending = pending_rows(want, sheets)
     _nb = _load_not_buyable() if pending else {}
@@ -709,8 +730,12 @@ def main():
         if target in seen:
             continue
         seen.add(target)
-        if (label, n) in pending and not has_spare_supply(row, _nb):
-            print(f"  ⏭ [{cat}] 未発送の注文があり、ほかに買える仕入元が無い (仕入れが済んでから戻す): {title}")
+        # ★2026-10-07 ユーザー「追跡番号を入れるまで再出品しない、をフローに」: 未発送の注文がある間は
+        #   ほかに買える仕入元があっても戻さない (9/15 の例外をやめた)。安く出し直すと、同じバイヤーが
+        #   安い方を買い直して高い方の注文のキャンセルを求めてくる (2026-10-07 リピーターのミュウ)
+        if (label, n) in pending:
+            print(f"  ⏸ [{cat}] 未発送の注文がある (追跡番号が入るまで戻さない): {title}")
+            pending_hit += 1
             skipped += 1
             continue
         _key = (row[S.PRODUCT_COL_KEY] or "").strip() if len(row) > S.PRODUCT_COL_KEY else ""
@@ -826,7 +851,7 @@ def main():
     if _retired_hit:
         print(f"  (補充の対象から外した出品 {_retired_hit}件は出していません: "
               f"{os.path.basename(RETIRED_PATH)})")
-    print(f"\n補充済で何もしない {done} / 対象 {acted} / 見送り {skipped} (うち補充保留 {hold_hit})"
+    print(f"\n補充済で何もしない {done} / 対象 {acted} / 見送り {skipped} (うち補充保留 {hold_hit} / 未発送の注文待ち {pending_hit})"
           + (f" / ⚠️要対応 {failed}" if failed else ""))
     if acted and not write:
         print("→ 実行するには --write")

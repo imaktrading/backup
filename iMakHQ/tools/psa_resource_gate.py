@@ -1218,8 +1218,16 @@ def main():
         _hold = {(r[1] or "").strip() for r in _pv0[1:] if len(r) > 1 and _sio0.is_restock_hold(r)}
     except Exception:                                              # noqa: BLE001
         _hold = set()
+    # ★2026-10-07 ユーザー「追跡番号を入れるまで再出品しない」: 未発送の注文がある出品も出さない
+    try:
+        import sold_restock as _SR
+        _unshipped = _SR.unshipped_item_ids()
+    except Exception as _e_us:                                     # noqa: BLE001 読めなければ全部止める側には倒さない
+        _unshipped = set()
+        print(f"  ⚠ 未発送の注文を読めない ({type(_e_us).__name__}) → この判定なしで進める")
+    _hold = _hold | _unshipped
     _hold_hit = 0
-    print(f"  ⏸ 補充保留 (Q列の印) の出品: {len(_hold)}件 → 再仕入れに出さない")
+    print(f"  ⏸ 再仕入れに出さない出品: 補充保留 (Q列の印) {len(_hold) - len(_unshipped)}件 / 未発送の注文 {len(_unshipped)}件")
     _judged_at = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")  # 可否判定(supply確認)の時刻
     MAX_AUX = 5  # 補URL列数 (AC-AG 相当)
     aux_cols = [f"補URL{k+1}" for k in range(MAX_AUX)]

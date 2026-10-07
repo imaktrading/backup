@@ -46,6 +46,8 @@ def test_unreadable_ledger_waits():
     assert not R.has_spare_supply(_row(MAIN, [AUX1]), None)
 
 
-def test_both_hold_points_use_the_rule():
+def test_both_hold_points_wait_until_shipped():
+    """★2026-10-07 ユーザー「追跡番号を入れるまで再出品しない」: 9/15 の例外 (ほかの仕入元があれば戻す) をやめた。"""
     src = open(R.__file__, encoding="utf-8").read()
-    assert src.count("in pending and not has_spare_supply(row, _nb)") == 2
+    assert "in pending and not has_spare_supply(row, _nb)" not in src
+    assert src.count("if (label, n) in pending:") == 2
