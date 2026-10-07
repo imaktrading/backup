@@ -791,6 +791,7 @@ def values_for_entry(e, size_text, title="", text="", work_en="", check_images=T
     v["l1"] = str(p["specs"].get("l1_id") or "")
     v["img_drop"] = list(e.get("img_drop") or [])
     v["img_main"] = (e.get("img_main") or "").strip()
+    v["img_extra"] = list(e.get("img_extra") or [])
     return v
 
 
@@ -818,7 +819,7 @@ def chart_applies(v):
 
 
 def listing_images(catalog_images, color_code="", l1="", other_codes=(), seller_urls=(),
-                   drop=(), max_n=MAX_PICTURES, first="", second=()):
+                   drop=(), max_n=MAX_PICTURES, first="", second=(), extra=()):
     """出品に使う画像 URL の並び (純関数)。
 
     ★2026-09-13 ユーザー「画像の順番を指定するところだけど、1枚目だけ指定させて」:
@@ -841,7 +842,8 @@ def listing_images(catalog_images, color_code="", l1="", other_codes=(), seller_
                 continue                    # 他の色の表
         sub.append(u)
     out, seen = [], set()
-    for u in main + sub + [(x or "").strip() for x in (seller_urls or ())]:
+    # ★2026-10-07 目視で人が選んだ追加の写真 (同じ物の候補 / 自分で探したURL) はカタログの後・仕入元の前
+    for u in main + sub + [(x or "").strip() for x in (extra or ())] + [(x or "").strip() for x in (seller_urls or ())]:
         if u and u not in seen and u not in dropped:
             seen.add(u)
             out.append(u)
@@ -865,7 +867,8 @@ def images_for_listing(v, seller_urls=(), chart_url=""):
     pin = [chart_url] if chart_url and chart_applies(v) else []
     return listing_images(v.get("catalog_images") or [], codes.get(v.get("color_name")) or "",
                           v.get("l1") or "", list(codes.values()), seller_urls,
-                          v.get("img_drop") or [], first=v.get("img_main") or "", second=pin)
+                          v.get("img_drop") or [], first=v.get("img_main") or "", second=pin,
+                          extra=v.get("img_extra") or [])
 
 
 _RE_MERCARI_ITEM = re.compile(r"jp\.mercari\.com/item/(m\d+)")

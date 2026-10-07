@@ -672,6 +672,9 @@ def parse_result(data):
             char = " ".join(str(p.get("char") or "").split())[:60]
             # ★2026-10-06 (№501) 目視の「出品の値」で人が直したサイズ・英語の作品名
             size = " ".join(str(p.get("size") or "").split())[:20]
+            # ★2026-10-07 追加の写真 (同じ物の候補 / 自分で探したURL) と、カタログに渡す分
+            _ok = lambda xs: [u.strip() for u in (xs or []) if isinstance(u, str) and re.match(r"^https?://\S+$", u.strip())][:12]  # noqa: E731
+            extra, xcat = _ok(p.get("extra")), _ok(p.get("xcat"))
             work = " ".join(str(p.get("work") or "").split())[:60]
             if pid and (color or design) and (reason or not need_reason):
                 out.append({"idx": idx, "pid": pid, "color": color,
@@ -679,6 +682,8 @@ def parse_result(data):
                             **({"char": char} if char else {}),
                             **({"size": size} if size else {}),
                             **({"work": work} if work else {}),
+                            **({"extra": extra} if extra else {}),
+                            **({"xcat": xcat} if xcat else {}),
                             **({"reason": reason} if need_reason else {}),
                             **({"drop": drop} if drop else {}),
                             **({"main": main} if main and main not in drop else {})})
@@ -952,6 +957,30 @@ function showImgs(box){var v=box.querySelector('.v.sel');var s=box.querySelector
     +" <span class='nm'>「1枚目」を押した画像が先頭 (押さなければ カタログの表が先頭)</span></div>";
   ca.forEach(function(u,i){h+=tile(u,cr[i],'cat');});h+="<span class='sep'></span>";
   ph.forEach(function(u,i){h+=tile(u,pr[i],'sel');});s.innerHTML=h;}
+/* ★2026-10-07 追加の写真 (「同じ物」の候補の写真 / 自分で探したURLの写真)。最初は「使わない」= 押した物だけ使う */
+function showExtra(box){var x=box.querySelector('.imgx');if(!x||!box.dataset.pid){return;}
+  var keep={};x.querySelectorAll('img').forEach(function(i){keep[i.dataset.raw]={off:i.classList.contains('off'),first:i.classList.contains('first')};});
+  function tile(u,raw,src){var k=keep[(raw||'').replace(/'/g,'%27')];var cls=(k&&!k.off)?'':'off';if(k&&k.first)cls+=' first';
+    return "<span class='tw'><img class='"+cls+"' src='"+u+"' data-src='"+src+"' data-raw='"+(raw||'').replace(/'/g,'%27')+"' onclick='togImg(event,this)' onerror='this.parentNode.remove()' title='押すと 使う/使わない'>"
+    +"<button class='f1' onclick='setFirst(event,this)'>1枚目</button></span>";}
+  var h="<div style='width:100%'><span class='nm'><b>追加の写真</b> (最初は使わない = 押した物だけ出品に使う)</span> "
+    +"自分で探した写真のURL <input class='xu' style='width:280px' placeholder='記事・公式・ショップのページ'> "
+    +"<button onclick='getPhotos(this)'>写真を取る</button> <label class='nm'><input type='checkbox' class='xcat' checked> カタログにも同じ物の写真として渡す</label>"
+    +" <span class='xres nm'></span></div>";
+  box.querySelectorAll('.v.same').forEach(function(v){var a=[],r=[];try{a=JSON.parse(v.dataset.imgs||'[]');r=JSON.parse(v.dataset.raw||'[]');}catch(e){}
+    h+="<span class='nm'>同じ物 "+v.dataset.pid+"</span>";a.forEach(function(u,i){h+=tile(u,r[i],'same');});h+="<span class='sep'></span>";});
+  var rp=[];try{rp=JSON.parse(box.dataset.refphotos||'[]');}catch(e){}
+  if(rp.length){h+="<span class='nm'>探したURL</span>";rp.forEach(function(u){h+=tile('/img?u='+encodeURIComponent(u),u,'ref');});}
+  var res=(x.querySelector('.xres')||{}).innerHTML||'';var xu=(x.querySelector('input.xu')||{}).value||'';
+  x.innerHTML=h;x.style.display='';x.querySelector('.xres').innerHTML=res;x.querySelector('input.xu').value=xu;}
+function getPhotos(btn){var box=btn.closest('.it');var x=box.querySelector('.imgx');var u=(x.querySelector('input.xu').value||'').trim();
+  var out=x.querySelector('.xres');if(!u){out.textContent='URLを入れてください';return;}out.textContent='写真を取っています… (10〜30秒)';
+  fetch('/api/photos?url='+encodeURIComponent(u)).then(function(r){return r.json();}).then(function(d){
+    var have=[];try{have=JSON.parse(box.dataset.refphotos||'[]');}catch(e){}
+    (d.images||[]).forEach(function(i){if(have.indexOf(i)<0)have.push(i);});box.dataset.refphotos=JSON.stringify(have);
+    var keepu=x.querySelector('input.xu').value;showExtra(box);x.querySelector('input.xu').value=keepu;
+    x.querySelector('.xres').textContent=(d.images||[]).length?('使える写真 '+d.images.length+'枚 (長辺500px以上) — 使う物を押す'):('使える写真がありません'+(d.reason?' ('+d.reason+')':''));
+  }).catch(function(e){out.textContent='取れませんでした ('+e+')';});}
 function togImg(ev,el){ev.stopPropagation();el.classList.toggle('off');if(el.classList.contains('off'))el.classList.remove('first');}
 /* ★2026-09-13 ユーザー「1枚目だけ指定させて」: 押した画像を先頭に。もう一度押すと解除。
    外していた画像を1枚目にしたら、使う側に戻す */
@@ -992,7 +1021,7 @@ function pickV(el){var box=el.closest('.it');
     if(!lc.value)lc.value=box.dataset.color||'';if(!ls.value)ls.value=box.dataset.size||'';
     // 色の一覧を持つ商品は、色は上の選択 (カタログの色) で決まる。柄の記録だけメルカリの色を直せる
     lv.querySelector('.lcw').style.display=el.dataset.design?'':'none';}
-  setAct(box.querySelector('button.go'));preview(box);}
+  setAct(box.querySelector('button.go'));preview(box);showExtra(box);}
 /* ★2026-10-06 (№501) 出品くんと同じ判定で「出品の値」を出す。❌ なら理由 (直せる欄を直すと出し直す) */
 function preview(el){var box=el.closest?el.closest('.it'):el;if(!box||!box.dataset.pid)return;
   var lv=box.querySelector('.lv');var out=lv.querySelector('.lvres');var dz=box.dataset.design==='1';
@@ -1049,7 +1078,7 @@ function steps(box){var a=box.dataset.act||'';var s1=box.querySelector('.steps .
   s1.classList.add('on');if(box.dataset.lvok){s2.classList.add('on');s3.classList.add('now');}else{s2.classList.add('now');}}
 document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.it').forEach(steps);});
 function sameV(ev,btn){ev.stopPropagation();var v=btn.closest('.v');if(v.classList.contains('sel'))return;
-  v.classList.toggle('same');}
+  v.classList.toggle('same');showExtra(v.closest('.it'));}
 function setAct(btn){var box=btn.closest('.it');
   box.querySelectorAll('.act button').forEach(function(b){b.classList.remove('sel');});
   btn.classList.add('sel');box.dataset.act=btn.dataset.a;
@@ -1067,13 +1096,15 @@ function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason
   document.querySelectorAll('.it').forEach(function(b){var a=b.dataset.act||'';var idx=parseInt(b.dataset.idx,10);
     var c=(b.querySelector('select.col')||{}).value||'';var r=(b.querySelector('select.rsn')||{}).value||'';
     if(a==='go'){
-      var drop=[];b.querySelectorAll('.imgpick img.off').forEach(function(i){if(i.dataset.raw)drop.push(decodeURIComponent(i.dataset.raw));});
+      var drop=[];b.querySelectorAll('.imgpick:not(.imgx) img.off').forEach(function(i){if(i.dataset.raw)drop.push(decodeURIComponent(i.dataset.raw));});
+      var extra=[],xcat=[];var xc=(b.querySelector('input.xcat')||{}).checked;
+      b.querySelectorAll('.imgx img:not(.off)').forEach(function(i){if(i.dataset.raw){var u=decodeURIComponent(i.dataset.raw);extra.push(u);if(xc&&i.dataset.src==='ref')xcat.push(u);}});
       var f1=b.querySelector('.imgpick img.first');var main=f1&&f1.dataset.raw?decodeURIComponent(f1.dataset.raw):'';
       var dz=b.dataset.design==='1';var cn=((b.querySelector('input.cn')||{}).value||'').trim();
       if(!b.dataset.pid||(!c&&!dz)){nocolor++;holds.push(idx);}
       else{var lv=b.querySelector('.lv');if(!b.dataset.lvok)nolv++;
         picks.push({idx:idx,pid:b.dataset.pid,color:dz?lv.querySelector('input.lc').value.trim():c,drop:drop,main:main,design:dz,char:dz?cn:'',
-          size:lv.querySelector('input.ls').value.trim(),work:lv.querySelector('input.lw').value.trim()});}}
+          size:lv.querySelector('input.ls').value.trim(),work:lv.querySelector('input.lw').value.trim(),extra:extra,xcat:xcat});}}
     else if(a==='skip'){
       if(!b.dataset.pid||!c){nocolor++;holds.push(idx);}
       else if(r.indexOf('skip_')!==0){noreason++;holds.push(idx);}
@@ -1207,6 +1238,8 @@ def build_html(items, catalog, summary=None):
                if it.get("hidden_instock") else "")
             + f"<div class='vslot'>{_cards_html(it['cands'], r[C_COLOR])}</div>"
             "<div class='imgpick'></div>"
+            # ★2026-10-07 ユーザー「同じ物にした写真からも選べるように / 自分で探したURLの写真も候補に」
+            "<div class='imgpick imgx' style='display:none'></div>"
             # ★2026-10-06 ユーザー提案 (№501): 出品くんが写す値を先に見せ、人が確かめ・直す
             "<div class='lv' style='display:none;margin:4px 0;padding:4px 6px;background:#f6f6f0;font-size:12px'>"
             "<b>出品の値</b> <span class='lcw'>色 <input class='lc' style='width:90px' "
@@ -1399,6 +1432,10 @@ def lookup_api(path, query, catalog=None):
         return check_ref_url(query.get("url") or "", [p["pid"] for p in catalog])
     if path == "/api/preview":
         return listing_preview(query)
+    if path == "/api/photos":
+        # ★2026-10-07 自分で探したURLの写真 (長辺500px以上) を並べる。カタログに在るかどうかは問わない
+        r = check_ref_url(query.get("url") or "", ())
+        return {"images": r.get("images") or [], "reason": "" if r.get("images") else r.get("reason", "")}
     if path != "/api/search":
         return None
     catalog = catalog if catalog is not None else load_catalog()
@@ -1474,6 +1511,37 @@ def merge_character_inputs(existing, new):
     out = dict(existing or {})
     out.update({k: v for k, v in (new or {}).items() if k and v})
     return out
+
+
+def write_image_inputs(inputs, dir_path=CATALOG_REQ_DIR, now=None):
+    """目視で人が選んだ「同じ物の写真」(自分で探した URL の写真) をカタログに渡す → 足した商品の数。
+
+    requests/ut_image_input.json = {product_id: {"urls": [...], "at": ...}}。カタログはその商品の画像に足す。
+    同じ URL は2回足さない。
+    """
+    if not inputs:
+        return 0
+    path = os.path.join(dir_path, "ut_image_input.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            cur = json.load(f)
+        cur = cur if isinstance(cur, dict) else {}
+    except (OSError, ValueError):
+        cur = {}
+    now = now or datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    n = 0
+    for pid, urls in inputs.items():
+        e = cur.setdefault(pid, {"urls": [], "at": now})
+        new = [u for u in urls if u not in e["urls"]]
+        if new:
+            e["urls"] += new
+            e["at"] = now
+            n += 1
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cur, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+    return n
 
 
 def write_merge_inputs(merges, dir_path=CATALOG_REQ_DIR, now=None):
@@ -1777,7 +1845,7 @@ def save(items, res, now=None):
     catalog = {p["pid"]: p for p in load_catalog()}
     led = load_ledger()
     in_high = _high_urls()
-    add_rows, add_led, char_inputs, works_added = [], {}, {}, 0
+    add_rows, add_led, char_inputs, works_added, img_inputs = [], {}, {}, 0, {}
     for p in res["picks"]:
         it = by_idx.get(p["idx"])
         if not it or p["pid"] not in catalog:
@@ -1792,6 +1860,9 @@ def save(items, res, now=None):
         color = p["color"] or ((r[C_COLOR] or "").strip() if p.get("design") else "")
         if p.get("design") and p.get("char"):
             char_inputs[p["pid"]] = p["char"]
+        if p.get("xcat"):
+            img_inputs.setdefault(p["pid"], [])
+            img_inputs[p["pid"]] += [u for u in p["xcat"] if u not in img_inputs[p["pid"]]]
         # ★2026-10-06 (№501) 人が入れた英語の作品名は対応表に足す (同じ作品の次の行にも効く)
         if p.get("work"):
             import ut_catalog_values as UCV
@@ -1801,6 +1872,7 @@ def save(items, res, now=None):
         # サイズ欄が空の出品はタイトルから読む (決められない時は空のまま = 出品側で止まる)
         add_led[url] = {"decision": "go", "product_id": p["pid"], "color": color,
                         **({"size_hand": p["size"]} if p.get("size") else {}),
+                        **({"img_extra": p["extra"]} if p.get("extra") else {}),
                         **({"design": True, "character": p.get("char", "")} if p.get("design") else {}),
                         "title": r[C_TITLE], "size": r[C_SIZE] or _size_from(r[C_TITLE]),
                         "at": now, **({"img_drop": p["drop"]} if p.get("drop") else {}),
@@ -1844,6 +1916,10 @@ def save(items, res, now=None):
         print(f"  📮 カタログに追加依頼: {n_req}件 → {os.path.basename(req_path)}")
     if works_added:
         print(f"  📝 英語の作品名を対応表に足した: {works_added}件 → iMakMercari/ut_title_names.yaml")
+    n_img = write_image_inputs(img_inputs, CATALOG_REQ_DIR)
+    # ★2026-10-07 0件でも出す (動いたかがログで分かるように)
+    print(f"  📮 カタログに同じ物の写真を渡した: {n_img}件 → ut_image_input.json / "
+          f"追加の写真を出品に使う行 {sum(1 for v in add_led.values() if v.get('img_extra'))}件")
     n_mg = write_merge_inputs(res.get("merges") or [], CATALOG_REQ_DIR)
     if n_mg:
         print(f"  📮 カタログに「同じ物」を渡した: {n_mg}組 → ut_merge_input.json")

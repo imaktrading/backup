@@ -906,8 +906,10 @@ def main():
                 pic_url = "|".join(_imgs)
                 _n_sup = len([u for u in _imgs if 'mercdn' in u])
                 _n_chart = 1 if _chart and _chart in _imgs else 0
-                print(f"    🖼 画像 {len(_imgs)}枚 (カタログ {len(_imgs) - _n_sup - _n_chart}"
-                      f" + 仕入元 {_n_sup}" + (" + サイズ表 1" if _n_chart else "") + ")")
+                # ★2026-10-07 目視で選んだ追加の写真 (同じ物 / 自分で探したURL) も数を出す (0でも)
+                _n_x = len([u for u in _imgs if u in set(cat_v.get("img_extra") or [])])
+                print(f"    🖼 画像 {len(_imgs)}枚 (カタログ {len(_imgs) - _n_sup - _n_chart - _n_x}"
+                      f" + 追加 {_n_x} + 仕入元 {_n_sup}" + (" + サイズ表 1" if _n_chart else "") + ")")
 
         # 出品価格（SSOT: pricing_engine = cost-plus + tier判定 + gap_limit）
         price_str = re.sub(r"[^0-9]", "", target["price_jpy"])
