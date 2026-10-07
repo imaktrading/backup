@@ -37,7 +37,9 @@ def _write_status(out: Path, **kw) -> None:
     (out / "status.json").write_text(json.dumps(kw, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-def run_shadow() -> int:
+def run_shadow(live: bool = False) -> int:
+    """live=True: 作った中身を API で eBay に送る (2026-10-07 ユーザー判断で家から移管).
+    送れなかった時は status.json に書くだけ。家の after_kagoya が見て、家で送り直す。"""
     from kagoya_offload import acquire_server_seat, release_server_seat
 
     out = OUT_ROOT / datetime.now().strftime("%Y%m%d")
@@ -46,7 +48,7 @@ def run_shadow() -> int:
         return 2
     try:
         from revise.api_revise import (build_all_xml, build_plan, fetch_shipping_policy_ids,
-                                       load_current_profiles)
+                                       load_current_profiles, send_plan, verify_sample)
         from revise.price_revise import SHARED_SNAPSHOT_DIR, run_price_revise
 
         result = run_price_revise(review_xlsx=True)  # 家と食い違った時に1件ずつ理由を見るため
@@ -69,9 +71,25 @@ def run_shadow() -> int:
             "problems": plan.problems, "api_calls": calls,
             "snapshot": snap_csv.name if snap_csv else None,
         }, ensure_ascii=False, indent=1), encoding="utf-8")
-        _write_status(out, result="ok", mode="shadow", revise=len(result.revisable),
+        counts = dict(revise=len(result.revisable), abnormal=len(result.abnormal),
                       prices=len(plan.prices), shippings=len(plan.shippings),
                       problems=len(plan.problems), api_calls=calls)
+        if not live:
+            _write_status(out, result="ok", mode="shadow", **counts)
+            return 0
+        if plan.problems:
+            _write_status(out, result="not_sent", mode="live", reason=f"組めない {plan.problems[:3]}", **counts)
+            return 1
+        sent = send_plan(plan)
+        if sent["failed"]:
+            _write_status(out, result="send_failed", mode="live", failed=len(sent["failed"]),
+                          reason=f"{sent['failed'][0]['call']} {sent['failed'][0]['errors'][:2]}", **counts)
+            return 1
+        bad = verify_sample(plan)
+        if bad:
+            _write_status(out, result="verify_failed", mode="live", reason=str(bad[:3]), **counts)
+            return 1
+        _write_status(out, result="ok", mode="live", sent_ok=True, **counts)
         return 0
     except Exception as e:  # noqa: BLE001 - 結果は status.json で家に返す
         _write_status(out, result="error", error=f"{type(e).__name__}: {e}",
@@ -86,4 +104,4 @@ if __name__ == "__main__":
     _out.mkdir(parents=True, exist_ok=True)
     with open(_out / "run.log", "w", encoding="utf-8") as _f:
         sys.stdout = sys.stderr = _f  # 予約タスクの出力は残らないので、家で読めるようにファイルへ
-        sys.exit(run_shadow())
+        sys.exit(run_shadow(live="--live" in sys.argv))

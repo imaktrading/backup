@@ -23,7 +23,8 @@ import kagoya_offload as k  # noqa: E402
 REMOTE_PKG = r"C:\dev\iMak_revise\iMakRevise"
 REMOTE_OUT = r"C:\setup\REVISE_offload\out"
 REMOTE_PY = k.REMOTE_PY
-TASK_NAME = "iMakRevise_KagoyaShadow"
+TASK_NAME = "iMakRevise_KagoyaDaily"  # 2026-10-07 本番 (送る)。旧 iMakRevise_KagoyaShadow は影
+OLD_TASK_NAMES = ["iMakRevise_KagoyaShadow"]
 LOCAL_PULL = PKG_ROOT / "csv_output" / "kagoya"
 LOG_PATH = PKG_ROOT / "decision_log" / "kagoya_shadow.log"
 MATCH_OK_PCT = 95.0
@@ -56,9 +57,10 @@ def deploy() -> int:
     run_py = REMOTE_PKG + r"\revise\kagoya_run.py"
     ps1.write_text("\n".join([
         f"$a = New-ScheduledTaskAction -Execute '{REMOTE_PY}' "
-        f"-Argument '-X utf8 \"{run_py}\"' -WorkingDirectory '{REMOTE_PKG}'",
+        f"-Argument '-X utf8 \"{run_py}\" --live' -WorkingDirectory '{REMOTE_PKG}'",
         "$t = New-ScheduledTaskTrigger -Daily -At 04:30",
         f"Register-ScheduledTask -TaskName {TASK_NAME} -Action $a -Trigger $t -User SYSTEM -RunLevel Highest -Force | Out-Null",
+        *[f"Unregister-ScheduledTask -TaskName {t} -Confirm:$false -ErrorAction SilentlyContinue" for t in OLD_TASK_NAMES],
         f"(Get-ScheduledTaskInfo -TaskName {TASK_NAME}).NextRunTime",
     ]) + "\n", encoding="utf-8")
     remote_ps1 = r"C:\setup\REVISE_offload\register_task.ps1"
