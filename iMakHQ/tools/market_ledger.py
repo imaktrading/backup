@@ -176,9 +176,12 @@ def lookup_catalog(cands, conn, title=""):
 
 
 def _money(s):
+    # ★2026-10-07 Research の画面が **ドルの値に「¥」の記号** を付けて出すようになった
+    #   (例 PSA10 メガリザードン「¥81」。検索の条件 $50〜$760 の中に収まる = 中身はドル)。
+    #   「$」しか外していなかったので、値段が全部空になるところだった。記号は外してドルとして読む
     try:
-        return float(str(s).replace("$", "").replace(",", ""))
-    except (ValueError, AttributeError):
+        return float(re.sub(r"US|JP|[$¥￥,\s]", "", str(s)))
+    except (ValueError, AttributeError, TypeError):
         return None
 
 
