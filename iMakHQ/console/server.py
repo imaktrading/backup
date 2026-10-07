@@ -1362,6 +1362,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "error": d.get("error") or ""})
             except (OSError, ValueError):
                 return self._json(200, {"ok": None})
+        if u.path == "/api/messages":
+            return self._json(200, get_messages())
         if u.path == "/api/version":
             return self._json(200, get_version())
         if u.path == "/api/research":
@@ -1498,11 +1500,72 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, {"ok": ok, "message": msg})
             except Exception as e:                       # noqa: BLE001 画面に出して知らせる
                 return self._json(200, {"ok": False, "message": str(e)[:200]})
+        if u.path.startswith("/api/messages/"):
+            act = u.path.rsplit("/", 1)[-1]
+            try:
+                BM = _bm()
+                if act == "refresh":
+                    threading.Thread(target=refresh_messages, daemon=True).start()
+                    return self._json(200, {"ok": True})
+                conv = BM.find(str(body.get("id") or ""))
+                if conv is None:
+                    return self._json(200, {"ok": False, "error": "その注文が一覧にありません (取り直してください)"})
+                if act == "draft":
+                    return self._json(200, {"ok": True, **BM.ai_draft(conv, log=lambda line: MSG.__setitem__("last", line))})
+                if act == "send":
+                    return self._json(200, BM.send(conv, str(body.get("body") or ""), str(body.get("kind") or ""),
+                                                   log=lambda line: MSG.__setitem__("last", line)))
+                if act == "mark":
+                    k = str(body.get("kind") or "")
+                    return self._json(200, BM.mark_sent(conv["id"], "paid" if k == "repeat" else k))
+            except Exception as e:                       # noqa: BLE001 画面に出して知らせる
+                return self._json(200, {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]})
+            return self._json(404, {"error": "not found"})
         if u.path == "/api/refresh":
             threading.Thread(target=refresh_counts, daemon=True).start()
             STATE["crew_at"] = 0                     # ホームは数え終わってから読む (refresh_counts)
             return self._json(200, {"ok": True})
         return self._json(404, {"error": "not found"})
+
+
+# ---------------------------------------------------------------- メッセージ (2026-10-08)
+#   バイヤーとのやり取りを注文ごとに並べる。裏で取って貯めた一覧 (buyer_messages.json) を読むだけ。
+#   作り直しは定期の予約 (iMakHQ_BuyerMessages_30m) と、画面の「今すぐ取り直す」。
+MSG = {"busy": False, "last": ""}
+
+
+def _bm():
+    if TOOLS not in sys.path:
+        sys.path.insert(0, TOOLS)
+    import buyer_messages as BM
+    return BM
+
+
+def get_messages():
+    BM = _bm()
+    try:
+        with open(BM.SNAPSHOT, encoding="utf-8") as f:
+            snap = json.load(f)
+    except (OSError, ValueError):
+        snap = {"at": "", "convs": []}
+    snap["templates"] = BM.load_templates()
+    snap["labels"] = BM.TEMPLATE_LABELS
+    snap["busy"] = MSG["busy"]
+    snap["last"] = MSG["last"]
+    return snap
+
+
+def refresh_messages():
+    if MSG["busy"]:
+        return
+    MSG["busy"] = True
+    try:
+        BM = _bm()
+        BM.collect(log=lambda line: MSG.__setitem__("last", line))
+    except Exception as e:                                   # noqa: BLE001 画面に出す
+        MSG["last"] = f"⚠️ 取り直しに失敗: {type(e).__name__}: {e}"[:300]
+    finally:
+        MSG["busy"] = False
 
 
 def _port_in_use(port):

@@ -393,3 +393,57 @@ svg.agsp{display:block;width:120px;height:30px}
 /* ★2026-10-02: KAGOYA で動くボタンの印 */
 .kg{display:inline-block;margin-left:6px;padding:0 5px;border-radius:3px;font:600 10px/16px var(--f-mono);
   letter-spacing:.04em;color:var(--ai);background:var(--ai-soft);border:1px solid var(--ai);vertical-align:1px;white-space:nowrap}
+
+/* ===== メッセージ (2026-10-08) ===== */
+.msgdot{display:inline-block;min-width:16px;padding:0 5px;border-radius:9px;background:var(--crit);color:#fff;font-size:11px;line-height:16px;text-align:center}
+.msgdot[hidden]{display:none}
+.msum{display:flex;gap:8px;flex-wrap:wrap}
+.msum .ms{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:6px 11px;display:flex;gap:7px;align-items:baseline}
+.msum .ms b{font:600 17px var(--f-mono)}.msum .ms span{font-size:12px;color:var(--ink-2)}
+.msum .ms.hot{border-color:var(--crit);background:var(--crit-soft)}
+.mfresh{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--ink-3);margin-left:auto}
+.mwrap{display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:14px;align-items:start}
+@media (max-width:860px){.mwrap{grid-template-columns:1fr}}
+.mlist{overflow:hidden}
+.mfil{display:flex;gap:6px;flex-wrap:wrap;padding:10px;border-bottom:1px solid var(--line)}
+.mfil button{border:1px solid var(--line);background:var(--sunken);color:var(--ink-2);border-radius:999px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
+.mfil button.on{background:var(--pc);border-color:var(--pc);color:var(--surface)}
+#msg-rows{max-height:70vh;overflow:auto}
+.mrow{display:grid;grid-template-columns:1fr auto;gap:3px 8px;width:100%;text-align:left;padding:10px 12px;border:0;border-bottom:1px solid var(--line);border-left:3px solid transparent;background:transparent;color:var(--ink);font:inherit;cursor:pointer}
+.mrow:hover{background:var(--sunken)}.mrow.on{background:var(--pcs);border-left-color:var(--pc)}
+.mwho{font-weight:600}.mflag{font-size:11.5px;color:var(--ink-3)}
+.mitem{grid-column:1/-1;font-size:12px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mchips{grid-column:1/-1;display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.mamt{font:11.5px var(--f-mono);color:var(--ink-3)}
+.mc{display:inline-flex;font-size:11px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap}
+.mc.mute{background:var(--sunken);color:var(--ink-2);border:1px solid var(--line)}
+.mc.info{background:var(--ai-soft);color:var(--ai)}.mc.crit{background:var(--crit-soft);color:var(--crit)}.mc.warn{background:var(--warn-soft);color:var(--warn)}
+.mdetail{display:grid;gap:14px}
+.mcard{padding:14px 16px}
+.mtitle{font-weight:600;margin-bottom:10px}
+.mh{font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:8px;letter-spacing:.04em}
+.mkvs{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 16px}
+.mkv span{display:block;font-size:11px;color:var(--ink-3)}.mkv b{font-weight:600;word-break:break-all}
+.mkv a{color:var(--ai)}
+.msteps{display:grid;grid-template-columns:repeat(3,1fr);margin-top:12px}
+.mst{position:relative;padding-top:18px;font-size:12px;color:var(--ink-3)}
+.mst::before{content:"";position:absolute;top:5px;left:0;right:0;height:3px;background:var(--line)}
+.mst::after{content:"";position:absolute;top:0;left:0;width:13px;height:13px;border-radius:50%;background:var(--surface);border:3px solid var(--line)}
+.mst.done{color:var(--ink)}.mst.done::before{background:var(--good)}.mst.done::after{border-color:var(--good);background:var(--good)}
+.mst.now{color:var(--ink);font-weight:600}.mst.now::after{border-color:var(--warn)}
+.mst small{display:block;font-weight:400;color:var(--ink-3)}
+.mtax{display:flex;gap:10px;margin-top:12px;padding:9px 12px;border-radius:8px;background:var(--warn-soft);font-size:12.5px}
+.mtax b{color:var(--warn);white-space:nowrap}
+.mthread{display:grid;gap:9px;max-height:340px;overflow:auto}
+.mmsg{max-width:85%;padding:9px 12px;border-radius:10px;font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.mmsg.me{justify-self:end;background:var(--ai-soft)}.mmsg.them{background:var(--sunken)}
+.mwhen{display:block;font:11px var(--f-mono);color:var(--ink-3);margin-top:5px}
+.mtpls{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.mt{border:1px solid var(--line);background:var(--sunken);color:var(--ink);border-radius:6px;padding:4px 10px;font:inherit;font-size:12px;cursor:pointer}
+.mt.on{border-color:var(--pc);background:var(--pcs);color:var(--pc);font-weight:600}
+.mt.ai{border-style:dashed;color:var(--ai)}
+#msg-body{width:100%;min-height:220px;resize:vertical;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:13px/1.55 var(--f-ui);background:var(--surface);color:var(--ink)}
+.mbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.mnote{font-size:12px;color:var(--ink-3)}
+.mconfirm{margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 12px;border-radius:8px;border:1px solid var(--pc);background:var(--pcs);font-size:13px}
+.mconfirm.bad{border-color:var(--crit);background:var(--crit-soft)}

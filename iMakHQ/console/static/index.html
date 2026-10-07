@@ -34,6 +34,7 @@
       <button class="sm" role="tab" aria-selected="false" data-page="sch" type="button">定期</button>
       <button class="sm" role="tab" aria-selected="false" data-page="ver" type="button">版・移行</button>
       <button class="sm" role="tab" aria-selected="false" data-page="agents" type="button">担当 <span id="tab-agents" class="agdot"></span></button>
+      <button class="sm" role="tab" aria-selected="false" data-page="msg" type="button">メッセージ <span id="tab-msg" class="msgdot"></span></button>
     </div></div>
   </div>
   </div><!-- /.stick -->
@@ -175,6 +176,24 @@
     <p class="note">緑 = 作業中 / 橙 = あなたへの質問で止まっている / 灰 = 待機中 / 点線 = 閉じている (「起動」でデスクトップのショートカットと同じ起動)。右の小さなグラフは直近60分の操作回数 (5分ごと)。</p>
   </div>
 
+  <!-- ===== メッセージ: バイヤーとのやり取り (2026-10-08) ===== -->
+  <div class="page" id="p-msg" hidden style="--pc:var(--p-today);--pcs:var(--p-today-soft)">
+    <div class="hero">
+      <div><h1>メッセージ</h1><div class="why">注文ごとに 支払い → 発送 → 到着 と問い合わせ。段階に合った文を用意してあるので、確かめて送るだけ</div></div>
+      <div class="msum" id="msg-sum"></div>
+      <div class="mfresh"><span id="msg-at">読込中…</span><button class="sm" type="button" id="msg-refresh">今すぐ取り直す</button></div>
+    </div>
+    <div class="mwrap">
+      <div class="card mlist">
+        <div class="mfil" id="msg-fil">
+          <button type="button" class="on" data-f="all">すべて</button><button type="button" data-f="reply">返事待ち</button><button type="button" data-f="todo">定型文まだ</button><button type="button" data-f="ask">買う前の質問</button>
+        </div>
+        <div id="msg-rows"><div class="empty">読込中…</div></div>
+      </div>
+      <div class="mdetail" id="msg-detail"></div>
+    </div>
+  </div>
+
   <!-- ===== 版・移行 ===== -->
   <div class="page" id="p-ver" hidden style="--pc:var(--p-other);--pcs:var(--p-other-soft)">
     <div class="hero"><div><h1>版・移行</h1><div class="why" id="ver-why">旧 出品くん (今のパネル) は残したまま、押せるボタンを1つずつこちらに移していきます。全部押せるようになったら 1.0</div></div>
@@ -205,5 +224,6 @@
   </form>
 </div>
 <script src="app.js"></script>
+<script src="messages.js"></script>
 </body>
 </html>

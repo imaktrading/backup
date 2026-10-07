@@ -697,6 +697,7 @@
     document.querySelectorAll(".page").forEach(function (p) { p.hidden = p.id !== "p-" + name; });
     if (name === "sch" && !schLoaded) { schLoaded = true; refreshTasks(); }
     if (name === "agents") refreshAgents();
+    if (name === "msg" && window.MSGTAB) window.MSGTAB.load();
   }
   document.querySelectorAll('[role="tab"]').forEach(function (t) {
     t.addEventListener("click", function () { show(t.dataset.page); history.replaceState(null, "", "#" + t.dataset.page); });
