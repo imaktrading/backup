@@ -39,6 +39,8 @@ except Exception:  # noqa: BLE001
     pass
 
 CHARA_TAB = "mercari_psa10_chara"
+# ★2026-10-07 HQ依頼 🥕「拾った物は捨てない」: 候補外の理由 (treasureと同じ考え方)
+COL_REASON = 38
 
 
 def _log(m: str) -> None:
@@ -47,13 +49,17 @@ def _log(m: str) -> None:
 
 def _get_or_create_chara_ws(sh):
     import gspread  # noqa: PLC0415
-    from sheet_writer_mercari_seller import _create_from_template, _ensure_header  # noqa: PLC0415
+    from sheet_writer_mercari_seller import _col_to_letter, _create_from_template, _ensure_header  # noqa: PLC0415
 
     try:
         ws = sh.worksheet(CHARA_TAB)
         _ensure_header(ws, sh)
     except gspread.WorksheetNotFound:
         ws = _create_from_template(sh, CHARA_TAB)
+    header = ws.row_values(1)
+    if len(header) < COL_REASON or header[COL_REASON - 1] != "候補外の理由":
+        ws.update(range_name=f"{_col_to_letter(COL_REASON)}1",
+                  values=[["候補外の理由"]], value_input_option="USER_ENTERED")
     return ws
 
 
@@ -80,12 +86,16 @@ def append_chara_items(items: list[dict], known_keys: set | None = None) -> dict
             skipped += 1
             continue
         seen_in_batch.add(key)
-        new_rows.append(_build_row(it))
+        row = _build_row(it)
+        while len(row) < COL_REASON - 1:
+            row.append("")
+        row.append(it.get("drop_reason") or "")
+        new_rows.append(row)
 
     if not new_rows:
         return {"tab": CHARA_TAB, "appended": 0, "skipped_existing": skipped, "input": len(items)}
 
-    header_len = len(ws.row_values(1)) or len(new_rows[0])
+    header_len = COL_REASON
     last_row = len(ws.get_all_values())
     next_row = last_row + 1
     end_col_letter = _col_to_letter(header_len)
@@ -102,6 +112,21 @@ def append_chara_items(items: list[dict], known_keys: set | None = None) -> dict
         known_keys.update(seen_in_batch)
     return {"tab": CHARA_TAB, "appended": len(new_rows), "skipped_existing": skipped,
             "input": len(items)}
+
+
+def _dropped_items(dropped: dict) -> list[dict]:
+    """🥕「拾った物は捨てない」: collect(collect_dropped=True) が積んだ候補外の分を
+    理由付きでスプシに書けるitem形に組み立てる (treasureと同じ考え方)。"""
+    items = []
+    for info in dropped.values():
+        items.append({
+            "url": info.get("url"), "title": info.get("title"), "condition": info.get("condition"),
+            "price_jpy": info.get("price_jpy"), "image_urls": info.get("image_urls"),
+            "description": info.get("description"), "cert": "",
+            "fill_high_columns": False, "category": "TCG",
+            "drop_reason": info.get("reason") or "",
+        })
+    return items
 
 
 def _build_chara_args(keywords: list[str], ap_args, cost_cfg) -> argparse.Namespace:
@@ -144,6 +169,11 @@ def main(argv=None) -> int:
     ap.add_argument("--resume-from-json", default=None,
                     help="落ちた走行の debug/mercari_chara_*.json を渡すと、"
                          " 収集済の検索語・処理済の商品を飛ばして続きから走る")
+    # ★2026-10-07 HQ依頼 🥕「拾った物は捨てない」(treasureと同じ): 前回dumpの
+    # collected_urls を対象に、鑑定番号を読まず候補外の理由だけ残す
+    ap.add_argument("--add-dropped-from-json", default=None,
+                    help="前回dumpの collected_urls を対象に、候補外の理由をシートに足す"
+                         " (新規検索なし・鑑定番号読み取りなし)")
     args = ap.parse_args(argv)
 
     from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
@@ -208,7 +238,34 @@ def _run(args) -> int:
         _log(f"  [SHEET] 途中書込: {res}")
         return len(new_cands), len(new_unreadable)
 
-    payload = psa10.collect(chara_args, dump_path=dump_path, resume=resume, on_flush=_flush)
+    urls_override = None
+    collect_dropped = False
+    if args.add_dropped_from_json:
+        src = json.loads(Path(args.add_dropped_from_json).read_text(encoding="utf-8"))
+        urls_override = list(src.get("collected_urls") or [])
+        chara_args.skip_vision = True
+        collect_dropped = True
+        _log(f"候補外の理由だけ残す: {len(urls_override)} URL (元 {args.add_dropped_from_json}・"
+             f"新規検索なし・鑑定番号読み取りなし)")
+
+    # ★2026-10-07 HQ依頼 (treasureと同じ): 詳細取得をAPI版にして、オークション形式の
+    # ページでも「取得失敗」と誤判定しないようにする
+    from scrapers.mercari_search_api import ApiSearchClient, fetch_detail_api  # noqa: PLC0415
+    api_client = ApiSearchClient()
+
+    def _detail_fn(u):
+        try:
+            return fetch_detail_api(api_client, u)
+        except Exception as e:  # noqa: BLE001 - API側の不調はChromeにフォールバック
+            _log(f"  ⚠️ 詳細(API版)失敗 ({type(e).__name__}) → この1件はChromeで読む")
+            return None
+
+    try:
+        payload = psa10.collect(chara_args, dump_path=dump_path, resume=resume, on_flush=_flush,
+                                urls_override=urls_override, detail_fn=_detail_fn,
+                                collect_dropped=collect_dropped)
+    finally:
+        api_client.close()
 
     kept = payload["candidates"]
     unreadable = payload.get("unreadable") or []
@@ -221,8 +278,14 @@ def _run(args) -> int:
 
     rest_k = [c for c in kept if c.get("url") not in written]
     rest_u = [c for c in unreadable if c.get("url") not in written]
+    dropped_res = None
+    if collect_dropped:
+        dropped = payload.get("dropped") or {}
+        dropped_res = append_chara_items(_dropped_items(dropped), known_keys=known)
+        _log(f"🥕 候補外の理由を足した: {dropped_res}")
     if not rest_k and not rest_u:
-        _log("[SHEET] 走行中に全部書込済")
+        if dropped_res is None:
+            _log("[SHEET] 走行中に全部書込済")
         run_marker.mark_finished(MARKER_PATH)
         return 0
 
