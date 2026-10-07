@@ -4,7 +4,7 @@
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
   var D = null, sel = null, filt = "all", drafts = {};
-  var STAGE = { paid: "支払い済み", shipped: "発送済み", arrived: "到着", ask: "買う前の質問" };
+  var STAGE = { unpaid: "支払い待ち", paid: "支払い済み", shipped: "発送済み", arrived: "到着", ask: "買う前の質問" };
   var STEPS = ["paid", "shipped", "arrived"];
 
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
@@ -89,7 +89,7 @@
     var c = cur(), el = $("msg-detail");
     if (!c) { el.innerHTML = '<div class="card"><div class="empty">左の一覧から選んでください</div></div>'; return; }
     var steps = c.kind === "order" ? '<div class="msteps">' + STEPS.map(function (s, i) {
-      var idx = STEPS.indexOf(c.stage);
+      var idx = STEPS.indexOf(c.stage); if (c.stage === "unpaid") idx = -1;
       var cls = i < idx ? "done" : i === idx ? "now" : "";
       var sent = (c.sent || []).indexOf(s) >= 0 ? '<small>文 送った</small>' : (i <= idx ? '<small>文 まだ</small>' : "<small></small>");
       return '<div class="mst ' + cls + '">' + STAGE[s] + sent + "</div>";
@@ -117,7 +117,7 @@
       '<textarea id="msg-body" aria-label="返信の文"></textarea>' +
       '<div class="mbar"><button type="button" class="run hot" id="msg-send">eBay に送る</button>' +
       (c.kind === "order" && rec && ["paid", "repeat", "shipped", "arrived"].indexOf(rec) >= 0 ? '<button type="button" class="run" id="msg-mark">eBay の画面で送ったので、送った印だけ付ける</button>' : "") +
-      '<span class="mnote" id="msg-note">' + esc(D.last || "") + "</span></div><div id="msg-cf"></div></div>";
+      '<span class="mnote" id="msg-note">' + esc(D.last || "") + '</span></div><div id="msg-cf"></div></div>';
     var body = $("msg-body"), kind = rec;
     body.value = drafts[c.id] != null ? drafts[c.id] : (rec ? render(rec, c) : "");
     body.oninput = function () { drafts[c.id] = body.value; };

@@ -32,7 +32,7 @@ def test_track_url_by_carrier():
 
 
 def test_stage_repeat_and_todo():
-    assert B.stage_of({"status": "Completed"}) == "paid"
+    assert B.stage_of({"status": "Completed", "paid": "2026-10-01"}) == "paid"
     assert B.stage_of({"tracking": "X"}) == "shipped"
     assert B.stage_of({"tracking": "X", "delivered": "2026-10-01"}) == "arrived"
     assert B.stage_of({"status": "Cancelled", "tracking": "X"}) == "cancelled"
@@ -88,3 +88,12 @@ def test_build_groups_threads_and_presale_questions():
     q = [c for c in convs if c["kind"] == "ask"][0]
     assert q["buyer"] == "q1" and q["ask"] == "ask_offer" and q["title"] == "Mew"
     assert hist == {"b1": {"O1": "2026-10-08T00:00:00Z"}}
+
+
+def test_unpaid_offer_order_gets_no_paid_message():
+    # オファー成立で支払い待ち (Active・PaidTime 無し・国も空) → 支払い後の文も関税の文も出さない
+    o = {"status": "Active", "paid": "", "country": ""}
+    assert B.stage_of(o) == "unpaid"
+    assert B.todo_for({"stage": "unpaid"}, set()) == ""
+    assert B.customs_line("", "0") == ""
+    assert B.stage_of({"status": "Completed", "paid": "2026-10-08T00:00:00Z"}) == "paid"

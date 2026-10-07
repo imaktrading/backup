@@ -167,6 +167,8 @@ EU = {"AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "H
 def customs_line(country, tax_amount):
     """関税の一文 (英語)。注文の事実 (仕向地と eBay が取った税額) だけで決める。純関数。"""
     c = (country or "").upper()
+    if not c:
+        return ""                                    # 国が分からない (支払い前など) = 書かない
     try:
         tax = float(tax_amount or 0)
     except (TypeError, ValueError):
@@ -213,9 +215,11 @@ def sent_kind(text):
 
 
 def stage_of(o):
-    """注文の段階: paid / shipped / arrived / cancelled。純関数。"""
+    """注文の段階: unpaid / paid / shipped / arrived / cancelled。純関数。"""
     if o.get("status") == "Cancelled":
         return "cancelled"
+    if not o.get("paid") and not o.get("shipped") and not o.get("tracking"):
+        return "unpaid"                              # オファー成立・支払い待ち (支払い後の文はまだ早い)
     if o.get("delivered"):
         return "arrived"
     if o.get("tracking") or o.get("shipped"):
