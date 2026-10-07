@@ -832,12 +832,15 @@ def _cards_html(cands, color_jp=""):
             f"data-defcolor=\"{_html.escape(dc)}\" "
             + (f"data-design='1' data-char=\"{_html.escape(p.get('character') or '')}\" "
                f"data-charv=\"{_html.escape(_charv_text(p.get('character_vision')))}\" " if p.get("design") else "")
+            + ("data-learned='1' " if p.get("learned") else "")
             + "onclick='pickV(this)'>"
             + (f"<img class='main' src='{_html.escape(prc._proxied(img))}' loading='lazy' onerror='imgFail(this)'>"
                if img else "<div class='noimg'>画像なし</div>")
             + (f"<div class='th'>{thumbs}</div>" if thumbs else "")
             + (f"<div class='nm'>画像 {len(gal)}枚 (🔍で全部)</div>" if len(gal) > 1 else "")
             + f"<div class='pid'>{_html.escape(p['pid'])}</div>"
+            + (f"<div class='nm' style='color:#060;font-weight:bold'>✔ 前に同じ{_html.escape(p['learned'])}で決めた商品</div>"
+               if p.get("learned") else "")
             + f"<div class='nm'>{_html.escape(p['name'][:22])}</div>"
             + f"<div class='nm'>{_html.escape((p['collab'] or p['character_family'])[:18])}</div>"
             + ("" if p.get("sold_out") else
@@ -1076,7 +1079,9 @@ function steps(box){var a=box.dataset.act||'';var s1=box.querySelector('.steps .
   s1.textContent='① 同じ柄を押す';s2.textContent='② ✅ を確かめる';
   if(!box.dataset.pid){s1.classList.add('now');return;}
   s1.classList.add('on');if(box.dataset.lvok){s2.classList.add('on');s3.classList.add('now');}else{s2.classList.add('now');}}
-document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.it').forEach(steps);});
+document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.it').forEach(steps);
+  // ★2026-10-07 前に同じタイトル / タグ番号で決めた商品は最初から選んでおく (違えば押し直す)
+  document.querySelectorAll(".v[data-learned='1']").forEach(function(v){try{pickV(v);}catch(e){}});});
 function sameV(ev,btn){ev.stopPropagation();var v=btn.closest('.v');if(v.classList.contains('sel'))return;
   v.classList.toggle('same');showExtra(v.closest('.it'));}
 function setAct(btn){var box=btn.closest('.it');
@@ -1754,6 +1759,42 @@ def rest_breakdown(rows):
     return out
 
 
+def _norm_title(t):
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", str(t or ""))).strip().upper()
+
+
+def learned_index(led, tag_of_url=None):
+    """目視で決めた結果 (台帳の go / skip) → ({タイトル: {pid}}, {タグの番号: {pid}})。純関数。
+
+    ★2026-10-07 ユーザー「ここで特定したものは、資産化されるの？」→「うん」: 出品URLは1件限りだが、
+      **メルカリのタイトルの書き方** と **タグの6桁番号** は、同じ商品の別の出品にも効く (PSA のラベルの記録と同じ考え)。
+    """
+    by_title, by_tag = {}, {}
+    for url, e in (led or {}).items():
+        if (e or {}).get("decision") not in ("go", "skip") or not e.get("product_id"):
+            continue
+        t = _norm_title(e.get("title"))
+        if t:
+            by_title.setdefault(t, set()).add(e["product_id"])
+        tag = str(e.get("tag") or (tag_of_url or {}).get(url) or "").strip()
+        if tag:
+            by_tag.setdefault(tag, set()).add(e["product_id"])
+    return by_title, by_tag
+
+
+def learned_pid(title, tag, by_title, by_tag):
+    """前に決めた商品 (1つに決まる時だけ) → (pid, "タイトル"|"タグ") / ("", "")。割れたら・食い違ったら使わない。純関数。"""
+    a = by_title.get(_norm_title(title)) or set()
+    b = by_tag.get(str(tag or "").strip()) or set() if str(tag or "").strip() else set()
+    if len(a) > 1 or len(b) > 1 or (a and b and a != b):
+        return "", ""
+    if a:
+        return next(iter(a)), "タイトル"
+    if b:
+        return next(iter(b)), "タグの番号"
+    return "", ""
+
+
 def load_items(limit=DEFAULT_LIMIT, new_only=False, stats=None):
     led = load_ledger()
     prod = _product_values()
@@ -1762,7 +1803,8 @@ def load_items(limit=DEFAULT_LIMIT, new_only=False, stats=None):
     stats["catalog_status"] = status_summary(led, status)
     # ★2026-09-12: 中間タブ (抽出くんが集めた分) と 商品管理シートの **まだ出していない Tシャツ行**
     #   (前の運用で入った分) の両方を目視に出す
-    rows = [(i, r, "tab") for i, r in pending_rows(_read_src(), led, _high_urls(prod), status=status)]
+    _src_all = _read_src()
+    rows = [(i, r, "tab") for i, r in pending_rows(_src_all, led, _high_urls(prod), status=status)]
     rows += [(SHEET_IDX_BASE + i, r, "sheet") for i, r in sheet_pending_rows(prod, led, status=status)]
     if new_only:
         rows = only_new(rows)
@@ -1773,6 +1815,11 @@ def load_items(limit=DEFAULT_LIMIT, new_only=False, stats=None):
     catalog = load_catalog()
     official = load_official_l1()
     stats["official"] = 0
+    # 過去に決めた行のタグ番号は台帳に無い (10/07 以前) → 中間タブの全行から引く
+    _tag_of = {(r[C_URL] or "").strip(): (r[C_TAG] if len(r) > C_TAG else "")
+               for r in list(_src_all or []) + [r for _i, r, _s in rows] if r and len(r) > C_URL}
+    _by_title, _by_tag = learned_index(led, _tag_of)
+    stats["learned"] = {"タイトル": 0, "タグの番号": 0}
     # ★2026-09-16 ユーザー「そんなにないやろ」: 「残り全部で N件」だけだと、その N が
     #   KEY 埋めの数に見える (実際は 620件中 KEY 埋めは 38件だった)。内訳を出す。
     stats["rest"] = rest_breakdown(rows)
@@ -1801,6 +1848,12 @@ def load_items(limit=DEFAULT_LIMIT, new_only=False, stats=None):
         if answered_after(led.get(_url), _st) and _st.get("product_id"):
             _hit = [p for p in catalog if p["pid"] == _st["product_id"]]
             oos = _hit + [p for p in oos if p["pid"] != _st["product_id"]]
+        # ★2026-10-07 前に同じタイトル / 同じタグ番号で決めた商品を先頭に (選んだ状態で出す・目視は残す)
+        _lp, _why = learned_pid(r[C_TITLE], r[C_TAG] if len(r) > C_TAG else "", _by_title, _by_tag)
+        _hit = [dict(p, learned=_why) for p in catalog if _lp and p["pid"] == _lp]
+        if _hit:
+            oos = _hit + [p for p in oos if p["pid"] != _lp]
+            stats["learned"][_why] += 1
         _chk = ""
         if answered_after(led.get(_url), _st) and _st.get("product_id"):
             import psa_resource_confirm as _prc
@@ -1875,6 +1928,7 @@ def save(items, res, now=None):
                         **({"img_extra": p["extra"]} if p.get("extra") else {}),
                         **({"design": True, "character": p.get("char", "")} if p.get("design") else {}),
                         "title": r[C_TITLE], "size": r[C_SIZE] or _size_from(r[C_TITLE]),
+                        **({"tag": r[C_TAG]} if len(r) > C_TAG and r[C_TAG] else {}),
                         "at": now, **({"img_drop": p["drop"]} if p.get("drop") else {}),
                         **({"img_main": p["main"]} if p.get("main") else {})}
     for p in res.get("skips") or []:
@@ -1961,6 +2015,10 @@ def main():
     if not items:
         print("→ 0件。抽出くんの収集 (mercari_uniqlo_ut タブ) に新しい行が入ったらまた出ます")
         return 0
+    _ln = _stats.get("learned") or {}
+    # ★2026-10-07 0件でも出す (動いたかがログで分かるように)
+    print(f"  ✔ 前に決めた商品を選んだ状態で出す: {sum(_ln.values())}件 "
+          f"(同じタイトル {_ln.get('タイトル', 0)} / 同じタグの番号 {_ln.get('タグの番号', 0)}) / 画面に出す {len(items)}件")
     n_c = sum(1 for it in items if it["cands"])
     print(f"  カタログ候補が並ぶ {n_c}件 / 候補なし (検索欄で探す) {len(items) - n_c}件")
     page = build_html(items, load_catalog(), summary=_stats.get("catalog_status"))
