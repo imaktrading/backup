@@ -350,6 +350,7 @@ def fetch_offers():
 
         # ★2026-08-08 追加 (④): ミラーで①②③外れなら、US本体タイトル一致 → US親iidで再ルックアップ。
         #   `358841114399`(uk) → `358600821584`(us) → row603 → 11999 の経路がここで通る。
+        parent = None
         if not cost_src and is_mirror:
             parent = find_us_parent(meta["title"], us_parents_by_title)
             if parent:
@@ -403,6 +404,9 @@ def fetch_offers():
                 "stock": stock, "supply": supply,
                 "buyer": g("UserID"), "fb": g("FeedbackScore"),
                 "expire": (g("ExpirationTime") or "")[:16].replace("T", " "),
+                # ★2026-10-07 仕入れ先を探す (psa_sold_cheapest --offers) が商品管理シートの行を引けるように
+                #   (豪州等のミラーの番号では引けず、タイトルだけで探していた)
+                "sku": sku, "usItem": (parent or {}).get("iid", "") if parent else "",
             })
     out.sort(key=lambda o: o["expire"])
     return out

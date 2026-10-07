@@ -433,7 +433,9 @@ def offer_targets(offers):
         seen.add(iid)
         sym = o.get("sym") or "$"
         out.append({"order": "", "item_id": iid, "title": o.get("title") or "", "ship_by": "",
-                    "sold_usd": f"オファー {sym}{o.get('price')} (出品 {sym}{o.get('list')})", "sku": "",
+                    "sold_usd": f"オファー {sym}{o.get('price')} (出品 {sym}{o.get('list')})",
+                    # ★2026-10-07 SKU と US 本体の番号でも商品管理シートの行を引く (ミラーの番号では引けない)
+                    "sku": o.get("sku") or "", "us_item": o.get("usItem") or "",
                     "note": f"オファー {sym}{o.get('price')} / 期限 {o.get('expire', '')} / バイヤー {o.get('buyer', '')}"})
     return out
 
@@ -480,6 +482,11 @@ def main(argv=None) -> int:
     done = []
     for i, o in enumerate(orders, 1):
         _l, _n, row = W.find_row(sheets, o.get("sku", ""), o["item_id"])
+        if not row and o.get("us_item"):
+            _l, _n, row = W.find_row(sheets, o.get("sku", ""), o["us_item"])
+        # ★2026-10-07 どの道で行を引いたかを必ず出す (動いたかがログで分かるように)
+        print(f"   商品管理シートの行: {'あり' if row else '無し'} (SKU {o.get('sku') or '-'} / "
+              f"番号 {o['item_id']}{' / US本体 ' + o['us_item'] if o.get('us_item') else ''})", flush=True)
         note = o.get("note", "")
         key = cert = ""
         urls = []
