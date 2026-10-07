@@ -127,6 +127,17 @@ PRODUCT_COL_FLG = 16        # Q (FLG)
 SHELF_MARK = "棚②"
 
 
+# ★2026-10-07 ユーザー「さっき買われたミュウは在庫補充もリバイスもしないで。安く再出品されると、
+#   安い方を買われて、高い方の注文をキャンセルしないといけない」。Q列 (FLG) に この印がある行は
+#   売れた分の補充・PSA 再仕入れ・補URL が触らない。人が印を消せば元に戻る。
+HOLD_MARK = "補充保留"
+
+
+def is_restock_hold(row, flg_col=PRODUCT_COL_FLG):
+    """Q列に「補充保留」の印がある行か (純関数)。"""
+    return HOLD_MARK in ((row[flg_col] if row and len(row) > flg_col else "") or "")
+
+
 def is_shelf_dropped(row, flg_col=PRODUCT_COL_FLG):
     """Q列に棚②の印がある行か (純関数)。"""
     return SHELF_MARK in ((row[flg_col] if len(row) > flg_col else "") or "")

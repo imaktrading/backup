@@ -673,6 +673,7 @@ def main():
     done = skipped = acted = 0
     _retired = load_retired()
     _retired_hit = 0
+    hold_hit = 0
     seen = set()
     pending = pending_rows(want, sheets)
     _nb = _load_not_buyable() if pending else {}
@@ -688,6 +689,12 @@ def main():
                 _retired_hit += 1          # 対象から外した分 (毎回出さない)
             else:
                 print(f"  ⏭ [{cat}] 台帳に行が無い: {title}")
+            skipped += 1
+            continue
+        if S.is_restock_hold(row):
+            # ★2026-10-07 人が「補充保留」を付けた出品は戻さない (0件でも走行ログに数を出す)
+            print(f"  ⏸ [{cat}] 補充保留 (Q列の印) → 戻さない: {title}")
+            hold_hit += 1
             skipped += 1
             continue
         state, _aux = W.classify(row, live=_live or None)
@@ -819,7 +826,7 @@ def main():
     if _retired_hit:
         print(f"  (補充の対象から外した出品 {_retired_hit}件は出していません: "
               f"{os.path.basename(RETIRED_PATH)})")
-    print(f"\n補充済で何もしない {done} / 対象 {acted} / 見送り {skipped}"
+    print(f"\n補充済で何もしない {done} / 対象 {acted} / 見送り {skipped} (うち補充保留 {hold_hit})"
           + (f" / ⚠️要対応 {failed}" if failed else ""))
     if acted and not write:
         print("→ 実行するには --write")

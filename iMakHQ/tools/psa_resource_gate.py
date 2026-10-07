@@ -1207,10 +1207,19 @@ def main():
     try:
         import psa_hoju_fill as _PHF0
         import sheet_io as _sio0
-        _n_lab = _PHF0.set_label_context(_sio0._read_with_quota_retry(_sio0._product_ws().get_all_values))
+        _pv0 = _sio0._read_with_quota_retry(_sio0._product_ws().get_all_values)
+        _n_lab = _PHF0.set_label_context(_pv0)
         print(f"  🏷 鑑定番号でカードの分かる仕入元: {_n_lab}本 (ラベルの記録)")
     except Exception as _e_lab:                                    # noqa: BLE001 読めなければ今までどおり
+        _pv0 = []
         print(f"  ⚠ ラベルの記録の読込skip ({type(_e_lab).__name__})")
+    # ★2026-10-07 人が「補充保留」(Q列) を付けた出品は 再仕入れに出さない (0件でもログに出す)
+    try:
+        _hold = {(r[1] or "").strip() for r in _pv0[1:] if len(r) > 1 and _sio0.is_restock_hold(r)}
+    except Exception:                                              # noqa: BLE001
+        _hold = set()
+    _hold_hit = 0
+    print(f"  ⏸ 補充保留 (Q列の印) の出品: {len(_hold)}件 → 再仕入れに出さない")
     _judged_at = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")  # 可否判定(supply確認)の時刻
     MAX_AUX = 5  # 補URL列数 (AC-AG 相当)
     aux_cols = [f"補URL{k+1}" for k in range(MAX_AUX)]
@@ -1229,6 +1238,9 @@ def main():
         c = combine(mr.get("best"), snkr_res.get(i),
                     mercari_cands=mr.get("cands"), max_aux=MAX_AUX)
         _iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
+        if _iid and _iid in _hold:
+            _hold_hit += 1
+            continue
         # ★2026-07-24 fail-closed: メルカリ「取得失敗(_error)」or「今回バッチ送り(_deferred)」で
         # SNKRDUNK も在庫確定なし → 「本当に無い」か「まだ確認してない」か不明 → End候補にしない
         # (=取下げに倒さない)。判定保留=次サイクルで再チェック。
