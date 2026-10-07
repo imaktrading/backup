@@ -141,6 +141,7 @@ def _build_treasure_args(keywords: list[str], ap_args, cost_cfg, card_limits) ->
         strict_gates=True,
         cost_cfg=cost_cfg,
         card_limits=card_limits,
+        max_vision=getattr(ap_args, "max_vision", 0),
     )
 
 
@@ -158,6 +159,12 @@ def main(argv=None) -> int:
     ap.add_argument("--resume-from-json", default=None,
                     help="落ちた走行の debug/mercari_treasure_*.json を渡すと、"
                          " 収集済の検索語・処理済の商品を飛ばして続きから走る")
+    # ★2026-10-07 HQ依頼 (2026-10-07_treasure_mew_two_words): 912語フル走行でなく
+    # 指定した語だけに絞る時に使う (パイプ区切り。 例: "PSA10 ミュウ 343/S-P|PSA10 ミュウ ババ抜き")
+    ap.add_argument("--keywords", default=None,
+                    help="demand_market.csv の全語ではなく、この語だけで回す (パイプ区切り)")
+    # 鑑定番号の読み取り(従量課金API)に上限を付ける。 0=無制限 (既定)
+    ap.add_argument("--max-vision", type=int, default=0)
     args = ap.parse_args(argv)
 
     from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
@@ -197,6 +204,9 @@ def _run(args) -> int:
 
     keywords = treasure_keywords.build_keywords(rows)
     limits = treasure_keywords.build_cost_limits(rows)
+    if args.keywords:
+        keywords = [k for k in args.keywords.split("|") if k.strip()]
+        _log(f"検索語を指定分だけに絞った: {keywords}")
     _log(f"トレジャーハント: 一覧 {len(rows)} 件 / 検索語 {len(keywords)} 語")
 
     resume = None

@@ -441,6 +441,15 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
         rej["no_image"] += 1
         return None
 
+    # ★2026-10-07 HQ依頼: 鑑定番号の読み取り(従量課金API)に上限を付ける。
+    # 超えた分は呼ばずに未取得として残す(読めなかった扱いと混同しない専用枠)
+    max_vision = getattr(args, "max_vision", 0) or 0
+    if max_vision and usage is not None and usage.get("calls", 0) >= max_vision:
+        rej["vision_cap_reached"] = rej.get("vision_cap_reached", 0) + 1
+        if failed is not None:
+            failed.append(url)
+        return None
+
     vision = psa_slab_vision.read_slab(images)
     if usage is not None:
         usage["calls"] = usage.get("calls", 0) + 1
