@@ -27,3 +27,11 @@ def test_restock_paths_read_the_mark():
     here = os.path.join(os.path.dirname(__file__), "..", "tools")
     for f in ("sold_restock.py", "psa_resource_gate.py"):
         assert "is_restock_hold" in open(os.path.join(here, f), encoding="utf-8").read(), f
+
+
+def test_hold_rechecked_right_before_writing():
+    vals = [["hdr"], [""] * 40, [""] * 40]
+    vals[2][S.PRODUCT_COL_FLG] = "補充保留"
+    targets = [{"row": 2, "itemID": "A"}, {"row": 3, "itemID": "B"}]
+    keep, held = H.drop_held_now({0: ["u1"], 1: ["u2"]}, targets, vals)
+    assert keep == {0: ["u1"]} and held == ["B"]

@@ -204,6 +204,20 @@ def url_label_nots(url_cert, psa_cache, learned, pll):
     return out
 
 
+def drop_held_now(confirmed, item_targets, vals):
+    """書く直前のシート (vals) で「補充保留」の行を外す → (残す confirmed, 外した itemID)。純関数。"""
+    keep, held = {}, []
+    for i, urls in (confirmed or {}).items():
+        t = item_targets[i] if i < len(item_targets) else {}
+        row = t.get("row")
+        r = vals[row - 1] if row and 0 < row <= len(vals) else []
+        if r and sheet_io.is_restock_hold(r):
+            held.append(t.get("itemID", ""))
+            continue
+        keep[i] = urls
+    return keep, held
+
+
 def label_diff_rows(t, cands, today):
     """補の候補のうち、鑑定番号のラベルで **別のカード** と分かる物 → 補URL候補NG の行 (純関数)。
 
@@ -3099,6 +3113,10 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     except Exception as _e_fr:                                   # noqa: BLE001
         print(f"⚠️要対応 書く直前の読み直しに失敗 → 書込を中止: {type(_e_fr).__name__}: {_e_fr}")
         _guard_ok = False
+    # ★2026-10-07 画面を開いている間に「補充保留」が付いた行は、書く直前に外す
+    #   (17:38 に開いた画面が、18:00 に保留にしたミュウの行へ 確定の時に書いていた)
+    confirmed, _held_now = drop_held_now(confirmed, item_targets, vals)
+    print(f"  ⏸ 書く直前に補充保留だった出品: {len(_held_now)}件 → 書かない {_held_now[:5]}")
     _price_by_idx = add_existing_prices(_price_by_idx, confirmed, item_targets, vals)
     _dead = dead_existing_aux(confirmed, item_targets, vals)
     if _dead:
