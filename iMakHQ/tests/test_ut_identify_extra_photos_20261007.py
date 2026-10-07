@@ -24,3 +24,12 @@ def test_extra_photos_go_after_catalog_before_seller_and_can_be_first():
 def test_image_inputs_written_once(tmp_path):
     assert UI.write_image_inputs({"P": ["https://x/1.jpg"]}, str(tmp_path), now="t") == 1
     assert UI.write_image_inputs({"P": ["https://x/1.jpg"]}, str(tmp_path), now="t") == 0
+
+
+def test_image_prefs_saved_per_product(tmp_path):
+    p = str(tmp_path / "prefs.json")
+    UI._PREFS = None
+    n = UI.save_img_prefs([{"pid": "E1", "main": "https://c/1.jpg", "drop": ["https://m/2.jpg"]},
+                           {"pid": "E2"}], path=p, now="t")
+    assert n == 1
+    assert UI.load_img_prefs(p)["E1"] == {"main": "https://c/1.jpg", "drop": ["https://m/2.jpg"], "extra": [], "at": "t"}

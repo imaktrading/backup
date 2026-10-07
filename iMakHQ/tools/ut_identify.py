@@ -830,6 +830,10 @@ def _cards_html(cands, color_jp=""):
             f"data-imgs=\"{_html.escape(json.dumps(gal))}\" "
             f"data-raw=\"{_html.escape(json.dumps(gallery(p, dc)))}\" "
             f"data-defcolor=\"{_html.escape(dc)}\" "
+            # ★2026-10-07 前にこの商品で選んだ写真の並び (1枚目 / 外した / 足した) — 選んだ時に当てる
+            + (f"data-pref=\"{_html.escape(json.dumps(load_img_prefs().get(p['pid']), ensure_ascii=False))}\" "
+               if load_img_prefs().get(p["pid"]) else "")
+            + ""
             + (f"data-design='1' data-char=\"{_html.escape(p.get('character') or '')}\" "
                f"data-charv=\"{_html.escape(_charv_text(p.get('character_vision')))}\" " if p.get("design") else "")
             + ("data-learned='1' " if p.get("learned") else "")
@@ -959,7 +963,16 @@ function showImgs(box){var v=box.querySelector('.v.sel');var s=box.querySelector
     +"<button class='zp' onclick='zoomPick(event,this)'>🔍 大きくして選ぶ</button>"
     +" <span class='nm'>「1枚目」を押した画像が先頭 (押さなければ カタログの表が先頭)</span></div>";
   ca.forEach(function(u,i){h+=tile(u,cr[i],'cat');});h+="<span class='sep'></span>";
-  ph.forEach(function(u,i){h+=tile(u,pr[i],'sel');});s.innerHTML=h;}
+  ph.forEach(function(u,i){h+=tile(u,pr[i],'sel');});s.innerHTML=h;applyPref(box);}
+/* ★2026-10-07 前にこの商品で選んだ写真の並びを当てる (外した物は外す / 1枚目 / 足した写真は使う) */
+function applyPref(box){var v=box.querySelector('.v.sel');if(!v||!v.dataset.pref)return;var p={};try{p=JSON.parse(v.dataset.pref);}catch(e){return;}
+  var drop=p.drop||[],extra=p.extra||[],main=p.main||'';var hit=0;
+  box.querySelectorAll('.imgpick img').forEach(function(i){var r=decodeURIComponent(i.dataset.raw||'');
+    if(drop.indexOf(r)>=0){i.classList.add('off');hit++;}
+    if(extra.indexOf(r)>=0){i.classList.remove('off');hit++;}
+    if(main&&r===main){i.classList.add('first');i.classList.remove('off');hit++;}});
+  var n=box.querySelector('.imgpick .prefnote');if(hit&&!n){var d=document.createElement('div');d.className='nm prefnote';d.style.cssText='width:100%;color:#060';
+    d.textContent='✔ 前にこの商品で選んだ写真の並びを当てました (違えば押し直す)';box.querySelector('.imgpick').prepend(d);}}
 /* ★2026-10-07 追加の写真 (「同じ物」の候補の写真 / 自分で探したURLの写真)。最初は「使わない」= 押した物だけ使う */
 function showExtra(box){var x=box.querySelector('.imgx');if(!x||!box.dataset.pid){return;}
   var keep={};x.querySelectorAll('img').forEach(function(i){keep[i.dataset.raw]={off:i.classList.contains('off'),first:i.classList.contains('first')};});
@@ -975,7 +988,7 @@ function showExtra(box){var x=box.querySelector('.imgx');if(!x||!box.dataset.pid
   var rp=[];try{rp=JSON.parse(box.dataset.refphotos||'[]');}catch(e){}
   if(rp.length){h+="<span class='nm'>探したURL</span>";rp.forEach(function(u){h+=tile('/img?u='+encodeURIComponent(u),u,'ref');});}
   var res=(x.querySelector('.xres')||{}).innerHTML||'';var xu=(x.querySelector('input.xu')||{}).value||'';
-  x.innerHTML=h;x.style.display='';x.querySelector('.xres').innerHTML=res;x.querySelector('input.xu').value=xu;}
+  x.innerHTML=h;x.style.display='';x.querySelector('.xres').innerHTML=res;x.querySelector('input.xu').value=xu;applyPref(box);}
 function getPhotos(btn){var box=btn.closest('.it');var x=box.querySelector('.imgx');var u=(x.querySelector('input.xu').value||'').trim();
   var out=x.querySelector('.xres');if(!u){out.textContent='URLを入れてください';return;}out.textContent='写真を取っています… (10〜30秒)';
   fetch('/api/photos?url='+encodeURIComponent(u)).then(function(r){return r.json();}).then(function(d){
@@ -1518,6 +1531,55 @@ def merge_character_inputs(existing, new):
     return out
 
 
+IMG_PREFS = r"C:/dev/iMak_data/hq/ut_image_prefs.json"
+_PREFS = None
+
+
+def load_img_prefs(path=None):
+    """商品ごとの写真の選び方 {product_id: {main, drop:[...], extra:[...], at}}。読めなければ {}。"""
+    global _PREFS
+    path = path or IMG_PREFS
+    if _PREFS is not None and path == IMG_PREFS:
+        return _PREFS
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        d = d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        d = {}
+    if path == IMG_PREFS:
+        _PREFS = d
+    return d
+
+
+def save_img_prefs(picks, path=None, now=None):
+    """目視で決めた写真の選び方を **商品ごと** に残す → 残した商品の数。後から来た選び方で上書き。
+
+    ★2026-10-07 ユーザー「うん」(1枚目と外した写真も商品ごとに覚えて、次から最初からその並びに)。
+      出品1件の記録 (台帳の img_main / img_drop) は売れたら終わり。商品ごとなら同じ商品の次の出品に効く。
+    """
+    global _PREFS
+    path = path or IMG_PREFS
+    d = dict(load_img_prefs(path))
+    now = now or datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    n = 0
+    for p in picks or []:
+        pid = p.get("pid")
+        if not pid or not (p.get("main") or p.get("drop") or p.get("extra")):
+            continue
+        d[pid] = {"main": p.get("main") or "", "drop": list(p.get("drop") or []),
+                  "extra": list(p.get("extra") or []), "at": now}
+        n += 1
+    if n:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, path)
+        if path == IMG_PREFS:
+            _PREFS = d
+    return n
+
+
 def write_image_inputs(inputs, dir_path=CATALOG_REQ_DIR, now=None):
     """目視で人が選んだ「同じ物の写真」(自分で探した URL の写真) をカタログに渡す → 足した商品の数。
 
@@ -1970,6 +2032,8 @@ def save(items, res, now=None):
         print(f"  📮 カタログに追加依頼: {n_req}件 → {os.path.basename(req_path)}")
     if works_added:
         print(f"  📝 英語の作品名を対応表に足した: {works_added}件 → iMakMercari/ut_title_names.yaml")
+    n_pref = save_img_prefs([p for p in res["picks"] if p.get("pid") in catalog])
+    print(f"  🖼 写真の選び方を商品ごとに記録: {n_pref}件 (次に同じ商品を選んだ時に当てる)")
     n_img = write_image_inputs(img_inputs, CATALOG_REQ_DIR)
     # ★2026-10-07 0件でも出す (動いたかがログで分かるように)
     print(f"  📮 カタログに同じ物の写真を渡した: {n_img}件 → ut_image_input.json / "
@@ -2015,6 +2079,8 @@ def main():
     if not items:
         print("→ 0件。抽出くんの収集 (mercari_uniqlo_ut タブ) に新しい行が入ったらまた出ます")
         return 0
+    _np = sum(1 for it in items for c in it["cands"] if load_img_prefs().get(c["pid"]))
+    print(f"  🖼 前に選んだ写真の並びを覚えている候補: {_np}件 (商品ごと {len(load_img_prefs())}商品)")
     _ln = _stats.get("learned") or {}
     # ★2026-10-07 0件でも出す (動いたかがログで分かるように)
     print(f"  ✔ 前に決めた商品を選んだ状態で出す: {sum(_ln.values())}件 "
