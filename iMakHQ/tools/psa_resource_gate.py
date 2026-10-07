@@ -1208,8 +1208,7 @@ def main():
         import psa_hoju_fill as _PHF0
         import sheet_io as _sio0
         _n_lab = _PHF0.set_label_context(_sio0._read_with_quota_retry(_sio0._product_ws().get_all_values))
-        if _n_lab:
-            print(f"  🏷 鑑定番号でカードの分かる仕入元: {_n_lab}本 (ラベルの記録)")
+        print(f"  🏷 鑑定番号でカードの分かる仕入元: {_n_lab}本 (ラベルの記録)")
     except Exception as _e_lab:                                    # noqa: BLE001 読めなければ今までどおり
         print(f"  ⚠ ラベルの記録の読込skip ({type(_e_lab).__name__})")
     _judged_at = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")  # 可否判定(supply確認)の時刻
@@ -1912,8 +1911,8 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
             _n_lab = _PLL.record_picks(_PHF1.same_label_picks(_uv, _PHF1._URL_CERT, prc._load_psa_cache() or {}, _PLL))
             _n_lab += _PLL.record_nots(_PHF1.same_label_picks(_uv, _PHF1._URL_CERT, prc._load_psa_cache() or {},
                                                               _PLL, want="diff"))
-            if _n_lab:
-                print(f"  📘 鑑定番号の分かる仕入元をラベルの記録に足した (同じ/違う): {_n_lab}件")
+            # ★2026-10-07 0件でも必ず出す (動いたかどうかがログで分かるように)
+            print(f"  📘 ラベルの記録に足した (鑑定番号の分かる仕入元の同じ/違う): {_n_lab}件 / 答え {len(_uv)}件のうち")
     except Exception as _e_uv:                                  # noqa: BLE001
         print(f"  ⚠ カード単位の記録skip ({type(_e_uv).__name__}: {_e_uv})")
     # ★2026-09-06: 「PSA10でない」= グレード対象外。「違う(精度事故)」に混ぜず、

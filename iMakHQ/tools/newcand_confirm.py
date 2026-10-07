@@ -690,6 +690,9 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
     if _no_src:
         print("  🔢 カード番号の出どころ: "
               + " / ".join(f"{k} {v}件" for k, v in _no_src.most_common()))
+    # ★2026-10-07 ユーザー「ログを見れば動いているか分かるように」: ラベルで選んだ件数を必ず出す
+    print("  🏷 ラベルの記録でカードを選んだ状態で出す: %d件 / 画面に出す %d件"
+          % (sum(1 for it in items if any(v.get("label") for v in it.get("variants") or [])), len(items)))
     if auto_aux and write:
         save_auto_aux(auto_aux)
     elif auto_aux:

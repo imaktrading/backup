@@ -3279,14 +3279,13 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         # ★2026-10-06 「同じ」と答えた候補の鑑定番号が分かれば (新規で打った物)、ラベルの記録にも足す
         _n_lab = _PLL.record_picks(same_label_picks(_uv, _URL_CERT, prc._load_psa_cache() or {}, _PLL))
         _n_lab += _PLL.record_nots(same_label_picks(_uv, _URL_CERT, prc._load_psa_cache() or {}, _PLL, want="diff"))
-        if _n_lab:
-            print(f"  📘 鑑定番号の分かる候補をラベルの記録に足した (同じ/違う): {_n_lab}件")
+        # ★2026-10-07 0件でも必ず出す (動いたかどうかがログで分かるように)
+        print(f"  📘 ラベルの記録に足した (鑑定番号の分かる候補の同じ/違う): {_n_lab}件 / 答え {len(_uv)}件のうち")
         # ★2026-10-06 印の当たり率 (目視を飛ばしてよいかの物差し)。貯まるほど確かになる
         _acc = _PLL.mark_accuracy(_PLL.load(_PLL.URL_PATH))
-        if _acc:
-            print("  🎯 印の当たり率: " + " / ".join(
-                f"{ {'label': 'ラベル', 'title': 'タイトル'}.get(k, k)} {v['same']}/{v['same'] + v['diff']}"
-                for k, v in sorted(_acc.items())))
+        print("  🎯 印の当たり率 (同じ/答えた数): " + (" / ".join(
+            f"{ {'label': 'ラベル', 'title': 'タイトル'}.get(k, k)} {v['same']}/{v['same'] + v['diff']}"
+            for k, v in sorted(_acc.items())) or "まだ答えなし"))
     except Exception as _e_uv:                                  # noqa: BLE001
         print(f"  ⚠ カード単位の記録skip ({type(_e_uv).__name__}: {_e_uv})")
 

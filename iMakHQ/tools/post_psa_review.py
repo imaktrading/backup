@@ -1769,7 +1769,9 @@ def _record_verified(results: list[dict]) -> None:
     # ★2026-09-22: 選び直したカードは PSA のラベルごとにも覚える (次の別の鑑定品に効かせる)
     try:
         import psa_label_learned as _PLL
-        _PLL.record_chosen(results, _TARGETS_BY_CERT)
+        # ★2026-10-07 ユーザー「ログを見れば動いているか分かるように」: 0件でも必ず1行出す
+        print("    📘 ラベルの記録に足した: %d件 (確定 %d件のうち)" % (
+            _PLL.record_chosen(results, _TARGETS_BY_CERT), len(results or [])))
     except Exception as e:                                     # noqa: BLE001
         print("    ⚠️ 選び直しを覚えられませんでした: %s" % e)
 
