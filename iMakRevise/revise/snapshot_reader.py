@@ -27,6 +27,7 @@ COL_CURRENT_PRICE = "Current price"
 COL_CURRENCY = "Currency"
 COL_LISTING_SITE = "Listing site"
 COL_AVAILABLE_QTY = "Available quantity"
+COL_SHIPPING_PROFILE = "Shipping profile name"
 
 
 def find_latest_snapshot(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR) -> Optional[Path]:
@@ -88,6 +89,7 @@ def load_snapshot(csv_path: Path) -> dict:
                 "currency": (row.get(COL_CURRENCY) or "").strip(),
                 "site": (row.get(COL_LISTING_SITE) or "").strip(),
                 "available_qty": available_qty,
+                "shipping_profile_name": (row.get(COL_SHIPPING_PROFILE) or "").strip() or None,
             }
     return result
 

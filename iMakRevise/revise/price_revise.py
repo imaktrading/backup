@@ -1389,7 +1389,12 @@ def run_price_revise(
         # snapshot + policy 取得
         snap = snapshot_map.get(c.item_id)
         pol_entry = policy_map.get(c.item_id) or {}
-        c.current_policy = pol_entry.get("shipping_profile_name")  # ItemID レベル
+        # 今の送料ポリシーは、その朝に取った一覧 (snapshot) を正とする (2026-10-07)。
+        # policy_cache は一度入ると、こちらが送った出品しか取り直さないため、他の担当が直した分で古くなり
+        # 家と KAGOYA で食い違っていた (10/7 実測: 3件中 家が誤り2・KAGOYA が誤り1 / snapshot は送っていない出品で 28/30 一致、
+        # 残り2は 4:33 以降に他で変わった物)。snapshot に無い時だけ控えを使う。
+        c.current_policy = ((snap or {}).get("shipping_profile_name")
+                            or pol_entry.get("shipping_profile_name"))  # ItemID レベル
 
         # variation candidate (2026-05-24): SKU 別 current_usd / qty
         if c.is_variation:

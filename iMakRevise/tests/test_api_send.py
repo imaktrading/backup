@@ -87,3 +87,12 @@ def test_price_moves_written_all_rows_both_directions(tmp_path):
     ids = [x["item_id"] for x in d["items"]]
     assert len(ids) == 13 and ids[0] == "down" and "same" not in ids
     assert d["items"][0]["diff_usd"] == -292.0 and d["items"][0]["sheet"] == "LOW" and d["sent_ok"] is True
+
+
+def test_snapshot_reader_returns_shipping_profile(tmp_path):
+    from revise.snapshot_reader import load_snapshot
+    p = tmp_path / "ebay_active_2026-10-07_043309.csv"
+    p.write_text("Item number,Title,Currency,Current price,Listing site,Available quantity,Shipping profile name\n"
+                 "111,t,USD,10.98,US,1,DDP-A-P09\n222,t,USD,5.98,US,1,\n", encoding="utf-8")
+    m = load_snapshot(p)
+    assert m["111"]["shipping_profile_name"] == "DDP-A-P09" and m["222"]["shipping_profile_name"] is None
