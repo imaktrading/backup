@@ -1,5 +1,8 @@
 # iMakHQ Daily Report
 
+★2026-10-07: **ここには書かない**。日報は共有の `~/.claude/projects/C--dev-iMak/memory/daily_report.md` (全窓が起動時に読む方)。
+  10/06〜10/07 の HQ の3件はそちらに写した (ADV 依頼 hq/requests/2026-10-07_daily_report_two_files.md)。
+
 HQルール準拠フォーマット: 決定 / 変更 / 検証 の3点セット。
 検証欄は grep / テスト / 目視 の実結果のみ記録する（自己申告は書かない）。
 

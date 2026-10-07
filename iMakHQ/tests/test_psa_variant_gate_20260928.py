@@ -85,7 +85,7 @@ def test_pick_fixes_or_refuses_the_8_cases():
     assert G.pick(OP, "ONE PIECE JAPANESE PRB01-PREMIUM BOOSTER -ONE PIECE CARD THE BEST-",
                   "MONKEY D. LUFFY", "OP05-119")[0] == ""
     assert G.pick("pokemon_tcg", "POKEMON JAPANESE SV2A-POKEMON CARD 151",
-                  "WARTORTLE MASTER BALL REVERSE HOLO", "SV2a-008")[0] == ""
+                  "WARTORTLE MASTER BALL REVERSE HOLO", "SV2a-008")[0] == "SV2a-008_mb"   # ★2026-10-07 版の行ができた
     assert G.pick(OP, "ONE PIECE JAPANESE OP06-WINGS OF THE CAPTAIN",
                   "RORONOA ZORO ALTERNATE ART", "OP06-118_p1")[0] == "OP06-118_p1"
 
