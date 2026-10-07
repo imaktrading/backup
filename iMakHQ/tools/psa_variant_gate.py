@@ -185,27 +185,34 @@ def conflict(category, brand, subject, row):
 _COLS = ("product_id", "set_name", "set_name_official", "specs", "source")
 
 
-def _alias_cols(con):
-    """alias_of 列がある DB か (試験の最小 DB には無い)。"""
+def _extra_cols(con):
+    """alias_of / language のうち、この DB に在る列 (試験の最小 DB には無い)。"""
     try:
-        return "alias_of" in {r[1] for r in con.execute("pragma table_info(products)")}
+        have = {r[1] for r in con.execute("pragma table_info(products)")}
     except sqlite3.Error:
-        return False
+        return ()
+    return tuple(c for c in ("alias_of", "language") if c in have)
+
+
+def _alias_cols(con):
+    return "alias_of" in _extra_cols(con)
 
 
 def _row(con, category, pid):
-    al = ", alias_of" if _alias_cols(con) else ""
+    ex = _extra_cols(con)
+    al = "".join(", " + c for c in ex)
     r = con.execute("select product_id, set_name, set_name_official, specs, source%s from products "
                     "where category=? and product_id=?" % al, (category, pid)).fetchone()
-    return dict(zip(_COLS + (("alias_of",) if al else ()), r)) if r else None
+    return dict(zip(_COLS + ex, r)) if r else None
 
 
 def _siblings(con, category, base):
-    al = ", alias_of" if _alias_cols(con) else ""
+    ex = _extra_cols(con)
+    al = "".join(", " + c for c in ex)
     rows = con.execute("select product_id, set_name, set_name_official, specs, source%s from products "
                        "where category=? and (product_id=? or product_id like ?)" % al,
                        (category, base, base + "_%")).fetchall()
-    cols = _COLS + (("alias_of",) if al else ())
+    cols = _COLS + ex
     # like の _ は1文字の何でもにも当たるので、自分で確かめ直す
     out = []
     for r in rows:
@@ -214,6 +221,30 @@ def _siblings(con, category, base):
             if "dummy" not in d["product_id"].lower():
                 out.append(d)
     return out
+
+
+def narrow_gundam_plus(brand, subject, good, ok):
+    """ガンダムの「+」(パラレル) のラベルで合う行が複数ある時に1つに絞る。絞れなければ ok のまま。純関数。
+
+    ★2026-10-07 cert 122484177 (ST04-010 キラ・ヤマト COMMON+): 公式サイトのパラレル行 _p1〜_p7 は
+      レアリティが「C」のままで、どれが C+ か行からは分からない → 8件で決められず、目視で何度 OK しても
+      出品の手前で落ち、毎回目視に戻っていた (5回)。レアリティに「+」と書いてあるのは別の取り込み元の
+      _bp (英語) / _bp_JP (日本語) で、_bp_JP はカタログが本体 _p1 にまとめている (alias_of)。
+      → 「+」と書いた行 → ラベルの言語 (JAPANESE) → 別名の本体 の順で絞る
+    """
+    m = _GD_RARITY_RE.search(" " + str(subject or "").upper() + " ")
+    if not m or "+" not in m.group(1):
+        return ok
+    plus = [r for r in good if str(_specs(r).get("rarity") or "").endswith("+")]
+    if "JAPANESE" in str(brand or "").upper():
+        plus = [r for r in plus if str(r.get("language") or "").lower() in ("ja", "both", "")]
+    picked = []
+    for r in plus:
+        body = str(r.get("alias_of") or "")
+        pid = body if body in ok else r["product_id"]
+        if pid not in picked:
+            picked.append(pid)
+    return picked if len(picked) == 1 else ok
 
 
 def pick(category, brand, subject, current_pid, db=CATALOG_DB, con=None):
@@ -241,6 +272,8 @@ def pick(category, brand, subject, current_pid, db=CATALOG_DB, con=None):
         official = [r["product_id"] for r in good if "official" in str(r.get("source") or "")]
         if len(ok) > 1 and len(official) == 1:
             ok = official
+        if len(ok) > 1 and category == "gundam_tcg":
+            ok = narrow_gundam_plus(brand, subject, good, ok)
         if len(ok) == 1:
             return ok[0], "%s → %s に直した" % (why, ok[0])
         return "", "%s / 合う行が%d件で決められない%s" % (

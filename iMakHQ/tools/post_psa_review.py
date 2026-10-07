@@ -1380,6 +1380,11 @@ def _generate_html(targets: list[dict]) -> None:
         html.append(f'<h2>cert {cert} — {t["category"]}</h2>')
         html.append(f'<div class=cert-info><b>Brand:</b> {t["brand"]}</div>')
         html.append(f'<div class=cert-info><b>Subject:</b> {t["subject"]}</div>')
+        # ★2026-10-07 何回目の目視か。OK したのにまた出ている = 出品の手前で落ちている
+        if t.get("seen_times"):
+            html.append(f'<div class=prior-note style="background:#4a2020;border-color:#e57373;color:#ffb4b4">'
+                        f'🔁 {int(t["seen_times"]) + 1}回目の目視 — 前に {int(t["seen_times"])}回 OK したのに出品まで行っていません'
+                        f' (出品くん側の不具合。答えはそのままで構いません)</div>')
         # 既決の再確認: 前回の答えを見せて既定選択にする (毎回まっさらで聞き直さない)
         _pc = t.get("prior_choice")
         if _pc:
@@ -2544,6 +2549,24 @@ def prior_answer_for(target, prior) -> dict | None:
     return None
 
 
+def repeat_counts(targets, vc):
+    """前に OK/CHOSEN したのに、また目視に出ている cert と その回数 (純関数)。
+
+    ★2026-10-07 ユーザー「こういうの結構多い、カウンターとかつけれないの？普通、新規の目視には１回しか出ないはずでしょ」。
+      9/01 に同じ要望で verified_certs に times を積むようにしたが、**画面にもログにも出していなかった**
+      (122484177 は5回 OK されていたのに誰も気づけなかった)。
+      OK したのにまた出る = 出品の手前 (刷りの確認・セルフチェック等) で落ちている = 生成側の不具合。
+    戻り: [(cert, これまでに答えた回数)] (回数の多い順)。
+    """
+    out = []
+    for t in targets or []:
+        cert = str(t.get("cert") or "").strip()
+        rec = (vc or {}).get(cert) or {}
+        if cert and rec.get("choice") in ("OK", "CHOSEN"):
+            out.append((cert, int(rec.get("times") or 1)))
+    return sorted(out, key=lambda x: -x[1])
+
+
 def sort_targets_prior_last(targets):
     """初見を上・既決を下に並べ替える (安定ソート・純関数)。"""
     return sorted(targets or [], key=lambda t: 1 if t.get("prior_choice") else 0)
@@ -2658,6 +2681,15 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
         if pa:
             t["prior_choice"] = pa
     targets = sort_targets_prior_last(targets)
+    # 何回目の目視か (0件でも必ず1行出す = 動いているかをログで確かめられる)
+    _rep = repeat_counts(targets, _vc)
+    _rep_n = dict(_rep)
+    for t in targets:
+        if t["cert"] in _rep_n:
+            t["seen_times"] = _rep_n[t["cert"]]
+    append_log_func("  🔁 OK 済みなのに また目視に出た: %d件 / 目視 %d件%s%s" % (
+        len(_rep), len(targets),
+        (" " + ", ".join("%s(%d回OK済)" % (c, n) for c, n in _rep[:8])) if _rep else "", chr(10)))
     _n_prior = sum(1 for t in targets if t.get("prior_choice"))
     if _n_prior:
         append_log_func(f"  🕘 再確認 (前回の答えを既定選択にして下に置く): {_n_prior}件\n")
