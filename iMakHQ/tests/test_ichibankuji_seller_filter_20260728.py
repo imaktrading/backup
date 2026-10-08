@@ -37,6 +37,12 @@ def _page(cond="新品、未使用", ship="送料込み", reviews=None, buyable=
 
 def _run(monkeypatch, cands, pages):
     monkeypatch.setattr(I.time, "sleep", lambda *_a: None)
+    # ★2026-10-09: 本番の詳細キャッシュ (iMak_data/dedupe) を読み書きしていた。テストの偽 URL が溜まり、
+    #   日付が古くなると結果が変わって落ちた。テストは空のキャッシュで回し、書き戻さない
+    monkeypatch.setattr(I, "_detail_cache_load", lambda *_a, **_k: {})
+    monkeypatch.setattr(I, "_detail_cache_save", lambda *_a, **_k: None)
+    #   10/02 から詳細はまず API で取る (本物のメルカリに偽 URL を問い合わせていた)。偽ページの経路に固定する
+    monkeypatch.setattr(mp, "mercari_source_name", lambda *_a, **_k: "chrome")
     return I._filter_new_freeship(_Drv(pages), [dict(c) for c in cands])
 
 

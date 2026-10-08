@@ -786,7 +786,14 @@ def _pick_image_by_language(imgs: list, lang_hint: str = "ja") -> str | None:
         return None
     ja_patterns = ("/OP-JA/", "OP-JA", "pokemon-card.com", "-JA/", "_JA_", "/JA/")
     en_patterns = ("/OP-EN/", "OP-EN", "-EN/", "_EN_", "/EN/")
+    # ★2026-10-09: 日本の公式サイトの画像を最優先にする。P-102 ナミ (cert 166651152) で
+    #   バンダイ TCG+ の /OP-JA/ 画像が**別の絵柄**で、公式 (www.onepiece-cardgame.com) を飛ばして
+    #   それを出したため、人が「該当なし」と押した (画像の中身はカタログに確認依頼)
+    official_ja = ("www.onepiece-cardgame.com/",)
     if lang_hint == "ja":
+        for u in imgs:
+            if any(p in u for p in official_ja):
+                return u
         for u in imgs:
             if any(p in u for p in ja_patterns):
                 return u
