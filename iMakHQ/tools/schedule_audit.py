@@ -238,7 +238,34 @@ def notify(by_owner, conf, now):
                 RB.post("監視くん", fn, body, "定期処理の点検")
             except Exception as e:                             # noqa: BLE001
                 print("  ⚠ 受け箱に写せませんでした: %s" % e)
+    _wake_owners(list(by_owner))
     return wrote
+
+
+# ★2026-10-09 ユーザー「ルールを守れよ。処理が滞るやろ」: この点検が書いた依頼には呼び鈴が付いておらず、
+#   相手が窓を開くまで届いていなかった。プログラムからはメッセージを送れないので、
+#   **閉じている担当は起動する** (起動した窓は最初に requests/ を見る決まり)。開いている担当は窓口が鳴らす。
+WAKE_KEY = {"リバイス": "REVISE", "抽出くん": "HARVEST"}
+
+
+def _wake_owners(owners):
+    woke, open_, none = [], [], []
+    for o in owners:
+        key = WAKE_KEY.get(o)
+        if not key:
+            none.append(o)
+            continue
+        try:
+            sys.path.insert(0, HERE)
+            import agent_board as AB
+            ok, _msg = AB.launch(key)
+            (woke if ok else open_).append(o)
+        except Exception:                                      # noqa: BLE001
+            none.append(o)
+    print("  🔔 担当の起動: 起動した %d %s / もう開いていた %d %s / この PC から起こせない %d %s"
+          % (len(woke), woke, len(open_), open_, len(none), none))
+    if open_ or none:
+        print("     → 開いている担当・起こせない担当には、窓口 (HQ / ADV) が呼び鈴を鳴らすこと")
 
 
 def main(argv=None):
