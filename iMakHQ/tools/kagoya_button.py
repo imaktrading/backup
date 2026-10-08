@@ -42,6 +42,11 @@ FUNNEL_DIR = r"C:/dev/iMak/iMakHQ/funnel_output"     # 並び順に使う最新�
 # 下の階層で読む物 (2026-10-02 試走で家と食い違った: 市場で売れた実績の台帳が無く並び順が変わった)
 PUSH_EXTRA = [
     r"C:/dev/iMak_data/hq/market_sold/ledger.csv",
+    # ★2026-10-08: 新規の並べ順 (tcg_batch_select) が読むトレジャーハントの一覧と市場で売れた枚数。
+    #   送っていなかったので KAGOYA では無い扱いになり、10/05 から「トレジャーハント 0件 / 市場で売れた 0件に実績」で
+    #   10/07 に足したプロモ分も優先されていなかった
+    r"C:/dev/iMak_data/hq/market_sold/demand_market.csv",
+    r"C:/dev/iMak_data/hq/market_sold/demand_full.csv",
     r"C:/dev/iMak_data/hq/exposure_watch/swap_priority.json",
     r"C:/dev/iMak_data/hq/shelf2_hoju_priority.json",      # ★2026-10-04 棚② の補優先 (補URL③の先頭へ)
     r"C:/dev/iMak_data/hq/price_jump_priority.json",       # ★2026-10-05 値段が大きく動いた出品 (補優先の先頭)

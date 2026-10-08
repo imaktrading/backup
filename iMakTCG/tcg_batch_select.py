@@ -546,6 +546,8 @@ def load_market_sold(path=MARKET_SOLD_CSV):
     import csv as _csv
     import os as _os
     if not _os.path.exists(path):
+        # ★2026-10-08: 黙って空にすると「0件に実績」と区別できない (KAGOYA に送られず3日気づかなかった)
+        print(f"  ⚠ 市場で売れた枚数の一覧がありません: {path}")
         return {}
     out = {}
     try:
@@ -577,6 +579,7 @@ def load_treasure_ids(path=TREASURE_CSV):
     import csv as _csv
     import os as _os
     if not _os.path.exists(path):
+        print(f"  ⚠ トレジャーハントの一覧がありません: {path}")
         return set()
     try:
         with open(path, encoding="utf-8-sig", newline="") as f:
