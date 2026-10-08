@@ -19,6 +19,15 @@ async function writeLog() {
   });
 }
 
+// ★2026-10-09 メルカリの購入履歴: 神風が #imak-buys 付きで開いたタブを、ページが印を消す前にここで拾う
+//   (メルカリの画面は開いた直後に URL を書き換えるので、ページの中の script では印が見えないことがある)
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  const u = info.url || "";
+  if (u.includes("jp.mercari.com/mypage/purchases") && u.includes("#imak-buys")) {
+    chrome.storage.local.set({ imakBuysAt: Date.now() });
+  }
+});
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg) return;
   if (msg.type === "api") {

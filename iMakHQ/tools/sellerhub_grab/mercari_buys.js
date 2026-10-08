@@ -22,7 +22,11 @@
       await chrome.storage.local.set({ [FLAG]: Date.now() });
       history.replaceState(null, "", location.pathname + location.search);
     }
-    const { [FLAG]: at = 0 } = await chrome.storage.local.get(FLAG);
+    let at = 0;
+    for (let i = 0; i < 10 && !at; i++) {                          // 印は裏 (background.js) が付ける。少し待つ
+      ({ [FLAG]: at = 0 } = await chrome.storage.local.get(FLAG));
+      if (!at) await sleep(300);
+    }
     if (!at || Date.now() - at > 15 * 60 * 1000) return;          // 神風が開いた時だけ動く
     for (let i = 0; i < 40; i++) {                                 // 一覧が出るまで (最大20秒)
       if (document.querySelector('a[href^="/transaction/"]')) break;
