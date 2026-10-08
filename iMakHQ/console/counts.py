@@ -32,6 +32,29 @@ def _restock_tab():
         return None
 
 
+ORDER_STATUS = r"C:/dev/iMak_data/hq/order_purchase_status.json"
+
+
+def order_sync():
+    """注文の取り込み (仕入れ待ち) を数え直しと一緒に回す (I/O)。
+
+    ★2026-10-09 ユーザー「仕入れ待ちの取り込むボタン、残数を数えなおすタイミングに含めれない？」。
+      それまで仕入れ待ちの数はボタンを押した時にしか変わらなかった。中身はボタンと同じ
+      (order_purchase_sync.py --write = eBay の注文を販売実績に足す + メルカリの購入履歴で仕入済を付ける)。
+      出力は多いので捨て、数は order_purchase_status.json から読む (画面もそこを読む)。
+    """
+    import subprocess
+    r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(TOOLS, "order_purchase_sync.py"), "--write"],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
+                       cwd=TOOLS, env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if r.returncode != 0:
+        raise RuntimeError(((r.stderr or r.stdout or "").strip().splitlines() or ["出力なし"])[-1][:200])
+    with open(ORDER_STATUS, encoding="utf-8") as f:
+        st = json.load(f)
+    return {"waiting": st.get("waiting"), "at": st.get("at"), "warn": st.get("warn") or ""}
+
+
 def main():
     rk = {"rows": None, "read": False}
 
@@ -50,6 +73,7 @@ def main():
         "restock": lambda: __import__("sold_restock").count_workload(),
         # ★2026-09-19: オファーは期限が短いので件数を出す (eBay 1コール)。
         "offer": lambda: __import__("offer_calc").count_workload(),
+        "order": order_sync,
         # ★2026-10-05 ユーザー「新規出品出来るカード枚数を今日やることの下に」: PSA 新規と同じ条件で数える
         "psa_new": lambda: __import__("psa_new_count").count_workload(),
         "ut": lambda: __import__("ut_hoju_fill").count_workload(),
