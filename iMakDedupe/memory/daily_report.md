@@ -300,3 +300,14 @@
 - 決定: PC 入替の備えで untracked 棚卸し中に発覚。`!**/__init__.py` を追加し __init__.py 3本を追加。extractors/__init__.py (regex 一式の入口) は失うと import 不能で、どこにも複製が無かった
 - 変更: .gitignore / dedupe/__init__.py / dedupe/extractors/__init__.py / tests/__init__.py。commit 6169d4e4 push 済
 - 検証: 残る `_*.py` 0件 (git ls-files --others --ignored)。取り直せない git 管理外データも 0件 (キャッシュ・試し打ちの残り・master に複製ありのみ)
+
+## 2026-10-09
+
+### PSA10 ピカチュウ 127/414 が US に2本 (リバイス依頼・中)
+
+- 決定: 残すのは 820161951128 (在庫1・商品管理シート2830行に仕入元+補URL3本+鑑定番号157659989+KEY)。
+  820158103418 (在庫0・$122.98) は **HIGH/LOW/公式 の全タブに1か所も無い野良出品** → 取り下げ。
+  これが eBay の「identical items」判定で毎朝の値段直しを止めていた。同 KEY の815行は CULL 済の別個体 (itemID空)
+- 変更: コードなし (調査+判断)。取り下げは監視くんへ inventory/requests + 受け箱 id=27 (ADV 経由・LAPTOP は requests/ 不可視)
+- 検証: snapshots/ebay_active_2026-10-09_051831.csv で2本とも US・在庫0/1 を確認。3シート全タブを itemID で走査し野良を確定
+- 残: live 全件 × シートの野良突合 (他にも同型があるか) をユーザーに提案中・未着手
