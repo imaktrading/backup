@@ -1965,6 +1965,11 @@ def _pdca_prune_resolved(dry_run):
         moved = _move_resolved_missing_models(pr.get("pruned_item_ids"))
         if moved:
             print(f"  🧹 台帳掃除: 解決済 {moved}件を missing_models.csv → missing_models_processed.csv")
+        # ★2026-10-09 (提案 2026-10-06_act_code_proposals_tcg 提案1): カタログが処理済にした依頼も digest の前に閉じる。
+        #   prune は source=missing_models の「行が在るか」しか見ず、images の穴 (source=generator) は閉じない。
+        #   後ろの _pdca_accumulate でしか閉じていなかったので、翌日の digest に pending のまま載っていた
+        synced = _pdca.sync_processed(con, CATALOG_REQ_DIR, ts=_today())
+        print(f"  🧹 カタログ処理済を先に閉じた: {synced}件")
         return pr.get("pruned") or 0
     except Exception as e:                                     # noqa: BLE001
         print(f"  ⚠️ PDCA prune(先出し) skip: {type(e).__name__}: {e}")
