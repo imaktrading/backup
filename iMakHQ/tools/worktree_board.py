@@ -78,8 +78,19 @@ def _is_outbound(path: Path, worktree: str) -> bool:
     return bool(RE_TO_HQ_NAME.search(path.stem)) or _addressed_to_desk(path)
 
 
+# ★2026-10-09 ユーザー「滞るやろ」: 返事に付けた名前 (`X_response_adv` / `X_response_hq` / `X_processed_2`) は
+#   それ自体が返事なのに、末尾が判定語でないため「相手が返す番」に数えていた (カタログ宛に5件が残って見えた)。
+#   判定語の **後ろに** 書き手名などが付いた物も、返事として決着扱いにする (下書き `_question` は先に別扱い)
+#   ★書き手名で終わる物だけ (`hq_response_yodobashi_cadence_GO` のような GO の指示や、下書き `_response_question` は
+#   返事ではないので除く。2026-08-12 / 08-18 の回帰テスト)
+_REPLY_BY = re.compile(r"_(?:processed|response|done|resolved|applied)_(?:adv|advisor|hq|catalog|kagoya|revise|harvest|"
+                       r"dedupe|inventory|laptop|bravo|alpha)$", re.I)
+
+
 def _is_closed(path: Path, stems: set[str]) -> bool:
     if path.stem.lower().endswith(CLOSED_SUFFIXES):
+        return True
+    if _REPLY_BY.search(path.stem):
         return True
     prefix = path.stem + "_"
     return any(s != path.stem and s.startswith(prefix) for s in stems)

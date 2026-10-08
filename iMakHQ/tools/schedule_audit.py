@@ -36,7 +36,10 @@ NOTIFIED = r"C:/dev/iMak_data/hq/schedule_audit_notified.json"
 JOBQ_STATE = r"C:/dev/iMak_data/hq/job_queue_state.json"
 JOBQ_DEF = r"C:/dev/iMak_data/hq/job_queue.json"
 NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-RENOTIFY_H = 24
+# ★2026-10-09 新生ブラボーの洗い出し (問題 C): 状態が変わっていないのに24時間ごとに知らせ直し、
+#   毎日同じ依頼が積まれていた。→ **1回知らせたら、直る (正常に戻る) まで黙る**。直った物は記録から消すので、
+#   また壊れたら知らせる。None = 知らせ直さない
+RENOTIFY_H = None
 
 # Windows の結果コード
 OK_CODES = {0}
@@ -138,14 +141,14 @@ BAD = {"missing", "disabled", "failed", "stale", "unknown_task", "ask", "unknown
 
 
 def to_notify(rows, notified, now, renotify_h=RENOTIFY_H):
-    """知らせる物 {担当: [行]}。同じ (名前, 状態) は renotify_h 時間に1回だけ。純関数。"""
+    """知らせる物 {担当: [行]}。同じ (名前, 状態) は1回だけ (renotify_h を入れればその間隔で知らせ直す)。純関数。"""
     out = {}
     for r in rows:
         if r["status"] not in BAD:
             continue
         key = "%s|%s" % (r["name"], r["status"])
         last = _ts(notified.get(key))
-        if last and (now - last).total_seconds() < renotify_h * 3600:
+        if last and (renotify_h is None or (now - last).total_seconds() < renotify_h * 3600):
             continue
         out.setdefault(r["owner"], []).append(r)
     return out
@@ -297,7 +300,14 @@ def main(argv=None):
     if dry:
         return 0
     notified = _load(NOTIFIED, {})
+    # 直った (今は異常でない) 物は記録から消す → また壊れたら知らせる
+    still = {"%s|%s" % (r["name"], r["status"]) for r in res["rows"] if r["status"] in BAD}
+    cleared = [k for k in notified if k not in still]
+    for k in cleared:
+        notified.pop(k, None)
     by_owner = to_notify(res["rows"], notified, now)
+    print("  🔕 知らせ済みで変わらない物 %d件 (出し直さない) / 直って記録から消した物 %d件"
+          % (sum(1 for r in res["rows"] if r["status"] in BAD) - sum(len(v) for v in by_owner.values()), len(cleared)))
     for p in notify(by_owner, conf, now):
         print("  📨 知らせた: %s" % p)
     for rows in by_owner.values():

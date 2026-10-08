@@ -82,14 +82,13 @@ def test_監視くんの最後の巡回が11時間より前なら止まってい
     assert [r for r in res["rows"] if r["name"] == "監視"][0]["status"] == "stale"
 
 
-def test_同じ異常は24時間に1回だけ知らせる():
+def test_同じ異常は1回だけ知らせ_直るまで出し直さない():
     rows = [{"name": "K1", "status": "failed", "owner": "カタログ", "where": "kagoya", "why": "x"},
             {"name": "H1", "status": "ok", "owner": "HQ", "where": "home", "why": "x"}]
     assert list(A.to_notify(rows, {}, NOW)) == ["カタログ"]
-    recent = {"K1|failed": "2026-10-07T03:00:00"}
-    assert A.to_notify(rows, recent, NOW) == {}
-    old = {"K1|failed": "2026-10-06T07:00:00"}
-    assert list(A.to_notify(rows, old, NOW)) == ["カタログ"]
+    old = {"K1|failed": "2026-10-01T07:00:00"}           # 何日たっても出し直さない (2026-10-09 問題 C)
+    assert A.to_notify(rows, old, NOW) == {}
+    assert list(A.to_notify(rows, old, NOW, renotify_h=24)) == ["カタログ"]   # 間隔を入れた時だけ出し直す
 
 
 def test_知らせの本文は既知と未回答を分けて書く():

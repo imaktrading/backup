@@ -162,6 +162,13 @@ def main() -> int:
     print("## 3. 未処理 requests (調整ハブの本務)")
     print("\n".join(_pending_requests()))
     print()
+    # ★2026-10-09 ユーザー「基本は呼び鈴で、穴は12時間にできる？」: 窓口の窓が見回りの予約を持つ
+    print("## 4. 依頼の見回り (窓口の決まり)")
+    print("- まず `python iMakHQ/tools/request_sweep.py` を走らせ、出た宛先それぞれに SendMessage で呼び鈴を鳴らす")
+    print("- CronList を見て、見回りの予約が無ければ CronCreate で入れる: cron `17 6,18 * * *` /"
+          " prompt「依頼の見回り: python iMakHQ/tools/request_sweep.py を走らせ、出た宛先に呼び鈴を鳴らす"
+          " (0件なら何もしない)」 (窓を閉じると消える・7日で切れるので、起動のたびに確かめる)")
+    print()
     print(
         "※ memory は出品専任と共有 (junction)。書込先も同じ dir。"
         " 区切りごとに commit / push / daily_report 追記 (見出しに [Advisor] 署名・Edit のみ)。"
