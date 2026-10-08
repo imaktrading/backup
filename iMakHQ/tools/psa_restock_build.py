@@ -389,6 +389,22 @@ def restock_items(rows, inp, skipped, itemid_to_cert):
     return out
 
 
+def summary_line(n_sent, n_already, held, skipped, ng_ids):
+    """② の締めの1行 (純関数)。
+
+    ★2026-10-08: 台帳などで **送る前に外した行 (skipped)** を締めの「見送り」に数えていなかった。
+      358514312870 が毎回外されているのに締めは「見送り 0件 → ✅ 正常」と出て、
+      ③ の「入稿待ち 1」とだけ食い違って見えた。外した分も数え、あれば「正常」と書かない。
+    """
+    n_skip = held + len(skipped or [])
+    line = f"在庫を戻した {n_sent}件 / もう戻っていた {n_already}件 / 見送り {n_skip}件"
+    if ng_ids:
+        return line + f" / ⚠️要対応 {len(ng_ids)}件 {list(ng_ids)}"
+    if skipped:
+        return line + f" → ⚠ 送る前に外した {len(skipped)}件あり (理由は上の ⏭。③ で入稿待ちに出ます)"
+    return line + " → ✅ 正常"
+
+
 def main():
     """★2026-09-30 ユーザー確定: 再仕入れは **今ある出品の在庫を 0→1 に戻すだけ** にする。
 
@@ -434,6 +450,8 @@ def main():
     for s in skipped[:10]:
         print("  ⏭", s)
     if not items:
+        if skipped:
+            print("\n" + summary_line(0, 0, 0, skipped, []))
         return 0
 
     import ebay_upload_csv as U
@@ -489,8 +507,7 @@ def main():
     if write and (sent or already):
         record_built(sent + already)
     ng = len(failed) + len(ended)
-    print(f"\n在庫を戻した {len(sent)}件 / もう戻っていた {len(already)}件 / 見送り {held}件" + (f" / ⚠️要対応 {ng}件 {failed + ended}" if ng else "")
-          + ("" if ng else " → ✅ 正常"))
+    print("\n" + summary_line(len(sent), len(already), held, skipped, failed + ended))
     # ★2026-10-04: ① 目視のボタンから一連で走る時 (psa_restock_chain) は、③ を chain が毎回1回だけ回す
     if write and (sent or already) and not os.environ.get("PSA_RESTOCK_CHAIN"):
         print("\n▶ ③ 確認を続けて回します (商品管理シートの仕入元・売り切れ・「実行済」を揃える)")
