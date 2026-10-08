@@ -1680,6 +1680,12 @@ def write_catalog_request(rows, dir_path=CATALOG_REQ_DIR, today=None):
         os.makedirs(dir_path, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(md)
+        try:                                         # ★2026-10-09 新生ブラボー: 依頼の呼び鈴はブラボーへ
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import bell as _bell
+            _bell.notify_bg("UT の同定 (ut_identify.py)", path, "UT のカタログ依頼")
+        except Exception:                            # noqa: BLE001
+            pass
         return path, md.count("\n| ") if not existing else len(rows)
     except OSError as e:                                           # noqa: BLE001
         print(f"  ⚠ カタログ依頼書を書けませんでした ({e}) — 台帳には残っています")

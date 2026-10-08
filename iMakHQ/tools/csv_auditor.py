@@ -966,6 +966,12 @@ def write_catalog_request(project, items, dry_run):
         os.makedirs(CATALOG_REQ_DIR, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
+        try:                                         # ★2026-10-09 新生ブラボー: 依頼の呼び鈴はブラボーへ
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import bell as _bell
+            _bell.notify_bg("CSV監査くん (csv_auditor.py)", path, "カタログへの確認依頼")
+        except Exception:                            # noqa: BLE001
+            pass
     return path
 
 

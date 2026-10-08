@@ -170,6 +170,12 @@ def _write_request(st):
               "3. 回答は同じ名前 + _response.md に「戻した件数 / 残り0件 / integrity_check」"]
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
+    try:                                         # ★2026-10-09 新生ブラボー: 依頼の呼び鈴はブラボーへ
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import bell as _bell
+        _bell.notify_bg("データの見張り (data_integrity_watch.py)", path, "カタログ DB の化け・壊れ (高)")
+    except Exception:                            # noqa: BLE001
+        pass
     return path
 
 

@@ -649,6 +649,12 @@ def _write_request(out_path: Path, category: str, rows: list[dict]) -> None:
         f"HQ から個別依頼書\n",
         encoding="utf-8",
     )
+    try:                                         # ★2026-10-09 新生ブラボー: 依頼の呼び鈴はブラボーへ
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import bell as _bell
+        _bell.notify_bg("カタログ自動依頼 (auto_catalog_add_request.py)", str(out_path), "カタログ追加 (自動)")
+    except Exception:                            # noqa: BLE001
+        pass
 
 
 def main() -> int:

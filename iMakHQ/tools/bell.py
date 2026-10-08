@@ -101,6 +101,27 @@ def to_bravo(frm, file, text, urgent=False):
     return ok
 
 
+def notify_bg(frm, path, text, urgent=False):
+    """依頼を書いたプログラムが呼ぶ口。呼び鈴は **裏で** 鳴らし、すぐ戻る (本体の処理を待たせない)。
+
+    path は requests の中のファイル (絶対パスでも iMak_data からの相対でもよい)。テスト中は鳴らさない。
+    """
+    rel = os.path.relpath(os.path.abspath(path), os.path.abspath(r"C:/dev/iMak_data")).replace("\\", "/")         if os.path.isabs(str(path)) else str(path).replace("\\", "/")
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return False
+    try:
+        flags = NOWIN | getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        args = [sys.executable, "-X", "utf8", os.path.join(HERE, "bell.py"), "bravo", "--from", frm,
+                "--file", rel, "--text", text] + (["--urgent"] if urgent else [])
+        subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=flags, close_fds=True)
+        print("🔔 ブラボーに呼び鈴 (裏で鳴らす): %s" % rel)
+        return True
+    except Exception as e:                                     # noqa: BLE001
+        print("⚠️ ブラボーに呼び鈴を鳴らせません (%s) — 依頼のファイルは置いてある" % e)
+        return False
+
+
 def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser()
