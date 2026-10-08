@@ -3,8 +3,9 @@
 """メルカリの「購入した商品」を読む (2026-09-24)。注文 → 仕入れ の管理 (order_purchase_sync.py) が使う。
 
 ★ユーザー (2026-09-24):「メルカリは mypage/purchases から URL とれないかな」「自分の購入履歴ならいいと思う」。
-  仕入れアカウントでログインした **専用の Chrome (PROFILE)** で読む。ログインは人が1回だけ手でした。
-  他の道具が使う匿名の Chrome (ログインしない) とは別物。混ぜない。
+  ★2026-10-09 から **いつも使っている Edge の拡張** (tools/sellerhub_grab/mercari_buys.js) が一覧を読んで神風に渡す。
+    専用の Chrome (ログインを1回だけ手でした物) は1日ほどでログインが切れたのでやめた (save_from_extension)。
+  値段は商品ページ (ログインしない Chrome) で読む (item_prices)。
 
 読むのは1ページ目だけ (直近 約40件)。完了済みの古い取引はリンクが無いものがあり、それは取れない。
 """
@@ -21,7 +22,6 @@ try:                                     # 後片付けで uc が quit を2回�
 except Exception:                        # noqa: BLE001
     pass
 
-PROFILE = r"C:\Users\imax2\local_data\iMakHQ\mercari_buyer_profile"
 URL = "https://jp.mercari.com/mypage/purchases"
 _DATE = re.compile(r"(\d{4})/(\d{2})/(\d{2}) (\d{2}):(\d{2})")
 
@@ -42,78 +42,75 @@ def parse_purchases(src):
     return out
 
 
-def normal_ua(major):
-    """窓なしでも普通の Chrome と同じ名乗り (純関数)。
+EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+CACHE = r"C:/dev/iMak_data/hq/mercari_purchases_cache.json"
+FRESH_MIN = 30                    # これより新しい控えがあれば Edge を開かない
+WAIT_SEC = 90                     # Edge の拡張が控えを書くのを待つ
 
-    ★2026-09-25 ユーザー「これで3回目やで」(ログインが1日ほどで切れる)。窓なしの Chrome は
-      'HeadlessChrome/154' と名乗る。ログインは普通の Chrome でしたので、メルカリからは別の端末に見え、
-      本人確認のやり直し (signin?acr_values=...) を求められていた。
+
+def save_from_extension(body, now=None, path=None):
+    """Edge の拡張 (sellerhub_grab/mercari_buys.js) が送ってきた購入履歴を控えに書く (I/O)。神風が呼ぶ。
+
+    ★2026-10-09 ユーザー「メルカリ購入履歴_ログインし直す.bat を押すって、アナログ過ぎない？」→「単純に購入履歴を読み取ればいい」。
+      専用の Chrome で読むと、メルカリから別の端末に見えて1日ほどでログインが切れた (9/25・10/6 に直して2回とも切れた)。
+      いつも使っている Edge (ログインしたまま) の拡張が一覧の HTML を渡し、ここで読む。
     """
-    return ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/%s.0.0.0 Safari/537.36" % (major or 154))
+    import json
+    now = now or dt.datetime.now()
+    if body.get("login_required"):
+        d = {"at": now.isoformat(timespec="seconds"), "login_required": True, "items": []}
+    else:
+        items = parse_purchases(body.get("html") or "")
+        d = {"at": now.isoformat(timespec="seconds"), "login_required": False,
+             "items": [{**p, "at": p["at"].isoformat() if p["at"] else None} for p in items]}
+    with open(path or CACHE, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False)
+    return {"ok": True, "n": len(d["items"]), "login_required": d["login_required"]}
 
 
-def read_args(profile=PROFILE):
-    """購入履歴を読む Chrome の起動引数 (純関数)。
-
-    ★2026-10-06 ユーザー「おかしいよね。作りが」: 取り込み8回のうち読めたのはログイン直後の1回だけ。
-      切れた時は毎回 本人確認のやり直し (signin?acr_values=...) に飛ばされていた。
-      ログインは窓ありの普通の Chrome、読む時は窓なし (headless) で、メルカリからは別の端末に見える。
-      9/25 に名乗り (UA) だけ揃えたが変わらなかった → **読む時もログインと同じ窓ありで開く**。
-      窓は画面の外に置くので見えない。名乗りの上書きもしない (ログイン時と全く同じ Chrome にする)。
-    """
-    return [f"--user-data-dir={profile}", "--lang=ja-JP", "--window-size=1280,1400",
-            "--window-position=-2400,-2400"]
-
-
-def fetch_purchases():
-    """ログイン済みの専用 Chrome (ログインと同じ窓あり・画面の外) で読む (I/O)。ログインが切れていたら例外。"""
-    import undetected_chromedriver as uc
-    from mercari_psa_resource import _chrome_major, _quiet_chromedriver
-    _quiet_chromedriver()
-    o = uc.ChromeOptions()
-    maj = _chrome_major()
-    for a in read_args():
-        o.add_argument(a)
-    d = uc.Chrome(options=o, version_main=maj) if maj else uc.Chrome(options=o)
+def load_cache(path=None):
+    """控え → (書いた時刻, ログインが要るか, 購入 list)。無ければ (None, False, [])。"""
+    import json
     try:
-        d.get(URL)
-        for _ in range(20):
-            time.sleep(2)
-            # ★2026-10-06: ログインに飛ばされたら待たずに閉じる (窓ありにしたので、40秒タスクバーに居座っていた)
-            if "/transaction/" in d.page_source or "login.jp.mercari.com" in d.current_url:
-                break
-        if "/mypage/purchases" not in d.current_url:
-            raise RuntimeError("メルカリのログインが切れています (%s)" % d.current_url)
-        return parse_purchases(d.page_source)
-    finally:
-        d.quit()
+        with open(path or CACHE, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None, False, []
+    items = [{**p, "at": dt.datetime.fromisoformat(p["at"]) if p.get("at") else None} for p in d.get("items") or []]
+    return dt.datetime.fromisoformat(d["at"]), bool(d.get("login_required")), items
 
 
-def login():
-    """ログインが切れた時に人が1回ログインする窓を開く (I/O)。購入履歴が出たら閉じる (最大15分)。
+def cache_state(at, login_required, now, since=None):
+    """控えをどう扱うか (純関数): "use" / "login" / "stale"。
 
-        python mercari_purchases.py --login
+    since: Edge に頼んだ時刻。それより後に書かれた物だけを今回の返事として扱う。
     """
-    import undetected_chromedriver as uc
-    from mercari_psa_resource import _chrome_major, _quiet_chromedriver
-    _quiet_chromedriver()
-    o = uc.ChromeOptions()
-    for a in (f"--user-data-dir={PROFILE}", "--lang=ja-JP", "--window-size=1280,1400"):
-        o.add_argument(a)
-    maj = _chrome_major()
-    d = uc.Chrome(options=o, version_main=maj) if maj else uc.Chrome(options=o)
-    try:
-        d.get(URL)
-        for _ in range(90):
-            time.sleep(10)
-            if "/mypage/purchases" in d.current_url and "/transaction/" in d.page_source:
-                print("ログインできました")
-                return True
-        print("15分でログインが終わりませんでした")
-        return False
-    finally:
-        d.quit()
+    if at is None or (since is not None and at < since):
+        return "stale"
+    if login_required:
+        return "login"
+    return "use" if (now - at).total_seconds() <= FRESH_MIN * 60 else "stale"
+
+
+def fetch_purchases(wait=WAIT_SEC, opener=None, sleep=time.sleep, now=dt.datetime.now):
+    """購入履歴 (I/O)。新しい控えがあればそれを、無ければ Edge で開いて拡張の返事を待つ。
+
+    ログインが要る時・返事が無い時は例外 (呼び側が神風の注文の枠に出す)。
+    """
+    at, login, items = load_cache()
+    if cache_state(at, login, now()) == "use":
+        return items
+    asked = now().replace(microsecond=0)
+    (opener or (lambda u: __import__("subprocess").Popen([EDGE, u])))(URL + "#imak-buys")
+    for _ in range(int(wait / 3)):
+        sleep(3)
+        at, login, items = load_cache()
+        st = cache_state(at, login, now(), since=asked)
+        if st == "use":
+            return items
+        if st == "login":
+            raise RuntimeError("メルカリのログインが要ります (Edge で開いたタブでログインしてください)")
+    raise RuntimeError("Edge の拡張から購入履歴が届きません (Edge の拡張「Seller Hub レポート取り」3.4 以上と神風が動いているか)")
 
 
 _PRICE = re.compile(r'data-testid="price"[^>]*>\s*<span[^>]*>[¥￥]</span>\s*<span>([\d,]+)</span>')
@@ -184,7 +181,5 @@ def mercari_id(url):
 
 if __name__ == "__main__":
     import sys
-    if "--login" in sys.argv:
-        sys.exit(0 if login() else 1)
     for p in fetch_purchases():
         print(p["at"], p["url"], p["title"][:40])

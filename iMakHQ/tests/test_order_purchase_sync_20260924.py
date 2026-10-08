@@ -203,19 +203,3 @@ def test_two_identical_uniqlo_purchases_get_different_keys():
     assert O.purchase_keys(b, "uniqlo")[0] != O.purchase_keys(b, "uniqlo")[1]
 
 
-def test_headless_uses_normal_chrome_name():
-    """ログインが1日で切れた (3回)。窓なしが HeadlessChrome と名乗り、別の端末に見えていた。"""
-    import mercari_purchases as MP
-    ua = MP.normal_ua(154)
-    assert "Headless" not in ua and "Chrome/154.0.0.0" in ua
-
-
-
-def test_reading_uses_same_windowed_chrome_as_login():
-    """2026-10-06: 読む時も窓ありで開く (窓なしだと別端末と見なされ本人確認のやり直しに飛ばされた)。"""
-    import mercari_purchases as MP
-    a = MP.read_args("P")
-    assert not any("headless" in x for x in a)
-    assert not any(x.startswith("--user-agent") for x in a)
-    assert "--user-data-dir=P" in a
-    assert any(x.startswith("--window-position=-") for x in a)      # 画面の外に置く

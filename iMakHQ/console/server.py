@@ -1473,6 +1473,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, SO.mark_sent(iid, body.get("pct")))
             except Exception as e:                       # noqa: BLE001
                 return self._json(200, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if u.path == "/api/mercari/purchases":
+            # ★2026-10-09 Edge の拡張 (sellerhub_grab/mercari_buys.js) がメルカリの購入履歴を渡してくる
+            if TOOLS not in sys.path:
+                sys.path.insert(0, TOOLS)
+            import mercari_purchases as MPU
+            try:
+                r = MPU.save_from_extension(body)
+                _log("🛒 メルカリ購入履歴を Edge から受け取りました: %s" % (
+                    "ログインが要ります" if r["login_required"] else "%d件" % r["n"]))
+                return self._json(200, r)
+            except Exception as e:                       # noqa: BLE001
+                return self._json(200, {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]})
         if u.path == "/api/research/open":
             try:
                 return self._json(200, research_open(body.get("preset"), body.get("tabs"),

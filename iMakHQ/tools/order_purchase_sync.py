@@ -499,10 +499,9 @@ def _link_mercari(targets, linked):
     except Exception as e:                                     # noqa: BLE001
         # ★2026-10-04: ログイン切れで購入が結べず、仕入れ済みのミュウが「仕入れ待ち」に残っていた。
         #   走行ログにしか出ていなかったので、神風の注文の枠に出す (_write_status が書く)
-        LINK_WARN.append("メルカリの購入履歴を読めません (ログイン切れ)" if "ログイン" in str(e)
-                         else "メルカリの購入履歴を読めません")
-        print(f"  ⚠ メルカリの購入履歴を読めませんでした: {str(e)[:60]}")
-        print("    → ログインし直す: python iMakHQ/tools/mercari_purchases.py --login (窓でログインしたら自動で閉じます)")
+        LINK_WARN.append("メルカリの購入履歴を読めません (Edge でメルカリにログイン)" if "ログイン" in str(e)
+                         else "メルカリの購入履歴を読めません (Edge の拡張)")
+        print(f"  ⚠ メルカリの購入履歴を読めませんでした: {str(e)[:100]}")
         return {}
     # ★2026-10-04: 「売れた PSA の仕入れ先を探す」の画面に出した候補から買った物も結ぶ (ユーザー OK)。
     #   仕入元・補URL だけだと、探し直して見つけた別の出品から買った分が「仕入れ待ち」に残っていた
@@ -523,7 +522,7 @@ def _link_mercari(targets, linked):
                             {n: norm_order(r[C_ORDER]) for n, r, _o in targets})
     key_of = {id(p): k for p, k in free}
     hit = MP.match(orders, [p for p, _k in free])
-    print(f"  メルカリ購入履歴 {len(buys)}件 (ほかの注文に結び済み {len(buys) - len(free)}件) / 結べた注文 {len(hit)}件")
+    print(f"  メルカリ購入履歴 (Edge の拡張から) {len(buys)}件 (ほかの注文に結び済み {len(buys) - len(free)}件) / 結べた注文 {len(hit)}件")
     return {n: (p["at"].date(), p["url"], "%s %s" % (p["at"].strftime("%m/%d %H:%M"), p["title"][:30]),
                 None, key_of[id(p)])
             for n, p in hit.items()}

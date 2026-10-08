@@ -31,6 +31,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch((e) => sendResponse({ ok: false, error: "神風に繋がらない (" + e + ")" }));
     return true;                       // 返事は後で送る
   }
+  if (msg.type === "close") {
+    // ★2026-10-09 メルカリの購入履歴 (mercari_buys.js) を渡し終えたタブを閉じる
+    if (sender.tab && sender.tab.id != null) setTimeout(() => chrome.tabs.remove(sender.tab.id), 1500);
+    return;
+  }
   if (msg.type === "start") {
     chrome.storage.local.set({ shgLines: [`${new Date().toLocaleString()} 自動 開始`] });
   } else if (msg.type === "log") {

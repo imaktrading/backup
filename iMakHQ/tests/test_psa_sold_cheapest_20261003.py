@@ -83,20 +83,20 @@ def test_purchase_login_failure_reaches_order_card(monkeypatch):
     import mercari_purchases as MP
 
     def boom():
-        raise RuntimeError("メルカリのログインが切れています (https://login.jp.mercari.com/...)")
+        raise RuntimeError("メルカリのログインが要ります (Edge で開いたタブでログインしてください)")
     monkeypatch.setattr(MP, "fetch_purchases", boom)
     monkeypatch.setattr(ops, "_candidate_lookup", lambda: (lambda sku, iid: {"m1"}))
     monkeypatch.setattr(ops, "LINK_WARN", [])
     assert ops._link_mercari([], {}) == {}
-    assert ops.LINK_WARN == ["メルカリの購入履歴を読めません (ログイン切れ)"]
+    assert ops.LINK_WARN == ["メルカリの購入履歴を読めません (Edge でメルカリにログイン)"]
     path = os.path.join(tempfile.mkdtemp(), "st.json")
     monkeypatch.setattr(ops, "STATUS", path)
     ops._write_status([[""] * 30])
     st = json.load(open(path, encoding="utf-8"))
-    assert "ログイン切れ" in st["warn"]
+    assert "ログイン" in st["warn"]
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "console"))
     import server as SV
-    assert "ログイン切れ" in SV.order_job_info(st)["warn"]
+    assert "ログイン" in SV.order_job_info(st)["warn"]
 
 
 def test_shown_candidates_are_recorded_and_pruned():

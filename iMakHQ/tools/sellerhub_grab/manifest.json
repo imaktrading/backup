@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Seller Hub レポート取り",
-  "version": "3.3",
+  "version": "3.4",
   "description": "Seller Hub のファネル用レポートを出品くん Console の起動時 (1日1回) に自動で作って落とす",
   "permissions": [
     "tabs",
@@ -19,6 +19,16 @@
       ],
       "js": [
         "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://jp.mercari.com/mypage/purchases*",
+        "https://login.jp.mercari.com/*"
+      ],
+      "js": [
+        "mercari_buys.js"
       ],
       "run_at": "document_idle"
     }
