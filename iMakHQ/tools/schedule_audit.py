@@ -34,6 +34,7 @@ EXPECTED = r"C:/dev/iMak_data/hq/schedule_expected.json"
 RESULT = r"C:/dev/iMak_data/hq/schedule_audit_last.json"
 NOTIFIED = r"C:/dev/iMak_data/hq/schedule_audit_notified.json"
 JOBQ_STATE = r"C:/dev/iMak_data/hq/job_queue_state.json"
+JOBQ_DEF = r"C:/dev/iMak_data/hq/job_queue.json"
 NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 RENOTIFY_H = 24
 
@@ -74,8 +75,9 @@ def judge(exp, actual, now):
     if res == RUNNING or actual.get("state") == "Running":
         return "running", "実行中"
     # ★まだ一度も動いていないが次回が決まっている (作ったばかり) は異常にしない
-    if res == NEVER and _ts(actual.get("next")):
-        return "never", "まだ一度も動いていない (初回 %s)" % _ts(actual.get("next")).strftime("%m/%d %H:%M")
+    if res == NEVER and actual.get("next"):
+        nx = _ts(actual.get("next"))
+        return "never", "まだ一度も動いていない (初回 %s)" % (nx.strftime("%m/%d %H:%M") if nx else actual.get("next"))
     age_h = (now - last).total_seconds() / 3600 if last else None
     if res not in OK_CODES and res not in (None, NEVER, OVERLAP):
         return "failed", "前回 失敗 (結果 %s・%s)" % (res, last.strftime("%m/%d %H:%M") if last else "?")
@@ -101,9 +103,14 @@ def audit(conf, home, kagoya, jobq, laptop_last, now):
             a = kagoya.get(e["name"]) if kagoya is not None else {"state": "?", "last": "", "result": None}
         elif w == "job_queue":
             s = (jobq or {}).get(e["name"]) or {}
-            a = None if not s else {"state": "Running" if s.get("pid") else "Ready",
-                                    "last": s.get("last_ok") or "",
-                                    "result": 0 if s.get("last_rc") in (0, None) else s.get("last_rc")}
+            defined = e["name"] in ((jobq or {}).get("_defined") or ())
+            if not s and defined:
+                # ★2026-10-09: 夜の束に足したばかりでまだ一度も動いていない仕事を「見つからない」と出していた
+                a = {"state": "Ready", "last": "", "result": NEVER, "next": "夜の束の次の見回り"}
+            else:
+                a = None if not s else {"state": "Running" if s.get("pid") else "Ready",
+                                        "last": s.get("last_ok") or "",
+                                        "result": 0 if s.get("last_rc") in (0, None) else s.get("last_rc")}
         else:                                   # laptop
             a = {"state": "Ready", "last": laptop_last.isoformat() if laptop_last else "", "result": 0}
         if w == "kagoya" and kagoya is None:
@@ -275,7 +282,10 @@ def main(argv=None):
         print("台帳が読めません: %s" % EXPECTED)
         return 1
     now = dt.datetime.now()
-    res = audit(conf, home_tasks(), kagoya_tasks(), _load(JOBQ_STATE, {}), laptop_last(), now)
+    jobq = dict(_load(JOBQ_STATE, {}))
+    jq = _load(JOBQ_DEF, {})
+    jobq["_defined"] = [j.get("name") for j in (jq if isinstance(jq, list) else jq.get("jobs", []))]
+    res = audit(conf, home_tasks(), kagoya_tasks(), jobq, laptop_last(), now)
     res["at"] = now.isoformat(timespec="seconds")
     bad = [r for r in res["rows"] if r["status"] in BAD]
     for r in res["rows"]:

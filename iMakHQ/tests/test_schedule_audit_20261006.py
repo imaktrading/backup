@@ -115,3 +115,11 @@ def test_作ったばかりで初回待ちは異常にしない_次回が無け�
     assert "never" not in A.BAD
     b = dict(a, next="")
     assert A.judge(_exp(), b, NOW)[0] == "stale"
+
+
+def test_夜の束に足したばかりの仕事は初回待ち_定義にも無ければ見つからない():
+    conf = {"expected": [_exp("new_job", "job_queue", 30)], "retired": {}, "ask": {}}
+    res = A.audit(conf, {}, {}, {"_defined": ["new_job"]}, None, NOW)
+    assert res["rows"][0]["status"] == "never"
+    res = A.audit(conf, {}, {}, {"_defined": []}, None, NOW)
+    assert res["rows"][0]["status"] == "missing"
