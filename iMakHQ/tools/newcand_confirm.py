@@ -1659,7 +1659,17 @@ def count_workload_high():
         rows = migrate_out_rows(_read_tab(OUT_TAB))
     except Exception as e:                                     # noqa: BLE001
         return {"error": "%s: %s" % (type(e).__name__, e)}
-    return {"pending": len(pending_list_rows(rows))}
+    items = pending_list_rows(rows)
+    # ★2026-10-09 ユーザー「押したけど、目視画面でずにおわった」: 押した時は「同じカードが既に出品中」を
+    #   補URL に回して画面に出さない (demote_listed_to_aux)。件数の側はそれを外さず、押しても出ない1件が
+    #   「1件」と出ていた。押した時と同じ関数で外す。出品中の一覧が読めない時は外さない (多めに言わない側に倒さない)
+    demoted = 0
+    try:
+        kept, dem = demote_listed_to_aux(items, already_listed_keys() | live_key_set())
+        demoted, items = len(dem), kept
+    except Exception:                                          # noqa: BLE001
+        pass
+    return {"pending": len(items), "already_listed": demoted}
 
 
 def save(items, res):
