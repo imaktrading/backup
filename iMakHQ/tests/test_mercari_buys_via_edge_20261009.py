@@ -73,3 +73,10 @@ def test_extension_is_registered():
     m = json.load(open(os.path.join(HERE, "..", "tools", "sellerhub_grab", "manifest.json"), encoding="utf-8"))
     js = [c for c in m["content_scripts"] if "mercari_buys.js" in c["js"]]
     assert js and "https://jp.mercari.com/mypage/purchases*" in js[0]["matches"]
+
+
+def test_zero_items_reply_is_not_accepted(monkeypatch, tmp_path):
+    """一覧が描かれる前に渡された (0件) は読めていない扱い (2026-10-09 最小化で実測)。"""
+    _o, opener = _fake(monkeypatch, tmp_path, {"html": "<html></html>"})
+    with pytest.raises(RuntimeError, match="0件"):
+        MP.fetch_purchases(wait=6, opener=opener, sleep=lambda s: None, now=lambda: NOW)

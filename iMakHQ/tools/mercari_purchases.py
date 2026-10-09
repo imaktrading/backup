@@ -61,6 +61,9 @@ def save_from_extension(body, now=None, path=None):
         d = {"at": now.isoformat(timespec="seconds"), "login_required": True, "items": []}
     else:
         items = parse_purchases(body.get("html") or "")
+        # 読み方を直す時のために、最後に届いたページをそのまま残す
+        with open((path or CACHE).replace(".json", "_last.html"), "w", encoding="utf-8") as f:
+            f.write(body.get("html") or "")
         d = {"at": now.isoformat(timespec="seconds"), "login_required": False,
              "items": [{**p, "at": p["at"].isoformat() if p["at"] else None} for p in items]}
     with open(path or CACHE, "w", encoding="utf-8") as f:
@@ -92,21 +95,58 @@ def cache_state(at, login_required, now, since=None):
     return "use" if (now - at).total_seconds() <= FRESH_MIN * 60 else "stale"
 
 
+def _open_quiet(url):
+    """Edge の **別の窓** で開いて、すぐ画面の右下の端へ動かす (I/O)。
+
+    ★2026-10-09 ユーザー「メルカリ購入履歴を確認する (ブラウザが) 立ち上がる」: 数え直しのたびに、作業中の窓の上に
+      購入履歴のタブが出ていた。別の窓にして、出たら画面の右下の端へ動かす (読み終えたら拡張が閉じる)。
+    """
+    import ctypes
+    import subprocess
+    from ctypes import wintypes
+    subprocess.Popen([EDGE, "--new-window", url])
+    u32 = ctypes.windll.user32
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def _cb(h, _l):
+        n = u32.GetWindowTextLengthW(h)
+        if n and u32.IsWindowVisible(h):
+            b = ctypes.create_unicode_buffer(n + 1)
+            u32.GetWindowTextW(h, b, n + 1)
+            if "メルカリ" in b.value or "mercari" in b.value.lower():
+                found.append(h)
+        return True
+    for _ in range(40):                                        # 最大 10秒、窓が出るのを待つ
+        time.sleep(0.25)
+        found.clear()
+        u32.EnumWindows(_cb, 0)
+        if found:
+            for h in found:
+                # 最小化・画面の外だと「見えていない窓」として一覧を描かず 0件で返る (実測)。
+                # 画面の右下に 8px だけ見える位置へ (見えている扱いのまま・前にも出さない)
+                sw, sh = u32.GetSystemMetrics(0), u32.GetSystemMetrics(1)
+                u32.SetWindowPos(h, 0, sw - 8, sh - 8, 1280, 1400, 0x0010 | 0x0004)   # NOACTIVATE | NOZORDER
+            return
+
+
 def fetch_purchases(wait=WAIT_SEC, opener=None, sleep=time.sleep, now=dt.datetime.now):
     """購入履歴 (I/O)。新しい控えがあればそれを、無ければ Edge で開いて拡張の返事を待つ。
 
     ログインが要る時・返事が無い時は例外 (呼び側が神風の注文の枠に出す)。
     """
     at, login, items = load_cache()
-    if cache_state(at, login, now()) == "use":
+    if cache_state(at, login, now()) == "use" and items:
         return items
     asked = now().replace(microsecond=0)
-    (opener or (lambda u: __import__("subprocess").Popen([EDGE, u])))(URL + "#imak-buys")
+    (opener or _open_quiet)(URL + "#imak-buys")
     for _ in range(int(wait / 3)):
         sleep(3)
         at, login, items = load_cache()
         st = cache_state(at, login, now(), since=asked)
         if st == "use":
+            if not items:                                      # 一覧が描かれる前に渡した = 読めていない
+                raise RuntimeError("Edge から購入履歴が0件で届きました (一覧が描かれる前)")
             return items
         if st == "login":
             raise RuntimeError("メルカリのログインが要ります (Edge で開いたタブでログインしてください)")
