@@ -55,3 +55,19 @@ def test_queue_skips_junk_at_entry(tmp_path, monkeypatch):
     monkeypatch.setattr(AP, "load_context", lambda v: ({"1": vals[1]}, {"https://m/nb"}, {}))
     n = AP.queue({2: ["https://m/a", "https://m/nb", "https://m/ok"]}, "test", item_of={2: "1"}, path=p, vals=vals)
     assert n == 1 and [r["url"] for r in AP.load(p)] == ["https://m/ok"]
+
+
+def test_badge_and_run_merge_pending_the_same_way():
+    """ボタンの件数と本番が、目視待ちを同じ関数で混ぜる (2026-10-10 件数と画面のずれ)。"""
+    src = open(os.path.join(HERE, "..", "tools", "psa_hoju_fill.py"), encoding="utf-8").read()
+    i, j = src.index("def count_workload("), src.index("def run_daytime_confirm(")
+    assert "merge_pending_cands(" in src[i:j] and "load_pending_by_iid(" in src[i:j]
+    assert "merge_pending_cands(" in src[j:] and "load_pending_by_iid(" in src[j:]
+    # 手前で落ちた出品 (ref が空) でも目視待ちは見比べられれば出す
+    assert src[j:].count("if _pend and not ref:") == 1
+
+
+def test_queue_consumed_only_when_shown():
+    src = open(os.path.join(HERE, "..", "tools", "psa_hoju_fill.py"), encoding="utf-8").read()
+    j = src.index("def run_daytime_confirm(")
+    assert "enumerate(items[:n_ui])" in src[j:] and "_shown_pending.append" not in src[j:]

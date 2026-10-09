@@ -54,10 +54,10 @@ def test_cost_filter_uses_candidate_price_when_table_lacks(monkeypatch):
 
 def test_pending_merge_goes_through_cost_gate():
     src = open(os.path.join(HERE, "..", "tools", "psa_hoju_fill.py"), encoding="utf-8").read()
-    i = src.index("_pend = _pending_by_iid.get(iid)")
+    i = src.index("def merge_pending_cands(")          # 2026-10-10 合流は共通の関数に
     assert "filter_candidates_by_cost(" in src[i:i + 2500]
     # ★2026-10-10 買えない URL は待ち列の出口 (aux_pending.sweep) で外す
-    assert "aux_pending.sweep(" in src[:i]
+    assert "aux_pending.sweep(" in src[src.index("def run_daytime_confirm("):]
 
 
 def test_cache_item_urls_only_individual_items():

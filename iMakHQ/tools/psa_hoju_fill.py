@@ -2457,6 +2457,91 @@ def prime_ref_images(targets, verbose=True):
     return got
 
 
+def load_pending_by_iid(cache):
+    """目視待ち → {itemID: [画面に混ぜる候補]} (I/O)。ボタンの件数と本番が同じ物を使う (2026-10-10)。"""
+    import aux_pending
+    _pending_by_iid = {}
+    _price_of, _name_of = {}, {}
+    try:
+        import hoju_url_from_dupes as _hd
+        _price_of = _hd.price_by_url_from_cache()
+        _name_of = _hd.name_by_url_from_cache()
+    except Exception:                                      # noqa: BLE001
+        _price_of, _name_of = {}, {}
+    # ★2026-09-13: itemID が空の行が 886本 溜まっていた (夜間の書き手が入れていなかった)。
+    #   捨てずに **行番号からシートの B列を引いて**拾う。積んだ物を必ず人に見せる。
+    # ★2026-09-13 ユーザー報告「補URL③ のスニダンの分が画像が出ない / 価格が出ない」。
+    #   目視待ちの候補は url/site/price(float)/note だけで画面に混ぜていた。通常の候補
+    #   (`_build_visual_candidates`) が持つ channel / image / 整数の price が無く、
+    #   画面は image が空だと出品ページの og:image を取りに行く → スニダンは **全ページ共通の
+    #   サイトロゴ** (実測6本とも同じ) / ラベルは channel が空 / 値段は int しか ¥ 表記しない。
+    #   → スニダンは **通常の候補と同じ出どころ** (探索キャッシュの psa10_listings) から
+    #     値段と実カードの画像を取る。キャッシュに無い = 最新の検索に居ない = 売り切れが大半
+    #     (実測: 値段が引けない21本のうち先頭8本中7本が売り切れ)。黙って消さず、その旨を出す。
+    _sd_info = {}
+    try:
+        for _e in (cache or {}).values():
+            for _l in (((_e or {}).get("snkrdunk") or {}).get("psa10_listings") or []):
+                if (_l or {}).get("url"):
+                    _sd_info[_norm_url(_l["url"])] = (_l.get("price"), _l.get("image") or "")
+    except Exception:                                      # noqa: BLE001
+        _sd_info = {}
+    for _r in aux_pending.load():
+        # ★2026-09-27 ユーザー「候補が全部違う」(ダークライGX にカビゴンが並んだ)。
+        #   itemID の無い行を **今の** 行番号から引いていたが、行は日々ずれる。
+        #   実測: 持ち主が分かる153本のうち今の行と一致は13本だけ = 140本が別の出品に出ていた。
+        #   itemID が無い物は誰の候補か分からないので出さない (空の行は 9/9〜9/13 の分だけ)。
+        _iid = (_r.get("itemID") or "").strip()
+        if not _iid:
+            continue
+        _u = _r["url"]
+        _is_sd = "snkrdunk.com" in _u
+        _sdp, _sdi = _sd_info.get(_norm_url(_u), (None, ""))
+        # ★2026-09-19: **積んだ時の値段を最優先**。今の検索キャッシュに無い古い分は
+        #   そこからしか分からない (実測: 目視待ち455本のうち257本が空だった)。
+        _pp = _r.get("price")
+        if _pp in (None, ""):
+            _pp = _sdp if _is_sd else _price_of.get(_norm_url(_u))
+        try:
+            _pp = int(round(float(_pp))) if _pp not in (None, "") else None
+        except (TypeError, ValueError):
+            _pp = None
+        _pending_by_iid.setdefault(_iid, []).append(
+            {"url": _u, "source": _r.get("source", ""), "price": _pp,
+             "channel": "snkrdunk" if _is_sd else ("mercari" if "mercari" in _u else ""),
+             "image": _sdi if _is_sd else "",
+             "name": (_name_of.get(_norm_url(_u)) or ("最新の検索に無い (値段が取れていません)" if _pp is None else "")),
+             "site": "mercari" if "mercari" in _u else ""})
+    return _pending_by_iid
+
+
+def merge_pending_cands(t, cands, pend, ctx, vals, mp):
+    """目視待ちの候補を通常の候補に混ぜる (ボタンの件数と本番で同じ・2026-10-10)。戻り: 候補。
+
+    既に主/補に入っている・買えない・「違う」と答えた物は aux_pending.sweep が待ち列から外している。
+    ここで見るのは 通常の候補との重複・NG タブ・値段・ミラーの版違い だけ。
+    """
+    iid = t["itemID"]
+    _pend = list(pend or [])
+    _have = {_norm_url(c.get("url")) for c in cands}
+    _have |= {_norm_url(u) for u in (ctx.get("ng_by_iid") or {}).get(iid, [])}
+    _pend, _pend_cost = filter_candidates_by_cost(_pend, t, vals)
+    for _p in _pend:
+        if _norm_url(_p["url"]) in _have:
+            continue
+        _have.add(_norm_url(_p["url"]))
+        if mp.mirror_title_conflicts(mirror_kind_for_target(t, mp), _p.get("name")):
+            continue                            # ★2026-09-27 ミラーの版違い (通常の候補と同じ門)
+        cands = list(cands) + [{"url": _p["url"], "site": _p.get("site") or "",
+                                "channel": _p.get("channel") or "",
+                                "image": _p.get("image") or "",
+                                "name": _p.get("name") or "",
+                                "price": _p.get("price"),
+                                "note": f"目視待ち ({_p.get('source','')})",
+                                "_pending": True}]
+    return cands
+
+
 def count_workload(max_backups=None, today=None, confirm_max_backups=None):
     """『押したら何件できるか』を **API/スクレイプ無し** で数える (SSOT)。
 
@@ -2547,10 +2632,20 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
                                            min_backups=CONFIRM_MAX_BACKUPS)
     _pll, _uv = load_same_verdicts()
     set_label_context(vals)                    # ★2026-10-06 仕入元 URL の鑑定番号 → ラベルでカード
+    # ★2026-10-10: 目視待ちも本番と同じ関数で混ぜて数える (以前はボタンに出ず、押すと増えていた)
+    try:
+        pend_by_iid = load_pending_by_iid(cache)
+    except Exception:                                          # noqa: BLE001
+        pend_by_iid = {}
     for t in list(c_targets) + list(swap_targets):
         is_swap = t["n_backups"] >= CONFIRM_MAX_BACKUPS
         cands, _ref, _why, _ = confirm_survivors(
             t, vals, cache, ctx, today, ref_of=_ref_of, art_of=_art_of, stats=stats)
+        _pend = pend_by_iid.get(t["itemID"]) or []
+        if _pend and not _ref:
+            _ref = _ref_of(t)
+        if _pend and _ref:
+            cands = merge_pending_cands(t, cands, _pend, ctx, vals, mp)
         # ★2026-09-29: 前に「同じ」と確かめた候補は目視に出ない (押すと自動で書く) ので数えない
         _same, cands = split_known_same(cands, t.get("key"), _pll, _uv)
         if not cands:
@@ -2703,31 +2798,6 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     _pending_by_iid = {}
     try:
         import aux_pending
-        _price_of, _name_of = {}, {}
-        try:
-            import hoju_url_from_dupes as _hd
-            _price_of = _hd.price_by_url_from_cache()
-            _name_of = _hd.name_by_url_from_cache()
-        except Exception:                                      # noqa: BLE001
-            _price_of, _name_of = {}, {}
-        # ★2026-09-13: itemID が空の行が 886本 溜まっていた (夜間の書き手が入れていなかった)。
-        #   捨てずに **行番号からシートの B列を引いて**拾う。積んだ物を必ず人に見せる。
-        # ★2026-09-13 ユーザー報告「補URL③ のスニダンの分が画像が出ない / 価格が出ない」。
-        #   目視待ちの候補は url/site/price(float)/note だけで画面に混ぜていた。通常の候補
-        #   (`_build_visual_candidates`) が持つ channel / image / 整数の price が無く、
-        #   画面は image が空だと出品ページの og:image を取りに行く → スニダンは **全ページ共通の
-        #   サイトロゴ** (実測6本とも同じ) / ラベルは channel が空 / 値段は int しか ¥ 表記しない。
-        #   → スニダンは **通常の候補と同じ出どころ** (探索キャッシュの psa10_listings) から
-        #     値段と実カードの画像を取る。キャッシュに無い = 最新の検索に居ない = 売り切れが大半
-        #     (実測: 値段が引けない21本のうち先頭8本中7本が売り切れ)。黙って消さず、その旨を出す。
-        _sd_info = {}
-        try:
-            for _e in (cache or {}).values():
-                for _l in (((_e or {}).get("snkrdunk") or {}).get("psa10_listings") or []):
-                    if (_l or {}).get("url"):
-                        _sd_info[_norm_url(_l["url"])] = (_l.get("price"), _l.get("image") or "")
-        except Exception:                                      # noqa: BLE001
-            _sd_info = {}
         # ★2026-10-10 出口: 見る意味の無い物 (出品が消えた・既に主/補に入っている・買えない・「違う」と答えた) を
         #   待ち列から外してから読む。0件でも必ず出す。外した物は aux_url_pending_dropped.jsonl に理由つきで残る
         try:
@@ -2735,32 +2805,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             print(f"  🧹 目視待ちから見る意味の無い物を外した: {sum(_sw.values())}本 {_sw if _sw else ''}")
         except Exception as _e_sw:                             # noqa: BLE001
             print(f"  ⚠ 目視待ちの掃除skip ({type(_e_sw).__name__}: {_e_sw})")
-        for _r in aux_pending.load():
-            # ★2026-09-27 ユーザー「候補が全部違う」(ダークライGX にカビゴンが並んだ)。
-            #   itemID の無い行を **今の** 行番号から引いていたが、行は日々ずれる。
-            #   実測: 持ち主が分かる153本のうち今の行と一致は13本だけ = 140本が別の出品に出ていた。
-            #   itemID が無い物は誰の候補か分からないので出さない (空の行は 9/9〜9/13 の分だけ)。
-            _iid = (_r.get("itemID") or "").strip()
-            if not _iid:
-                continue
-            _u = _r["url"]
-            _is_sd = "snkrdunk.com" in _u
-            _sdp, _sdi = _sd_info.get(_norm_url(_u), (None, ""))
-            # ★2026-09-19: **積んだ時の値段を最優先**。今の検索キャッシュに無い古い分は
-            #   そこからしか分からない (実測: 目視待ち455本のうち257本が空だった)。
-            _pp = _r.get("price")
-            if _pp in (None, ""):
-                _pp = _sdp if _is_sd else _price_of.get(_norm_url(_u))
-            try:
-                _pp = int(round(float(_pp))) if _pp not in (None, "") else None
-            except (TypeError, ValueError):
-                _pp = None
-            _pending_by_iid.setdefault(_iid, []).append(
-                {"url": _u, "source": _r.get("source", ""), "price": _pp,
-                 "channel": "snkrdunk" if _is_sd else ("mercari" if "mercari" in _u else ""),
-                 "image": _sdi if _is_sd else "",
-                 "name": (_name_of.get(_norm_url(_u)) or ("最新の検索に無い (値段が取れていません)" if _pp is None else "")),
-                 "site": "mercari" if "mercari" in _u else ""})
+        _pending_by_iid = load_pending_by_iid(cache)
         if _pending_by_iid:
             print(f"  ＋目視待ちの補URL {sum(len(v) for v in _pending_by_iid.values())}本 "
                   f"({len(_pending_by_iid)}出品) を候補に混ぜます")
@@ -2792,7 +2837,18 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     def _art_of(ref, cands, t):
         """本番の絵柄判定 (API)。判定不能は全候補を目視へ = 捨てる方向に倒さない。"""
         if _art_cache is None:
-            return cands, []
+            # ★2026-10-10: API キーが無い時も、前に判定済みの「別の絵柄」はボタンの件数と同じく外す
+            #   (以前は全部通し、ボタンでは外れていた候補が画面に出ていた)
+            try:
+                import psa_art_match as _artc
+                _ac = _artc.load_cache()
+                keep, drop = [], []
+                for _c in cands:
+                    _h = _artc.cached_verdict(ref, _c.get("image") or _c.get("url") or "", _c.get("name") or "", _ac)
+                    (drop if (_h is not None and _artc.drop_reason(_h)) else keep).append(_c)
+                return keep, drop
+            except Exception:                                  # noqa: BLE001
+                return cands, []
         # 現物の確定情報 (catalog/PSA) を渡す = モデルに推測させず「正」を与える
         try:
             _facts = dict(prc.psa_label_facts(t.get("cert"), t["_card_no"]))
@@ -2833,26 +2889,12 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         #   積むだけだと補URLが一切増えなくなる。人が見て採否を決める形にするのが指示。
         #   現物画像が無い行には混ぜない (見比べる相手が無いと判定できない)
         _pend = _pending_by_iid.get(iid) or []
+        # ★2026-10-10: 手前で落ちた出品 (台帳・控えが古い・番号が取れない等) でも、目視待ちは見比べられれば出す。
+        #   以前は ref が空のまま返るので混ぜられず、待ち列に永久に残っていた
+        if _pend and not ref:
+            ref = _ref_of(t)
         if _pend and ref:
-            # ★2026-10-10: 既に主/補に入っている・買えない・「違う」と答えた物は、この関数の始めの
-            #   aux_pending.sweep が待ち列から外している (ここで同じ門を重ねない)。残すのは
-            #   通常の候補との重複・NG タブ・値段 (ユーザー確定の 1.5倍 / ¥1,000) ・ミラーの版違い
-            _have = {_norm_url(c.get("url")) for c in cands}
-            _have |= {_norm_url(u) for u in (ctx.get("ng_by_iid") or {}).get(iid, [])}
-            _pend, _pend_cost = filter_candidates_by_cost(_pend, t, vals)
-            for _p in _pend:
-                if _norm_url(_p["url"]) in _have:
-                    continue
-                _have.add(_norm_url(_p["url"]))
-                if mp.mirror_title_conflicts(mirror_kind_for_target(t, mp), _p.get("name")):
-                    continue                            # ★2026-09-27 ミラーの版違い (通常の候補と同じ門)
-                cands = list(cands) + [{"url": _p["url"], "site": _p.get("site") or "",
-                                        "channel": _p.get("channel") or "",
-                                        "image": _p.get("image") or "",
-                                        "name": _p.get("name") or "",
-                                        "price": _p.get("price"),
-                                        "note": f"目視待ち ({_p.get('source','')})",
-                                        "_pending": True}]
+            cands = merge_pending_cands(t, cands, _pend, ctx, vals, mp)
         if not cands:
             continue
         # ★2026-09-29: 前に人が「同じ」と確かめた候補は目視に出さず、そのまま書く分にする
