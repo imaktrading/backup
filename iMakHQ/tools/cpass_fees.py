@@ -18,7 +18,9 @@ import time
 
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 CACHE = r"C:/dev/iMak_data/hq/cpass_fees.json"
-URL = "https://ebay-jp.orangeconnex.com/homePage#imak-ship"
+# ★2026-10-09 ユーザー「Cpass、ログイン切れたのでは？」: ポータルを直接開かず、CPaSS の配送業者設定から入る
+#   (拡張 cpass_enter.js が「SpeedPAKセラーポータルへ」→「確認」を押す)
+URL = "https://cpass.ebay.com/jp/setting/carrier#imak-ship"
 WAIT_SEC = 120
 TRACK = re.compile(r"^E[A-Z]\d{10,}[A-Z0-9]*$")
 
@@ -56,11 +58,11 @@ def fetch(wait=WAIT_SEC, opener=None, sleep=time.sleep, now=dt.datetime.now):
     asked = now().replace(microsecond=0)
     if opener is None:
         import mercari_purchases as MP                         # 別窓で開いて画面の右下の端に寄せる (前に出さない)
-        opener = lambda u: MP._open_quiet(u, ("Orange Connex", "SpeedPAK", "orangeconnex"))  # noqa: E731
+        opener = lambda u: MP._open_quiet(u, ("CPaSS", "Orange Connex", "SpeedPAK", "orangeconnex"))  # noqa: E731
     opener(URL)
     for _ in range(int(wait / 3)):
         sleep(3)
         d = load()
         if d.get("at") and dt.datetime.fromisoformat(d["at"]) >= asked:
             return {t: v["yen"] for t, v in d["fees"].items()}
-    raise RuntimeError("SpeedPAK の送料が届きません (Edge でポータルにログインしているか・拡張 3.9 以上か)")
+    raise RuntimeError("SpeedPAK の送料が届きません (Edge で CPaSS にログインしているか・拡張 4.0 以上か)")
