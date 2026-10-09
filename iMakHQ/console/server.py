@@ -545,7 +545,8 @@ def get_jobs():
                      "ask_amount": bool(s.get("ask_amount")), "kagoya": is_remote(s, _remote_set()), **info})
     # ★2026-10-05: 新規に出せる PSA の枚数 (今日やることの状態の1行に出す)
     psa_new = (STATE["counts"] or {}).get("psa_new") or {}
-    return {"jobs": jobs, "psa_new": psa_new, "counts_at": STATE["counts_at"], "counting": STATE["counting"],
+    offer_send = (STATE["counts"] or {}).get("offer_send") or {}     # ★2026-10-09 オファーを送れる件数
+    return {"jobs": jobs, "psa_new": psa_new, "offer_send": offer_send, "counts_at": STATE["counts_at"], "counting": STATE["counting"],
             "counts_error": STATE["counts_error"]}
 
 

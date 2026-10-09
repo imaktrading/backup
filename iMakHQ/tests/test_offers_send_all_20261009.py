@@ -46,3 +46,12 @@ def test_sent_by_button_not_automatically():
 def test_extension_closes_sent_modal():
     js = open(os.path.join(HERE, "..", "tools", "sellerhub_grab", "content.js"), encoding="utf-8").read()
     assert "await closeSentModal();" in js and "Got it" in js
+
+
+def test_count_sendable_is_shown_next_to_psa_new():
+    """ユーザー「新規に出せる PSA 221枚 の横にして。送れる件数を表示して」(2026-10-09)。"""
+    cnt = open(os.path.join(HERE, "..", "console", "counts.py"), encoding="utf-8").read()
+    assert '"offer_send": lambda: __import__("shelf_offer").count_sendable()' in cnt
+    js = open(os.path.join(HERE, "..", "console", "static", "app.js"), encoding="utf-8").read()
+    i, j = js.index("新規に出せる PSA <b>"), js.index("オファーを送れる <b>")
+    assert 0 < j - i < 800

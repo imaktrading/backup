@@ -22,7 +22,7 @@ def test_counts_cover_the_same_keys_as_the_panel():
     panel_keys = set(re.findall(r"d\['(\w+)'\]=", PANEL)) | {"hoju"}
     console_keys = set(re.findall(r'^\s+"(\w+)": lambda', COUNTS, re.M))
     # ★2026-10-05: 旧パネルはもう使わない。神風だけの項目 (新規に出せる PSA) は旧パネルに足さない
-    console_only = {"psa_new"}
+    console_only = {"psa_new", "offer_send"}   # ★2026-10-09 オファーを送れる件数も神風だけ
     assert panel_keys == console_keys - console_only, (panel_keys ^ (console_keys - console_only))
 
 

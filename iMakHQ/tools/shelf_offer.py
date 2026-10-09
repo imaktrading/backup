@@ -324,6 +324,35 @@ def active_offer_ids():
         return None
 
 
+def count_sendable(now=None):
+    """今ボタンを押したら送れる件数 (神風の「新規に出せる PSA」の横に出す・2026-10-09 ユーザー)。台帳は書かない (I/O)。
+
+    戻り: {"n": 件数} / 読めなければ {"n": None, "error": 理由}。
+    """
+    import csv
+    import glob
+    now = now or datetime.datetime.now()
+    try:
+        ledger = load_json(OFFERS_PATH, {})
+        fun = sorted(glob.glob(os.path.join(HERE, "..", "funnel_output", "funnel_*.csv")))
+        rows = []
+        if fun:
+            with open(fun[-1], encoding="utf-8-sig", newline="") as f:
+                rows = [r for r in csv.DictReader(f) if (r.get("site") or "") == "US"]
+        rows = [r for r in rows if str(r.get("item_id")) not in ledger
+                or (offer_state(ledger[str(r.get("item_id"))], now) == "done"
+                    and not recently_sent(ledger[str(r.get("item_id"))], now))]
+        el = eligible_ids(_headers())
+        act = active_offer_ids()
+        if el is None or act is None:
+            return {"n": None, "error": "eBay の一覧が読めない"}
+        import psa_hoju_fill as H
+        sheet = {H._cell(x, H.B): x for x in H._read_high()[1:] if H._cell(x, H.B)}
+        return {"n": sum(1 for _r, why in pick_rows(rows, el, sheet, act) if not why)}
+    except Exception as e:                                     # noqa: BLE001
+        return {"n": None, "error": f"{type(e).__name__}: {e}"[:200]}
+
+
 def plan_items(rows, ledger, now=None, log=print, reason="店全体"):
     """出品 [{item_id, price, watch, title}] → 送る待ちの台帳行を足す (I/O: eBay・シート)。戻り: 足した itemID の集合。"""
     now = now or datetime.datetime.now()

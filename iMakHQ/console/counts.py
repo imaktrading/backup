@@ -74,6 +74,8 @@ def main():
         # ★2026-09-19: オファーは期限が短いので件数を出す (eBay 1コール)。
         "offer": lambda: __import__("offer_calc").count_workload(),
         "order": order_sync,
+        # ★2026-10-09 ユーザー「新規に出せる PSA の横にして。送れる件数を表示して」
+        "offer_send": lambda: __import__("shelf_offer").count_sendable(),
         # ★2026-10-05 ユーザー「新規出品出来るカード枚数を今日やることの下に」: PSA 新規と同じ条件で数える
         "psa_new": lambda: __import__("psa_new_count").count_workload(),
         "ut": lambda: __import__("ut_hoju_fill").count_workload(),
