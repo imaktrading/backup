@@ -171,10 +171,21 @@ def reset_dead_confirmed(product_vals=None):
     rows = read_tab("RESTOCK確定")
     if product_vals is None:
         product_vals = _product_ws().get_all_values()
-    keep, dropped = split_dead_confirmed(rows, sold_out_supply_by_item(product_vals))
-    if dropped:
+    sold_out = sold_out_supply_by_item(product_vals)
+    # ★2026-10-10 ユーザー「都度10枚程度確定しているのに何回も出てくる」: 先頭が売り切れたら行ごと ① に
+    #   戻していたので、確定した他の URL (平均6本) を捨てて探し直していた。今買えると確かめた URL が
+    #   残っていれば、それを先頭にして ② で戻す。買える物が無い行だけ従来どおり ① に戻す。
+    import restock_aux as _ra
+    _targets = {(_ra._cell(r, 0)) for r in (rows or [])[1:]} & set(sold_out)
+    _check = sorted({u for r in (rows or [])[1:] if _ra._cell(r, 0) in _targets
+                     for u in _ra.split_urls(_ra._cell(r, rows[0].index("確認済仕入URL")))[1:]}
+                    ) if rows and "確認済仕入URL" in rows[0] else []
+    alive = _ra.check_alive(_check) if _check else {}
+    keep, rotated, dropped = _ra.rotate_dead_first(rows, sold_out, alive)
+    print(f"  🔁 確定した仕入元が売り切れ → 確定済みの次の仕入元に切替: {len(rotated)}件 {rotated[:5]} / "
+          f"次が無く①に戻した: {len(dropped)}件 {dropped[:5]} (確かめた URL {len(_check)}本)")
+    if rotated or dropped:
         write_rows_to_tab("RESTOCK確定", keep)
-        print(f"  ↩ 確定した仕入元が売り切れ {len(dropped)}件を RESTOCK確定から外し、再仕入れ①に戻した")
     return dropped
 
 

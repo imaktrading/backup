@@ -226,6 +226,14 @@ def reconcile_and_write(today):
         out.append(r)
     write_rows_to_tab("RESTOCK確定", out)
 
+    # ★2026-10-10: 確定した残りの仕入元 (先頭以外) を補URLへ。今までは先頭1本だけ使い残りを捨てていた
+    #   (115行・694本)。先頭が売り切れても補で生き残り、① に戻って目視し直さずに済む。
+    try:
+        import restock_aux
+        restock_aux.fill_from_confirmed(confirmed_rows=out)
+    except Exception as e:                                      # noqa: BLE001
+        print(f"⚠️要対応 確定した仕入元を補URLへ: 失敗 {type(e).__name__}: {e}")
+
     # 再仕入れ待ち台帳: 実行済(qty>=1=供給戻り確認)を「復活可」に反映
     done_ids = set(cls["done"])
     if done_ids:

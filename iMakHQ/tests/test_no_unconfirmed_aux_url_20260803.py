@@ -90,10 +90,12 @@ def test_visual_confirm_paths_are_the_only_writers():
                                 (`psa_resource_confirm.restock_confirm`) を通してから書く。
                                 UT は 作品+柄+サイズ+状態 が揃って初めて同じ商品なので、
                                 機械の絞り込みだけでは決められない = **目視が唯一の担保**
+    - `restock_aux.py`        … 再仕入れ① の目視 (`restock_confirm`) で「同じ」と確定した URL だけを書く
+                                (RESTOCK確定タブの 確認済仕入URL。2026-10-10 追加。それまで先頭1本以外を捨てていた)
     """
     allowed = {"psa_hoju_fill.py", "ichibankuji_restock.py",
                "dup_guard.py", "hoju_url_from_dupes.py", "kuji_hoju_fill.py",
-               "ut_hoju_fill.py",
+               "ut_hoju_fill.py", "restock_aux.py",
                "sheet_io.py",                 # 定義そのもの (書き手ではない)
                "ichibankuji_restock_poc.py"}  # POC。本番フローから呼ばれない
     offenders = {}
