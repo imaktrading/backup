@@ -437,10 +437,17 @@ def link_purchases(ws, by_id, today_rows):
         m = re.search(r"jp\.mercari\.com/transaction/(m\d+)", r[C_URL])
         if m:
             linked.setdefault("mercari:%s#1" % m.group(1), norm_order(r[C_ORDER]))
+        m = re.search(r"スニダン 取引ID (\d+)", r[C_URL])          # 手で入れたスニダンの購入も使用済み
+        if m:
+            linked.setdefault("snkrdunk:%s#1" % m.group(1), norm_order(r[C_ORDER]))
     uq = [(n, r, o) for n, r, o in targets if is_uniqlo_order(o)]
     mc = [(n, r, o) for n, r, o in targets if not is_uniqlo_order(o)]
     if mc:
         hits.update(_link_mercari(mc, linked))
+        # ★2026-10-09 メルカリで結べなかった注文は、スニダンの購入メール (Gmail) で結ぶ
+        rest = [(n, r, o) for n, r, o in mc if n not in hits]
+        if rest:
+            hits.update(_link_snkrdunk(rest, linked))
     if uq:
         hits.update(_link_uniqlo(uq, linked))
     ups = []
@@ -525,6 +532,26 @@ def _link_mercari(targets, linked):
     print(f"  メルカリ購入履歴 (Edge の拡張から) {len(buys)}件 (ほかの注文に結び済み {len(buys) - len(free)}件) / 結べた注文 {len(hit)}件")
     return {n: (p["at"].date(), p["url"], "%s %s" % (p["at"].strftime("%m/%d %H:%M"), p["title"][:30]),
                 None, key_of[id(p)])
+            for n, p in hit.items()}
+
+
+def _link_snkrdunk(targets, linked):
+    """スニダンの購入メールと注文を結ぶ (I/O)。{行番号: (日付, X の値, 表示, 仕入値, 鍵)}。"""
+    import snkrdunk_purchases as SN
+    try:
+        buys = SN.fetch_purchases()
+    except Exception as e:                                     # noqa: BLE001
+        LINK_WARN.append("スニダンの購入メールを読めません")
+        print(f"  ⚠ スニダンの購入メールを読めませんでした: {str(e)[:80]}")
+        return {}
+    keys = ["snkrdunk:%s#1" % p["id"] for p in buys]
+    free = unused_purchases(buys, keys, linked, {n: norm_order(r[C_ORDER]) for n, r, _o in targets})
+    key_of = {id(p): k for p, k in free}
+    orders = [(n, _jst_day(o.get("creationDate")), r[C_TITLE]) for n, r, o in targets if _jst_day(o.get("creationDate"))]
+    hit = SN.match(orders, [p for p, _k in free])
+    print(f"  スニダン購入メール {len(buys)}件 (ほかの注文に結び済み {len(buys) - len(free)}件) / 結べた注文 {len(hit)}件")
+    return {n: (p["at"].date(), "スニダン 取引ID %s" % p["id"], "%s %s" % (p["at"].strftime("%m/%d %H:%M"), p["title"][:30]),
+                p["price"], key_of[id(p)])
             for n, p in hit.items()}
 
 
