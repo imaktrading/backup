@@ -37,7 +37,7 @@
     link.click();
     let ok = null;
     for (let i = 0; i < 20 && !ok; i++) {
-      ok = [...document.querySelectorAll("button, a")].filter(visible).find((e) => /^(確認|OK|Confirm)$/i.test(txt(e)));
+      ok = [...document.querySelectorAll("button, a")].filter(visible).find((e) => /^(確認|OK|Confirm)$/i.test(txt(e).replace(/\s+/g, "")));   // 画面の文字は「確 認」(空白入り)
       if (!ok) await sleep(500);
     }
     if (ok) ok.click();
