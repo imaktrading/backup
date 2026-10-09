@@ -55,3 +55,17 @@ def test_count_sendable_is_shown_next_to_psa_new():
     js = open(os.path.join(HERE, "..", "console", "static", "app.js"), encoding="utf-8").read()
     i, j = js.index("新規に出せる PSA <b>"), js.index("オファーを送れる <b>")
     assert 0 < j - i < 800
+
+
+def test_send_batch_is_10_by_watch(monkeypatch):
+    """ユーザー「一気処理だと時間かかるよね？1回10件とかにしない？」(2026-10-09)。ウォッチの多い順に10件。"""
+    assert SO.SEND_BATCH == 10
+    rows = [{"item_id": str(i), "watch": str(i), "price": "100"} for i in range(1, 16)]
+    monkeypatch.setattr(SO, "_headers", lambda: {})
+    monkeypatch.setattr(SO, "eligible_ids", lambda h: {str(i) for i in range(1, 16)})
+    monkeypatch.setattr(SO, "active_offer_ids", lambda: set())
+    import psa_hoju_fill as H
+    monkeypatch.setattr(H, "_read_high", lambda *a, **k: [["h"]] + [[""] + [str(i)] + [""] * 38 for i in range(1, 16)])
+    ledger = {}
+    got = SO.plan_items(rows, ledger, log=lambda *a: None, limit=10)
+    assert got == {str(i) for i in range(6, 16)}

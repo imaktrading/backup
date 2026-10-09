@@ -349,8 +349,8 @@
     var os_ = STRIP.offerSend;
     var osb = buttons.filter(function (b) { return b.label.indexOf("オファーを送る (") >= 0; })[0];
     if (os_ || osb) chips.push(os_ && os_.n == null ? ["warn", "オファーを送れる 数えられない", jobBtn(osb, "送る")]
-                       : ["", "オファーを送れる <b>" + (os_ ? os_.n : "—") + "件</b> (8%引き)",
-                          os_ && os_.n ? jobBtn(osb, "送る") : ""]);
+                       : ["", "オファーを送れる <b>" + (os_ ? os_.n : "—") + "件</b> (8%引き・1回10件)",
+                          os_ && os_.n ? jobBtn(osb, "10件送る") : ""]);
     $("today-strip").innerHTML = chips.concat(STRIP.errors || []).map(stChip).join("");
     var big = [];
     // 左注文・右オファーの2枠 (2026-10-04 ユーザー「注文は左にして」= .ord を先頭に並べる)。どちらかに件数があれば両方並べる (0件の側は「ありません」)

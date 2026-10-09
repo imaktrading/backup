@@ -1533,7 +1533,7 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "shelf_offer.py", "send"],
         "params": [],
-        "tip": "ウォッチ・カートの人がいる US の出品に 8%引きのオファーを送ります (仕入元が売り切れ・返事待ちのオファーがある・30日以内に送った物は除く)。"
+        "tip": "ウォッチ・カートの人がいる US の出品に 8%引きのオファーを **1回10件** 送ります (ウォッチの多い順・仕入元が売り切れ・返事待ちのオファーがある・30日以内に送った物は除く)。"
                "押すと一覧を作って Edge で Seller Hub を開き、拡張が1件ずつ送ってタブを閉じます。",
         "skip_postprocess": True,
         "no_recount": True,

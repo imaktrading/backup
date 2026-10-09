@@ -273,6 +273,7 @@ def settle(ledger, drop_ids, live_ids, write=False, log=print, now=None):
 
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 SEND_URL = "https://www.ebay.com/sh/lst/active?offers=sendNewOffers&source=filterbar&action=search#shg-offers"
+SEND_BATCH = 10           # ★2026-10-09 ボタン1回で送る件数
 OFFER_PCT_US = 8           # ★2026-10-09 ユーザー確定: 値引きは広告費の分 (US 8%・ミラーは 10%・ミラーはまだ送らない)
 
 
@@ -353,7 +354,7 @@ def count_sendable(now=None):
         return {"n": None, "error": f"{type(e).__name__}: {e}"[:200]}
 
 
-def plan_items(rows, ledger, now=None, log=print, reason="店全体"):
+def plan_items(rows, ledger, now=None, log=print, reason="店全体", limit=None):
     """出品 [{item_id, price, watch, title}] → 送る待ちの台帳行を足す (I/O: eBay・シート)。戻り: 足した itemID の集合。"""
     now = now or datetime.datetime.now()
     rows = [r for r in rows if str(r.get("item_id")) not in ledger
@@ -377,7 +378,17 @@ def plan_items(rows, ledger, now=None, log=print, reason="店全体"):
     import psa_hoju_fill as H
     sheet = {H._cell(x, H.B): x for x in H._read_high()[1:] if H._cell(x, H.B)}
     added = set()
-    for r, why in pick_rows(rows, el, sheet, act):
+    # ★2026-10-09 ユーザー「一気処理だと時間かかるよね？1回10件とかにしない？」: limit 件まで。
+    #   ウォッチの多い順 (買いそうな人が多い物から) → 値段の高い順
+    def _num(v):
+        try:
+            return float(str(v or 0).replace(",", "") or 0)
+        except ValueError:
+            return 0.0
+    picked = sorted(pick_rows(rows, el, sheet, act), key=lambda x: (bool(x[1]), -_num(x[0].get("watch")), -_num(x[0].get("price"))))
+    for r, why in picked:
+        if limit is not None and len(added) >= limit and not why:
+            continue
         iid = str(r.get("item_id"))
         title = (r.get("title") or "")[:40]
         if why:
@@ -459,7 +470,7 @@ def mark_sent(iid, pct=None):
     return {"ok": True}
 
 
-def build_store_plan(log=print):
+def build_store_plan(log=print, limit=None):
     """店全体: eBay が送れるとした PSA 出品を一覧に載せる (神風のボタン)。期限の後始末もする。"""
     import csv
     import glob
@@ -476,7 +487,7 @@ def build_store_plan(log=print):
     except Exception:                                          # noqa: BLE001
         drops = set()
     settle(ledger, drops, live or None, write=True, log=log)
-    plan_items(rows, ledger, log=log, reason="店全体")
+    plan_items(rows, ledger, log=log, reason="店全体", limit=limit)
     save_json(OFFERS_PATH, ledger)
     w = waiting_list()
     log(f"💌 送る一覧: {len(w)}件")
@@ -493,7 +504,7 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1 and sys.argv[1] == "send":
         # ★2026-10-09 ユーザー「突然送られると他業務の邪魔になるから、ボタン化して」: 神風のボタンから。
         #   一覧を作り (期限の後始末も)、あれば Seller Hub の送る画面を Edge で開く → 拡張が送ってタブを閉じる
-        w = build_store_plan()
+        w = build_store_plan(limit=SEND_BATCH)
         if w:
             import subprocess
             subprocess.Popen([EDGE, SEND_URL])
