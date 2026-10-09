@@ -108,13 +108,14 @@ def test_ads_tool_skips_no_ad_items(tmp_path, monkeypatch):
 
 
 def test_offers_are_not_sent_anymore():
-    """★2026-10-05 ユーザー判断: こちらからオファーを送らない (以前も数件しか売れず、96時間は出品を直せず取り消せない)。
-    棚②は落とす前のオファーを通さず、拡張も出品中一覧では動かない。"""
+    """★2026-10-05 ユーザー判断: こちらからオファーを送らない → ★2026-10-09 ユーザー確定で再開
+    (「送れるものには全部送る」・送ったオファー中も数量0が通ることを実機で確認)。
+    棚②の落とす前のオファーは「全部送る」に含まれるので個別には通さない。拡張は出品中一覧 (送る画面) で動く。"""
     here = os.path.join(os.path.dirname(__file__), "..")
     src = open(os.path.join(here, "tools", "shelf_evict.py"), encoding="utf-8").read()
     assert "SO.offer_before_drop(" not in src
     import json
     man = json.load(open(os.path.join(here, "tools", "sellerhub_grab", "manifest.json"), encoding="utf-8"))
-    assert not any("lst/active" in m for c in man["content_scripts"] for m in c["matches"])
+    assert any("lst/active" in m for c in man["content_scripts"] for m in c["matches"])
     cp = open(os.path.join(here, "control_panel.py"), encoding="utf-8").read()
     assert "💌 オファーの送る一覧を作る" not in cp

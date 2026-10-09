@@ -260,7 +260,7 @@
       const closed = await waitFor(() => (liveOfferDialog() ? null : true), 20000);
       if (!closed) { log(`⚠ ${item.item_id} 送った後に小窓が閉じない → 送れたか画面で確かめてください (台帳には入れません)`); return; }
       const m = await api("POST", "/api/offers/sent", { item_id: item.item_id, pct: item.pct });
-      log(`💌 送った: ${item.item_id} ${item.pct}%引き (下限 $${item.floor})${m && m.ok ? "" : " ⚠台帳に入らず"}`);
+      log(`💌 送った: ${item.item_id} ${item.pct}%引き${m && m.ok ? "" : " ⚠台帳に入らず"}`);
       sent++;
       await sleep(2500);
       if (mode === "one") break;
@@ -530,5 +530,23 @@
     } else {
       startButton("品質レポートだけ取る", grabLqr);
     }
+  } else if (location.pathname.startsWith("/sh/lst/active")) {
+    // ★2026-10-09 ユーザー確定「オファーが送れるものには全部送る」(カウンターを受けるので画面から)。
+    //   神風が1日1回、送る一覧を作ってからこのページを #shg-offers 付きで開く。印は background.js が拾う
+    //   (eBay の画面が URL を書き換えても分かるように)。一覧を全部送ったらタブを閉じる
+    (async () => {
+      let at = 0;
+      for (let i = 0; i < 10 && !at; i++) {
+        ({ shgOffersAt: at = 0 } = await chrome.storage.local.get("shgOffersAt"));
+        if (!at) await sleep(300);
+      }
+      if (!at || Date.now() - at > 15 * 60 * 1000) return;
+      await chrome.storage.local.remove("shgOffersAt");
+      panel();
+      log("自動: オファーを送ります (神風の送る一覧)");
+      await sendOffers("all");
+      await sleep(3000);
+      chrome.runtime.sendMessage({ type: "close" });
+    })();
   }
 })();

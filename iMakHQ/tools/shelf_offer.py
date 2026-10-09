@@ -10,12 +10,13 @@
 送る理由は2つ・仕組みと台帳は1つ (OFFERS_PATH):
     ① 棚②で落とす PSA (shelf_evict が落とす前にここを通す)  ② それ以外 (店全体・`plan` で一覧を作る)
 
-送る条件と値段:
-    - eBay が「今オファーを送れる」とした出品 (find_eligible_items。ウォッチ・カート離脱がある)
-    - 仕入元 + 補 のうち **今買える物が2本以上** (1本だと受けてもらう前に切れたら仕入れられない)
-    - 値引きは **広告費の10%分まで** (ユーザー「プロモ費が10%だから、その分割引けばいいか」)。
-      **2番目に安い仕入元** で利益を計算し、赤字なら浅くする。eBay の最小は5%引き → 5%未満になる物は送らない
-    - 「下限」= カウンターを受けてよい一番低い値段 (2番目に安い仕入元で利益0)
+送る条件と値段 (★2026-10-09 ユーザー確定で作り直し。旧: 仕入元2本以上・2番目の仕入元で利益計算・5〜10%):
+    - eBay が「今オファーを送れる」とした US の出品 (find_eligible_items。ウォッチ・カート離脱がある) **全部**
+      (棚②で落とす前の物もこの中に入る)
+    - 仕入元が売り切れでない (商品管理シート D列が空) / バイヤーからのオファーが返事待ちでない / 30日以内に送っていない
+    - 値引きは **広告費の分** = US 8% (OFFER_PCT_US)。広告を外して送るので、広告付きで売れた時と利益は同じ (利益計算はしない)
+    - 1日1回、神風の起動時に一覧を作り、Edge の拡張が Seller Hub の画面から送る (カウンターを受けるため API では送らない)
+    - 送ったオファー中に仕入元が切れても、監視くんの数量0で払えなくなる (2026-10-09 実機で数量0が通ることを確認)
 
 台帳の状態 (status):
     送る待ち   一覧に載せた。拡張が送る前に広告を外す。WAIT_DAYS (2日) 送らなければ後始末
@@ -270,11 +271,59 @@ def settle(ledger, drop_ids, live_ids, write=False, log=print, now=None):
     return ledger
 
 
-def plan_items(rows, ledger, now=None, log=print, reason="店全体"):
-    """出品 [{item_id, price, watch, title}] → 送る待ちの台帳行を足す (I/O: eBay・メルカリ・スニダン・シート)。
+OFFER_PCT_US = 8           # ★2026-10-09 ユーザー確定: 値引きは広告費の分 (US 8%・ミラーは 10%・ミラーはまだ送らない)
 
-    戻り: 足した itemID の集合。送れない物は理由を log に出すだけ。
+
+def pick_rows(rows, el, sheet, active_offer_ids, sold_col=3):
+    """送る出品を選ぶ (純関数)。戻り: [(row, 理由 or "")] — 理由が空なら送る。
+
+    ★2026-10-09 ユーザー確定「オファーが送れるものには全部送る」:
+      - eBay が送れるとした出品 (el) / 商品管理シートにある / 仕入元が売り切れでない (D列が空 = 監視くんの判定)
+      - バイヤーからのオファーが返事待ちの出品には送らない
+      - 値引きは広告費の分なので利益計算はしない (広告付きで売れた時と同じ利益。「プロモぶんだから赤にはならない」)
     """
+    out = []
+    for r in rows:
+        iid = str(r.get("item_id"))
+        if iid not in el:
+            continue
+        row = sheet.get(iid)
+        if not row:
+            out.append((r, "商品管理シートに無い"))
+        elif (row[sold_col].strip() if len(row) > sold_col else ""):
+            out.append((r, "仕入元が売り切れ"))
+        elif iid in active_offer_ids:
+            out.append((r, "バイヤーからのオファーが返事待ち"))
+        else:
+            out.append((r, ""))
+    return out
+
+
+def active_offer_ids():
+    """バイヤーからのオファーが返事待ちの itemID (I/O・GetBestOffers Active)。取れなければ None。"""
+    try:
+        import re as _re
+        sys.path.insert(0, r"C:\dev\iMak\iMakeBayAPI")
+        import fix_de_speedpak_shipping as fx
+        import offer_calc as O
+        fx.refresh()
+        tok = fx.token()
+        by = {}
+        for n in range(1, 20):
+            t = fx.post("GetBestOffers", "<BestOfferStatus>Active</BestOfferStatus>"
+                        f"<Pagination><EntriesPerPage>100</EntriesPerPage><PageNumber>{n}</PageNumber></Pagination>"
+                        "<DetailLevel>ReturnAll</DetailLevel>", tok, site="0")
+            before = len(by)
+            O.parse_best_offers(t, by)
+            if len(by) == before:
+                break
+        return set(by)
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+def plan_items(rows, ledger, now=None, log=print, reason="店全体"):
+    """出品 [{item_id, price, watch, title}] → 送る待ちの台帳行を足す (I/O: eBay・シート)。戻り: 足した itemID の集合。"""
     now = now or datetime.datetime.now()
     rows = [r for r in rows if str(r.get("item_id")) not in ledger
             or (offer_state(ledger[str(r.get("item_id"))], now) == "done"
@@ -290,36 +339,26 @@ def plan_items(rows, ledger, now=None, log=print, reason="店全体"):
     if el is None:
         log("  ⚠ オファーを送れる出品の一覧が取れない → 一覧に載せません")
         return set()
-    rows = [r for r in rows if str(r.get("item_id")) in el]
-    if not rows:
+    act = active_offer_ids()
+    if act is None:
+        log("  ⚠ 返事待ちのオファーが読めない → 一覧に載せません (二重に値引きしないため)")
         return set()
     import psa_hoju_fill as H
-    import offer_calc as O
     sheet = {H._cell(x, H.B): x for x in H._read_high()[1:] if H._cell(x, H.B)}
-    p = O.fetch()
-    ck = next(k for k in p["cats"] if "TCG" in k)
     added = set()
-    for r in rows:
+    for r, why in pick_rows(rows, el, sheet, act):
         iid = str(r.get("item_id"))
-        price = float(str(r.get("price") or 0).replace(",", "") or 0)
-        row = sheet.get(iid)
-        if not row or H._cell(row, H.CATEGORY) != "TCG":
-            continue                                           # PSA だけ (仕入元の見方が PSA 用)
-        urls = [H._cell(row, 0)] + [H._cell(row, H.AUX0 + k) for k in range(H.AUXN)]
-        costs = buyable_costs(urls)
-        profit = lambda op, c, _p=price: O.calc_py(p, "US計算", ck, "US", op, c, promo_on=False, listed=_p)  # noqa: E731
-        pct, offer, basis, why = choose_discount(price, costs, profit)
         title = (r.get("title") or "")[:40]
-        if pct is None:
+        if why:
             log(f"     ✗ {iid} 載せない ({why}) {title}")
             continue
-        floor = floor_price(price, basis, profit)
+        price = float(str(r.get("price") or 0).replace(",", "") or 0)
+        offer = round(price * (100 - OFFER_PCT_US) / 100, 2)
         ledger[iid] = {"status": WAITING, "planned": now.isoformat(timespec="seconds"), "reason": reason,
-                       "price": price, "pct": pct, "offer": offer, "floor": floor, "cost_basis": basis,
-                       "costs": costs, "title": r.get("title") or ""}
+                       "price": price, "pct": OFFER_PCT_US, "offer": offer, "floor": None,
+                       "title": r.get("title") or ""}
         added.add(iid)
-        log(f"     💌 一覧に載せた ({reason}): {iid} ${price:.2f} → {pct}%引き ${offer:.2f} "
-            f"/ 下限 ${floor} (仕入 ¥{basis:,}) {title}")
+        log(f"     💌 一覧に載せた ({reason}): {iid} ${price:.2f} → {OFFER_PCT_US}%引き ${offer:.2f} {title}")
     return added
 
 
@@ -409,7 +448,7 @@ def build_store_plan(log=print):
     plan_items(rows, ledger, log=log, reason="店全体")
     save_json(OFFERS_PATH, ledger)
     w = waiting_list()
-    log(f"💌 送る一覧: {len(w)}件 (Edge で Seller Hub の出品中一覧を開き、右下の「オファーを送る」を押す)")
+    log(f"💌 送る一覧: {len(w)}件 (神風が1日1回 Seller Hub を開き、Edge の拡張が送る)")
     return w
 
 
