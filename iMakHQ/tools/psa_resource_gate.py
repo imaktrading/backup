@@ -1579,6 +1579,32 @@ def count_ng_blocked(uniq_iids, cache, ng_by_iid, combine_fn, build_cands_fn):
     return blocked
 
 
+# ★2026-10-09 ユーザー「再仕入れ何回やってもボタン消えない」: 押すと「候補0本」で飛ばされる札が、
+#   件数には「押せば見つかるかも」として残り続けていた (昼はメルカリを探さないので、押しても見つからない)。
+#   押した時に候補0本だった札を記録し、**同じ日のうちは**件数から外す。夜の探索 (23:30) の後は日付が変わるので戻る。
+NOCAND_PATH = r"C:/dev/iMak_data/hq/psa_gate_nocand.json"
+
+
+def _save_nocand(iids, path=NOCAND_PATH):
+    import datetime as _dt
+    import json as _json
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump({"date": _dt.date.today().isoformat(), "iids": [i for i in iids if i and i != "?"]}, f)
+    except OSError:
+        pass
+
+
+def load_nocand_today(today, path=NOCAND_PATH):
+    """今日押した時に候補0本だった itemID の set (日付が今日でなければ空)。"""
+    import json as _json
+    try:
+        d = _json.load(open(path, encoding="utf-8"))
+    except Exception:                                          # noqa: BLE001
+        return set()
+    return set(d.get("iids") or []) if d.get("date") == today else set()
+
+
 def count_workload(today=None):
     """押したら『今すぐ照合に出せる件数』を **探索せずに** 数える (パネルのヒント用・2026-09-01).
 
@@ -1683,6 +1709,23 @@ def count_workload(today=None):
                 _cache, _ng_map, combine, _build_visual_candidates)
         except Exception:                                      # noqa: BLE001
             ng_blocked = set()             # 判らない時は外さない (作業できる側に残す)
+        # ★2026-10-09: 今日押して候補0本だった札も外す (押しても出ないのに件数に残っていた)
+        nocand = load_nocand_today(today or _dt.date.today().isoformat())
+        ng_blocked = set(ng_blocked) | {i for i in uniq if i in nocand}
+        # ★2026-10-09: 押した時と同じく「補充保留 (Q列)」と「未発送の注文がある出品」も外す
+        #   (実例 820206076676 ミュウ: 未発送の注文があり押しても出ないのに、件数に1件残っていた)
+        try:
+            import sheet_io as _sio_h
+            _pv_h = _sio_h._read_with_quota_retry(_sio_h._product_ws().get_all_values)
+            _hold_h = {(r[1] or "").strip() for r in _pv_h[1:] if len(r) > 1 and _sio_h.is_restock_hold(r)}
+        except Exception:                                      # noqa: BLE001
+            _hold_h = set()
+        try:
+            import sold_restock as _SR_h
+            _hold_h |= set(_SR_h.unshipped_item_ids())
+        except Exception:                                      # noqa: BLE001
+            pass
+        ng_blocked |= {i for i in uniq if i in _hold_h}
         base["ng_blocked"] = len(ng_blocked)
         base.update({"actionable": sum(1 for i in uniq if i and i not in processed
                                        and i not in excl and i not in supply_wait
@@ -1837,6 +1880,7 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
     if _nocand:
         print(f"  ⏭ 候補0本 {len(_nocand)}件は照合に出せない (仕入元が買えない/違う判定済/上限超え): "
               f"{', '.join(_nocand[:10])}")
+    _save_nocand(_nocand)          # ★2026-10-09: ボタンの件数から同じ日のうちは外す (下の count_workload)
     if not items:
         print("  照合対象なし (見せる候補がある再仕入れ可が0件) → RESTOCK確定 変更なし")
         return
