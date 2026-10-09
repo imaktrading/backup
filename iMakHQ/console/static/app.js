@@ -335,22 +335,25 @@
   function renderStrip() {
     if (!$("today-strip")) return;
     var oj = STRIP.offer, dj = STRIP.order, chips = [STRIP.counts, STRIP.night, STRIP.watch, STRIP.integrity, STRIP.defender];
+    // ★2026-10-05 ユーザー「新規出品出来るカード枚数を…注文仕入れ待ち0件みたいに表示できる？」
+    var pn = STRIP.psaNew;
+    var pnChip = pn ? (pn.n == null ? ["warn", "新規に出せる PSA 数えられない", ""]
+                                    : ["", "新規に出せる PSA <b>" + pn.n + "枚</b>", ""]) : null;
+    // ★2026-10-09 ユーザー「新規に出せる PSA の横にして。送れる件数を表示して」→「オファー0件の横に新規に出せる PSA、
+    //   注文 仕入れ待ちの横にオファーを送れる件数を移動」: 並びは オファー → 新規に出せる PSA → 注文 → オファーを送れる
+    var os_ = STRIP.offerSend;
+    var osb = buttons.filter(function (b) { return b.label.indexOf("オファーを送る (") >= 0; })[0];
+    var osChip = (os_ || osb) ? (os_ && os_.n == null ? ["warn", "オファーを送れる 数えられない", jobBtn(osb, "10件送る")]
+                       : ["", "オファーを送れる <b>" + (os_ ? os_.n : "—") + "件</b> (8%引き・1回10件)",
+                          os_ && os_.n ? jobBtn(osb, "10件送る") : ""]) : null;
     if (oj) chips.push(oj.state === "error" ? ["warn", "オファー 数えられない", ""]
                        : [oj.n ? "warn" : "", "オファー <b>" + (oj.n || 0) + "件</b>", ""]);
+    if (pnChip) chips.push(pnChip);
     // ★2026-09-29 ユーザー「これに仕入れ待ち件数を表示を追加したら」: [取り込む] はここに1つだけ (常に)
     if (dj) chips.push([dj.n ? "warn" : "", "注文 仕入れ待ち <b>" + (dj.n == null ? "—" : dj.n) + "件</b>" +
                         (dj.note ? " · " + esc(dj.note).replace("最後の取り込み ", "最後の取り込み <b>") + "</b>" : " · 未取り込み"),
                         jobBtn(dj, "取り込む") + ' <a class="stlink" href="' + SALES_SHEET + '" target="_blank" rel="noopener">シート</a>']);
-    // ★2026-10-05 ユーザー「新規出品出来るカード枚数を…注文仕入れ待ち0件みたいに表示できる？」
-    var pn = STRIP.psaNew;
-    if (pn) chips.push(pn.n == null ? ["warn", "新規に出せる PSA 数えられない", ""]
-                       : ["", "新規に出せる PSA <b>" + pn.n + "枚</b>", ""]);
-    // ★2026-10-09 ユーザー「新規に出せる PSA 221枚 の横にして。送れる件数を表示して」: オファーを送るボタンをここに
-    var os_ = STRIP.offerSend;
-    var osb = buttons.filter(function (b) { return b.label.indexOf("オファーを送る (") >= 0; })[0];
-    if (os_ || osb) chips.push(os_ && os_.n == null ? ["warn", "オファーを送れる 数えられない", jobBtn(osb, "送る")]
-                       : ["", "オファーを送れる <b>" + (os_ ? os_.n : "—") + "件</b> (8%引き・1回10件)",
-                          os_ && os_.n ? jobBtn(osb, "10件送る") : ""]);
+    if (osChip) chips.push(osChip);
     $("today-strip").innerHTML = chips.concat(STRIP.errors || []).map(stChip).join("");
     var big = [];
     // 左注文・右オファーの2枠 (2026-10-04 ユーザー「注文は左にして」= .ord を先頭に並べる)。どちらかに件数があれば両方並べる (0件の側は「ありません」)
