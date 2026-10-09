@@ -344,7 +344,9 @@
     var os_ = STRIP.offerSend;
     var osb = buttons.filter(function (b) { return b.label.indexOf("オファーを送る (") >= 0; })[0];
     var osChip = (os_ || osb) ? (os_ && os_.n == null ? ["warn", "オファーを送れる 数えられない", jobBtn(osb, "10件送る")]
-                       : ["", "オファーを送れる <b>" + (os_ ? os_.n : "—") + "件</b> (8%引き・1回10件)",
+                       : ["", "オファーを送れる <b>" + (os_ ? os_.n : "—") + "件</b> (8%引き・1回10件)" +
+                          (os_ && os_.sent ? " · 送った " + os_.sent + "件 → 成約 <b>" + (os_.won || 0) + "件</b>" +
+                           (os_.won ? " ($" + os_.won_usd + ")" : "") : ""),
                           os_ && os_.n ? jobBtn(osb, "10件送る") : ""]) : null;
     if (oj) chips.push(oj.state === "error" ? ["warn", "オファー 数えられない", ""]
                        : [oj.n ? "warn" : "", "オファー <b>" + (oj.n || 0) + "件</b>", ""]);

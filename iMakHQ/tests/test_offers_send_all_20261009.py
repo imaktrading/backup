@@ -69,3 +69,15 @@ def test_send_batch_is_10_by_watch(monkeypatch):
     ledger = {}
     got = SO.plan_items(rows, ledger, log=lambda *a: None, limit=10)
     assert got == {str(i) for i in range(6, 16)}
+
+
+def test_match_sales_and_stats():
+    """効果測定: 送った日〜期限に売れて、売値がオファー以下なら「オファーで成約」(2026-10-09)。"""
+    led = {"1": {"status": SO.SENT, "sent": "2026-10-09T18:30:00", "expires": "2026-10-13T18:30:00", "offer": 91.06},
+           "2": {"status": SO.SENT, "sent": "2026-10-09T18:30:00", "expires": "2026-10-13T18:30:00", "offer": 83.70},
+           "3": {"status": SO.SENT, "sent": "2026-10-09T18:30:00", "expires": "2026-10-13T18:30:00", "offer": 50.0}}
+    rows = [["", "1", "", "", "2026/10/10", "", "91.06"], ["", "2", "", "", "2026/10/11", "", "90.98"],
+            ["", "3", "", "", "2026/10/01", "", "50"]]
+    assert SO.match_sales(led, rows) == 2
+    assert led["1"]["status"] == SO.WON and led["2"]["status"] == SO.FULL and "outcome" not in led["3"]
+    assert SO.offer_stats(led) == {"sent": 3, "won": 1, "won_usd": 91.06, "full": 1}

@@ -236,6 +236,66 @@ def remove_no_ad(iid, path=None):
         save_json(path, d)
 
 
+WON, FULL = "オファーで成約", "定価で売れた"
+
+
+def match_sales(ledger, sales_rows, item_col=1, date_col=4, price_col=6):
+    """送ったオファーが売れたかを販売実績の行で決める (純関数)。台帳に outcome を書き、書いた件数を返す。
+
+    ★2026-10-09 ユーザー「送ったオファーで成約になったものは、後でわかるの？効果測定という意味ね」。
+      送った日〜期限の日に、その itemID の注文があり、売値がオファーの値段以下なら「オファーで成約」、高ければ「定価で売れた」。
+      ミラー (別の itemID) の注文は数えない (オファーは US に送る)。
+    """
+    sold = {}
+    for r in sales_rows or []:
+        iid = (r[item_col] if len(r) > item_col else "").strip()
+        if not iid:
+            continue
+        try:
+            day = datetime.datetime.strptime((r[date_col] or "").strip(), "%Y/%m/%d").date()
+            price = float(str(r[price_col]).replace(",", "").replace("$", ""))
+        except (ValueError, IndexError):
+            continue
+        sold.setdefault(iid, []).append((day, price))
+    n = 0
+    for iid, e in ledger.items():
+        if not e.get("sent") or e.get("outcome"):
+            continue
+        try:
+            a = datetime.datetime.fromisoformat(e["sent"]).date()
+            b = datetime.datetime.fromisoformat(e.get("expires") or e["sent"]).date()
+        except (ValueError, TypeError):
+            continue
+        hit = [(d, p) for d, p in sold.get(iid, []) if a <= d <= b]
+        if not hit:
+            continue
+        d, p = min(hit)
+        offer = float(e.get("offer") or 0)
+        e.update(outcome=WON if offer and p <= offer + 0.5 else FULL, sold_price=p, sold_day=d.isoformat())
+        e["status"] = e["outcome"]
+        n += 1
+    return n
+
+
+def offer_stats(ledger):
+    """送った件数・オファーで成約・売上 (純関数)。神風に出す。"""
+    sent = [e for e in ledger.values() if e.get("sent")]
+    won = [e for e in sent if e.get("outcome") == WON]
+    return {"sent": len(sent), "won": len(won), "won_usd": round(sum(float(e.get("sold_price") or 0) for e in won), 2),
+            "full": sum(1 for e in sent if e.get("outcome") == FULL)}
+
+
+def _read_sales():
+    """販売実績の全行 (I/O)。読めなければ None。"""
+    try:
+        import order_purchase_sync as OPS
+        import sheet_io as S
+        ws = S._open(OPS.SALES_SHEET_ID).get_worksheet_by_id(OPS.SALES_GID)
+        return S._read_with_quota_retry(ws.get_all_values)[1:]
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
 def settle(ledger, drop_ids, live_ids, write=False, log=print, now=None):
     """期限が来た物の後始末 (write=False は数えるだけ)。台帳の status を埋めて返す。
 
@@ -243,8 +303,23 @@ def settle(ledger, drop_ids, live_ids, write=False, log=print, now=None):
     送る待ち → 2日:     落とす候補 = 落とす / それ以外 = (広告を外していれば戻して) 送らずに終了
     """
     now = now or datetime.datetime.now()
+    sales = _read_sales() if write else None                   # 試し (write=False) では販売実績を読まない
+    if sales is not None:
+        won = match_sales(ledger, sales)
+        st_ = offer_stats(ledger)
+        log(f"  📈 オファーの効果: 送った {st_['sent']}件 / オファーで成約 {st_['won']}件 (${st_['won_usd']:,.2f}) "
+            f"/ 定価で売れた {st_['full']}件 (今回わかった {won}件)")
     back = []
     for iid, e in ledger.items():
+        if e.get("outcome"):
+            # 売れた出品も、補充されて出し直る時のために、期限が来たら外した広告を戻す (状態は成約のまま)
+            try:
+                over = now >= datetime.datetime.fromisoformat(e.get("expires") or "")
+            except ValueError:
+                over = True
+            if over and e.get("ad_removed") and not e.get("ad_back"):
+                back.append(iid)
+            continue
         st = offer_state(e, now)
         if st not in ("expired", "waiting_over"):
             continue
@@ -263,6 +338,9 @@ def settle(ledger, drop_ids, live_ids, write=False, log=print, now=None):
             ok = restore_ads(back, log=log)
             for iid in ok:
                 e = ledger[iid]
+                if e.get("outcome"):
+                    e["ad_back"] = now.isoformat(timespec="seconds")
+                    continue
                 e["status"] = "広告を戻した" if offer_state(e, now) == "expired" else "送らずに終了"
             if ok:
                 log(f"  💌 期限が来て落とさない {len(ok)}件 の US 広告を8%で付け直しました")
@@ -349,7 +427,10 @@ def count_sendable(now=None):
             return {"n": None, "error": "eBay の一覧が読めない"}
         import psa_hoju_fill as H
         sheet = {H._cell(x, H.B): x for x in H._read_high()[1:] if H._cell(x, H.B)}
-        return {"n": sum(1 for _r, why in pick_rows(rows, el, sheet, act) if not why)}
+        sales = _read_sales()
+        if sales is not None and match_sales(ledger, sales):
+            save_json(OFFERS_PATH, ledger)
+        return {"n": sum(1 for _r, why in pick_rows(rows, el, sheet, act) if not why), **offer_stats(ledger)}
     except Exception as e:                                     # noqa: BLE001
         return {"n": None, "error": f"{type(e).__name__}: {e}"[:200]}
 

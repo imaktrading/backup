@@ -78,6 +78,7 @@ def test_settle_sent_and_waiting(tmp_path, monkeypatch):
               "LIVE": {"status": SO.SENT, "expires": "2099-01-01T00:00:00"}}
     calls = []
     monkeypatch.setattr(SO, "restore_ads", lambda iids, log=None: calls.append(sorted(iids)) or set(iids))
+    monkeypatch.setattr(SO, "_read_sales", lambda: [])          # 本物の販売実績は読まない
     SO.settle(ledger, {"DROP"}, {"DROP", "KEEP", "WAIT_AD", "WAIT_NOAD", "LIVE"}, write=True,
               log=lambda *a: None, now=NOW)
     assert ledger["SOLD"]["status"] == "売れた・終了"
