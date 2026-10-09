@@ -26,19 +26,36 @@ URL = "https://jp.mercari.com/mypage/purchases"
 _DATE = re.compile(r"(\d{4})/(\d{2})/(\d{2}) (\d{2}):(\d{2})")
 
 
+def norm_title(t):
+    """Shops の商品名を比べるための形 (空白・全角空白・タブを抜く) (純関数)。"""
+    return re.sub(r"\s+", "", (t or "").replace("　", ""))
+
+
 def parse_purchases(src):
-    """購入履歴の HTML → [{"id", "url", "title", "at"(datetime or None)}] (純関数)。"""
-    parts = re.split(r'href="/transaction/(m\d+)"', src or "")
+    """購入履歴の HTML → [{"id", "url", "title", "at"(datetime or None), "shops"}] (純関数)。
+
+    ★2026-10-09 ユーザー「(Shops も) 自動にしてほしい」: メルカリShops の購入は `/transaction/m…` ではなく
+      `https://mercari-shops.com/orders/<注文番号>` で並ぶ。Shops の購入は id を「name:<商品名>」にして、
+      仕入元・補URL の Shops の商品名と突き合わせる (注文番号と商品ページの番号は別物なので)。
+    """
+    pat = re.compile(r'href="(?:/transaction/(m\d+)|https://mercari-shops\.com/orders/([A-Za-z0-9]+))"')
+    ms = list(pat.finditer(src or ""))
     out = []
-    for k in range(1, len(parts), 2):
-        body = re.sub(r"<svg.*?</svg>", "", parts[k + 1][:6000], flags=re.S)
+    for k, m in enumerate(ms):
+        end = ms[k + 1].start() if k + 1 < len(ms) else m.end() + 6000
+        body = re.sub(r"<svg.*?</svg>", "", (src or "")[m.end():min(end, m.end() + 6000)], flags=re.S)
         texts = [_html.unescape(x.split(">", 1)[-1]).strip() for x in body.split("<")]
         texts = [x for x in texts if x]
-        m = next((_DATE.search(x) for x in texts if _DATE.search(x)), None)
-        # 表に入れるのは取引画面 (発送状況・取引メッセージが見られる)。ユーザー 2026-09-24「こっちの URL の方がよくない？」
-        out.append({"id": parts[k], "url": "https://jp.mercari.com/transaction/" + parts[k],
-                    "title": texts[0] if texts else "",
-                    "at": dt.datetime(*map(int, m.groups())) if m else None})
+        d = next((_DATE.search(x) for x in texts if _DATE.search(x)), None)
+        title = texts[0] if texts else ""
+        at = dt.datetime(*map(int, d.groups())) if d else None
+        if m.group(1):
+            # 表に入れるのは取引画面 (発送状況・取引メッセージが見られる)。ユーザー 2026-09-24「こっちの URL の方がよくない？」
+            out.append({"id": m.group(1), "url": "https://jp.mercari.com/transaction/" + m.group(1),
+                        "title": title, "at": at, "shops": False})
+        else:
+            out.append({"id": "name:" + norm_title(title), "url": "https://mercari-shops.com/orders/" + m.group(2),
+                        "title": title, "at": at, "shops": True, "order_id": m.group(2)})
     return out
 
 

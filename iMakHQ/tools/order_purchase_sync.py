@@ -336,11 +336,31 @@ def _candidate_lookup():
         return None
     cols = [0] + [S.PRODUCT_COL_AUX_START + k for k in range(S.PRODUCT_AUX_MAX)]
 
+    names, prices = {}, {}
+
+    def shops_name(url):
+        """Shops の商品ページ → 「name:<商品名>」(API・同じ URL は1回だけ)。★2026-10-09 Shops の購入を結ぶため。"""
+        if url not in names:
+            try:
+                import mercari_psa_resource as mp
+                from mercari_purchases import norm_title
+                d = mp.api_detail(url) or {}
+                names[url] = ("name:" + norm_title(d["name"])) if d.get("name") else ""
+                if names[url] and d.get("price"):
+                    prices[names[url]] = int(d["price"])               # Shops の仕入原価 = 商品ページの値段 (送料込み)
+            except Exception:                                  # noqa: BLE001
+                names[url] = ""
+        return names[url]
+
     def f(sku, iid):
         _l, _n, row = W.find_row(sheets, (sku or "").strip(), (iid or "").strip())
         if not row:
             return set()
-        return {mercari_id(row[c]) for c in cols if len(row) > c and mercari_id(row[c])}
+        out = {mercari_id(row[c]) for c in cols if len(row) > c and mercari_id(row[c])}
+        out |= {shops_name(row[c].strip()) for c in cols
+                if len(row) > c and "mercari.com/shops/product/" in row[c]} - {""}
+        return out
+    f.prices = prices
     return f
 
 
@@ -379,7 +399,9 @@ def purchase_keys(buys, kind):
     """購入ごとの見分けの鍵 (純関数)。同じ日に同じ物を2点買った時は #1 #2 で分ける。"""
     out, seen = [], {}
     for p in buys:
-        if kind == "mercari":
+        if kind == "mercari" and p.get("shops"):
+            base = "shops:" + str(p.get("order_id") or "")               # ★2026-10-09 Shops は注文番号で見分ける
+        elif kind == "mercari":
             base = "mercari:" + str(p.get("id") or "")
         else:
             base = "uniqlo:%s|%s|%s|%s|%s" % (p.get("day"), p.get("pid"), p.get("color"), p.get("size"),
@@ -437,6 +459,9 @@ def link_purchases(ws, by_id, today_rows):
         m = re.search(r"jp\.mercari\.com/transaction/(m\d+)", r[C_URL])
         if m:
             linked.setdefault("mercari:%s#1" % m.group(1), norm_order(r[C_ORDER]))
+        m = re.search(r"mercari-shops\.com/orders/([A-Za-z0-9]+)", r[C_URL])   # Shops の購入も使用済み
+        if m:
+            linked.setdefault("shops:%s#1" % m.group(1), norm_order(r[C_ORDER]))
         m = re.search(r"スニダン 取引ID (\d+)", r[C_URL])          # 手で入れたスニダンの購入も使用済み
         if m:
             linked.setdefault("snkrdunk:%s#1" % m.group(1), norm_order(r[C_ORDER]))
@@ -531,7 +556,7 @@ def _link_mercari(targets, linked):
     hit = MP.match(orders, [p for p, _k in free])
     print(f"  メルカリ購入履歴 (Edge の拡張から) {len(buys)}件 (ほかの注文に結び済み {len(buys) - len(free)}件) / 結べた注文 {len(hit)}件")
     return {n: (p["at"].date(), p["url"], "%s %s" % (p["at"].strftime("%m/%d %H:%M"), p["title"][:30]),
-                None, key_of[id(p)])
+                (getattr(cand, "prices", {}).get(p["id"]) if p.get("shops") else None), key_of[id(p)])
             for n, p in hit.items()}
 
 
