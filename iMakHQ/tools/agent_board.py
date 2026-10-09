@@ -441,7 +441,37 @@ def close_window(key, force=False):
     for pid in pids:
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=30,
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    _close_terminal_window(key + "-web")
     return True, "%s を閉じました" % key
+
+
+# ★2026-10-09 ユーザー「CMD の窓自体を閉じて」: 家の担当は Windows Terminal の窓 (題 "<KEY>-web") で開く。
+#   中を落としても終了コードが0でないと「プロセスは終了しました」の窓が残る → 窓にも閉じる合図を送る
+#   (settings.json の defaults に closeOnExit=always も入れた。こちらは設定が戻された時の保険)
+_WT_CLOSE_PS = r'''
+Add-Type @"
+using System;using System.Text;using System.Runtime.InteropServices;
+public class WtClose{public delegate bool P(IntPtr h,IntPtr l);
+[DllImport("user32.dll")]public static extern bool EnumWindows(P p,IntPtr l);
+[DllImport("user32.dll")]public static extern int GetClassName(IntPtr h,StringBuilder s,int n);
+[DllImport("user32.dll")]public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);
+[DllImport("user32.dll")]public static extern bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l);}
+"@
+[WtClose]::EnumWindows({param($h,$l) $c=New-Object Text.StringBuilder 256;[WtClose]::GetClassName($h,$c,256)|Out-Null;
+ if($c.ToString() -eq 'CASCADIA_HOSTING_WINDOW_CLASS'){$t=New-Object Text.StringBuilder 256;[WtClose]::GetWindowText($h,$t,256)|Out-Null;
+ if($t.ToString() -eq '__TITLE__'){[WtClose]::PostMessage($h,0x10,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null}};$true},[IntPtr]::Zero)|Out-Null
+'''
+
+
+def _close_terminal_window(title):
+    """題が title のターミナルの窓に閉じる合図 (WM_CLOSE) を送る。無ければ何もしない。"""
+    import time
+    time.sleep(2)                        # 中が落ちて窓が「終了しました」になるのを待つ
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", _WT_CLOSE_PS.replace("__TITLE__", title)],
+                       capture_output=True, timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception:                                          # noqa: BLE001 閉じられなくても中は落ちている
+        pass
 
 
 def sleep_idle():
