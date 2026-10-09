@@ -75,6 +75,7 @@ from err_flag import (  # noqa: E402
     build_err_marker, marker_count, PERSISTENT_THRESHOLD, DEAD_SOURCE_THRESHOLD,
 )
 from ledger_lock import ledger_lock, LedgerBusy  # noqa: E402
+import supply_guard as SG  # noqa: E402
 from scrapers.mercari_scraper import fetch_product_inventory as fetch_mercari  # noqa: E402
 from scrapers.mercari_scraper import create_driver as create_mercari_driver  # noqa: E402
 from scrapers.amazon_scraper import fetch_product_inventory as fetch_amazon  # noqa: E402
@@ -348,7 +349,62 @@ def _check_single_url(url: str, sleep_sec: float = DEFAULT_SLEEP_SEC,
     if isinstance(raw_points, int) and not isinstance(raw_points, bool) and raw_points >= 0:
         out["points_jpy"] = raw_points
 
+    if supplier == "mercari":
+        out["supply_name"] = (info.get("name") or "")[:120]   # supply_guard 用 (読み取りは増やさない)
     return out
+
+
+def _guard_supply_name(out: dict, row: dict) -> dict:
+    """★ 2026-10-09 (HQ GO B-20261009-014): 仕入元の商品名の急変 → 売切と同じ扱い (supply_guard 1・2).
+
+    シャワーズ (820133532757) の補URL が PSA10→PSA7 に書き換わり、その値段で赤字販売した。
+    メルカリ (Shops 含む) は API の返事に商品名があるので、読み取りを増やさずに見る。
+    在庫ありと出た時だけ倒す (売切はそのまま)。補URL なら既存の消込 (2 回目も売切) に乗る。
+    """
+    name = out.get("supply_name") or ""
+    if not name or name == "(deleted)":
+        return out
+    SG.count_read(out["url"])
+    reason = SG.grade_problem(row.get("title", ""), name)
+    kind = "grade"
+    if not reason:
+        reason = SG.baseline().check(out["url"], name)
+        kind = "name"
+    if reason and out["is_sold"] is False:
+        out["is_sold"] = True
+        out["raw_status"] = f"guard_{kind}"
+        out["guard"] = reason
+        out["price_jpy"] = None
+        SG.record_review(kind, out["url"], row, reason, name)
+        log(f"    [🏷] {reason}: {out['url']} / {name[:50]} → 売切と同じ扱い (目視へ)")
+    return out
+
+
+def _guard_price_drop(row: dict, sub_results: list) -> bool:
+    """★ 2026-10-09 (HQ GO): ほかの在庫あり仕入元 (中央値) か 前回 M より 4 割以上安い値段を目視に回す.
+
+    在庫ありのまま (取下げはしない)。見つけた行は **M を前回のまま据え置く** (True を返し、呼出側が
+    price_jpy=None にする)。ほかの仕入元の値段に乗り換えると、正しい安値 (例 ¥10,999) が既に M の行で
+    M が ¥35,000 に跳ねて eBay の値段まで上がる (10/09 の試走で 150 行中 2 行)。目視で決まるまで動かさない。
+    """
+    flagged = False
+    prev_m = SG.parse_jpy(row.get("current_m_jpy_str"))
+    live = [s for s in sub_results
+            if s.get("is_sold") is False and isinstance(s.get("price_jpy"), int)
+            and not isinstance(s.get("price_jpy"), bool)]
+    prices = {id(s): s["price_jpy"] for s in live}
+    for s in live:
+        others = [prices[id(o)] for o in live if o is not s]
+        reason = SG.price_drop(prices[id(s)], others, prev_m)
+        if reason:
+            s["guard_price"] = reason
+            s["price_excluded_jpy"] = prices[id(s)]
+            s["price_jpy"] = None
+            s["points_jpy"] = None
+            SG.record_review("price", s["url"], row, reason, s.get("supply_name", ""), prices[id(s)])
+            log(f"    [🏷] {reason}: {s['url']} → 仕入値は前回のまま (目視へ)")
+            flagged = True
+    return flagged
 
 
 def check_one_row(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
@@ -357,8 +413,13 @@ def check_one_row(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
 
     補仕入URL を含む短絡評価が必要な場合は check_one_row_with_fallback を使うこと。
     """
-    sub = _check_single_url(row["url"], sleep_sec, mercari_driver, amazon_driver)
-    return _build_row_result(row, [sub], hit_index=(0 if sub["is_sold"] is False else -1))
+    sub = _guard_supply_name(_check_single_url(row["url"], sleep_sec, mercari_driver, amazon_driver), row)
+    hold_price = _guard_price_drop(row, [sub])
+    result = _build_row_result(row, [sub], hit_index=(0 if sub["is_sold"] is False else -1))
+    if hold_price:
+        result["price_jpy"] = None
+        result["points_jpy"] = None
+    return result
 
 
 def check_one_row_with_fallback(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
@@ -390,8 +451,9 @@ def check_one_row_with_fallback(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
     _model = row.get("key_number", "")   # AI列=型番 (yodobashi 補URL の snapshot lookup キー)
 
     # 主 URL は必ず scrape (index 0)
-    main_sub = _check_single_url(row["url"], sleep_sec, mercari_driver, amazon_driver,
-                                 model_number=_model)
+    main_sub = _guard_supply_name(
+        _check_single_url(row["url"], sleep_sec, mercari_driver, amazon_driver,
+                          model_number=_model), row)
     sub_results = [main_sub]
     hit_index = 0 if main_sub["is_sold"] is False else -1
 
@@ -401,8 +463,9 @@ def check_one_row_with_fallback(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
         if not burl:
             backup_slot_results.append(None)   # 空枠 (色塗り "unknown" / 消込対象外)
             continue
-        sub = _check_single_url(burl, sleep_sec, mercari_driver, amazon_driver,
-                                model_number=_model)
+        sub = _guard_supply_name(
+            _check_single_url(burl, sleep_sec, mercari_driver, amazon_driver,
+                              model_number=_model), row)
         sub_results.append(sub)
         if sub["is_sold"] is False and hit_index < 0:
             hit_index = len(sub_results) - 1   # sub_results 内の index (価格採用に使う)
@@ -413,8 +476,9 @@ def check_one_row_with_fallback(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
         #   消込だけが sold_reconfirmed=True を要求する = 誤削除に対してのみ厳しくする。
         sold_reconfirmed = None
         if sub["is_sold"] is True:
-            sub2 = _check_single_url(burl, sleep_sec, mercari_driver, amazon_driver,
-                                     model_number=_model)
+            sub2 = _guard_supply_name(
+                _check_single_url(burl, sleep_sec, mercari_driver, amazon_driver,
+                                  model_number=_model), row)
             sold_reconfirmed = (sub2["is_sold"] is True)
         backup_slot_results.append({
             "slot": slot_i,                    # 0-4 = AC-AG (列 29+slot_i)
@@ -425,7 +489,11 @@ def check_one_row_with_fallback(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
             "sold_reconfirmed": sold_reconfirmed,
         })
 
+    hold_price = _guard_price_drop(row, sub_results)
     result = _build_row_result(row, sub_results, hit_index=hit_index)
+    if hold_price:                       # M を前回のまま (supply_guard 3)
+        result["price_jpy"] = None
+        result["points_jpy"] = None
     result["backup_slot_results"] = backup_slot_results
 
     # ★ 補URL救済 signal (フック2、2026-07-25 HQ Phase1 測定用)。
@@ -1895,6 +1963,9 @@ def process_sheet(
     log(f"  === 集計 [{sheet_label}] ===")
     log(f"    処理: {len(results)} / 対象 {len(rows)}")
     log(f"    新規売切: {newly_sold} / 新規復活: {newly_in_stock} / 変化なし: {len(results) - newly_sold - newly_in_stock - errors} / エラー: {errors}")
+    # ★ 2026-10-09 (HQ GO B-20261009-014): 0 件でも毎回 1 行出す
+    log(f"    {SG.summary_line()}")
+    SG.baseline().save()
     if url_alerts:
         log(f"  [!] URL 不正で在庫検出スキップ: {len(url_alerts)} 件 (スプシ修正必要)")
         for a in url_alerts[:10]:
