@@ -920,6 +920,31 @@ def _watcher_loop():
         time.sleep(120 if (STATE.get("watcher") or {}).get("local") else 1800)
 
 
+OFFER_EVERY_SEC = 600
+
+
+def _offer_loop():
+    """オファーの件数だけ 10分おきに数え直す (eBay 1コール)。
+
+    ★2026-10-09 ユーザー「オファーを読んでいないのではないか」: 数え直しは 開いた時 / ボタンの後 / 3時間古い時 だけで、
+      朝 7:04 の「0件」のまま、受信中のオファー (820202113139) が画面に出ていなかった。オファーは期限が短い。
+      走行ログには件数が変わった時 (最初の1回を含む) に1行出す。
+    """
+    last = None
+    time.sleep(60)
+    while True:
+        try:
+            if not STATE["counting"]:
+                refresh_counts(keys=["offer"])
+                n = ((STATE["counts"] or {}).get("offer") or {}).get("actionable")
+                if n != last:
+                    _log("📨 オファーを数え直しました: %s件 (10分おき)" % n)
+                    last = n
+        except Exception:                                      # noqa: BLE001
+            pass
+        time.sleep(OFFER_EVERY_SEC)
+
+
 SCHEDULE_AUDIT = r"C:/dev/iMak_data/hq/schedule_audit_last.json"
 
 
@@ -1683,6 +1708,7 @@ def main():
     _load_counts_cache()
     threading.Thread(target=get_home, daemon=True).start()
     threading.Thread(target=_watcher_loop, daemon=True).start()
+    threading.Thread(target=_offer_loop, daemon=True).start()
     threading.Thread(target=adopt_orphan_run, daemon=True).start()
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     if "--no-open" not in sys.argv:
