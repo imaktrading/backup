@@ -1699,47 +1699,11 @@ def sellerhub_daily():
         _log("⚠️ Seller Hub のレポート取りを開けませんでした: %s" % e)
 
 
-# ★2026-10-09 ユーザー確定「オファーが送れるものには全部送る」(US 8%引き・カウンターを受けるので画面から)。
-#   1日1回: 送る一覧を作り (shelf_offer.py plan・期限の後始末も)、あれば Seller Hub の「オファーを送れる出品」を
-#   #shg-offers 付きで Edge で開く → 拡張 (sellerhub_grab) が1件ずつ送ってタブを閉じる
-OFFERS_URL = "https://www.ebay.com/sh/lst/active?offers=sendNewOffers&source=filterbar&action=search#shg-offers"
-OFFERS_STAMP = r"C:\dev\iMak_data\hq\offers_daily_last.txt"
-
-
-def offers_daily():
-    today = datetime.date.today().isoformat()
-    try:
-        with open(OFFERS_STAMP, encoding="utf-8") as f:
-            if f.read().strip() == today:
-                return
-    except OSError:
-        pass
-    try:
-        with open(OFFERS_STAMP, "w", encoding="utf-8") as f:
-            f.write(today)
-        r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(TOOLS, "shelf_offer.py"), "plan"],
-                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
-                           cwd=TOOLS, env=dict(os.environ, PYTHONIOENCODING="utf-8"),
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        if TOOLS not in sys.path:
-            sys.path.insert(0, TOOLS)
-        import shelf_offer as SO
-        n = len(SO.waiting_list())
-        _log("💌 オファーの送る一覧: %d件 (1日1回・US 8%%引き)%s" % (
-            n, "" if r.returncode == 0 else " ⚠ 一覧づくりが異常終了 (%s)" % (r.stderr or "").strip()[-120:]))
-        if n:
-            subprocess.Popen([EDGE, OFFERS_URL])
-            _log("💌 Seller Hub を Edge で開きました (拡張が送ってタブを閉じます)")
-    except Exception as e:                                     # noqa: BLE001
-        _log("⚠️ オファーを送る準備に失敗: %s" % e)
-
-
 def main():
     if _port_in_use(PORT):                                     # もう動いている = 窓だけ開く
         if "--no-open" not in sys.argv:
             open_window()
             sellerhub_daily()
-            threading.Thread(target=offers_daily, daemon=True).start()
         return
     _load_counts_cache()
     threading.Thread(target=get_home, daemon=True).start()
@@ -1750,7 +1714,6 @@ def main():
     if "--no-open" not in sys.argv:
         threading.Timer(0.6, open_window).start()
         threading.Timer(5.0, sellerhub_daily).start()
-        threading.Timer(120.0, offers_daily).start()        # Seller Hub のレポート取りと重ならないよう少し後
     srv.serve_forever()
 
 

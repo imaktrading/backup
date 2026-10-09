@@ -33,6 +33,16 @@ def test_extension_handles_send_page():
     assert 'sendOffers("all")' in js and "shgOffersAt" in js
 
 
-def test_server_runs_offers_daily():
+def test_sent_by_button_not_automatically():
+    """ユーザー「突然送られると他業務の邪魔になるから、ボタン化して」(2026-10-09)。"""
     src = open(os.path.join(HERE, "..", "console", "server.py"), encoding="utf-8").read()
-    assert "threading.Timer(120.0, offers_daily).start()" in src and "#shg-offers" in src
+    assert "offers_daily" not in src
+    sys.path.insert(0, os.path.join(HERE, ".."))
+    import control_panel as cp
+    b = [s for s in cp.SCRIPTS if s["label"] == "💌 オファーを送る (送れる出品に8%引き)"][0]
+    assert b["cmd"] == ["python", "shelf_offer.py", "send"] and "#shg-offers" in SO.SEND_URL
+
+
+def test_extension_closes_sent_modal():
+    js = open(os.path.join(HERE, "..", "tools", "sellerhub_grab", "content.js"), encoding="utf-8").read()
+    assert "await closeSentModal();" in js and "Got it" in js

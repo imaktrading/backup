@@ -15,7 +15,7 @@
       (棚②で落とす前の物もこの中に入る)
     - 仕入元が売り切れでない (商品管理シート D列が空) / バイヤーからのオファーが返事待ちでない / 30日以内に送っていない
     - 値引きは **広告費の分** = US 8% (OFFER_PCT_US)。広告を外して送るので、広告付きで売れた時と利益は同じ (利益計算はしない)
-    - 1日1回、神風の起動時に一覧を作り、Edge の拡張が Seller Hub の画面から送る (カウンターを受けるため API では送らない)
+    - 神風のボタン「💌 オファーを送る」で一覧を作り、Edge の拡張が Seller Hub の画面から送る (カウンターを受けるため API では送らない)
     - 送ったオファー中に仕入元が切れても、監視くんの数量0で払えなくなる (2026-10-09 実機で数量0が通ることを確認)
 
 台帳の状態 (status):
@@ -271,6 +271,8 @@ def settle(ledger, drop_ids, live_ids, write=False, log=print, now=None):
     return ledger
 
 
+EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+SEND_URL = "https://www.ebay.com/sh/lst/active?offers=sendNewOffers&source=filterbar&action=search#shg-offers"
 OFFER_PCT_US = 8           # ★2026-10-09 ユーザー確定: 値引きは広告費の分 (US 8%・ミラーは 10%・ミラーはまだ送らない)
 
 
@@ -448,7 +450,7 @@ def build_store_plan(log=print):
     plan_items(rows, ledger, log=log, reason="店全体")
     save_json(OFFERS_PATH, ledger)
     w = waiting_list()
-    log(f"💌 送る一覧: {len(w)}件 (神風が1日1回 Seller Hub を開き、Edge の拡張が送る)")
+    log(f"💌 送る一覧: {len(w)}件")
     return w
 
 
@@ -459,6 +461,16 @@ if __name__ == "__main__":
         pass
     if len(sys.argv) > 1 and sys.argv[1] == "plan":
         build_store_plan()
+    elif len(sys.argv) > 1 and sys.argv[1] == "send":
+        # ★2026-10-09 ユーザー「突然送られると他業務の邪魔になるから、ボタン化して」: 神風のボタンから。
+        #   一覧を作り (期限の後始末も)、あれば Seller Hub の送る画面を Edge で開く → 拡張が送ってタブを閉じる
+        w = build_store_plan()
+        if w:
+            import subprocess
+            subprocess.Popen([EDGE, SEND_URL])
+            print(f"💌 Seller Hub を Edge で開きました: {len(w)}件を拡張が送ります (送り終えたらタブが閉じます)")
+        else:
+            print("💌 送る物はありません")
     else:
         for e in waiting_list():
             print(f"{e['item_id']} {e.get('reason')} {e.get('pct')}%引き ${e.get('offer')} 下限 ${e.get('floor')} {e.get('title', '')[:40]}")

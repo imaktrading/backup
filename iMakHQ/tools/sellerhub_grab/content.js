@@ -222,6 +222,23 @@
     if (c) c.click();
   }
 
+  // ★2026-10-09: 送った後に eBay が「Offers sent / You just sent buyers 1 new offer!」の小窓と
+  //   「Offers has a new home」の吹き出しを出す。閉じないと次の行の Send offers が開かず「小窓が開かない」で止まった
+  //   (初回 59件中 2件で止まった)。「Got it」を押して閉じる (無ければ ×)
+  async function closeSentModal() {
+    const box = await waitFor(() => [...document.querySelectorAll("[role=dialog], [aria-modal=true], [data-testid=sio-modal-root]")]
+      .find((d) => visible(d) && /Offers sent|You just sent/i.test(txt(d))) || null, 8000);
+    for (let i = 0; i < 3; i++) {
+      const got = [...document.querySelectorAll("button")].filter(visible).find((b) => /^Got it$/i.test(txt(b)));
+      if (got) { got.click(); await sleep(600); continue; }
+      break;
+    }
+    if (box && visible(box)) {
+      const x = box.querySelector("button[aria-label*=lose], button[aria-label*=Close], .lightbox-dialog__close");
+      if (x) { x.click(); await sleep(600); }
+    }
+  }
+
   async function sendOffers(mode) {
     // mode: "try" = 1件を小窓に入れるまで (送らない) / "one" = 1件送る / "all" = 全部送る
     const w = await api("GET", "/api/offers/waiting");
@@ -260,6 +277,7 @@
       const closed = await waitFor(() => (liveOfferDialog() ? null : true), 20000);
       if (!closed) { log(`⚠ ${item.item_id} 送った後に小窓が閉じない → 送れたか画面で確かめてください (台帳には入れません)`); return; }
       const m = await api("POST", "/api/offers/sent", { item_id: item.item_id, pct: item.pct });
+      await closeSentModal();
       log(`💌 送った: ${item.item_id} ${item.pct}%引き${m && m.ok ? "" : " ⚠台帳に入らず"}`);
       sent++;
       await sleep(2500);
