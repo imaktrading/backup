@@ -1,0 +1,6 @@
+{
+  "model": "haiku",
+  "permissions": {
+    "allow": ["ListAgents", "SendMessage", "Write(C:/dev/iMak_data/hq/requests/**)"]
+  }
+}
