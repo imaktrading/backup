@@ -117,7 +117,47 @@ def load_ledger(path=LEDGER):
     return _load(path)
 
 
-def run(log_text, append_log, ledger_path=LEDGER, verified_path=VERIFIED, add_backlog=None):
+MIRROR_INPUT = r"C:/dev/iMak_data/catalog/requests/mirror_variant_input.json"
+_MIRROR_RE = re.compile(r"刷りがPSAラベルと合わない — (?P<base>[A-Za-z0-9-]+) — PSA は (?P<psa>[A-Z .]*REVERSE HOLO) だが行は 通常"
+                        r" / 合う行が0件")
+
+
+def mirror_requests(reasons):
+    """落ちた理由から「ミラーの行が無い」物を拾う (純関数)。{cert: {"base", "psa"}}。
+
+    ★2026-10-09 (ブラボー B-20261009-024・カタログ GO 済み): ミラー行の依頼書を3回出した。依頼書の代わりに
+      カタログの入力 mirror_variant_input.json に1件書けば、カタログが毎時に `<通常版>_<印>` の行を作る。
+      どのミラーを作れるかはカタログの表が決める (表に無い表記はカタログが断る) ので、ここは REVERSE HOLO を全部渡す。
+    """
+    out = {}
+    for cert, why in (reasons or {}).items():
+        m = _MIRROR_RE.search(why or "")
+        if m:
+            out[cert] = {"base": m.group("base"), "psa": m.group("psa").strip()}
+    return out
+
+
+def write_mirror_input(reqs, now, path=MIRROR_INPUT):
+    """カタログの入力 {cert: {base, psa, at}} に足す (I/O)。戻り: 新しく足した件数 (同じ cert の同じ中身は足し直さない)。"""
+    if not reqs:
+        return 0
+    cur = _load(path)
+    n = 0
+    for cert, v in reqs.items():
+        old = cur.get(cert) or {}
+        if old.get("base") == v["base"] and old.get("psa") == v["psa"]:
+            continue
+        cur[cert] = dict(v, at=now)
+        n += 1
+    if n:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cur, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, path)
+    return n
+
+
+def run(log_text, append_log, ledger_path=LEDGER, verified_path=VERIFIED, add_backlog=None, mirror_path=None):
     """自動の締めで呼ぶ (I/O)。走行ログ1本ぶん。0件でも必ず1行出す。"""
     reasons, ok = parse_fail_reasons(log_text)
     now = datetime.now().isoformat(timespec="seconds")
@@ -137,6 +177,12 @@ def run(log_text, append_log, ledger_path=LEDGER, verified_path=VERIFIED, add_ba
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(ledger, f, ensure_ascii=False, indent=1)
     os.replace(tmp, ledger_path)
+    try:
+        mreq = mirror_requests(reasons)
+        mnew = write_mirror_input(mreq, now, path=mirror_path or MIRROR_INPUT)
+        append_log("🪞 ミラーの行の作成を頼んだ: %d件 (ミラーで落ちた %d件・カタログが毎時に作る)\n" % (mnew, len(mreq)))
+    except Exception as e:                                      # noqa: BLE001
+        append_log("  ⚠️ ミラーの行の作成を頼めなかった: %s: %s\n" % (type(e).__name__, e))
     answered = [c for c in reasons if (ledger.get(c) or {}).get("answered")]
     append_log("🩹 目視 OK 済みなのに出品の手前で落ちた: %d件 (落ちた cert 全体 %d件) / 残務に足した: %d件%s\n" % (
         len(answered), len(reasons), len(added),
