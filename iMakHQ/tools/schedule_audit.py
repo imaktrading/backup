@@ -107,13 +107,16 @@ def audit(conf, home, kagoya, jobq, laptop_last, now):
         elif w == "job_queue":
             s = (jobq or {}).get(e["name"]) or {}
             defined = e["name"] in ((jobq or {}).get("_defined") or ())
+            # ★2026-10-09 ブラボー指摘 (B-20261009-012): 夜の束で any_rc_ok の仕事は、結果コードが 0 以外でも正常
+            #   (例: カタログの整合点検は見つけた件数を返す)。夜の束自身と同じ判定にする
+            rc_ok = e["name"] in ((jobq or {}).get("_any_rc_ok") or ())
             if not s and defined:
                 # ★2026-10-09: 夜の束に足したばかりでまだ一度も動いていない仕事を「見つからない」と出していた
                 a = {"state": "Ready", "last": "", "result": NEVER, "next": "夜の束の次の見回り"}
             else:
                 a = None if not s else {"state": "Running" if s.get("pid") else "Ready",
                                         "last": s.get("last_ok") or "",
-                                        "result": 0 if s.get("last_rc") in (0, None) else s.get("last_rc")}
+                                        "result": 0 if (rc_ok or s.get("last_rc") in (0, None)) else s.get("last_rc")}
         else:                                   # laptop
             a = {"state": "Ready", "last": laptop_last.isoformat() if laptop_last else "", "result": 0}
         if w == "kagoya" and kagoya is None:
@@ -273,7 +276,11 @@ def main(argv=None):
     now = dt.datetime.now()
     jobq = dict(_load(JOBQ_STATE, {}))
     jq = _load(JOBQ_DEF, {})
-    jobq["_defined"] = [j.get("name") for j in (jq if isinstance(jq, list) else jq.get("jobs", []))]
+    _jobs = jq if isinstance(jq, list) else jq.get("jobs", [])
+    jobq["_defined"] = [j.get("name") for j in _jobs]
+    jobq["_any_rc_ok"] = [j.get("name") for j in _jobs if j.get("any_rc_ok")]
+    print("  📋 夜の束: 仕事 %d件 / 結果コードを問わない (any_rc_ok) %d件 %s"
+          % (len(jobq["_defined"]), len(jobq["_any_rc_ok"]), jobq["_any_rc_ok"]))
     res = audit(conf, home_tasks(), kagoya_tasks(), jobq, laptop_last(), now)
     res["at"] = now.isoformat(timespec="seconds")
     bad = [r for r in res["rows"] if r["status"] in BAD]

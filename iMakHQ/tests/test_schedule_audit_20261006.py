@@ -122,3 +122,12 @@ def test_夜の束に足したばかりの仕事は初回待ち_定義にも無�
     assert res["rows"][0]["status"] == "never"
     res = A.audit(conf, {}, {}, {"_defined": []}, None, NOW)
     assert res["rows"][0]["status"] == "missing"
+
+
+def test_夜の束でany_rc_okの仕事は結果コードが0以外でも正常():
+    conf = {"expected": [_exp("weekly", "job_queue", 200)], "retired": {}, "ask": {}}
+    st = {"weekly": {"last_ok": "2026-10-07T06:00:00", "last_rc": 10, "pid": None}}
+    res = A.audit(conf, {}, {}, dict(st, _defined=["weekly"], _any_rc_ok=["weekly"]), None, NOW)
+    assert res["rows"][0]["status"] == "ok"
+    res = A.audit(conf, {}, {}, dict(st, _defined=["weekly"], _any_rc_ok=[]), None, NOW)
+    assert res["rows"][0]["status"] == "failed"
