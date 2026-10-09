@@ -171,6 +171,19 @@ def item_prices(ids):
     """
     if not ids:
         return {}
+    # ★2026-10-09: まず API (Chrome は「window already closed」で落ちて1件も読めなかった)。読めなかった分だけ Chrome
+    out = {}
+    try:
+        import mercari_psa_resource as _mp
+        for mid in ids:
+            d = _mp.api_detail("https://jp.mercari.com/item/" + mid) or {}
+            if d.get("price"):
+                out[mid] = int(d["price"])
+    except Exception:                                          # noqa: BLE001
+        pass
+    ids = [i for i in ids if i not in out]
+    if not ids:
+        return out
     import undetected_chromedriver as uc
     from mercari_psa_resource import _chrome_major, _quiet_chromedriver
     _quiet_chromedriver()
@@ -179,7 +192,6 @@ def item_prices(ids):
         o.add_argument(a)
     maj = _chrome_major()
     d = uc.Chrome(options=o, version_main=maj) if maj else uc.Chrome(options=o)
-    out = {}
     try:
         for mid in ids:
             d.get("https://jp.mercari.com/item/" + mid)
