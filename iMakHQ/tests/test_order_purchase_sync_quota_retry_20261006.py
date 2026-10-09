@@ -6,4 +6,4 @@ SRC = (Path(__file__).resolve().parent.parent / "tools" / "order_purchase_sync.p
 
 def test_reads_go_through_quota_retry():
     assert "ws.get_all_values()" not in SRC
-    assert SRC.count("_read_with_quota_retry(ws.get_all_values)") == 6
+    assert SRC.count("_read_with_quota_retry(ws.get_all_values)") == 7   # ★2026-10-09 SpeedPAK の送料の読み直しで +1

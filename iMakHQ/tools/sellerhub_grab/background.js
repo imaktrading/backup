@@ -26,6 +26,9 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (u.includes("jp.mercari.com/mypage/purchases") && u.includes("#imak-buys")) {
     chrome.storage.local.set({ imakBuysAt: Date.now() });
   }
+  if (u.includes("orangeconnex.com") && u.includes("#imak-ship")) {          // ★2026-10-09 SpeedPAK の送料
+    chrome.storage.local.set({ imakShipAt: Date.now() });
+  }
   if (u.includes("ebay.com/sh/lst/active") && u.includes("#shg-offers")) {   // ★2026-10-09 オファーを送る
     chrome.storage.local.set({ shgOffersAt: Date.now() });
   }

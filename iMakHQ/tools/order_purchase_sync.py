@@ -521,6 +521,46 @@ def fill_mercari_cost(ws, rows):
     return len(ups)
 
 
+C_POST = 14                                            # O 送料 (うちが払った送料。H の送料はバイヤーが払った分)
+
+
+def ship_cost_targets(rows):
+    """送料 (O列) が空で、追跡番号が SpeedPAK (EE…/EX…) の行 [(行番号, 追跡番号)] (純関数)。"""
+    import cpass_fees as CF
+    out = []
+    for n, r in enumerate(rows[1:], 2):
+        r = r + [""] * (C_STATE + 1 - len(r))
+        t = r[C_TRACK].strip()
+        if t and CF.is_cpass_tracking(t) and not r[C_POST].strip():
+            out.append((n, t))
+    return out
+
+
+def fill_ship_cost(ws, rows):
+    """SpeedPAK の送料を O列に入れる (I/O)。★2026-10-09 ユーザー「EE から始まるのは Cpass。そこから送料を取って」。
+
+    空の行がある時だけ、SpeedPAK セラーポータルを Edge で開いて拡張に読ませる。手で入れた値は上書きしない。
+    """
+    import gspread.utils as GU
+    import cpass_fees as CF
+    want = ship_cost_targets(rows)
+    if not want:
+        print("  📦 SpeedPAK の送料: 空の行 0件")
+        return 0
+    fees = {t: v["yen"] for t, v in (CF.load().get("fees") or {}).items()}
+    if any(t not in fees for _n, t in want):
+        try:
+            fees = CF.fetch()
+        except Exception as e:                                 # noqa: BLE001
+            LINK_WARN.append("SpeedPAK の送料を読めません (Edge でポータルにログイン)")
+            print(f"  ⚠ SpeedPAK の送料を読めませんでした: {str(e)[:100]}")
+    ups = [{"range": GU.rowcol_to_a1(n, C_POST + 1), "values": [[fees[t]]]} for n, t in want if t in fees]
+    if ups:
+        ws.batch_update(ups, value_input_option="USER_ENTERED")
+    print(f"  📦 SpeedPAK の送料: 入れた {len(ups)}件 / 空の行 {len(want)}件")
+    return len(ups)
+
+
 def _link_mercari(targets, linked):
     import mercari_purchases as MP
     cand = _candidate_lookup()
@@ -717,6 +757,7 @@ def main(argv):
     fill_money(ws, by_id, _read_with_quota_retry(ws.get_all_values))
     link_purchases(ws, by_id, _read_with_quota_retry(ws.get_all_values))
     fill_mercari_cost(ws, _read_with_quota_retry(ws.get_all_values))
+    fill_ship_cost(ws, _read_with_quota_retry(ws.get_all_values))
     st = _write_status(_read_with_quota_retry(ws.get_all_values))
     print(f"  書きました: 足した {len(add)}行 / 仕入れ待ち {st['waiting']}件"
           + (f" (いちばん早い発送期限 {st['earliest_ship_by']})" if st["earliest_ship_by"] else ""))

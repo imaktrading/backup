@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Seller Hub レポート取り",
-  "version": "3.8",
+  "version": "3.9",
   "description": "Seller Hub のファネル用レポートを出品くん Console の起動時 (1日1回) に自動で作って落とす",
   "permissions": [
     "tabs",
@@ -32,6 +32,15 @@
         "mercari_buys.js"
       ],
       "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://ebay-jp.orangeconnex.com/*"
+      ],
+      "js": [
+        "cpass_fees.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "host_permissions": [

@@ -112,7 +112,7 @@ def cache_state(at, login_required, now, since=None):
     return "use" if (now - at).total_seconds() <= FRESH_MIN * 60 else "stale"
 
 
-def _open_quiet(url):
+def _open_quiet(url, words=("メルカリ", "mercari")):
     """Edge の **別の窓** で開いて、すぐ画面の右下の端へ動かす (I/O)。
 
     ★2026-10-09 ユーザー「メルカリ購入履歴を確認する (ブラウザが) 立ち上がる」: 数え直しのたびに、作業中の窓の上に
@@ -131,7 +131,7 @@ def _open_quiet(url):
         if n and u32.IsWindowVisible(h):
             b = ctypes.create_unicode_buffer(n + 1)
             u32.GetWindowTextW(h, b, n + 1)
-            if "メルカリ" in b.value or "mercari" in b.value.lower():
+            if any(w.lower() in b.value.lower() for w in words):
                 found.append(h)
         return True
     for _ in range(40):                                        # 最大 10秒、窓が出るのを待つ
