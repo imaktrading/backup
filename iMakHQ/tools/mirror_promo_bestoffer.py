@@ -368,6 +368,54 @@ def enable_best_offer(fx, tok, site_key, item_id):
     return "NG: " + (msgs[0][:110] if msgs else "応答不明")
 
 
+OFFER_HOLD_DAYS = 4      # 承諾したオファーの支払い期限 (承諾 +4日) を目安に、期限からこの日数は広告を付けない
+
+
+def offer_hold(xml, now):
+    """GetBestOffers (ItemID 指定・All) の返事 → 広告を付けずに待つべきか (純関数)。
+
+    ★2026-10-09 ユーザー「オファーが来たものはプロモ外すけど、支払い前にオファーをつける夜間自動処理を止めないとダメ」。
+      オファー対応は「プロモを外す → 承諾」(広告費を払わない)。外した後、支払いの前にこの夜の処理が
+      10% を付け直すと、支払われた時に広告費がかかる。返事待ち (Active) と、承諾済み (Accepted) で
+      期限から OFFER_HOLD_DAYS 日以内の物は飛ばす。
+    """
+    import datetime as _dt
+    for b in re.findall(r"<BestOffer>(.*?)</BestOffer>", xml or "", re.S):
+        st = (re.search(r"<Status>(.*?)</Status>", b) or [None, ""])[1]
+        if st == "Active":
+            return True
+        if st == "Accepted":
+            m = re.search(r"<ExpirationTime>(.*?)</ExpirationTime>", b)
+            if not m:
+                return True
+            exp = _dt.datetime.fromisoformat(m.group(1).replace("Z", "+00:00"))
+            if now - exp <= _dt.timedelta(days=OFFER_HOLD_DAYS):
+                return True
+    return False
+
+
+def drop_offer_holds(fx, trading, todo, now=None):
+    """広告を付ける候補から、オファーが来ている・承諾して支払い待ちの出品を外す (I/O)。戻り: 外した件数。"""
+    import datetime as _dt
+    now = now or _dt.datetime.now(_dt.timezone.utc)
+    held = 0
+    for key in SITES:
+        keep = []
+        for iid in todo[key]["promo"]:
+            try:
+                xml = fx.post("GetBestOffers", f"<ItemID>{iid}</ItemID><BestOfferStatus>All</BestOfferStatus>"
+                              "<DetailLevel>ReturnAll</DetailLevel>", trading.get(), site=SITES[key][1])
+            except Exception:                                  # noqa: BLE001 分からない時は付けない (広告費の方が痛い)
+                held += 1
+                continue
+            if offer_hold(xml, now):
+                held += 1
+            else:
+                keep.append(iid)
+        todo[key]["promo"] = keep
+    return held
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--write", action="store_true", help="実際に付ける (既定は一覧だけ)")
@@ -396,6 +444,10 @@ def main():
           flush=True)
 
     todo = plan(items, advertised, a.only)
+    n_cand = sum(len(todo[k]["promo"]) for k in SITES)
+    held = drop_offer_holds(fx, trading, todo)
+    print("🤝 オファーが来ている / 承諾して支払い待ちで広告を付けない: %d件 / 広告の候補 %d件" % (held, n_cand),
+          flush=True)
     skip = recently_failed_for_good(_read_progress_lines())
     for key in SITES:
         d = todo[key]
