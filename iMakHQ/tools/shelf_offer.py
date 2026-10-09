@@ -588,8 +588,24 @@ if __name__ == "__main__":
         w = build_store_plan(limit=SEND_BATCH)
         if w:
             import subprocess
+            import time as _t
             subprocess.Popen([EDGE, SEND_URL])
-            print(f"💌 Seller Hub を Edge で開きました: {len(w)}件を拡張が送ります (送り終えたらタブが閉じます)")
+            print(f"💌 Seller Hub を Edge で開きました: {len(w)}件を拡張が送ります", flush=True)
+            # ★2026-10-09 ユーザー「送ってる最中なのに、ログは終わりましたになるね」: 送り終わるまで待って結果を出す
+            ids = {e["item_id"] for e in w}
+            last, still_since = None, _t.time()
+            while True:
+                _t.sleep(10)
+                led = load_json(OFFERS_PATH, {})
+                left = [i for i in ids if (led.get(i) or {}).get("status") == WAITING]
+                sent = [i for i in ids if (led.get(i) or {}).get("status") == SENT]
+                if left != last:
+                    print(f"   … 送った {len(sent)}件 / 残り {len(left)}件", flush=True)
+                    last, still_since = left, _t.time()
+                if not left or _t.time() - still_since > 180:          # 全部送れた / 3分動かない = 拡張が止まった
+                    break
+            print(f"💌 終わり: 送った {len(sent)}件 / 送れなかった {len(left)}件"
+                  + (" (送れなかった分は2日後に広告を戻して終わり・次に押せばまた候補に出る)" if left else ""))
         else:
             print("💌 送る物はありません")
     else:
