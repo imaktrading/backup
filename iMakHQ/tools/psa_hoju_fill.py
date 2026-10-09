@@ -2744,6 +2744,13 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
                         _sd_info[_norm_url(_l["url"])] = (_l.get("price"), _l.get("image") or "")
         except Exception:                                      # noqa: BLE001
             _sd_info = {}
+        # ★2026-10-10 出口: 見る意味の無い物 (出品が消えた・既に主/補に入っている・買えない・「違う」と答えた) を
+        #   待ち列から外してから読む。0件でも必ず出す。外した物は aux_url_pending_dropped.jsonl に理由つきで残る
+        try:
+            _sw = aux_pending.sweep(vals)
+            print(f"  🧹 目視待ちから見る意味の無い物を外した: {sum(_sw.values())}本 {_sw if _sw else ''}")
+        except Exception as _e_sw:                             # noqa: BLE001
+            print(f"  ⚠ 目視待ちの掃除skip ({type(_e_sw).__name__}: {_e_sw})")
         for _r in aux_pending.load():
             # ★2026-09-27 ユーザー「候補が全部違う」(ダークライGX にカビゴンが並んだ)。
             #   itemID の無い行を **今の** 行番号から引いていたが、行は日々ずれる。
@@ -3469,7 +3476,7 @@ def run_newcand_aux(dry_run=False):
             _price_of = {}
         n_q = aux_pending.queue(wb, source="捨てた候補の転記(夜間)",
                                 existing_by_row=existing_by_row, item_of=item_of,
-                                price_of=_price_of)
+                                price_of=_price_of, vals=vals)   # ★2026-10-10 見る意味の無い物は積まない
         print(f"🔗 書込は行いません (ユーザー指示)。目視待ちに {n_q}本 積みました "
               f"(python aux_pending.py で確認)")
         return 0

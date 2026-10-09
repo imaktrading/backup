@@ -49,7 +49,7 @@ def test_dupes_route_queues_instead_of_writing():
     """2枚目の自動追記: シート書込の前に目視待ちへ逃がしている。"""
     s = _src("hoju_url_from_dupes.py")
     assert "aux_pending" in s
-    m = re.search(r'if os\.environ\.get\("AUX_AUTO_WRITE"\) != "1":(.{0,900})', s, re.S)
+    m = re.search(r'if os\.environ\.get\("AUX_AUTO_WRITE"\) != "1":(.{0,1200})', s, re.S)   # 2026-10-10 入口の門 (vals=) で1行増えた
     assert m, "自動書込を止める分岐が無い"
     seg = m.group(1)
     assert "queue(" in seg, "目視待ちに積んでいない"

@@ -59,15 +59,120 @@ def build_rows(row_to_urls, source, existing_by_row=None, item_of=None, today=No
     return out
 
 
+# ★2026-10-10 ユーザー「入口と出口の無駄をなくして、正しいカードが補に追加されるようにして」。
+#   実測: 待ち列 1,724本のうち、出品が消えた 346 / 既に主・補に入っている 241 / 買えない URL 176 は
+#   見る意味が無いのに残り続け、毎回読み直して「既知 1,296・高い 1,698 を除外」して 3〜7件しか出ていなかった。
+#   入口 (積む時) と出口 (補URL③の始め) で同じ門を通す。待ち列は「新規出品候補」タブと検索の控えから
+#   作る写しなので、ここから外しても元の記録 (カード単位の仕入元) は消えない。外した物は理由つきで残す。
+DROPPED_PATH = os.path.join(HERE, "..", "review_logs", "aux_url_pending_dropped.jsonl")
+_A, _B, _AUX0, _AUXN, _KEY = 0, 1, 28, 5, 34
+
+
+def _norm(u):
+    return (u or "").strip().split("?", 1)[0].split("#", 1)[0].rstrip("/")
+
+
+def junk_reason(url, sheet_row, not_buyable=(), verdicts=None):
+    """待ち列に置く意味が無い理由。置く意味があれば "" (純関数)。
+
+    sheet_row: その出品の商品管理シートの行 (None = 出品が消えた)
+    not_buyable: 買えない URL (正規化済みの集合) / verdicts: url_card_verdicts (「違う」だけ見る)
+    """
+    if sheet_row is None:
+        return "出品が消えた"
+    n = _norm(url)
+    have = {_norm(sheet_row[i]) for i in [_A] + list(range(_AUX0, _AUX0 + _AUXN))
+            if i < len(sheet_row) and sheet_row[i]}
+    if n in have:
+        return "既に主URL/補URLに入っている"
+    if n in not_buyable:
+        return "買えない URL"
+    pid = (sheet_row[_KEY] if len(sheet_row) > _KEY else "").split(":")[-1].strip()
+    if pid and ((verdicts or {}).get(n) or {}).get(pid, {}).get("v") == "diff":
+        return "このカードと「違う」と答えた URL"
+    return ""
+
+
+def load_context(vals):
+    """門に要る物を揃える (I/O)。戻り: (itemID→行, 買えない URL, 判定の記録)。読めない物は空 (外す方に倒さない)。"""
+    by_iid = {}
+    for r in (vals or [])[1:]:
+        iid = (r[_B] if len(r) > _B else "").strip()
+        if iid:
+            by_iid[iid] = r
+    try:
+        import mercari_psa_resource as _mp
+        nb = {_norm(u) for u in (_mp.load_not_buyable() or {})}
+    except Exception:                                          # noqa: BLE001
+        nb = set()
+    try:
+        import psa_label_learned as _pl
+        uv = _pl.load(_pl.URL_PATH)
+    except Exception:                                          # noqa: BLE001
+        uv = {}
+    return by_iid, nb, uv
+
+
+def sweep(vals, path=None, dropped_path=None, ctx=None):
+    """待ち列から見る意味の無い物を外す (I/O)。外した物は理由つきで別ファイルに残す。戻り: {理由: 本数}。
+
+    シートが読めていない (vals が空) 時は何もしない (全部「出品が消えた」にしないため)。
+    """
+    import collections
+    if not vals or len(vals) < 2:
+        return {}
+    p = path or PATH
+    rows = load(p)
+    by_iid, nb, uv = ctx or load_context(vals)
+    keep, drop, why = [], [], collections.Counter()
+    today = datetime.date.today().isoformat()
+    for r in rows:
+        iid = (r.get("itemID") or "").strip()
+        if not iid:
+            keep.append(r)                 # 誰の候補か分からない古い行は画面側が出さない。ここでは触らない
+            continue
+        reason = junk_reason(r.get("url"), by_iid.get(iid), nb, uv)
+        if reason:
+            why[reason] += 1
+            drop.append(dict(r, dropped=today, reason=reason))
+        else:
+            keep.append(r)
+    if drop:
+        with open(dropped_path or DROPPED_PATH, "a", encoding="utf-8") as f:
+            for r in drop:
+                f.write(json.dumps(r, ensure_ascii=False) + chr(10))
+        with open(p, "w", encoding="utf-8") as f:
+            for r in keep:
+                f.write(json.dumps(r, ensure_ascii=False) + chr(10))
+    return dict(why)
+
+
 def queued_pairs(path=None):
     """今 待ち行列に居る (行, URL) の集合 (I/O)。"""
     return {(r.get("row"), (r.get("url") or "").strip()) for r in load(path)}
 
 
-def queue(row_to_urls, source, existing_by_row=None, item_of=None, path=None, price_of=None):
-    """目視待ちに積む (I/O)。戻り: 積んだ本数。既に居る分は積み直さない。"""
+def queue(row_to_urls, source, existing_by_row=None, item_of=None, path=None, price_of=None, vals=None):
+    """目視待ちに積む (I/O)。戻り: 積んだ本数。既に居る分は積み直さない。
+
+    vals (商品管理シート) を渡すと、見る意味の無い物 (junk_reason) は積まない (★2026-10-10 入口の門)。
+    """
     rows = build_rows(row_to_urls, source, existing_by_row, item_of,
                       already=queued_pairs(path), price_of=price_of)
+    if vals and len(vals) > 1 and rows:
+        import collections
+        by_iid, nb, uv = load_context(vals)
+        why = collections.Counter()
+        kept = []
+        for r in rows:
+            reason = junk_reason(r.get("url"), by_iid.get((r.get("itemID") or "").strip()), nb, uv)
+            if reason:
+                why[reason] += 1
+            else:
+                kept.append(r)
+        print(f"  🚪 目視待ちの入口で外した: {sum(why.values())}本 / 積もうとした {len(rows)}本 "
+              f"{dict(why) if why else ''}")
+        rows = kept
     if not rows:
         return 0
     p = path or PATH

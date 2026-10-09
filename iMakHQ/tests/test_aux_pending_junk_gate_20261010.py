@@ -1,0 +1,57 @@
+# -*- coding: utf-8 -*-
+"""目視待ちの入口と出口で、見る意味の無い物を省く (2026-10-10 ユーザー「入口出口で省いて欲しい」)。"""
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "tools"))
+import aux_pending as AP  # noqa: E402
+
+
+def srow(iid, a="", aux=(), key=""):
+    r = [""] * 40
+    r[0], r[1], r[34] = a, iid, key
+    for k, u in enumerate(aux):
+        r[28 + k] = u
+    return r
+
+
+def test_junk_reasons():
+    r = srow("1", "https://m/a", ["https://m/b?x=1"], "pokemon_tcg:M-P-020")
+    assert AP.junk_reason("https://m/z", None) == "出品が消えた"
+    assert AP.junk_reason("https://m/a", r) == "既に主URL/補URLに入っている"
+    assert AP.junk_reason("https://m/b", r) == "既に主URL/補URLに入っている"
+    assert AP.junk_reason("https://m/c", r, {"https://m/c"}) == "買えない URL"
+    uv = {"https://m/d": {"M-P-020": {"v": "diff"}}}
+    assert AP.junk_reason("https://m/d", r, set(), uv) == "このカードと「違う」と答えた URL"
+    assert AP.junk_reason("https://m/e", r, set(), uv) == ""
+
+
+def test_sweep_moves_junk_to_dropped_file(tmp_path):
+    p, dp = str(tmp_path / "q.jsonl"), str(tmp_path / "d.jsonl")
+    rows = [{"itemID": "1", "url": "https://m/a"}, {"itemID": "1", "url": "https://m/new"},
+            {"itemID": "9", "url": "https://m/x"}, {"itemID": "", "url": "https://m/old"}]
+    with open(p, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+    vals = [["h"], srow("1", "https://m/a")]
+    why = AP.sweep(vals, path=p, dropped_path=dp, ctx=({"1": vals[1]}, set(), {}))
+    assert why == {"既に主URL/補URLに入っている": 1, "出品が消えた": 1}
+    assert [r["url"] for r in AP.load(p)] == ["https://m/new", "https://m/old"]
+    assert {r["reason"] for r in AP.load(dp)} == set(why)
+
+
+def test_sweep_does_nothing_without_sheet(tmp_path):
+    p = str(tmp_path / "q.jsonl")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"itemID": "1", "url": "u"}) + "\n")
+    assert AP.sweep([], path=p) == {} and len(AP.load(p)) == 1
+
+
+def test_queue_skips_junk_at_entry(tmp_path, monkeypatch):
+    p = str(tmp_path / "q.jsonl")
+    vals = [["h"], srow("1", "https://m/a")]
+    monkeypatch.setattr(AP, "load_context", lambda v: ({"1": vals[1]}, {"https://m/nb"}, {}))
+    n = AP.queue({2: ["https://m/a", "https://m/nb", "https://m/ok"]}, "test", item_of={2: "1"}, path=p, vals=vals)
+    assert n == 1 and [r["url"] for r in AP.load(p)] == ["https://m/ok"]
