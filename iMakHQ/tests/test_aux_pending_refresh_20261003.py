@@ -22,3 +22,11 @@ def test_sold_removed_live_gets_price_unknown_untouched():
 
 def test_only_rows_with_item_id_are_checked():
     assert A.urls_to_check(ROWS) == ["u1", "u2", "u3"]
+
+
+def test_live_row_keeps_listing_name_20261010():
+    """出品名も残す (番号違い・刷り違いの門を効かせるため)。"""
+    import aux_pending_refresh as R
+    keep, _ = R.plan([{"itemID": "1", "url": "u"}], {"u": {"live": True, "price": 100, "name": "PSA10 ピカチュウ 020/M-P"}},
+                     today="2026-10-10")
+    assert keep[0]["name"] == "PSA10 ピカチュウ 020/M-P" and keep[0]["price"] == 100

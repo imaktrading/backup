@@ -61,6 +61,10 @@ def plan(rows, results, today=None):
         r = dict(r, checked=today)
         if isinstance(res.get("price"), (int, float)) and res["price"] > 0:
             r["price"] = int(res["price"])
+        # ★2026-10-10: 出品名も残す。名前が無いと、目視に出す前の「番号違い・刷り違い」の門が効かず、
+        #   別の版 (通常版の出品にパラレル版など) がそのまま目視に出ていた
+        if res.get("name"):
+            r["name"] = str(res["name"])
         keep.append(r)
     return keep, removed
 
@@ -108,7 +112,8 @@ def _check_mercari(urls, sleep, log):
                     else:
                         live = (str(getattr(d, "status", "") or "").lower() in ("on_sale", "item_status_on_sale")
                                 and getattr(d, "auction_info", None) is None)
-                        out[u] = {"live": live, "price": getattr(d, "price", None)}
+                        out[u] = {"live": live, "price": getattr(d, "price", None),
+                                  "name": getattr(d, "name", "") or ""}
                 elif m_shop:
                     p = loop.run_until_complete(api.product(m_shop.group(1)))
                     if p is None:
@@ -120,7 +125,8 @@ def _check_mercari(urls, sleep, log):
                             price = int(getattr(p, "price", "") or 0) or None
                         except (TypeError, ValueError):
                             price = None
-                        out[u] = {"live": qty > 0, "price": price}
+                        out[u] = {"live": qty > 0, "price": price,
+                                  "name": getattr(p, "name", "") or getattr(pd, "name", "") or ""}
             except Exception:                                  # noqa: BLE001  判らない = 触らない
                 pass
             if sleep:

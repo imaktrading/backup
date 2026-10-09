@@ -2510,7 +2510,8 @@ def load_pending_by_iid(cache):
             {"url": _u, "source": _r.get("source", ""), "price": _pp,
              "channel": "snkrdunk" if _is_sd else ("mercari" if "mercari" in _u else ""),
              "image": _sdi if _is_sd else "",
-             "name": (_name_of.get(_norm_url(_u)) or ("最新の検索に無い (値段が取れていません)" if _pp is None else "")),
+             "name": (_r.get("name") or _name_of.get(_norm_url(_u))
+                      or ("最新の検索に無い (値段が取れていません)" if _pp is None else "")),
              "site": "mercari" if "mercari" in _u else ""})
     return _pending_by_iid
 
@@ -2519,19 +2520,27 @@ def merge_pending_cands(t, cands, pend, ctx, vals, mp):
     """目視待ちの候補を通常の候補に混ぜる (ボタンの件数と本番で同じ・2026-10-10)。戻り: 候補。
 
     既に主/補に入っている・買えない・「違う」と答えた物は aux_pending.sweep が待ち列から外している。
-    ここで見るのは 通常の候補との重複・NG タブ・値段・ミラーの版違い だけ。
+    ここで見るのは 通常の候補との重複・NG タブと、通常の候補と同じ門 (番号・値段・刷り・ミラー・見送り・使用中)。
     """
     iid = t["itemID"]
     _pend = list(pend or [])
     _have = {_norm_url(c.get("url")) for c in cands}
     _have |= {_norm_url(u) for u in (ctx.get("ng_by_iid") or {}).get(iid, [])}
-    _pend, _pend_cost = filter_candidates_by_cost(_pend, t, vals)
+    # ★2026-10-10: 通常の候補と同じ門 (番号・値段・刷り・ミラー・見送り・他の出品が使用中) を通す。
+    #   以前は値段とミラーだけで、別の版 (例: 通常版の出品に パラレル版) が目視に出ていた
+    _cn = t.get("_card_no") or build_search_query(t, mp).get("card_no") or ""
+    if _cn:
+        _pend, _ = filter_candidates_by_number(_pend, _cn)
+    _pend, _ = filter_candidates_by_cost(_pend, t, vals)
+    _pend, _ = filter_candidates_by_variant(_pend, t.get("title"))
+    _pend, _ = filter_candidates_by_mirror(_pend, mirror_kind_for_target(t, mp), mp)
+    _pend, _ = filter_candidates_skipped(_pend, (ctx.get("skipped_by") or {}).get(iid))
+    if ctx.get("used_by_others"):
+        _pend, _ = filter_candidates_used_by_others(_pend, ctx["used_by_others"], iid)
     for _p in _pend:
         if _norm_url(_p["url"]) in _have:
             continue
         _have.add(_norm_url(_p["url"]))
-        if mp.mirror_title_conflicts(mirror_kind_for_target(t, mp), _p.get("name")):
-            continue                            # ★2026-09-27 ミラーの版違い (通常の候補と同じ門)
         cands = list(cands) + [{"url": _p["url"], "site": _p.get("site") or "",
                                 "channel": _p.get("channel") or "",
                                 "image": _p.get("image") or "",
