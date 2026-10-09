@@ -26,7 +26,7 @@ def test_every_candidate_path_reads_and_both_confirm_screens_write():
     assert 'url_verdict(card_pid, x.get("url"), _uv) != "diff"' in g           # 候補を出す共通の関数
     assert "card_pid=mp.split_key(r.get(\"key\"))[1]" in g                     # 再仕入れ①
     assert "card_pid=mp.split_key(t.get(\"key\"))[1]" in h                     # 補URL③
-    assert 'url_verdict(_pidp, _p["url"], _uvp) == "diff"' in h                # 目視待ちを混ぜる所
+    assert "aux_pending.sweep(" in h                                          # 目視待ち: 出口で「違う」を外す (2026-10-10)
     assert '"same", "再仕入れ①"' in g and '"diff", "再仕入れ①"' in g
     assert '"same", "補URL③"' in h and '"diff", "補URL③"' in h
 

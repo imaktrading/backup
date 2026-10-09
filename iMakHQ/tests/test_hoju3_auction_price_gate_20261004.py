@@ -56,7 +56,8 @@ def test_pending_merge_goes_through_cost_gate():
     src = open(os.path.join(HERE, "..", "tools", "psa_hoju_fill.py"), encoding="utf-8").read()
     i = src.index("_pend = _pending_by_iid.get(iid)")
     assert "filter_candidates_by_cost(" in src[i:i + 2500]
-    assert "load_not_buyable" in src[i:i + 2500]
+    # ★2026-10-10 買えない URL は待ち列の出口 (aux_pending.sweep) で外す
+    assert "aux_pending.sweep(" in src[:i]
 
 
 def test_cache_item_urls_only_individual_items():

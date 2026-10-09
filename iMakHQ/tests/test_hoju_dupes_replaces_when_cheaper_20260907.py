@@ -47,11 +47,6 @@ def test_unknown_price_new_url_does_nothing():
     assert D.plan_replacement(E, "https://a/new", {}) == (None, [])
 
 
-def test_writer_uses_full_when_replaced():
-    """入替が決まった行は full をそのまま書く (existing+add では5本を超える)."""
-    src = (TOOLS / "hoju_url_from_dupes.py").read_text(encoding="utf-8")
-    assert 'v.get("full") or (v["existing"] + v["add"])' in src
-
 
 def test_row_price_uses_listing_price_not_cost():
     """比較の土台は **出品価格** (M→F)。N(仕入値)はポイントを引いた後なので使わない."""

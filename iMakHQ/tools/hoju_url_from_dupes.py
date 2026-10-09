@@ -526,77 +526,28 @@ def main():
             if v.get("full"):
                 v["full"] = [u for u in v["full"] if u in _alive or u in v["existing"]]
     if do_write:
-        row_to_urls = {row: (v.get("full") or (v["existing"] + v["add"]))[:AUXN]
-                       for row, v in plan.items() if v["add"]}
         # ★2026-09-08 ユーザー指示「勝手に補に追加するルートは閉じて、必ず目視を通る様にして」。
         #   この経路は **KEY が一致する行**から URL を配るが、元の行の KEY が誤っていれば
         #   誤った版を配る (KEY 取り違えは 2026-09-07 に実在。同じ番号の別版は商品名で
         #   見分けが付かない)。実害3件はすべて買い手の問い合わせで発覚した。
-        #   → シートには書かず、目視待ちに積む。AUX_AUTO_WRITE=1 で従来動作に戻せる。
-        if os.environ.get("AUX_AUTO_WRITE") != "1":
-            import aux_pending
-            item_of = {row: v.get("itemid", "") for row, v in plan.items()}
-            existing_by_row = {row: v.get("existing") or [] for row, v in plan.items()}
-            n_q = aux_pending.queue({row: [u for u in v["add"]] for row, v in plan.items()
-                                     if v["add"]},
-                                    source="2枚目の自動追記",
-                                    existing_by_row=existing_by_row, item_of=item_of,
-                                    # ★2026-09-19: 積む時に値段も残す (後から引き直すと空になる)
-                                    price_of=price_by_url_from_cache(),
-                                    vals=vals)          # ★2026-10-10 見る意味の無い物は積まない
-            print(f"=== 書込は行いません (2026-09-08 ユーザー指示)。"
-                  f"目視待ちに {n_q}本 積みました ===")
-            print("   人が採否を決めます: python aux_pending.py で中身を確認")
-            _record(0, total_add, urgent, len(warns), unverified=0)
-            return
-        _iid_of = {row: plan[row].get("itemid", "") for row in row_to_urls}
-        n = sheet_io.write_aux_urls(row_to_urls, expect_iid=_iid_of)
-        missing = verify_written(row_to_urls)
-        if missing:
-            # ★2026-08-18: 書込の戻り値を信じない。実測で「16行 完了」と出たのに
-            #   1行分が入っていなかった (row 1341)。事後確認が無いので誰も気づけなかった。
-            #   規約「送った後に実状態を verify し、漏れは同サイクル内で完結」に合わせる。
-            print(f"⚠️ 書けていない行 {len(missing)}件 → もう一度書きます")
-            sheet_io.write_aux_urls({row: row_to_urls[row] for row in missing}, expect_iid=_iid_of)
-            missing = verify_written({row: row_to_urls[row] for row in missing})
-        print(f"=== 実書込 完了: {n} 行 (既存保持+新規追加)"
-              + (f" / ⚠️**{len(missing)}行は書けていません (要対応)**" if missing else " / 全行 確認済")
-              + " ===")
-        for row in missing:
-            print(f"  ⚠️ row {row}: {row_to_urls[row]}")
-        _record(n, total_add, urgent, len(warns), unverified=len(missing))
+        #   → シートには書かず、目視待ちに積む。
+        # ★2026-10-10: AUX_AUTO_WRITE (シートへ直接書く口) は一度も使われていないので外した。積むだけ。
+        import aux_pending
+        item_of = {row: v.get("itemid", "") for row, v in plan.items()}
+        existing_by_row = {row: v.get("existing") or [] for row, v in plan.items()}
+        n_q = aux_pending.queue({row: [u for u in v["add"]] for row, v in plan.items()
+                                 if v["add"]},
+                                source="2枚目の自動追記",
+                                existing_by_row=existing_by_row, item_of=item_of,
+                                # ★2026-09-19: 積む時に値段も残す (後から引き直すと空になる)
+                                price_of=price_by_url_from_cache(),
+                                vals=vals)          # ★2026-10-10 見る意味の無い物は積まない
+        print(f"=== 書込は行いません (2026-09-08 ユーザー指示)。"
+              f"目視待ちに {n_q}本 積みました ===")
+        print("   人が採否を決めます: python aux_pending.py で中身を確認")
+        _record(0, total_add, urgent, len(warns), unverified=0)
     else:
         print("=== dry-run 終了(書込なし)。実書込は --write ===")
-
-
-def diff_written(intended, actual):
-    """書いたつもり vs 実際 → 入っていない行番号 (純関数)。
-
-    ★2026-08-18: 「書込 完了 16行」と出たのに 1行分が実際には入っていなかった。
-      戻り値は「API を呼んだ数」であって「入った数」ではない。実物を読んで確かめる。
-    """
-    out = []
-    for row, urls in (intended or {}).items():
-        have = set(actual.get(row) or [])
-        if [u for u in urls if u and u not in have]:
-            out.append(row)
-    return sorted(out)
-
-
-def verify_written(row_to_urls):
-    """シートを読み直して、入っていない行を返す (I/O)。読めなければ空 (= 判定不能)。"""
-    if not row_to_urls:
-        return []
-    try:
-        vals = sheet_io._product_ws().get_all_values()
-    except Exception:                                          # noqa: BLE001
-        return []
-    actual = {}
-    for row in row_to_urls:
-        _r = sheet_io.current_row(row)          # 行がずれていた分は実際に書いた行で確かめる
-        r = vals[_r - 1] if 0 < _r <= len(vals) else []
-        actual[row] = [u for u in (_cell(r, AUX0 + k) for k in range(AUXN)) if u]
-    return diff_written(row_to_urls, actual)
 
 
 def _record(rows, added, urgent, warns, unverified=0):

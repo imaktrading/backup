@@ -17,10 +17,8 @@ import psa_hoju_fill as P  # noqa: E402
 
 
 def test_global_kill_is_disabled():
-    """互換のため関数は残すが、他プロセスを kill してはいけない。"""
-    src = inspect.getsource(P._clean_orphan_chrome)
-    assert "Stop-Process" not in src
-    assert P._clean_orphan_chrome() is None
+    """他プロセスを kill する掃除は無い (2026-10-10 何もしない関数ごと外した)。"""
+    assert not hasattr(P, "_clean_orphan_chrome")
 
 
 def test_ownership_is_parent_based():

@@ -1158,21 +1158,6 @@ def _save_cache(cache, path=CACHE_PATH):
     os.replace(tmp, path)
 
 
-def _clean_orphan_chrome():
-    """★2026-07-28 廃止(no-op)。**他プロセスの driver を殺していた**ため。
-
-    旧実装は run 開始時に `undetected_chromedriver` を **全部** kill していた(孤児掃除)。
-    しかし深夜は 01:30 監視くん Cycle / 04:00 Backup / 04:30 リバイスくん が動いており、
-    01:30 の cycle が長引いたまま 03:00 に本 run が始まると **監視くんの driver を殺す**。
-    取下げ処理の途中で driver が消える = 状態同期が壊れる危険側の失敗。
-
-    → ユーザー判断(2026-07-28): 他プロセスには触らず、**自分が起こした分だけ後片付けする**
-      (_cleanup_own_drivers)。孤児蓄積の対策はそちらで達成する。
-    互換のため関数は残すが何もしない。
-    """
-    return
-
-
 def _own_driver_pids():
     """このプロセスが親の undetected_chromedriver PID と、その子 chrome PID を返す。
 
@@ -2711,12 +2696,11 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     #   ラベルの件数計算も同じものを使う = 「32件と出て3件しか出ない」を構造的に防ぐ。
     import collections
     ctx = build_confirm_context(vals, cache, today, verbose=True)
-    skip_iids = ctx["skip_iids"]
     stats = collections.Counter()
 
     # ★2026-09-08: 自動で書くのをやめた分 (目視待ち) を、この画面に合流させる。
     #   ここに出さないと「積んだだけで誰も見ない」= 補URLが増えなくなる。
-    _pending_by_iid, _shown_pending = {}, []
+    _pending_by_iid = {}
     try:
         import aux_pending
         _price_of, _name_of = {}, {}
@@ -2850,34 +2834,16 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         #   現物画像が無い行には混ぜない (見比べる相手が無いと判定できない)
         _pend = _pending_by_iid.get(iid) or []
         if _pend and ref:
+            # ★2026-10-10: 既に主/補に入っている・買えない・「違う」と答えた物は、この関数の始めの
+            #   aux_pending.sweep が待ち列から外している (ここで同じ門を重ねない)。残すのは
+            #   通常の候補との重複・NG タブ・値段 (ユーザー確定の 1.5倍 / ¥1,000) ・ミラーの版違い
             _have = {_norm_url(c.get("url")) for c in cands}
-            # ★2026-09-24 ユーザー報告「同じ仕入候補が連続で並んでいる」: _have を足した分で
-            #   更新しておらず、目視待ちに同じ URL が複数あると全部並んでいた。
-            #   もう補URLに入っている物・過去に「違う」にした物も出さない (通常の候補と同じ門)
-            _have |= {_norm_url(_cell(vals[t["row"] - 1], AUX0 + k))
-                      for k in range(AUXN) if t.get("row") and 0 < t["row"] <= len(vals)}
             _have |= {_norm_url(u) for u in (ctx.get("ng_by_iid") or {}).get(iid, [])}
-            try:
-                import psa_label_learned as _PLLp
-                _uvp = _PLLp.load(_PLLp.URL_PATH)
-                _pidp = mp.split_key(t.get("key"))[1]
-            except Exception:                                  # noqa: BLE001
-                _PLLp, _uvp, _pidp = None, {}, ""
-            # ★2026-10-04 ユーザー報告「現在の仕入値より高いのもある」: 目視待ちから混ぜる分には値段の門が無かった
-            #   (通常の候補は filter_candidates_by_cost を通る)。同じ門を通す。買えないと分かった URL も出さない
-            try:
-                _ngp = set(mp.load_not_buyable() or {})
-            except Exception:                                  # noqa: BLE001
-                _ngp = set()
-            _pend_ok, _pend_cost = filter_candidates_by_cost(
-                [_p for _p in _pend if _p.get("url") not in _ngp], t, vals)
-            _pend = _pend_ok
+            _pend, _pend_cost = filter_candidates_by_cost(_pend, t, vals)
             for _p in _pend:
                 if _norm_url(_p["url"]) in _have:
                     continue
                 _have.add(_norm_url(_p["url"]))
-                if _PLLp and _pidp and _PLLp.url_verdict(_pidp, _p["url"], _uvp) == "diff":
-                    continue                            # どこかの画面で「違う」と決めた仕入元
                 if mp.mirror_title_conflicts(mirror_kind_for_target(t, mp), _p.get("name")):
                     continue                            # ★2026-09-27 ミラーの版違い (通常の候補と同じ門)
                 cands = list(cands) + [{"url": _p["url"], "site": _p.get("site") or "",
@@ -2885,8 +2851,8 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
                                         "image": _p.get("image") or "",
                                         "name": _p.get("name") or "",
                                         "price": _p.get("price"),
-                                        "note": f"目視待ち ({_p.get('source','')})"}]
-                _shown_pending.append((iid, _p["url"]))
+                                        "note": f"目視待ち ({_p.get('source','')})",
+                                        "_pending": True}]
         if not cands:
             continue
         # ★2026-09-29: 前に人が「同じ」と確かめた候補は目視に出さず、そのまま書く分にする
@@ -3041,6 +3007,12 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             res = {"confirmed": [], "diffs": [], "sold": [], "bundle": []}
             n_ui = 0                        # 答えが無いので見送り等も記録しない
         confirmed = {c["idx"]: c["urls"] for c in res["confirmed"]}
+    # ★2026-10-10: 待ち列から外すのは **画面に出して答えが返った分** と「前に同じ」で書く分だけ。
+    #   以前は混ぜた時点で「見せた」に数えたので、件数の上限で切られた出品・時間切れ・
+    #   画面の手前で落ちた分まで、一度も見せずに待ち列から消えていた
+    _shown_pending = [(item_targets[_i]["itemID"], _c["url"]) for _i, _it in enumerate(items[:n_ui])
+                      for _c in (_it.get("candidates") or []) if _c.get("_pending")]
+    _shown_pending += [(_t["itemID"], _c["url"]) for _t, _s in auto_same for _c in _s if _c.get("_pending")]
     # 前に「同じ」と確かめた分を、画面の答えに足す (画面に出なかった出品は後ろに足す)
     _idx_by_iid = {t["itemID"]: i for i, t in enumerate(item_targets)}
     for _t, _same in auto_same:
@@ -3418,7 +3390,7 @@ def run_newcand_aux(dry_run=False):
 
     人が既にカードを同定済みなので新しい判断は要らない。無人で回してよい。
     """
-    from sheet_io import read_tab, write_rows_to_tab, write_aux_urls
+    from sheet_io import read_tab
     import dup_guard as _dg
 
     tab = read_tab(NEWCAND_TAB)
@@ -3458,48 +3430,28 @@ def run_newcand_aux(dry_run=False):
     #   この経路は 新規出品候補タブの 用途=補URL 行を KEY で配るが、KEY が誤っていれば
     #   誤った版を配る。同じ番号の別版は商品名で見分けが付かない (ST10-006 は版8つ・全部SR)。
     #   実害3件 (2026-09-08) はすべて買い手の問い合わせ/オファーで発覚した。
-    #   → シートには書かず、目視待ちに積む。AUX_AUTO_WRITE=1 で従来動作に戻せる。
-    if os.environ.get("AUX_AUTO_WRITE") != "1":
-        import aux_pending
-        # ★2026-09-13: ここは itemID を渡していなかった。見る側 (③補充の画面) は itemID で
-        #   引くので、**積んだ分の93% が一度も画面に出てこなかった** (実測 951本中 886本)。
-        #   itemID はシートの B列にあり、行番号から引ける。新しい台帳は作らない。
-        item_of = {row: _cell(vals[row - 1], B) for row in wb if 0 < row <= len(vals)}
-        existing_by_row = {row: [_cell(vals[row - 1], AUX0 + k) for k in range(AUXN)]
-                           for row in wb if 0 < row <= len(vals)}
-        # ★2026-09-19: 積む時に値段も残す (画面で「今の検索キャッシュ」から引き直すと、
-        #   数日前に積んだ物は値段が空のまま目視に出る)。
-        try:
-            import hoju_url_from_dupes as _hd_p
-            _price_of = _hd_p.price_by_url_from_cache()
-        except Exception:                                      # noqa: BLE001
-            _price_of = {}
-        n_q = aux_pending.queue(wb, source="捨てた候補の転記(夜間)",
-                                existing_by_row=existing_by_row, item_of=item_of,
-                                price_of=_price_of, vals=vals)   # ★2026-10-10 見る意味の無い物は積まない
-        print(f"🔗 書込は行いません (ユーザー指示)。目視待ちに {n_q}本 積みました "
-              f"(python aux_pending.py で確認)")
-        return 0
-    n = write_aux_urls(wb, expect_iid={row: _cell(vals[row - 1], B)
-                                       for row in wb if 0 < row <= len(vals)})
-    print(f"🔗 補URL(AC-AG) 書込: {n}行 (安い順に最大{AUXN}本)")
-
-    # 使えた URL に転記済の印。次回もう出さない (人が同じ行を何度も見ない)。
-    marked = 0
-    used_norm = {_norm_url(u) for u in used}
-    body = []
-    for r in (tab[1:] if len(tab) > 1 else []):
-        r = list(r) + [""] * 12
-        if ((r[NEWCAND_USE_COL] or "").strip() == NEWCAND_USE_AUX
-                and not (r[NEWCAND_DONE_COL] or "").strip()
-                and _norm_url(r[NEWCAND_URL_COL]) in used_norm):
-            r[NEWCAND_DONE_COL] = NEWCAND_DONE_MARK
-            marked += 1
-        body.append(r[:len(tab[0])])
-    if marked:
-        write_rows_to_tab(NEWCAND_TAB, [list(tab[0])] + body)
-        print(f"  🔖 新規出品候補: 転記済 +{marked}本")
-    return n
+    #   → シートには書かず、目視待ちに積む。
+    # ★2026-10-10: AUX_AUTO_WRITE (シートへ直接書く口) は一度も使われていないので外した。積むだけ。
+    import aux_pending
+    # ★2026-09-13: ここは itemID を渡していなかった。見る側 (③補充の画面) は itemID で
+    #   引くので、**積んだ分の93% が一度も画面に出てこなかった** (実測 951本中 886本)。
+    #   itemID はシートの B列にあり、行番号から引ける。新しい台帳は作らない。
+    item_of = {row: _cell(vals[row - 1], B) for row in wb if 0 < row <= len(vals)}
+    existing_by_row = {row: [_cell(vals[row - 1], AUX0 + k) for k in range(AUXN)]
+                       for row in wb if 0 < row <= len(vals)}
+    # ★2026-09-19: 積む時に値段も残す (画面で「今の検索キャッシュ」から引き直すと、
+    #   数日前に積んだ物は値段が空のまま目視に出る)。
+    try:
+        import hoju_url_from_dupes as _hd_p
+        _price_of = _hd_p.price_by_url_from_cache()
+    except Exception:                                      # noqa: BLE001
+        _price_of = {}
+    n_q = aux_pending.queue(wb, source="捨てた候補の転記(夜間)",
+                            existing_by_row=existing_by_row, item_of=item_of,
+                            price_of=_price_of, vals=vals)   # ★2026-10-10 見る意味の無い物は積まない
+    print(f"🔗 書込は行いません (ユーザー指示)。目視待ちに {n_q}本 積みました "
+          f"(python aux_pending.py で確認)")
+    return 0
 
 
 def main():

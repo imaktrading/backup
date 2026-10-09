@@ -154,7 +154,7 @@ def test_kuji_size_write_relocates_by_supply_url():
 
 
 def test_read_back_uses_actual_row():
-    for f in ("psa_hoju_fill.py", "hoju_url_from_dupes.py"):
+    for f in ("psa_hoju_fill.py",):          # 2026-10-10 hoju_url_from_dupes はシートに書かなくなった
         src = open(os.path.join(ROOT, "iMakHQ", "tools", f), encoding="utf-8").read()
         assert "current_row(row)" in src, f
 
