@@ -81,3 +81,17 @@ def test_match_sales_and_stats():
     assert SO.match_sales(led, rows) == 2
     assert led["1"]["status"] == SO.WON and led["2"]["status"] == SO.FULL and "outcome" not in led["3"]
     assert SO.offer_stats(led) == {"sent": 3, "won": 1, "won_usd": 91.06, "full": 1}
+
+
+def test_send_only_right_after_button(tmp_path):
+    """復元された Seller Hub のタブが勝手に送らない (2026-10-10 06:56 に1件送った)。"""
+    import datetime as dt
+    p = str(tmp_path / "s.txt")
+    now = dt.datetime(2026, 10, 10, 7, 0)
+    assert not SO.send_requested(now, p)
+    open(p, "w").write("2026-10-10T06:50:00")
+    assert SO.send_requested(now, p)
+    open(p, "w").write("2026-10-09T20:37:00")
+    assert not SO.send_requested(now, p)
+    src = open(os.path.join(HERE, "..", "console", "server.py"), encoding="utf-8").read()
+    assert "if not SO.send_requested():" in src

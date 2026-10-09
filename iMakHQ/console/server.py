@@ -1371,6 +1371,9 @@ class Handler(BaseHTTPRequestHandler):
             if TOOLS not in sys.path:
                 sys.path.insert(0, TOOLS)
             import shelf_offer as SO
+            # ★2026-10-10: ボタンを押した直後 (15分) だけ渡す。復元されたタブが勝手に送らないように
+            if not SO.send_requested():
+                return self._json(200, {"items": [], "note": "ボタンが押されていない"})
             return self._json(200, {"items": SO.waiting_list()})
         if u.path == "/api/defender":
             # ★2026-10-04 ユーザー「ここにボタン付けてくれない？ON/OFFで」: Defender の検査の対象外 (C:\dev)

@@ -351,6 +351,8 @@ def settle(ledger, drop_ids, live_ids, write=False, log=print, now=None):
 
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 SEND_URL = "https://www.ebay.com/sh/lst/active?offers=sendNewOffers&source=filterbar&action=search#shg-offers"
+SEND_STAMP = r"C:/dev/iMak_data/hq/offers_send_requested.txt"
+SEND_WINDOW_MIN = 15       # ★2026-10-09 ボタンを押してからこの分数の間だけ、拡張に一覧を渡す
 SEND_BATCH = 10           # ★2026-10-09 ボタン1回で送る件数
 OFFER_PCT_US = 8           # ★2026-10-09 ユーザー確定: 値引きは広告費の分 (US 8%・ミラーは 10%・ミラーはまだ送らない)
 
@@ -515,6 +517,21 @@ def offer_before_drop(picked, is_psa, send=False, now=None, log=print, live_ids=
 
 
 # ---------------------------------------------------------------- 拡張・神風から呼ぶ
+def send_requested(now=None, path=None):
+    """ボタンを押してから SEND_WINDOW_MIN 分以内か (I/O)。
+
+    ★2026-10-10 ユーザー「勝手にオファーを送る動いてなかった？」: 前の晩の Seller Hub のタブが Edge の起動で
+      #shg-offers 付きのまま復元され、拡張が残りの一覧を送った (06:56 に1件)。押した直後だけ渡す。
+    """
+    now = now or datetime.datetime.now()
+    try:
+        with open(path or SEND_STAMP, encoding="utf-8") as f:
+            t = datetime.datetime.fromisoformat(f.read().strip())
+    except (OSError, ValueError):
+        return False
+    return now - t <= datetime.timedelta(minutes=SEND_WINDOW_MIN)
+
+
 def waiting_list(now=None):
     """送る待ちの一覧 (拡張が読む)。"""
     now = now or datetime.datetime.now()
@@ -589,6 +606,8 @@ if __name__ == "__main__":
         if w:
             import subprocess
             import time as _t
+            with open(SEND_STAMP, "w", encoding="utf-8") as f:            # 押した時刻 (拡張はこの15分だけ送る)
+                f.write(datetime.datetime.now().isoformat(timespec="seconds"))
             subprocess.Popen([EDGE, SEND_URL])
             print(f"💌 Seller Hub を Edge で開きました: {len(w)}件を拡張が送ります", flush=True)
             # ★2026-10-09 ユーザー「送ってる最中なのに、ログは終わりましたになるね」: 送り終わるまで待って結果を出す
