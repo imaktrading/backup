@@ -7,7 +7,7 @@
 
   1. 鑑定 : 行の商品が PSA10 なのに、仕入元の商品名が PSA10 でない → 売切と同じ扱い
   2. 名前 : 初めて見た時の商品名から、カード番号か鑑定の数字が消えた・変わった → 売切と同じ扱い + 目視
-  3. 値段 : 同じ行のほかの在庫あり仕入元 (中央値) か 前回の M 列 より 4 割以上安い → M を前回のまま据え置く + 目視
+  3. 値段 : 前回の M 列より 4 割以上安い (M が無い行は ほかの在庫あり仕入元の中央値より) → M を前回のまま据え置く + 目視
             (在庫ありのまま = 取下げはしない。安値も、ほかの仕入元の高値も採らない)
 
 1・2 を「売切と同じ扱い」にするのは「取下げ漏れ > 過剰取下げ」の原則 (中身の違う物を在庫ありと数えると、
@@ -147,15 +147,24 @@ def baseline() -> NameBaseline:
 
 # ── 3. 値段の急落 ────────────────────────────────────────────────────────
 def price_drop(price: int, other_prices: list, prev_m: Optional[int]) -> str:
-    """ほかの在庫あり仕入元の中央値 か 前回 M の 60% 未満なら理由。基準が無い / 問題なし → ""."""
+    """急落なら理由。基準が無い / 問題なし → "".
+
+    前回 M がある行は **前回 M との比較だけ** (今までの値段から急に落ちた = 新しい異常)。
+    ほかの仕入元の中央値と比べるのは 前回 M が無い時だけ。
+    ★ 10/09 初回の巡回: 中央値で比べると、PSA は仕入元ごとの値幅が大きく、既に M になっている
+      正しい安値 (例 ¥10,999 vs 中央値 ¥35,000) を 180 行で 8 件拾った。拾うと M が据え置かれ、
+      その安値が上がっても M が追いつかない (= eBay で安売りの危険) ので、既に採っている値段は見ない。
+    """
     if not isinstance(price, int) or price <= 0:
+        return ""
+    if isinstance(prev_m, int) and prev_m > 0:
+        if price < prev_m * PRICE_DROP_RATIO:
+            return f"前回の仕入値 ¥{prev_m:,} より 4 割以上安い ¥{price:,}"
         return ""
     if other_prices:
         med = statistics.median(other_prices)
         if price < med * PRICE_DROP_RATIO:
             return f"ほかの仕入元 (中央値 ¥{int(med):,}) より 4 割以上安い ¥{price:,}"
-    if isinstance(prev_m, int) and prev_m > 0 and price < prev_m * PRICE_DROP_RATIO:
-        return f"前回の仕入値 ¥{prev_m:,} より 4 割以上安い ¥{price:,}"
     return ""
 
 

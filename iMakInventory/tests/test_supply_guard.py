@@ -139,7 +139,12 @@ def test_legit_cheap_m_does_not_jump_to_other_source(monkeypatch, tmp_path):
     row = {"row_index": 7, "item_id": "820110211566", "title": "PSA10 ミュウex sv4a 327/190 SSR", "url": main,
            "backup_url_slots": [bk, None, None, None, None], "current_m_jpy_str": "10999"}
     r = m.check_one_row_with_fallback(row, sleep_sec=0)
-    assert r["is_sold"] is False and r["price_jpy"] is None
+    assert r["is_sold"] is False and r["price_jpy"] == 10999     # 既に採っている安値は見ない
+
+
+def test_established_cheap_price_is_not_flagged():
+    assert not G.price_drop(10999, [35000], 10999)
+    assert not G.price_drop(5555, [9999, 10000], 5555)
 
 
 def test_normal_row_unchanged(monkeypatch, tmp_path):
