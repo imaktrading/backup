@@ -22,7 +22,18 @@
       link = [...document.querySelectorAll("a, span, button")].filter(visible).find((e) => /SpeedPAKセラーポータルへ/.test(txt(e)));
       if (!link) await sleep(500);
     }
-    if (!link) return;                                         // ログインの画面などに飛ばされた (eBay のログインが要る)
+    const api = (path, body) => new Promise((res) => {
+      try { chrome.runtime.sendMessage({ type: "api", method: "POST", path, body }, (r) => res(r || {})); }
+      catch (e) { res({}); }
+    });
+    if (!link) {                                               // ログインの画面などに飛ばされた (eBay のログインが要る)
+      await api("/api/cpass/fees", { fees: {}, debug: { stage: "CPaSS に入口が無い", url: location.href,
+        text: (document.body ? document.body.innerText : "").replace(/\s+/g, " ").slice(0, 800) } });
+      return;
+    }
+    // <a href> ならそのまま同じタブで移る (新しい窓を開かない)
+    const href = link.closest("a") && link.closest("a").getAttribute("href");
+    if (href && /^https?:/.test(href)) { location.assign(href); return; }
     link.click();
     let ok = null;
     for (let i = 0; i < 20 && !ok; i++) {

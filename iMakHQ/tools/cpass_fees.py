@@ -47,7 +47,8 @@ def save_from_extension(body, now=None, path=None):
         if is_cpass_tracking(t) and isinstance(v, dict) and v.get("yen") is not None:
             new += t not in fees
             fees[t] = v
-    d = {"at": (now or dt.datetime.now()).isoformat(timespec="seconds"), "fees": fees}
+    d = {"at": (now or dt.datetime.now()).isoformat(timespec="seconds"), "fees": fees,
+         "debug": body.get("debug")}                       # 読めなかった時に、拡張が見た画面を後から確かめる
     with open(path or CACHE, "w", encoding="utf-8") as f:
         json.dump(d, f, ensure_ascii=False, indent=1)
     return {"ok": True, "n": len(body.get("fees") or {}), "new": new, "total": len(fees)}

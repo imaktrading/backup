@@ -83,7 +83,11 @@
     }
     sessionStorage.removeItem(STAGE);
     await chrome.storage.local.remove(FLAG);
-    const r = await api("/api/cpass/fees", { fees: all, url: location.href });
+    const dbg = { url: location.href, title: document.title, tr: document.querySelectorAll("tr").length,
+                  td: document.querySelectorAll("td").length,
+                  text: (document.body ? document.body.innerText : "").replace(/\s+/g, " ").slice(0, 1500),
+                  rows: [...document.querySelectorAll("tr")].slice(0, 8).map((tr) => txt(tr).slice(0, 200)) };
+    const r = await api("/api/cpass/fees", { fees: all, url: location.href, debug: dbg });
     if (r && r.ok) chrome.runtime.sendMessage({ type: "close" });
   }
 

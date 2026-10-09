@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Seller Hub レポート取り",
-  "version": "4.0",
+  "version": "4.2",
   "description": "Seller Hub のファネル用レポートを出品くん Console の起動時 (1日1回) に自動で作って落とす",
   "permissions": [
     "tabs",
@@ -50,6 +50,16 @@
         "cpass_enter.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://cpass.ebay.com/jp/setting/carrier*"
+      ],
+      "js": [
+        "cpass_main.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ],
   "host_permissions": [
