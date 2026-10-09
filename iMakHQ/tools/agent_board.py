@@ -382,6 +382,105 @@ def launch(key):
     return True, "%s を起動しました" % hit[0]["label"]
 
 
+# ------------------------------------------------------------------ 用の済んだ担当を閉じる (2026-10-09 ユーザー)
+# ユーザー「各担当が残務がなくなり、待機になったら、CMD 閉じてくれないかな」。
+# 閉じる = 起動用の cmd (claude_rc.cmd <folder> / 担当の .bat) を子ごと落とす。依頼が来たら wake でまた開く。
+KEEP_OPEN = ("HQ", "ADV", "ALPHA", "BRAVO", "RELAY")   # 窓口と HQ はユーザーが直接話す / RELAY は KAGOYA の呼び鈴の中継なので閉じない
+IDLE_MIN = 5                                   # 返事を書き終えてすぐは閉じない (続けて呼び鈴が来ることがある)
+LEDGER_TO_KEY = {"カタログ": "CATALOG", "重複くん": "DEDUPE", "監視くん": "INVENTORY",
+                 "抽出くん": "HARVEST", "リバイス": "REVISE", "HQ": "HQ"}
+
+
+def idle_enough(row, now=None, minutes=IDLE_MIN):
+    """待機中で、最後の動きから minutes 分たっているか (純関数)。"""
+    if not row or row.get("state") != "idle":
+        return False
+    now = now or _dt.datetime.now()
+    try:
+        since = _dt.datetime.fromisoformat(row.get("since") or "")
+    except ValueError:
+        return False
+    return (now - since).total_seconds() >= minutes * 60
+
+
+def open_keys_in_ledger(cur):
+    """台帳で担当がまだ持っている依頼 (返した・閉じた 以外) の宛先 key の集合 (純関数)。"""
+    return {LEDGER_TO_KEY.get(r.get("to")) for r in cur.values()
+            if r.get("state") not in ("返した", "閉じた")} - {None}
+
+
+def _cmd_pids(folder, lnk=""):
+    """この担当の起動用 cmd の PID 一覧。調べられなければ []。"""
+    ps = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8;"
+          "@(Get-CimInstance Win32_Process -Filter \"Name='cmd.exe'\" | Select-Object ProcessId,CommandLine)"
+          " | ConvertTo-Json -Compress")
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
+                           encoding="utf-8", errors="ignore", timeout=20,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        got = json.loads(r.stdout or "[]")
+        got = got if isinstance(got, list) else [got]
+    except Exception:                                          # noqa: BLE001
+        return []
+    return [g["ProcessId"] for g in got if g and rc_in_cmdlines(folder, [g.get("CommandLine")], lnk)]
+
+
+def close_window(key, force=False):
+    """担当 key の窓を閉じる。待機中で IDLE_MIN 分動いていない時だけ (force で省く)。戻り: (ok, 文)。"""
+    if key in KEEP_OPEN:
+        return False, "%s は閉じない (窓口・HQ)" % key
+    hit = [r for r in read_roster() if r["key"] == key]
+    if not hit:
+        return False, "その担当のショートカットが見つかりません: %s" % key
+    row = next((r for r in local_agents() if r.get("key") == key and r["state"] != "off"), None)
+    if row and not force and not idle_enough(row):
+        return False, "%s は作業中か、動いて %d 分たっていないので閉じない" % (key, IDLE_MIN)
+    pids = _cmd_pids(hit[0]["folder"], hit[0]["lnk"])
+    if not pids:
+        return False, "%s の起動用の窓が見つかりません (閉じている)" % key
+    for pid in pids:
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=30,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return True, "%s を閉じました" % key
+
+
+def sleep_idle():
+    """台帳に持ち物が無く、待機中の担当を全部閉じる (家 + KAGOYA)。走行ログ用に1行ずつ返す。"""
+    import bravo_ledger as B
+    busy_keys = open_keys_in_ledger(B.fold(B.load()))
+    out, closed, looked = [], 0, 0
+    for r in local_agents():
+        k = r.get("key")
+        if not k or k in KEEP_OPEN or r["state"] == "off":
+            continue
+        looked += 1
+        if k in busy_keys:
+            out.append("%s: 台帳に持ち物あり → 閉じない" % k)
+            continue
+        ok, msg = close_window(k)
+        closed += ok
+        out.append(msg)
+    for h in REMOTE_LAUNCH_HOSTS:
+        try:
+            rows = remote_ssh(h)["rows"]
+        except Exception as e:                                 # noqa: BLE001
+            out.append("%s: 一覧を読めない (%s)" % (h, str(e)[:60]))
+            continue
+        for r in rows:
+            k = r.get("key")
+            if not k or k in KEEP_OPEN or r.get("state") == "off":
+                continue
+            looked += 1
+            if k in busy_keys:
+                out.append("%s(%s): 台帳に持ち物あり → 閉じない" % (k, h))
+                continue
+            got = parse_json_out(_remote_py("close " + k, timeout=90)) or {}
+            closed += bool(got.get("ok"))
+            out.append("%s(%s): %s" % (k, h, got.get("message") or "返事なし"))
+    out.append("🛏 待機中の担当を閉じた: %d / 開いていた %d (窓口・HQ は除く)" % (closed, looked))
+    return out
+
+
 # ------------------------------------------------------------------ ssh で届く PC (KAGOYA) — 2026-10-05
 # 向こうでこのファイルを動かして一覧を JSON で受け取る / 起動させる。kagoya_offload の ssh を使う
 
@@ -482,6 +581,15 @@ def main():
     if cmd == "launch":                  # 家の神風から ssh で起動させる
         ok, msg = launch((sys.argv[2:] or [""])[0])
         print(json.dumps({"ok": ok, "message": msg}, ensure_ascii=True))
+        return 0
+    if cmd == "close":                   # 担当1つを閉じる (KAGOYA へは ssh で家から呼ばれる)
+        ok, msg = close_window((sys.argv[2:] or [""])[0], force="--force" in sys.argv)
+        print(json.dumps({"ok": ok, "message": msg}, ensure_ascii=True) if os.environ.get("SSH_CONNECTION")
+              else msg)
+        return 0
+    if cmd == "sleep-idle":              # ブラボーが依頼を閉じた区切りで回す
+        for ln in sleep_idle():
+            print(ln)
         return 0
     if cmd == "wake":
         # ★2026-09-29 ユーザー「依頼しているわけだから、すぐに処理してもらった方がいい」:
