@@ -204,7 +204,7 @@ def test_csv_headers_unchanged_no_canonical_column():
 def test_build_row_accepts_pid_by_cert_kwarg():
     """build_row(pid_by_cert=...) を受け付ける = sidecar 集約点が生きている。"""
     src = _load_psa_to_csv_source()
-    assert "def build_row(cert_number, price, data, description, driver=None, catalog_misses=None, pid_by_cert=None)" in src
+    assert "def build_row(cert_number, price, data, description, driver=None, catalog_misses=None, pid_by_cert=None," in src
 
 
 def test_sidecar_write_wired_after_csv_write():

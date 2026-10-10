@@ -2153,8 +2153,34 @@ def _pad_title_with_facts(title, year, rarity_short, set_code, target_min=70, ma
 # PSA10 以外で build_row が止めた cert (規定どおりの除外。失敗とは数えない・2026-09-22 Act 提案3)
 GRADE_EXCLUDED = set()
 
+# ★2026-10-10 ユーザー「落ちた分だけ、読めば？」→「直して」: 写真の読み取り (card_identifier・Sonnet) は
+#   最初は読まない。200件の突き合わせで 190件は読んでも読まなくても出品行が同じ、
+#   違いは「セルフチェックの Type 空で落ちる 8件」だけだった (写真が Type を埋めて通していた)。
+#   → 保存済み・番号なし DON!! は従来どおり読む / それ以外はセルフチェックで落ちた時だけ読み直す。
+#   直した後の同じ200件: 出品行 200/200 同じ・API を呼ぶのは 12件。
+RETRY_WITH_VISION = object()
+VISION_STATS = {"api": 0, "cached": 0, "skipped": 0, "retried": 0}
 
-def build_row(cert_number, price, data, description, driver=None, catalog_misses=None, pid_by_cert=None):
+
+def build_row_lazy_vision(cert_number, price, data, description, driver=None,
+                          catalog_misses=None, pid_by_cert=None, _build=None):
+    """build_row を写真なしで作り、セルフチェックで落ちた時だけ写真を読んで作り直す。"""
+    _build = _build or build_row
+    _n = len(catalog_misses) if catalog_misses is not None else 0
+    row = _build(cert_number, price, data, description, driver=driver,
+                 catalog_misses=catalog_misses, pid_by_cert=pid_by_cert, vision="auto")
+    if row is RETRY_WITH_VISION:
+        VISION_STATS["retried"] += 1
+        if catalog_misses is not None:
+            del catalog_misses[_n:]          # 1回目の分を二重に積まない
+        print("    ↻ セルフチェックで落ちた → 写真を読んで作り直す")
+        row = _build(cert_number, price, data, description, driver=driver,
+                     catalog_misses=catalog_misses, pid_by_cert=pid_by_cert, vision="on")
+    return row
+
+
+def build_row(cert_number, price, data, description, driver=None, catalog_misses=None, pid_by_cert=None,
+              vision="on"):
     subject = data.get('Subject', 'Unknown')
     card_number = data.get('CardNumber', '')
     brand = data.get('Brand', '')
@@ -2181,9 +2207,21 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     # 失敗 (low/failed) 時は既存ロジック (Bandai名前検索 等) にフォールバック。
     # ロールバック: この import & if ブロックをコメントアウトすれば完全に元に戻る。
     _vision_result = None
-    if data.get('CardImageUrl') and not _override_applied:
+    _vision_skipped = False
+    if data.get('CardImageUrl') and not _override_applied and vision == "auto":
         try:
-            from card_identifier import identify_from_image as _identify
+            from card_identifier import has_cached as _has_cached
+            _cached = _has_cached(cert_number)
+        except Exception:
+            _cached = False
+        if not (_cached or is_unidentifiable_don_card(subject, card_number)):
+            _vision_skipped = True
+            VISION_STATS["skipped"] += 1
+    if data.get('CardImageUrl') and not _override_applied and not _vision_skipped:
+        try:
+            from card_identifier import identify_from_image, has_cached as _has_cached
+            VISION_STATS["cached" if _has_cached(cert_number) else "api"] += 1
+            _identify = identify_from_image
             _vision_result = _identify(
                 cert_number=cert_number,
                 image_url=data.get('CardImageUrl', ''),
@@ -2820,6 +2858,8 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     )
     for _w in _warnings:
         print(f"       ⚠️ {_w}")
+    if _errors and _vision_skipped:
+        return RETRY_WITH_VISION      # 写真を読めば通る分 (build_row_lazy_vision が読み直す)
     if _errors:
         # ★2026-08-29 提案2: 「必須Item Specific が空」等の failure に catalog 到達可否を付記。
         #   「引けなかった」=②出品くん / 「引けたが値が無い」=①カタログ、とその場で判定が付く。
@@ -3933,7 +3973,7 @@ def main():
             print(f" → #{card_number} {subject} ✓")
             # SKU にメルカリ item ID を使うため、URL を data に注入（tshirt_listing_rules 準拠）
             data['_mercari_url'] = mercari_url_map.get(cert, '')
-            row = build_row(cert, DEFAULT_PRICE, data, description, driver=driver, catalog_misses=catalog_misses, pid_by_cert=pid_by_cert)
+            row = build_row_lazy_vision(cert, DEFAULT_PRICE, data, description, driver=driver, catalog_misses=catalog_misses, pid_by_cert=pid_by_cert)
             if row is None:
                 # selfcheck弾かれ → rows/card_info の後段ループで None参照クラッシュを防ぐためスキップ
                 if str(cert) in GRADE_EXCLUDED:
@@ -4266,6 +4306,11 @@ def main():
                 writer.writerow(MARKET_LOG_HEADERS)
             writer.writerows(market_log_rows)
         print(f"📊 市場ログ: {MARKET_LOG_FILE} ({len(market_log_rows)}件追記)")
+
+    # ★2026-10-10: 写真読みを「落ちた分だけ」にした効き目を毎回出す (0件でも出す)
+    print(f"🖼️ 写真の読み取り: API {VISION_STATS['api']}件 / 保存済み {VISION_STATS['cached']}件 / "
+          f"読まずに済んだ {VISION_STATS['skipped'] - VISION_STATS['retried']}件 "
+          f"(うち落ちて読み直した {VISION_STATS['retried']}件)")
 
     # CSV出力先: iMakHQ/csv_output/tcg_upload_<timestamp>.csv （他カテゴリと命名規則統一）
     output_file = _gcop("tcg", "upload")

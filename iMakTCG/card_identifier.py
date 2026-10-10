@@ -64,6 +64,11 @@ def _load_cache() -> dict:
     return {}
 
 
+def has_cached(cert_number) -> bool:
+    """この cert を読んだ結果が保存済みか (= 読んでも API 代がかからない)。"""
+    return bool(_load_cache().get(str(cert_number)))
+
+
 def _save_cache(cache: dict) -> None:
     with open(CACHE_PATH, "w", encoding="utf-8") as f:
         json.dump(cache, f, ensure_ascii=False, indent=2)
