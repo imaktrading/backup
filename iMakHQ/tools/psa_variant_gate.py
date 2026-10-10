@@ -62,6 +62,11 @@ def mirror_text(text):
     for w in ("MASTER BALL", "POKE BALL", "ROCKET"):
         if w + " REVERSE HOLO" in u:
             return w + " REVERSE HOLO"
+    # ★2026-10-10 (ブラボー B-20261010-001 / 残務 №388): ボールの名前の無い「REVERSE HOLO」も**ミラー**。
+    #   通常版として通していたため、ブラッキー (UMBREON REVERSE HOLO・10/07) とレックウザ (RAYQUAZA REVERSE HOLO・10/09)
+    #   が通常版の KEY で出品された。どのミラーかはラベルで決まらないので、ミラーの行が1つだけの時に限りそれを使う
+    if "REVERSE HOLO" in u:
+        return "REVERSE HOLO"
     return ""
 _ALT_TYPES = ("alt_art", "parallel", "sp", "super_parallel", "manga")
 
@@ -177,6 +182,8 @@ def conflict(category, brand, subject, row):
                 return "PSA は通常 (%s) だが行はパラレル" % m.group(1)
     elif category == "pokemon_tcg":
         lab, row_v = mirror_text(subject), mirror_text(_specs(row).get("variant_psa_text"))
+        if lab == "REVERSE HOLO" and row_v:
+            return ""                                          # 名前の無いミラー: どのミラーの行でも合う (1つに絞れた時だけ使われる)
         if lab != row_v:
             return "PSA は %s だが行は %s" % (lab or "通常", row_v or "通常")
     return ""

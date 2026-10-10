@@ -15,7 +15,7 @@ import tcg_listing_fields as T  # noqa: E402
 def test_mirror_text():
     assert G.mirror_text("RAYQUAZA POKÉ BALL REVERSE HOLO") == "POKE BALL REVERSE HOLO"
     assert G.mirror_text("PERSIAN MASTER BALL REVERSE HOLO") == "MASTER BALL REVERSE HOLO"
-    assert G.mirror_text("PIKACHU REVERSE HOLO") == ""                 # 版名なしはまだ見ない
+    assert G.mirror_text("PIKACHU REVERSE HOLO") == "REVERSE HOLO"     # ★2026-10-10 版名なしもミラー (通常版で通さない)
     assert G.mirror_text("") == ""
 
 
@@ -35,3 +35,12 @@ def test_title_keeps_mirror_name():
          "_mirror": "Poke Ball Reverse Holo"}
     t = T.build_title_from_fields(f)
     assert "Poke Ball Reverse Holo" in t and len(t) <= 80
+
+
+def test_bare_reverse_holo_is_not_plain():
+    """★2026-10-10 B-20261010-001: UMBREON REVERSE HOLO が通常版 SV8a-092 で出品された。通常版の行とは合わない。"""
+    base = {"product_id": "SV8a-092", "specs": "{}"}
+    pb = {"product_id": "SV8a-092_pb", "specs": '{"variant_psa_text": "POKE BALL REVERSE HOLO"}'}
+    b = "POKEMON JAPANESE SV8A-TERASTAL FEST EX"
+    assert G.conflict("pokemon_tcg", b, "UMBREON REVERSE HOLO", base)
+    assert G.conflict("pokemon_tcg", b, "UMBREON REVERSE HOLO", pb) == ""
