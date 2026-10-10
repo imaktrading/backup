@@ -601,9 +601,6 @@ def print_word_for_key(key, hint=None):
 #   ところが「REVERSE HOLO」だけの物に モンボ / モンスターボール / エネルギーミラー が混ざる
 #   (PSA が区別していない)。→ **確かな「マスターボールか否か」だけ** で絞る。
 _MASTER_BALL_WORDS = ("マスターボール", "マスボ", "MASTER BALL", "MASTERBALL")
-# ★2026-10-10: ボールのミラー全般 (通常版の出品に モンスターボールミラー が目視に出ていた: SV8a-092 ブラッキー)
-_BALL_MIRROR_WORDS = _MASTER_BALL_WORDS + ("モンスターボール", "ポケモンボール", "ポケボ", "ボールミラー",
-                                          "POKE BALL", "POKEBALL", "MONSTER BALL")
 
 
 def mirror_kind(variety):
@@ -622,14 +619,11 @@ def mirror_title_conflicts(kind, title):
     - こちらがマスターボール → 出品名に マスターボール/マスボ が無ければ外す
       (マスターボールは売り手が必ず書く。書いていない物はほぼ別の版)
     - こちらがそれ以外のミラー → 出品名が マスターボール を名乗れば外す
-    - こちらが通常版 ('plain' = PSA ラベルを読めてミラーの記載が無い) → ボールのミラーを名乗れば外す
     - 版が分からない ('') → 外さない
     """
     if not kind:
         return False
     u = unicodedata.normalize("NFKC", title or "").upper()
-    if kind == "plain":
-        return any(w.upper() in u for w in _BALL_MIRROR_WORDS)
     has_master = any(w.upper() in u for w in _MASTER_BALL_WORDS)
     return (not has_master) if kind == "master" else has_master
 

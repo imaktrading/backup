@@ -571,19 +571,10 @@ def _card_no_from_key(key):
 
 
 def mirror_kind_for_target(target, mp):
-    """出品の鑑定番号 → ミラーの版 ('master' / 'mirror' / 'plain' / '')。鑑定データが無ければ ''。
-
-    ★2026-10-10 'plain' = ポケモンで PSA ラベルを読めて、ミラーの記載が無く、KEY にも版の印が無い = 通常版。
-    """
+    """出品の鑑定番号 → ミラーの版 ('master' / 'mirror' / '')。鑑定データが無ければ ''。"""
     try:
         import psa_resource_confirm as _prc
-        facts = _prc.psa_label_facts((target or {}).get("cert"))
-        k = mp.mirror_kind(facts.get("variety"))
-        key = str((target or {}).get("key") or "")
-        if (not k and facts.get("brand") and key.startswith("pokemon_tcg:")
-                and "_" not in key.split(":", 1)[1]):
-            return "plain"
-        return k
+        return mp.mirror_kind(_prc.psa_label_facts((target or {}).get("cert")).get("variety"))
     except Exception:                                          # noqa: BLE001
         return ""
 

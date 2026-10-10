@@ -71,24 +71,3 @@ def test_queue_consumed_only_when_shown():
     src = open(os.path.join(HERE, "..", "tools", "psa_hoju_fill.py"), encoding="utf-8").read()
     j = src.index("def run_daytime_confirm(")
     assert "enumerate(items[:n_ui])" in src[j:] and "_shown_pending.append" not in src[j:]
-
-
-def test_plain_pokemon_drops_ball_mirror_titles():
-    """通常版の出品に ボールのミラーを出さない (SV8a-092 ブラッキー に モンスターボールミラー が出ていた)。"""
-    import mercari_psa_resource as mp
-    assert mp.mirror_title_conflicts("plain", "PSA10 ブラッキー モンスターボールミラー 092/187")
-    assert mp.mirror_title_conflicts("plain", "PSA10 ブラッキー マスターボールミラー")
-    assert not mp.mirror_title_conflicts("plain", "PSA10 ブラッキー 092/187 テラスタルフェス")
-    assert not mp.mirror_title_conflicts("", "PSA10 ブラッキー モンスターボールミラー")
-
-
-def test_plain_kind_only_for_pokemon_without_version_mark(monkeypatch):
-    import mercari_psa_resource as mp
-    import psa_resource_confirm as prc
-    import psa_hoju_fill as P
-    monkeypatch.setattr(prc, "psa_label_facts", lambda cert, card_no="": {"variety": "", "brand": "POKEMON SV8a"})
-    assert P.mirror_kind_for_target({"cert": "1", "key": "pokemon_tcg:SV8a-092"}, mp) == "plain"
-    assert P.mirror_kind_for_target({"cert": "1", "key": "pokemon_tcg:SV8a-092_mb"}, mp) == ""
-    assert P.mirror_kind_for_target({"cert": "1", "key": "one_piece_tcg:OP01-001"}, mp) == ""
-    monkeypatch.setattr(prc, "psa_label_facts", lambda cert, card_no="": {"variety": "", "brand": ""})
-    assert P.mirror_kind_for_target({"cert": "1", "key": "pokemon_tcg:SV8a-092"}, mp) == ""
