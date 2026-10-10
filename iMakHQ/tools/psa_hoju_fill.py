@@ -2880,13 +2880,20 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     #   約800件の全部で現物画像の取得と絵柄の AI 照合をしていた (1回 13〜20分・10/8 は4回押して毎回全件)。
     #   出す分が集まったら、残りは **手元の画像だけ・絵柄の照合なし・買えるかの確認なし** で流す。
     #   画面に出る物は同じ (並び順は targets のまま)。「前に同じ」の自動書込とラベルの振り分けは全件で続ける
-    def _enough():
+    def _enough(t):
+        """この出品の枠 (補充 / 入れ替え) は、もう画面に出す分が集まったか。
+
+        ★2026-10-10 試走で効かなかった: 両方の枠が埋まるまで待っていたので、入れ替えが6件しか無い日は
+          最後まで全件を照合していた。枠ごとに判断する (split_fill_and_swap と同じ切り方)。
+        """
         if limit is None:
             return False
         if not swap_limit:
             return len(items) >= limit
         nf = sum(1 for _t in item_targets if _t.get("n_backups", 0) < CONFIRM_MAX_BACKUPS)
-        return nf >= limit and (len(item_targets) - nf) >= swap_limit
+        if t.get("n_backups", 0) < CONFIRM_MAX_BACKUPS:
+            return nf >= limit
+        return (len(item_targets) - nf) >= swap_limit
 
     def _ref_disk(t):
         return (prc.ebay_listing_image(t["itemID"], allow_fetch=False)
@@ -2897,7 +2904,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
 
     _fast_from = None
     for t in targets:
-        _fast = _enough()
+        _fast = _enough(t)
         if _fast and _fast_from is None:
             _fast_from = _scanned
             print(f"   ⏩ 画面に出す分が集まった ({_scanned}件目) → 残りは画像の取得と絵柄の照合をせずに流す", flush=True)
