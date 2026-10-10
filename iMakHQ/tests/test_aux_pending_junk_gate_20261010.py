@@ -71,3 +71,13 @@ def test_queue_consumed_only_when_shown():
     src = open(os.path.join(HERE, "..", "tools", "psa_hoju_fill.py"), encoding="utf-8").read()
     j = src.index("def run_daytime_confirm(")
     assert "enumerate(items[:n_ui])" in src[j:] and "_shown_pending.append" not in src[j:]
+
+
+def test_stop_heavy_checks_once_enough_items():
+    """出す分が集まったら画像取得・絵柄照合・買えるか確認をしない (2026-10-10「かなり遅い」)。"""
+    src = open(os.path.join(HERE, "..", "tools", "psa_hoju_fill.py"), encoding="utf-8").read()
+    j = src.index("def run_daytime_confirm(")
+    body = src[j:]
+    assert "art_of=(_art_none if _fast else _art_of)" in body
+    assert "ref_of=(_ref_disk if _fast else _ref_of)" in body
+    assert "if not _fast:" in body and "⏩" in body

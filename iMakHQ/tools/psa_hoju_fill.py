@@ -2876,7 +2876,31 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     label_routed = []               # ラベルで別のカードと分かった候補 → 補URL候補NG (= 新規の種の材料) へ
     marks = {"label": 0, "title": 0}  # 印を付けて目視に出した候補の数 (2026-10-07 動いている証拠を走行ログに)
     _scanned = 0
+    # ★2026-10-10 ユーザー「補URL③補充 かなり遅い」: 画面に出すのは補充 limit 件 + 入れ替え swap_limit 件なのに、
+    #   約800件の全部で現物画像の取得と絵柄の AI 照合をしていた (1回 13〜20分・10/8 は4回押して毎回全件)。
+    #   出す分が集まったら、残りは **手元の画像だけ・絵柄の照合なし・買えるかの確認なし** で流す。
+    #   画面に出る物は同じ (並び順は targets のまま)。「前に同じ」の自動書込とラベルの振り分けは全件で続ける
+    def _enough():
+        if limit is None:
+            return False
+        if not swap_limit:
+            return len(items) >= limit
+        nf = sum(1 for _t in item_targets if _t.get("n_backups", 0) < CONFIRM_MAX_BACKUPS)
+        return nf >= limit and (len(item_targets) - nf) >= swap_limit
+
+    def _ref_disk(t):
+        return (prc.ebay_listing_image(t["itemID"], allow_fetch=False)
+                or prc.psa_image_for_cert(t.get("cert") or None))
+
+    def _art_none(ref, cands, t):
+        return cands, []
+
+    _fast_from = None
     for t in targets:
+        _fast = _enough()
+        if _fast and _fast_from is None:
+            _fast_from = _scanned
+            print(f"   ⏩ 画面に出す分が集まった ({_scanned}件目) → 残りは画像の取得と絵柄の照合をせずに流す", flush=True)
         _scanned += 1
         if _scanned % 10 == 0 or _scanned == len(targets):
             print(f"   … {_scanned}/{len(targets)}件 走査 "
@@ -2888,7 +2912,8 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         #   ので、「目視待ち32件」と出して3件しか出ない、が構造的に起きない。
         t["_card_no"] = build_search_query(t, mp).get("card_no") or ""
         cands, ref, why, _dropped_art = confirm_survivors(
-            t, vals, cache, ctx, today, ref_of=_ref_of, art_of=_art_of, stats=stats)
+            t, vals, cache, ctx, today, ref_of=(_ref_disk if _fast else _ref_of),
+            art_of=(_art_none if _fast else _art_of), stats=stats)
         for _c in _dropped_art:
             art_dropped_log.append((iid, _c.get("url", ""),
                                     _c.get("drop_why") or _c.get("art_reason", "")))
@@ -2901,7 +2926,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         # ★2026-10-10: 手前で落ちた出品 (台帳・控えが古い・番号が取れない等) でも、目視待ちは見比べられれば出す。
         #   以前は ref が空のまま返るので混ぜられず、待ち列に永久に残っていた
         if _pend and not ref:
-            ref = _ref_of(t)
+            ref = _ref_disk(t) if _fast else _ref_of(t)
         if _pend and ref:
             cands = merge_pending_cands(t, cands, _pend, ctx, vals, mp)
         if not cands:
@@ -2920,7 +2945,8 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         # ★2026-10-04 ユーザー「補URL③入れ替えで、まだAUCでてるね」: 控えに前から貯まった候補は詳細を開いていない。
         #   画面に出す直前に、メルカリ個人出品が今そのまま買えるかを API で確かめ、買えない
         #   (オークション・売り切れ・消えた) 物は出さずに台帳へ。確かめられなかった物は今までどおり出す
-        cands = drop_unbuyable_now(cands)
+        if not _fast:                                   # 出さない分は買えるかを確かめない
+            cands = drop_unbuyable_now(cands)
         if not cands:
             continue
         cn = t["_card_no"]
@@ -3018,7 +3044,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     #        ここを黙って落とすと「補URLゼロのまま放置」が見えなくなる。
     _stuck = no_cardno + no_cache + no_cand + no_cand_after_filter + no_ref
     print("──── 目視残 ────")
-    print(f"  ① 目視で片づく残り      : {_rest}件"
+    print(f"  ① 目視で片づく残り      : {_rest}件" + (" (⏩ 以降は絵柄を照合していない概数)" if _fast_from is not None else "")
           + (f"  (このコマンドをあと {-(-_rest // limit)}回で消化)" if (_rest and limit) else ""))
     print(f"  ② 目視しても出てこない残: {_stuck}件  ← 画面に出ないので何回まわしても減らない")
     if _stuck:
