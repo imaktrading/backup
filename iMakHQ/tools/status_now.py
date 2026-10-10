@@ -434,6 +434,15 @@ def main():
     _cc = _cost_column()
     if _cc:
         print("  " + _cc)
+    # ★2026-10-10 有料 API (Anthropic) の使用額。0円でも必ず出す (記録が動いているかが分かるように)
+    try:
+        import api_cost_log as _acl
+        _s = _acl.summarize(_acl.load(), datetime.date.today().isoformat())
+        _top = sorted(_s.items(), key=lambda kv: -kv[1][1])[:3]
+        print("  💸 有料 API 今日: $%.2f / %d回%s" % (sum(v[1] for v in _s.values()), sum(v[0] for v in _s.values()),
+              (" (多い順: " + " / ".join("%s $%.2f" % (k, v[1]) for k, v in _top) + ")") if _top else ""))
+    except Exception as _e:                                      # noqa: BLE001
+        print("  💸 有料 API: 記録を読めない (%s)" % type(_e).__name__)
 
     vd = _viewer_disagreement()
     if vd:
