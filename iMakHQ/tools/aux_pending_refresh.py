@@ -126,7 +126,7 @@ def _check_mercari(urls, sleep, log):
                         except (TypeError, ValueError):
                             price = None
                         out[u] = {"live": qty > 0, "price": price,
-                                  "name": getattr(p, "name", "") or getattr(pd, "name", "") or ""}
+                                  "name": getattr(p, "display_name", "") or ""}   # name は商品の番号
             except Exception:                                  # noqa: BLE001  判らない = 触らない
                 pass
             if sleep:
