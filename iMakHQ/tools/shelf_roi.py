@@ -37,7 +37,7 @@ import listing_funnel as LF    # noqa: E402
 
 SALES_SHEET_ID = "1MufEUweIJcLv-NwT3KZsEJ_k_yl1rKryaqBZjUH7c2U"
 SALES_GID = 1814510799
-SALES_COL = {"item": 1, "date": 4, "country": 5, "price": 6, "profit": 15, "cat": 17}
+SALES_COL = {"item": 1, "date": 4, "country": 5, "price": 6, "profit": 15, "cat": 17, "state": 25}
 REPORT_GLOB = r"C:\dev\iMak_data\seller_hub\reports\**\eBay-all-active-listings-report-*.csv"
 
 # 販売実績シートのカテゴリ名 → 商品管理シートのカテゴリ名。
@@ -52,10 +52,14 @@ CAT_ALIAS = {
 
 
 def money(x):
-    """'$1,234.56' / '¥1,500' / '-$4.06' → float (純関数, test可)。"""
-    s = (x or "").replace("$", "").replace("¥", "").replace(",", "").strip()
-    neg = s.startswith("-")
-    s = s.lstrip("-").lstrip("+")
+    """'$1,234.56' / '¥1,500' / '-$4.06' / '▲¥3,728' → float (純関数, test可)。
+
+    ★2026-10-11: 販売実績シートは赤字を「▲¥3,728」と書く。これを読めず 0 にしていたため、
+      赤字の分だけ利益が多く出ていた (10/9 の ▲¥3,728 が 0 になった)。▲・△・全角マイナスも負に読む。
+    """
+    s = (x or "").replace("$", "").replace("¥", "").replace("￥", "").replace(",", "").strip()
+    neg = s[:1] in ("-", "▲", "△", "−", "－")
+    s = s.lstrip("-▲△−－").lstrip("+")
     try:
         return (-1.0 if neg else 1.0) * float(s or 0)
     except ValueError:
@@ -87,6 +91,9 @@ def sales_by_category(rows2d, since):
             continue
         d = parse_date(col(SALES_COL["date"]))
         if not d or d < since:
+            continue
+        # ★2026-10-11: キャンセルの注文は売れていない。数えると件数と利益が多く出る
+        if "キャンセル" in col(SALES_COL["state"]):
             continue
         c = norm_cat(col(SALES_COL["cat"]))
         out[c]["n"] += 1
