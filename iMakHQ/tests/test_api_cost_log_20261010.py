@@ -39,3 +39,12 @@ def test_install_wraps_create_once():
     first = m.Messages.create
     A.install()
     assert m.Messages.create is first
+
+
+def test_caller_and_images():
+    def my_job():
+        return A.caller_of()
+    assert my_job().endswith(":my_job")
+    msgs = [{"role": "user", "content": [{"type": "image", "source": {}}, {"type": "text", "text": "x"},
+                                         {"type": "image", "source": {}}]}]
+    assert A.count_images(msgs) == 2 and A.count_images(None) == 0

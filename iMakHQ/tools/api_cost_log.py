@@ -64,7 +64,35 @@ def _usage_dict(u):
     return out
 
 
-def record(model, usage, secs=None):
+def caller_of(skip=("/anthropic/", "/api_cost_log.py", "/httpx/", "/functools.py")):
+    """API を呼んだ側の「ファイル名:関数名」(何の処理か)。分からなければ ""。"""
+    try:
+        f = sys._getframe(1)
+        while f is not None:
+            fn = f.f_code.co_filename.replace("\\", "/")
+            if not any(s in fn for s in skip):
+                return "%s:%s" % (os.path.basename(fn), f.f_code.co_name)
+            f = f.f_back
+    except Exception:                                          # noqa: BLE001
+        pass
+    return ""
+
+
+def count_images(messages):
+    """送った画像の枚数 (純関数)。画像は高いので、何枚送っているかを残す。"""
+    n = 0
+    try:
+        for m in messages or []:
+            c = m.get("content") if isinstance(m, dict) else None
+            for b in (c if isinstance(c, list) else []):
+                if isinstance(b, dict) and b.get("type") == "image":
+                    n += 1
+    except Exception:                                          # noqa: BLE001
+        pass
+    return n
+
+
+def record(model, usage, secs=None, where="", images=0):
     """1回分を LOG に足す (I/O)。失敗しても例外を出さない。テスト中は本物の LOG に書かない。"""
     if os.environ.get("PYTEST_CURRENT_TEST") and LOG == _DEFAULT_LOG:
         return
@@ -75,6 +103,10 @@ def record(model, usage, secs=None):
                **usage, "usd": cost_usd(model, usage)}
         if secs is not None:
             rec["s"] = round(secs, 1)
+        if where:
+            rec["where"] = where
+        if images:
+            rec["img"] = images
         os.makedirs(os.path.dirname(LOG), exist_ok=True)
         with open(LOG, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -98,7 +130,7 @@ def install():
         resp = orig(self, *a, **kw)
         try:
             record(getattr(resp, "model", None) or kw.get("model"), _usage_dict(getattr(resp, "usage", None)),
-                   time.time() - t0)
+                   time.time() - t0, where=caller_of(), images=count_images(kw.get("messages")))
         except Exception:                                      # noqa: BLE001
             pass
         return resp
@@ -171,13 +203,13 @@ def write_usercustomize():
     return p
 
 
-def summarize(rows, since):
-    """{prog: [回数, ドル, 金額不明の回数]} (純関数)。"""
+def summarize(rows, since, by="prog"):
+    """{prog (by="where" なら 処理): [回数, ドル, 金額不明の回数]} (純関数)。"""
     out = {}
     for r in rows:
         if (r.get("at") or "") < since:
             continue
-        s = out.setdefault(r.get("prog") or "?", [0, 0.0, 0])
+        s = out.setdefault(r.get(by) or r.get("prog") or "?", [0, 0.0, 0])
         s[0] += 1
         if r.get("usd") is None:
             s[2] += 1
@@ -209,7 +241,7 @@ def main(argv=None):
     today = _dt.date.today().isoformat()
     week = (_dt.date.today() - _dt.timedelta(days=6)).isoformat()
     for label, since in (("今日", today), ("直近7日", week)):
-        s = summarize(rows, since)
+        s = summarize(rows, since, by="where")
         tot = sum(v[1] for v in s.values())
         print(f"💸 有料 API {label}: ${tot:.2f} / {sum(v[0] for v in s.values())}回")
         for prog, (n, usd, unk) in sorted(s.items(), key=lambda kv: -kv[1][1]):
