@@ -31,3 +31,14 @@ def test_選び直しても写真の候補と使う使わないを残す():
     assert "function snapImgs" in h and "function restoreImgs" in h
     assert "if(grouped&&prev&&prev!==el){prev.classList.add('same');}" in h
     assert "if(grouped)restoreImgs(box,snap);" in h
+
+
+def test_同じ物と探したURLの写真は全部_出品に使う画像の段に並ぶ():
+    """ユーザー「同じ物を選ぶ。それらが持っている画像全てが、出品に使う画像に並ばないとダメ」(2026-10-12)。
+    ブラウザで A を選び B・C を同じ物にすると 7枚 (A2+B3+C1+メルカリ1) が全部同じ段に並ぶことを確かめた。"""
+    h = U.build_html([], [])
+    h = h.decode() if isinstance(h, bytes) else h
+    assert "tile(u,r[i],'same','同じ物 '+w.dataset.pid,false)" in h       # 同じ物は最初から「使う」
+    assert "tile('/img?u='+encodeURIComponent(u),u,'ref','探したURL',true)" in h   # 探したURL は最初「使わない」
+    assert "v.classList.toggle('same');showImgs(v.closest('.it'));" in h
+    assert "if(add&&!off){extra.push(u)" in h

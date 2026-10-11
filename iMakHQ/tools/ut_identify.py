@@ -957,17 +957,28 @@ function fillColors(box,v){var sel=box.querySelector('select.col');var wrap=box.
    並びは固定 (カタログ → 仕入元・最大12枚)。ここでは **使わない画像を押して外すだけ**。
    他の色の表は出品側で自動で外すので、ここに出す必要はない */
 function showImgs(box){var v=box.querySelector('.v.sel');var s=box.querySelector('.imgpick');
-  if(!s||!v){return;}var cr=[],pr=[];
+  if(!s||!v){return;}var snap=snapImgs(box);var cr=[],pr=[];
   try{cr=JSON.parse(v.dataset.raw||'[]');}catch(e){}try{pr=JSON.parse(box.dataset.rawphotos||'[]');}catch(e){}
   var ca=[],ph=[];try{ca=JSON.parse(v.dataset.imgs||'[]');}catch(e){}try{ph=JSON.parse(box.dataset.photos||'[]');}catch(e){}
-  function tile(u,raw,src){return "<span class='tw'><img src='"+u+"' data-src='"+src+"' data-raw='"+(raw||'').replace(/'/g,'%27')+"' onclick='togImg(event,this)' onerror='imgGone(this)' title='押すと 使わない/使う'>"
-    +"<span class='srcl'>"+(src==='cat'?'カタログ '+v.dataset.pid:'メルカリ')+"</span>"
+  /* ★2026-10-12 ユーザー「同じ物を選ぶ。それらが持っている画像全てが、出品に使う画像に並ばないとダメ」:
+     出品に使う画像の段に、選んだ商品・同じ物・探したURL・メルカリを全部並べる (下の段に分けない)。
+     選んだ商品と同じ物は最初から「使う」(同じシャツなので)。探したURL は最初「使わない」 (ページの関係ない写真も混ざる)。
+     使う/使わない・1枚目 は作り直しても残す (snapImgs/restoreImgs) */
+  var seen={};
+  function tile(u,raw,src,lab,off){var r=(raw||'').replace(/'/g,'%27');if(!r||seen[r])return '';seen[r]=1;
+    return "<span class='tw'><img class='"+(off?'off':'')+"' src='"+u+"' data-src='"+src+"' data-raw='"+r+"' onclick='togImg(event,this)' onerror='imgGone(this)' title='押すと 使わない/使う'>"
+    +"<span class='srcl'>"+lab+"</span>"
     +"<button class='f1' onclick='setFirst(event,this)'>1枚目</button></span>";}
-  var h="<div style='width:100%'><span class='nm'>出品に使う画像 (カタログ → 仕入元・最大12枚) — 使わない物を押す</span> "
+  var h="<div style='width:100%'><span class='nm'>出品に使う画像 (選んだ商品 → 同じ物 → 探したURL → メルカリ・12枚まで) — 使わない物を押す</span> "
     +"<button class='zp' onclick='zoomPick(event,this)'>🔍 大きくして選ぶ</button>"
     +" <span class='nm'>「1枚目」を押した画像が先頭 (押さなければ カタログの表が先頭)</span></div>";
-  ca.forEach(function(u,i){h+=tile(u,cr[i],'cat');});h+="<span class='sep'></span>";
-  ph.forEach(function(u,i){h+=tile(u,pr[i],'sel');});s.innerHTML=h;applyPref(box);useCount(box);}
+  ca.forEach(function(u,i){h+=tile(u,cr[i],'cat','カタログ '+v.dataset.pid,false);});
+  box.querySelectorAll('.v.same').forEach(function(w){if(w===v)return;var a=[],r=[];try{a=JSON.parse(w.dataset.imgs||'[]');r=JSON.parse(w.dataset.raw||'[]');}catch(e){}
+    h+="<span class='sep'></span>";a.forEach(function(u,i){h+=tile(u,r[i],'same','同じ物 '+w.dataset.pid,false);});});
+  var rp=[];try{rp=JSON.parse(box.dataset.refphotos||'[]');}catch(e){}
+  if(rp.length){h+="<span class='sep'></span>";rp.forEach(function(u){h+=tile('/img?u='+encodeURIComponent(u),u,'ref','探したURL',true);});}
+  h+="<span class='sep'></span>";
+  ph.forEach(function(u,i){h+=tile(u,pr[i],'sel','メルカリ',false);});s.innerHTML=h;applyPref(box);restoreImgs(box,snap);useCount(box);}
 /* ★2026-10-07 前にこの商品で選んだ写真の並びを当てる (外した物は外す / 1枚目 / 足した写真は使う) */
 function applyPref(box){var v=box.querySelector('.v.sel');if(!v||!v.dataset.pref)return;var p={};try{p=JSON.parse(v.dataset.pref);}catch(e){return;}
   var drop=p.drop||[],extra=p.extra||[],main=p.main||'';var hit=0;
@@ -979,27 +990,17 @@ function applyPref(box){var v=box.querySelector('.v.sel');if(!v||!v.dataset.pref
     d.textContent='✔ 前にこの商品で選んだ写真の並びを当てました (違えば押し直す)';box.querySelector('.imgpick').prepend(d);}}
 /* ★2026-10-07 追加の写真 (「同じ物」の候補の写真 / 自分で探したURLの写真)。最初は「使わない」= 押した物だけ使う */
 function showExtra(box){var x=box.querySelector('.imgx');if(!x||!box.dataset.pid){return;}
-  var keep={};x.querySelectorAll('img').forEach(function(i){keep[i.dataset.raw]={off:i.classList.contains('off'),first:i.classList.contains('first')};});
-  function tile(u,raw,src,lab){var k=keep[(raw||'').replace(/'/g,'%27')];var cls=(k&&!k.off)?'':'off';if(k&&k.first)cls+=' first';
-    return "<span class='tw'><img class='"+cls+"' src='"+u+"' data-src='"+src+"' data-lab='"+lab+"' data-raw='"+(raw||'').replace(/'/g,'%27')+"' onclick='togImg(event,this)' onerror='imgGone(this)' title='押すと 使う/使わない'>"
-    +"<span class='srcl'>"+lab+"</span>"
-    +"<button class='f1' onclick='setFirst(event,this)'>1枚目</button></span>";}
-  var h="<div style='width:100%'><span class='nm'><b>追加の写真</b> (最初は使わない = 押した物だけ出品に使う)</span> "
-    +"自分で探した写真のURL <input class='xu' style='width:280px' placeholder='記事・公式・ショップのページ'> "
+  if(x.querySelector('input.xu')){x.style.display='';return;}       // ★2026-10-12 写真は上の段に並べる。ここは URL を入れる所だけ
+  x.innerHTML="<div style='width:100%'><span class='nm'><b>自分で探した写真</b> (取った写真は上の「出品に使う画像」に 使わない で並ぶ)</span> "
+    +"写真のURL <input class='xu' style='width:280px' placeholder='記事・公式・ショップのページ'> "
     +"<button onclick='getPhotos(this)'>写真を取る</button> <label class='nm'><input type='checkbox' class='xcat' checked> カタログにも同じ物の写真として渡す</label>"
-    +" <span class='xres nm'></span></div>";
-  box.querySelectorAll('.v.same').forEach(function(v){var a=[],r=[];try{a=JSON.parse(v.dataset.imgs||'[]');r=JSON.parse(v.dataset.raw||'[]');}catch(e){}
-    h+="<span class='nm'>同じ物 "+v.dataset.pid+"</span>";a.forEach(function(u,i){h+=tile(u,r[i],'same','同じ物 '+v.dataset.pid);});h+="<span class='sep'></span>";});
-  var rp=[];try{rp=JSON.parse(box.dataset.refphotos||'[]');}catch(e){}
-  if(rp.length){h+="<span class='nm'>探したURL</span>";rp.forEach(function(u){h+=tile('/img?u='+encodeURIComponent(u),u,'ref','探したURL');});}
-  var res=(x.querySelector('.xres')||{}).innerHTML||'';var xu=(x.querySelector('input.xu')||{}).value||'';
-  x.innerHTML=h;x.style.display='';x.querySelector('.xres').innerHTML=res;x.querySelector('input.xu').value=xu;applyPref(box);useCount(box);}
+    +" <span class='xres nm'></span></div>";x.style.display='';}
 function getPhotos(btn){var box=btn.closest('.it');var x=box.querySelector('.imgx');var u=(x.querySelector('input.xu').value||'').trim();
   var out=x.querySelector('.xres');if(!u){out.textContent='URLを入れてください';return;}out.textContent='写真を取っています… (10〜30秒)';
   fetch('/api/photos?url='+encodeURIComponent(u)).then(function(r){return r.json();}).then(function(d){
     var have=[];try{have=JSON.parse(box.dataset.refphotos||'[]');}catch(e){}
     (d.images||[]).forEach(function(i){if(have.indexOf(i)<0)have.push(i);});box.dataset.refphotos=JSON.stringify(have);
-    var keepu=x.querySelector('input.xu').value;showExtra(box);x.querySelector('input.xu').value=keepu;
+    showImgs(box);
     x.querySelector('.xres').textContent=(d.images||[]).length?('使える写真 '+d.images.length+'枚 (長辺500px以上) — 使う物を押す'):('使える写真がありません'+(d.reason?' ('+d.reason+')':''));
   }).catch(function(e){out.textContent='取れませんでした ('+e+')';});}
 function togImg(ev,el){ev.stopPropagation();el.classList.toggle('off');if(el.classList.contains('off'))el.classList.remove('first');useCount(el.closest('.it'));}
@@ -1036,8 +1037,8 @@ function zoomPick(ev,btn){ev.preventDefault();ev.stopPropagation();var box=btn.c
         document.querySelectorAll('#zov img.first').forEach(function(x){x.classList.remove('first');});
         if(on){im.classList.add('first');im.classList.remove('off');}};
       w.appendChild(im);w.appendChild(b);c.appendChild(w);});}
-  col('zl','カタログ',ts.filter(function(t){return t.dataset.src==='cat';}));
-  col('zr','仕入元の写真',ts.filter(function(t){return t.dataset.src==='sel';}));
+  col('zl','カタログ (選んだ商品・同じ物)',ts.filter(function(t){return t.dataset.src==='cat'||t.dataset.src==='same';}));
+  col('zr','探したURL・仕入元の写真',ts.filter(function(t){return t.dataset.src==='ref'||t.dataset.src==='sel';}));
   document.getElementById('zov').classList.add('on');}
 /* ★2026-10-12 ユーザー「同じ物が3つあって、候補を選び直すと出品に使う画像が変わる。おかしい」:
    選んだ商品と「同じ物」はひとまとまり。選び直しても (1) 前に選んでいた物は「同じ物」に回す
@@ -1122,7 +1123,7 @@ document.addEventListener('DOMContentLoaded',function(){document.querySelectorAl
   // ★2026-10-07 前に同じタイトル / タグ番号で決めた商品は最初から選んでおく (違えば押し直す)
   document.querySelectorAll(".v[data-learned='1']").forEach(function(v){try{pickV(v);}catch(e){}});});
 function sameV(ev,btn){ev.stopPropagation();var v=btn.closest('.v');if(v.classList.contains('sel'))return;
-  v.classList.toggle('same');showExtra(v.closest('.it'));}
+  v.classList.toggle('same');showImgs(v.closest('.it'));}
 function setAct(btn){var box=btn.closest('.it');
   box.querySelectorAll('.act button').forEach(function(b){b.classList.remove('sel');});
   btn.classList.add('sel');box.dataset.act=btn.dataset.a;
@@ -1140,9 +1141,10 @@ function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason
   document.querySelectorAll('.it').forEach(function(b){var a=b.dataset.act||'';var idx=parseInt(b.dataset.idx,10);
     var c=(b.querySelector('select.col')||{}).value||'';var r=(b.querySelector('select.rsn')||{}).value||'';
     if(a==='go'){
-      var drop=[];b.querySelectorAll('.imgpick:not(.imgx) img.off').forEach(function(i){if(i.dataset.raw)drop.push(decodeURIComponent(i.dataset.raw));});
-      var extra=[],xcat=[];var xc=(b.querySelector('input.xcat')||{}).checked;
-      b.querySelectorAll('.imgx img:not(.off)').forEach(function(i){if(i.dataset.raw){var u=decodeURIComponent(i.dataset.raw);extra.push(u);if(xc&&i.dataset.src==='ref')xcat.push(u);}});
+      var drop=[],extra=[],xcat=[];var xc=(b.querySelector('input.xcat')||{}).checked;
+      b.querySelectorAll('.imgpick:not(.imgx) img').forEach(function(i){if(!i.dataset.raw)return;var u=decodeURIComponent(i.dataset.raw);
+        var add=(i.dataset.src==='same'||i.dataset.src==='ref');var off=i.classList.contains('off');
+        if(!add&&off)drop.push(u);if(add&&!off){extra.push(u);if(xc&&i.dataset.src==='ref')xcat.push(u);}});
       var f1=b.querySelector('.imgpick img.first');var main=f1&&f1.dataset.raw?decodeURIComponent(f1.dataset.raw):'';
       var dz=b.dataset.design==='1';var cn=((b.querySelector('input.cn')||{}).value||'').trim();
       if(!b.dataset.pid||(!c&&!dz)){nocolor++;holds.push(idx);}
