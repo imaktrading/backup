@@ -48,4 +48,4 @@ def test_B列の印と候補外の理由_20261011():
     add, _paint, n = TH.plan([a, b, c, d], [], reason_col=40)
     assert [r[0] for _i, r in add] == ["u1"]
     assert n["flagged"] == 1 and n["reason"] == 1
-    assert n["flags"] == {4: "候補外: 写真を読めていない", 5: "候補外: 7万円超"}
+    assert n["flags"] == {4: "候補外: 写真を読めていない", 5: "候補外: 仕入値が高い（7万円超）"}

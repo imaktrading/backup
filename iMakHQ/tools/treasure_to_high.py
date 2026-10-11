@@ -49,7 +49,10 @@ def _price(s):
 #   印のある行は足さない。候補外の理由がある行も足さない (それまで理由を見ずに 368行を足す計算になっていた)
 COL_FLAG = 1
 FLAG_HIGH = "HIGH追加済"
-REASON_LABEL = (("vision_skipped", "写真を読めていない"), ("card_cost_over", "値段が上限超え"),
+# ★2026-10-11 ユーザー「価格上限越えの表現が複数あるから統一して」: 2つは別物 (カードごとの相場上限 / 会社の7万円) なので
+#   「仕入値が高い」でそろえ、括弧でどちらかを書く
+REASON_LABEL = (("vision_skipped", "写真を読めていない"), ("card_cost_over", "仕入値が高い（相場から見た上限超え）"),
+                ("cost_over_limit", "仕入値が高い（7万円超）"),
                 ("seller_rating", "出品者の評価不足"), ("bundle", "まとめ売り"), ("sold", "売り切れ"))
 
 
@@ -92,7 +95,7 @@ def plan(treasure_rows, high_rows, cap=COST_CAP, reason_col=None):
             continue
         if p > cap:
             n["over"] += 1
-            n["flags"][i] = "候補外: 7万円超"
+            n["flags"][i] = "候補外: 仕入値が高い（7万円超）"
             continue
         key = url or cert
         if key in seen:
@@ -127,22 +130,29 @@ def tab_of(argv):
     return TABS["treasure"]
 
 
-def pick_buyable(add, limit, check=None):
-    """足す候補を上から見て、メルカリで今も買える物だけ limit 件選ぶ。戻り (選んだ, 外した数)。"""
+def pick_buyable(add, limit, check=None, sold_rows=None):
+    """足す候補を上から見て、メルカリで今も買える物だけ limit 件選ぶ。戻り (選んだ, 外した数)。
+
+    sold_rows: 渡すと「読めたが買えない (売り切れ)」と分かった行番号を足す (B列に印を付けるため)。
+      読めなかった行 (check が None) は印を付けない = 次回また確かめる。
+    """
     if check is None:
         import mercari_psa_resource as mp
 
         def check(url):
             d = mp.api_detail(url)
-            return bool(d and d.get("buyable"))
+            return None if not d else bool(d.get("buyable"))
     out, skipped = [], 0
     for i, row in add:
         if len(out) >= limit:
             break
-        if check(row[0]):
+        ok = check(row[0])
+        if ok:
             out.append((i, row))
         else:
             skipped += 1
+            if ok is False and sold_rows is not None:
+                sold_rows.append(i)
     return out, skipped
 
 
@@ -164,7 +174,10 @@ def main(argv):
     if lim is not None:
         # ★2026-10-05 ユーザー「200追加して」: 一度に全部 (3,474行) 入れると新規の目視が溢れるので件数で区切る。
         #   入れる前にメルカリで今も買えるかを確かめ、買える物だけを上から lim 件 (10/5 の抜き取りで 9割が買えた)
-        add, skipped = pick_buyable(add, lim)
+        _sold = []
+        add, skipped = pick_buyable(add, lim, sold_rows=_sold)
+        for i in _sold:
+            n["flags"][i] = "候補外: 売り切れ"
         allowed = {i for i, _r in add}
         planned = {i for i, _r in plan(tr, hi, reason_col=rc)[0]}
         paint = [i for i in paint if i not in planned or i in allowed]   # 入れなかった行は塗らない (次回の候補)
