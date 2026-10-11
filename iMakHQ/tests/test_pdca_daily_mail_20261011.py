@@ -73,5 +73,5 @@ def test_トレハンを回す時期():
     h = P.harvest_timing(587, 25, 0, 2232)
     assert h["line"] == 175 and h["run"] is False and h["what"] == "まだ回さない"
     h = P.harvest_timing(150, 25, 0, 2232)
-    assert h["run"] is True and h["what"].startswith("トレジャーを回す")
-    assert P.harvest_timing(150, 25, 0, 0)["what"] == "トレジャーとキャラを回す"
+    assert h["run"] is True and h["what"].startswith("トレハンを回す")
+    assert P.harvest_timing(150, 25, 0, 0)["what"] == "トレハンとキャラハンを回す"

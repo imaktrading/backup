@@ -196,9 +196,9 @@ def harvest_timing(listable, per_day, treasure_left, chara_left, days=HARVEST_DA
     if not run:
         what = "まだ回さない"
     elif chara_left > 0 and treasure_left == 0:
-        what = "トレジャーを回す (キャラは中間スプシの在庫から先に HIGH へ足す)"
+        what = "トレハンを回す (キャラハンは中間スプシの在庫から先に HIGH へ足す)"
     elif treasure_left == 0 and chara_left == 0:
-        what = "トレジャーとキャラを回す"
+        what = "トレハンとキャラハンを回す"
     else:
         what = "中間スプシの在庫から先に HIGH へ足す"
     return {"listable": listable, "line": line, "left_days": left_days, "run": run, "what": what,
@@ -337,7 +337,7 @@ def render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv=None):
                 d = f'約{hv["left_days"]:.0f}日分' if hv["left_days"] is not None else "日数不明"
                 now = (f'出品の待ち (PSA 新規に今出せる物) <b class="num">{hv["listable"]}</b>件 ({d}) ・ '
                        f'{hv["line"]}件 (1週間分) を切ったら回す → <b class="{c}">{e(hv["what"])}</b><br>'
-                       f'中間スプシの在庫: トレジャー {hv["treasure_left"]:,} ・ キャラ {hv["chara_left"]:,}')
+                       f'中間スプシの在庫: トレハン {hv["treasure_left"]:,} ・ キャラハン {hv["chara_left"]:,}')
             # ★2026-10-11 ユーザー「メールで送る日報に書いておいて」: 中見出しごとの決めたことを日付つきで出す
             dec = "".join(f'<br><span class="small">決めたこと: {e(x)}</span>' for x in (m.get("decided") or []))
             out.append(f'<div class="k"><div class="kt">{e(m["name"])}<span class="st {stc}">● {e(m["status"])}</span></div>'
