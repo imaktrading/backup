@@ -120,8 +120,13 @@ def row_is_alt(row):
     vt = str(sp.get("variant_type") or "").lower()
     fe = sp.get("features_ebay")
     fe = " ".join(fe) if isinstance(fe, list) else str(fe or "")
+    # ★2026-10-11 カタログが行に書いた PSA ラベルの手がかり (psa_subject_hint) も見る。
+    #   ドン!!カードは別絵柄 (金の枠) でも variant_type が無く、hint に「ALTERNATE ART / GOLD」とだけある
+    #   (DON-OP14-002 等16行)。見ていなかったので金のドンのスラブが毎回「行は通常」で落ちていた (cert 160273867 3回)
+    hint = " ".join(str(h) for h in (sp.get("psa_subject_hint") or []) if h)
     return (vt in _ALT_TYPES or "Alternative Art" in fe or row_is_sp(row)
-            or bool(_ALT_PID_RE.search(str(row.get("product_id") or ""))))
+            or bool(_ALT_PID_RE.search(str(row.get("product_id") or "")))
+            or has_alt_mark(hint))
 
 
 def row_alias_alt(row):

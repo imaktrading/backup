@@ -105,3 +105,11 @@ def test_gundam_plus_is_parallel():
 def test_label_text_keeps_variety_and_stripped_rarity():
     assert G.label_text({"Subject": "GARROD RAN/TIFFA ADILL", "Variety": None,
                          "LabelRarity": "RARE+"}) == "GARROD RAN/TIFFA ADILL  RARE+"
+
+
+def test_don_gold_row_marked_only_by_psa_hint_20261011():
+    """ドン!!カードの金の枠は psa_subject_hint にだけ印がある (cert 160273867 が3回落ちた)。"""
+    import json as _j
+    gold = {"product_id": "DON-OP14-002", "specs": _j.dumps({"psa_subject_hint": ["OP-14", "ALTERNATE ART", "GOLD"]})}
+    plain = {"product_id": "DON-OP14-001", "specs": _j.dumps({"psa_subject_hint": ["OP-14"]})}
+    assert G.row_is_alt(gold) and not G.row_is_alt(plain)
