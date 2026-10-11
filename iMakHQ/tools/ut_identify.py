@@ -1039,7 +1039,18 @@ function zoomPick(ev,btn){ev.preventDefault();ev.stopPropagation();var box=btn.c
   col('zl','カタログ',ts.filter(function(t){return t.dataset.src==='cat';}));
   col('zr','仕入元の写真',ts.filter(function(t){return t.dataset.src==='sel';}));
   document.getElementById('zov').classList.add('on');}
+/* ★2026-10-12 ユーザー「同じ物が3つあって、候補を選び直すと出品に使う画像が変わる。おかしい」:
+   選んだ商品と「同じ物」はひとまとまり。選び直しても (1) 前に選んでいた物は「同じ物」に回す
+   (2) 写真ごとの 使う/使わない・1枚目 はそのまま残す。それまでは上の段を作り直すと全部「使う」に戻り、
+   前に選んでいた商品の写真は どこにも出なくなっていた */
+function snapImgs(box){var m={};box.querySelectorAll('.imgpick img').forEach(function(i){
+  if(i.dataset.raw)m[i.dataset.raw]={off:i.classList.contains('off'),first:i.classList.contains('first')};});return m;}
+function restoreImgs(box,m){var f=false;box.querySelectorAll('.imgpick img').forEach(function(i){var k=m[i.dataset.raw];if(!k)return;
+  i.classList.toggle('off',!!k.off);var on=!!k.first&&!f;i.classList.toggle('first',on);if(on)f=true;});useCount(box);}
 function pickV(el){var box=el.closest('.it');
+  var prev=box.querySelector('.v.sel');var snap=snapImgs(box);var grouped=!!box.querySelector('.v.same');
+  if(grouped&&prev&&prev!==el){prev.classList.add('same');}
+  el.classList.remove('same');
   box.querySelectorAll('.v').forEach(function(v){v.classList.remove('sel');});
   el.classList.add('sel');box.dataset.pid=el.dataset.pid;fillColors(box,el);showImgs(box);
   // ★2026-10-06 柄の記録: 色はメルカリの表記・キャラ名は人が入れる (候補を最初から入れておく)
@@ -1051,7 +1062,8 @@ function pickV(el){var box=el.closest('.it');
     if(!lc.value)lc.value=box.dataset.color||'';if(!ls.value)ls.value=box.dataset.size||'';
     // 色の一覧を持つ商品は、色は上の選択 (カタログの色) で決まる。柄の記録だけメルカリの色を直せる
     lv.querySelector('.lcw').style.display=el.dataset.design?'':'none';}
-  setAct(box.querySelector('button.go'));preview(box);showExtra(box);}
+  setAct(box.querySelector('button.go'));preview(box);showExtra(box);
+  if(grouped)restoreImgs(box,snap);}
 /* ★2026-10-06 (№501) 出品くんと同じ判定で「出品の値」を出す。❌ なら理由 (直せる欄を直すと出し直す) */
 function preview(el){var box=el.closest?el.closest('.it'):el;if(!box||!box.dataset.pid)return;
   var lv=box.querySelector('.lv');var out=lv.querySelector('.lvres');var dz=box.dataset.design==='1';
