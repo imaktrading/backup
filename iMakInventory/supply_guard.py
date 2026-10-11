@@ -37,7 +37,9 @@ PRICE_STREAK_BAND = 0.10        # 「同じ値段帯」= 前回の急落値の �
 
 # ── 1. 鑑定 ──────────────────────────────────────────────────────────────
 # HQ iMakHQ/tools/mercari_psa_resource.is_psa10 と同じ判定 (LAPTOP の巡回は HQ を import しない流儀のため写し)。
-_OTHER_GRADER_RE = re.compile(r"(?<![A-Z])(CGC|SGC|AGS|HGA|BGS|ARS|BVG|GMA|PCG)(?![A-Z])")
+# ★ 2026-10-12: HQ 946727e2 に合わせる — PCG は後に数字がある時だけ他社鑑定 (PCG はポケカの旧シリーズ名でもあり、
+#   「PSA10 わるいヘルガー … PCG 構築済みデッキ」の正しい補URLを外していた)。HQ を直したら ここも直す (テストで照合)。
+_OTHER_GRADER_RE = re.compile(r"(?<![A-Z])(CGC|SGC|AGS|HGA|BGS|ARS|BVG|GMA)(?![A-Z])|(?<![A-Z])PCG\s*\d")
 
 
 def is_psa10(name: str) -> bool:

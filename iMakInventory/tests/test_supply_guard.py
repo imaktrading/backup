@@ -200,3 +200,26 @@ def test_review_one_entry_per_row_and_kind(monkeypatch, tmp_path):
         monkeypatch.setattr(G, "_REVIEWED_THIS_RUN", set())
         G.record_review("price", "u1", {"row_index": 2874, "item_id": "999"}, f"安い ¥{price}", "", price)
     assert len((tmp_path / "r.jsonl").read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_pcg_series_name_is_not_other_grader():
+    """HQ 946727e2: PCG はポケカの旧シリーズ名。後に数字がある時だけ他社鑑定."""
+    assert not G.grade_problem("PSA10 わるいヘルガー", "PSA10 わるいヘルガー アンリミ PCG 構築済みデッキ「ロケット団ハーフデッキ」")
+    assert G.grade_problem("PSA10 ピカチュウ", "【PCG10鑑定品】ピカチュウ（同PSA10）")
+    assert G.grade_problem("PSA10 ピカチュウ", "ピカチュウ PCG 10 PSA10相当")
+
+
+def test_same_judgement_as_hq_is_psa10():
+    """写しが HQ の is_psa10 とずれていないか (HQ の部品が読める時だけ)."""
+    import pytest
+    hq = "C:/dev/iMak/iMakHQ/tools"
+    if not os.path.isdir(hq):
+        pytest.skip("HQ の部品が無い")
+    sys.path.insert(0, hq)
+    try:
+        import mercari_psa_resource as M
+    except Exception:
+        pytest.skip("HQ の部品が読めない")
+    for n in ["PSA10 わるいヘルガー PCG 構築済みデッキ", "【PCG10鑑定品】ピカチュウ（同PSA10）", "CGC pristine PSA10 ルフィ",
+              "psa 10 ホウオウ", "PSA 9 ホウオウ", "PSA10相当 ナミ", "ナミ PSA10 BGS9.5", SHOWERS_NOW, SHOWERS_THEN]:
+        assert G.is_psa10(n) == M.is_psa10(n), n
