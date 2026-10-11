@@ -102,7 +102,7 @@ def retry_urls_from(payload: dict, exclude: set | None = None) -> list[str]:
 
 def collect(args, dump_path=None, resume=None, urls_override=None,
             on_flush=None, should_pause=None, detail_fn=None, claimed=None,
-            collect_dropped=False) -> dict:
+            collect_dropped=False, skip_urls=None) -> dict:
     """収集 → 詳細 → Vision。
 
     ★途中で落ちても作業を捨てない (2026-08-17 の事故対策)。
@@ -128,6 +128,11 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
     (2026-10-04 HQ依頼: KAGOYA はスプシ認証を持たないので `no_dedupe=True` だったが、
     cert単位の重複読取を防ぐため、 呼出側 (家) が `sheet_writer.load_claimed_supply()` で
     取った値を job に積んで渡せるようにした)。
+
+    `skip_urls`: `set[str]` (URL の dedupe_key) を渡すと、 詳細取得・写真読み(課金)の
+    **前**に飛ばす (2026-10-11 HQ依頼: 中間スプシ[トレジャー/キャラ]に既にある URL を
+    回し直しで読み直していた反省。 呼出側が `load_keys_all_tabs` 等で取った既存キーを渡す)。
+    `rej["already_in_sheet"]` で件数が残る (0件でも表示する)。
     """
     keywords = args.keywords or psa_search_terms.build_keywords(args.games)
     # 需要実証済 (ファネル分析 RESTOCK = 在庫切れ ∩ 需要あり) のカードを検索語に足す。
@@ -162,7 +167,8 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
     cands, rej = [], {"sold": 0, "seller_rating": 0, "no_identity": 0,
                       "fetch_fail": 0, "no_image": 0, "cert_unreadable": 0,
                       "vision_error": 0, "already_claimed_url": 0,
-                      "already_claimed_cert": 0, "item_error": 0, "auction": 0}
+                      "already_claimed_cert": 0, "item_error": 0, "auction": 0,
+                      "already_in_sheet": 0}
     vision_errors: list[str] = []
     # 未判定 (取得できなかった) URL。 件数だけ出して URL を捨てると拾い直せない
     failed_urls: list[str] = []
@@ -217,6 +223,7 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
             from sheet_writer import load_claimed_supply  # noqa: PLC0415
             claimed = load_claimed_supply()
         _log(f"既知の仕入元: URL {len(claimed['urls'])} 件 / cert {len(claimed['certs'])} 件")
+    skip_urls = set(skip_urls or ())
 
     from sheet_writer import dedupe_key  # noqa: PLC0415
     try:
@@ -256,6 +263,10 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
             if dedupe_key(url) in claimed["urls"]:
                 rej["already_claimed_url"] += 1
                 _record_dropped(dropped, url, "already_claimed_url")
+                processed.append(url)
+                continue
+            if skip_urls and dedupe_key(url) in skip_urls:
+                rej["already_in_sheet"] += 1
                 processed.append(url)
                 continue
             try:

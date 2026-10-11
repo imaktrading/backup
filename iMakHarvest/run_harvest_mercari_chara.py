@@ -263,7 +263,7 @@ def _run(args) -> int:
     try:
         payload = psa10.collect(chara_args, dump_path=dump_path, resume=resume, on_flush=_flush,
                                 urls_override=urls_override, detail_fn=_detail_fn,
-                                collect_dropped=collect_dropped)
+                                collect_dropped=collect_dropped, skip_urls=known)
     finally:
         api_client.close()
 

@@ -189,6 +189,23 @@ def test_resume_skips_already_processed_urls(monkeypatch, stub, tmp_path):
     assert got["collect_reject"]["sold"] == 1    # 前回の集計を引き継ぐ
 
 
+def test_skip_urls_never_reach_detail_or_vision(monkeypatch, stub):
+    """🥕2026-10-11 HQ依頼: 中間スプシに既にあるURLは詳細取得・写真読み(課金)の前に飛ばす."""
+    touched = []
+
+    def one(url, driver, args, claimed, rej, vision_errors, failed=None, detail_fn=None, usage=None, dropped=None):
+        touched.append(url)
+        return _candidate(url)
+
+    monkeypatch.setattr(R, "_process_one", one)
+    skip = {"m0", "m2", "m4"}  # 6件中3件は中間スプシに既にある
+    got = R.collect(_args(), skip_urls=skip)
+
+    assert len(touched) == 3                         # 飛ばした分は_process_oneに届かない
+    assert got["collect_reject"]["already_in_sheet"] == 3
+    assert not any(u.endswith(("m0", "m2", "m4")) for u in touched)
+
+
 def test_resume_carries_processed_urls_forward(monkeypatch, stub, tmp_path):
     resume = {"candidates": [], "collect_reject": {},
               "processed_urls": ["https://jp.mercari.com/item/m0"]}
