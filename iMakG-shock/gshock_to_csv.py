@@ -121,6 +121,8 @@ LOCATION = "Japan"
 CATEGORY = 31387
 SCHEDULE_WEEKS = 2
 PIC_URL = "https://raw.githubusercontent.com/imaktrading/imaktrading.github.io/main/999.png"
+# ★2026-10-11: 新規は並べて選んだ写真 (gshock_photos)。使った / 写真待ちで出さなかった 型番の数
+_PHOTO_STATS = {"used": 0, "waiting": 0}
 
 # Shipping Profile 名 (= 価格 + カテゴリ から SSOT 経由で取得)
 # V6 mode: "DDP-A-P09" 等 / V5 Free mode: "Free" / fallback: 旧 V5 tier 名
@@ -1897,6 +1899,28 @@ def main():
                     print(f"    🖼 元画像 {len(_imgs)}枚 流用 (itemID {_oldid})")
                 else:
                     print(f"    ⚠ 元画像取得不可(itemID {_oldid or '不明'}) → 999.png のまま")
+            else:
+                # ★2026-10-11 ユーザー確定: 新規は「並べて選んだ写真」を使う (gshock_photos.py)。
+                #   eBay から「G-SHOCK は写真が少ない」と指摘。999.png (仮) で出して手で差し替えるのをやめる。
+                #   まだ選んでいない型番は **出さずに** 写真の待ちに回す (次の回に選んだ写真で出る)。
+                _pm = data.get('model_base') or data.get('model_official') or data.get('model', '')
+                try:
+                    _sys.path.insert(0, r"C:/dev/iMak/iMakHQ/tools")
+                    import gshock_photos as _GP
+                    _pics = _GP.urls_for(_pm)
+                    if _pics:
+                        row[3] = "|".join(_pics)
+                        _PHOTO_STATS["used"] += 1
+                        print(f"    🖼 選んだ写真 {len(_pics)}枚 ({_pm})")
+                    else:
+                        _GP.add_pending(_pm, "gshock_to_csv")
+                        _PHOTO_STATS["waiting"] += 1
+                        print(f"    ⏸ 写真をまだ選んでいない → 出さずに写真の待ちへ ({_pm})")
+                        continue
+                except Exception as _pe:
+                    _PHOTO_STATS["waiting"] += 1
+                    print(f"    ⏸ 写真の記録を読めない ({type(_pe).__name__}) → 出さない ({_pm})")
+                    continue
 
             # 検証＋正規化（C: プレフィックス列のみ抽出）
             if _validate_specs:
@@ -1966,6 +1990,9 @@ def main():
 
     print(f"\n完了！出力: {output_file}")
     print(f"成功: {len(rows)-1}件 / 失敗: {len(errors)}件")
+    # ★走行ログで「動いた」が分かる1行 (0件でも出す)
+    print(f"📷 写真: 選んだ写真で出した {_PHOTO_STATS['used']}件 / 写真待ちで出さなかった {_PHOTO_STATS['waiting']}件"
+          f" (選ぶ: python C:/dev/iMak/iMakHQ/tools/gshock_photos.py prepare → review)")
 
     # 生成時セルフ監査 (CSV監査くん) — 監査を待たず生成で品質確認
     try:
