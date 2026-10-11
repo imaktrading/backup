@@ -56,3 +56,14 @@ def test_出品の動きは_US_だけ():
     mv = P.listing_moves(act, ina, dt.date(2026, 10, 9))
     assert mv["new"] == 1 and mv["ended"] == 2 and mv["net"] == -1
     assert mv["new_month"] == 2 and mv["live"] == 1
+
+
+def test_バリエーションは1出品として数える():
+    # Tシャツはサイズごとに1行。売り切れのサイズ (数量0) が混ざっても1出品
+    act = [_l("US", "Jun-01-26 01:00:00 PDT", iid="9", qty="1"),
+           _l("US", "Jun-01-26 01:00:00 PDT", iid="9", qty="0"),
+           _l("US", "Jun-01-26 01:00:00 PDT", iid="9", qty="2"),
+           _l("US", "Jun-01-26 01:00:00 PDT", iid="8", qty="0"),
+           _l("US", "Jun-01-26 01:00:00 PDT", iid="8", qty="0")]
+    mv = P.listing_moves(act, [], dt.date(2026, 10, 9))
+    assert mv["live"] == 1

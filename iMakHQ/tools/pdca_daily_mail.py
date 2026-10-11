@@ -161,8 +161,17 @@ def listing_moves(active, inactive, day):
         if d and m0 <= d <= day:
             end_month += 1
             end_day += d == day
-    live = sum(1 for r in active if r.get("Listing site") == "US"
-               and (r.get("Available quantity") or "0") not in ("0", ""))
+    # ★バリエーション出品 (Tシャツ等) はサイズごとに1行ずつ出るので、itemID でまとめて数える。
+    #   行で数えると 1,390 と出た (正しくは 891 出品)。売り切れたサイズの行も混ざる
+    qty = {}
+    for r in active:
+        if r.get("Listing site") == "US":
+            try:
+                n = int(r.get("Available quantity") or 0)
+            except ValueError:
+                n = 0
+            qty[r.get("Item number")] = qty.get(r.get("Item number"), 0) + n
+    live = sum(1 for n in qty.values() if n > 0)
     days = (day - m0).days + 1
     return {"day": day, "new": new_day, "new_cat": new_cat, "ended": end_day,
             "net": new_day - end_day, "live": live, "new_month": new_month,
