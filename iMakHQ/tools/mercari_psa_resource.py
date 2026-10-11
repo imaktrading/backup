@@ -65,7 +65,9 @@ def search_keyword(title, set_no):
 #     **すり抜ける** (2026-07-30 実データ `CGC pristine PSA10 ワンピースデイ25 ルフィ P-110`
 #     で確認)。PSA9/8/7 の方は `PSA 9` 表記を拾うため空白除去後に当てる = 使う文字列が違う。
 # ★2026-09-24: PCG を追加 (「【PCG10鑑定品】…（同PSA10）」が PSA10 の候補として目視に出ていた)
-_OTHER_GRADER_RE = re.compile(r"(?<![A-Z])(CGC|SGC|AGS|HGA|BGS|ARS|BVG|GMA|PCG)(?![A-Z])")
+# ★2026-10-12: PCG は **後に数字がある時だけ** 他社鑑定 (「PCG10」「PCG 10」)。PCG はポケカの旧シリーズ名でもあり
+#   (「PSA10 わるいヘルガー … PCG 構築済みデッキ」)、監視くんが正しい PSA10 の補URLを外していた
+_OTHER_GRADER_RE = re.compile(r"(?<![A-Z])(CGC|SGC|AGS|HGA|BGS|ARS|BVG|GMA)(?![A-Z])|(?<![A-Z])PCG\s*\d")
 
 
 def is_psa10(name):
