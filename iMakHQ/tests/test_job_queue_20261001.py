@@ -64,3 +64,10 @@ def test_overdue_only_after_deadline_while_still_due():
     assert not Q.overdue(NIGHT, {"last_ok": "2026-10-02T01:00:00"}, at(8))   # 済んでいる
     assert not Q.overdue(NIGHT, {"last_ok": "2026-10-01T05:00:00"}, at(5))   # まだ期限前
     assert not Q.overdue(RAW, None, at(12))                                    # 期限の無い処理
+
+
+def test_余力が無くても_ignore_load_の軽い処理は始める_20261012():
+    jobs = [{"name": "mail", "every_hours": 20, "window": [5, 10], "ignore_load": True},
+            {"name": "other", "every_hours": 20, "window": [5, 10]}]
+    got = Q.pick(jobs, {}, set(), at(7), idle_min=0, mem_pct=79, cpu_pct=10)
+    assert got == ["mail"]

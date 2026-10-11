@@ -77,12 +77,15 @@ def pick(jobs, states, running, now, idle_min, mem_pct, cpu_pct):
     """
     out = []
     busy_heavy = any(j.get("heavy") for j in jobs if j["name"] in running)
-    if mem_pct >= MEM_MAX or cpu_pct >= CPU_MAX:
-        return out                                          # 余力が無い = 新しく始めない
+    # ★2026-10-12: 余力が無い時でも ignore_load の軽い処理 (毎朝の日報メール等・数十秒) は始める。
+    #   メモリ 79% のまま 6時〜7時半まで日報メールが止まっていた
+    tight = mem_pct >= MEM_MAX or cpu_pct >= CPU_MAX
     for j in sorted(jobs, key=lambda j: (j.get("deadline_hour") is None, j.get("deadline_hour") or 0)):
         n = j["name"]
         if n in running or not j.get("enabled", True):
             continue
+        if tight and not j.get("ignore_load"):
+            continue                                        # 余力が無い = 新しく始めない
         if not is_due(j, states.get(n), now):
             continue
         if not in_window(now.hour, j.get("window")):
