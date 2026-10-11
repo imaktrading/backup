@@ -72,6 +72,8 @@ def plan(treasure_rows, high_rows, cap=COST_CAP, reason_col=None):
     数["flags"] = {シート行番号: B列に書く印} (足す行は書いた後に HIGH追加済 を付ける)
     """
     hu = {_g(r, 0) for r in high_rows if _g(r, 0)}
+    # ★2026-10-11: HIGH の補URL (AC〜AG) に使われている出品も足せない (足すと HIGH 側で弾かれ「見当たらない」になっていた)
+    aux = {_g(r, c) for r in high_rows for c in range(28, 33) if _g(r, c)} - hu
     hc = {_g(r, 8) for r in high_rows if _g(r, 8)}
     add, paint, seen = [], [], set()
     n = {"over": 0, "noprice": 0, "in_high": 0, "dup_tab": 0, "flagged": 0, "reason": 0, "flags": {}}
@@ -84,6 +86,10 @@ def plan(treasure_rows, high_rows, cap=COST_CAP, reason_col=None):
             n["in_high"] += 1
             paint.append(i)
             n["flags"][i] = FLAG_HIGH
+            continue
+        if url in aux:
+            n["aux"] = n.get("aux", 0) + 1
+            n["flags"][i] = "候補外: 補URLで使用中"
             continue
         if reason_col is not None and _g(r, reason_col):
             n["reason"] += 1
