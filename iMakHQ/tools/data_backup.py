@@ -37,7 +37,8 @@ DB = os.path.join(SRC, "catalog", "products.sqlite")
 DEST = r"G:\マイドライブ\iMak_backup\daily"
 # ★2026-09-27 Catalog 依頼: 7 → 14。9/26 の products.sqlite ビット化けは 9/24 分で戻せたが、
 #   気づくのが1週間遅れると戻せない (1本 110〜130MB / +約1GB)
-KEEP = 14
+# ★2026-10-12 Google ドライブが満杯 (バックアップだけで 13GB・23本)。ユーザー OK で 14日 → 7日・1日1本に
+KEEP = 7
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATUS = os.path.join(HERE, "..", "review_logs", "data_backup_last.json")
 
@@ -50,6 +51,7 @@ EXCLUDE_DIRS = {
     r"catalog\montbell_pdfs", r"catalog\_don_images", r"catalog\_don_pdf_samples",
     r"catalog\_ygo_jp_images", r"catalog\pokemon_translation_cache",
     r"dedupe\img_cache",    # 重複くんの画像キャッシュ 2.3GB / 1.6万件。取り直せる (拡張子が無く種類で外せない)
+    r"hq\offload_work",     # ★2026-10-12 KAGOYA に送る作業用の写し (1本の zip の 309MB / 545MB)。毎回作り直す
     "_symbols",             # ★2026-10-01 Windows のデバッグ用ファイル (25MB)。Microsoft から取り直せる
 }
 EXCLUDE_DIR_PATTERNS = ("*_dumps", "*_dumps.bak_*", "*_dumps_*", "*.bak_*", "__pycache__", "_tmp*")
@@ -276,9 +278,12 @@ def zips_to_prune(names, keep=KEEP):
       14本あっても14日分にならなかった (9/30 は3本 → 13日分しか残っていなかった)。
     """
     zs = sorted(f for f in names if f.startswith("iMak_daily_") and f.endswith(".zip"))
-    days = sorted({f[len("iMak_daily_"):len("iMak_daily_") + 8] for f in zs})
+    day = lambda f: f[len("iMak_daily_"):len("iMak_daily_") + 8]   # noqa: E731
+    days = sorted({day(f) for f in zs})
     keep_days = set(days[-keep:])
-    return [f for f in zs if f[len("iMak_daily_"):len("iMak_daily_") + 8] not in keep_days]
+    # ★2026-10-12: 残す日も **1日1本** (その日の一番新しい物)。同じ日に何本もあると容量を食う
+    newest = {day(f): f for f in zs}                              # 並びが昇順なので最後 = 一番新しい
+    return [f for f in zs if day(f) not in keep_days or newest[day(f)] != f]
 
 
 def prune(dest=DEST, keep=KEEP):

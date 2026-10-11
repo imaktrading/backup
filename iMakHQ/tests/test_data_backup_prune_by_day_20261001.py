@@ -11,10 +11,17 @@ def test_prune_counts_days_not_files():
     names = ["iMak_daily_20260929_0604.zip", "iMak_daily_20260930_0500.zip",
              "iMak_daily_20260930_0625.zip", "iMak_daily_20260930_0756.zip",
              "iMak_daily_20261001_0600.zip", "other.txt"]
-    assert D.zips_to_prune(names, keep=2) == ["iMak_daily_20260929_0604.zip"]
-    assert D.zips_to_prune(names, keep=3) == []
+    # ★2026-10-12: 残す日も1日1本 (その日の一番新しい物)
+    assert D.zips_to_prune(names, keep=2) == ["iMak_daily_20260929_0604.zip", "iMak_daily_20260930_0500.zip",
+                                              "iMak_daily_20260930_0625.zip"]
+    assert D.zips_to_prune(names, keep=3) == ["iMak_daily_20260930_0500.zip", "iMak_daily_20260930_0625.zip"]
 
 
 def test_recreatable_files_are_excluded():
     assert "_symbols" in D.EXCLUDE_DIRS
     assert D._excluded_file("HWiNFO_log_20260930.CSV", 1000)
+
+
+def test_作業用の写しはバックアップに入れない_20261012():
+    assert D._excluded_dir(r"hq\offload_work")
+    assert D.KEEP == 7
