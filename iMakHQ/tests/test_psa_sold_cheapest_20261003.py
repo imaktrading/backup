@@ -85,6 +85,8 @@ def test_purchase_login_failure_reaches_order_card(monkeypatch):
     def boom():
         raise RuntimeError("メルカリのログインが要ります (Edge で開いたタブでログインしてください)")
     monkeypatch.setattr(MP, "fetch_purchases", boom)
+    import mercari_mail_purchases as MM                      # ★2026-10-11 メールが先。読めない時に Edge へ
+    monkeypatch.setattr(MM, "fetch_purchases", lambda: (_ for _ in ()).throw(RuntimeError("メール読めず")))
     monkeypatch.setattr(ops, "_candidate_lookup", lambda: (lambda sku, iid: {"m1"}))
     monkeypatch.setattr(ops, "LINK_WARN", [])
     assert ops._link_mercari([], {}) == {}
@@ -119,9 +121,11 @@ def test_link_uses_shown_candidates(monkeypatch):
     import mercari_purchases as MP
     import psa_sold_cheapest as PSC
     monkeypatch.setattr(ops, "_candidate_lookup", lambda: (lambda sku, iid: {"m_supply"}))
-    monkeypatch.setattr(MP, "fetch_purchases", lambda: [
-        {"id": "m_shown", "url": "https://jp.mercari.com/transaction/m_shown", "title": "PSA10 ミュウ",
-         "at": dt.datetime(2026, 10, 3, 22, 34)}])
+    _buys = [{"id": "m_shown", "url": "https://jp.mercari.com/transaction/m_shown", "title": "PSA10 ミュウ",
+              "at": dt.datetime(2026, 10, 3, 22, 34)}]
+    monkeypatch.setattr(MP, "fetch_purchases", lambda: _buys)
+    import mercari_mail_purchases as MM                      # ★2026-10-11 購入はメールから読む (テストでは Gmail に行かない)
+    monkeypatch.setattr(MM, "fetch_purchases", lambda: _buys)
     monkeypatch.setattr(PSC, "load_shown", lambda: {"27-15214-32723": {"at": "2026-10-03", "ids": ["m_shown"]}})
     row = [""] * 30
     row[ops.C_ORDER] = "27-15214-32723"

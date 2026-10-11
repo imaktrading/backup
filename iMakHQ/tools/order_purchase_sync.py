@@ -566,15 +566,25 @@ def _link_mercari(targets, linked):
     cand = _candidate_lookup()
     if cand is None:
         return {}
+    # ★2026-10-11 ユーザー「メルカリもメールで取るに修正したら」: 購入メール (Gmail) を先に読む。
+    #   Edge の拡張の購入履歴は30分の控えを使い回すので、買った直後に数え直しても仕入れ待ちのままだった。
+    #   メールが読めない時だけ、今までの Edge の拡張に戻る。
+    src = "購入メール"
     try:
-        buys = MP.fetch_purchases()
-    except Exception as e:                                     # noqa: BLE001
-        # ★2026-10-04: ログイン切れで購入が結べず、仕入れ済みのミュウが「仕入れ待ち」に残っていた。
-        #   走行ログにしか出ていなかったので、神風の注文の枠に出す (_write_status が書く)
-        LINK_WARN.append("メルカリの購入履歴を読めません (Edge でメルカリにログイン)" if "ログイン" in str(e)
-                         else "メルカリの購入履歴を読めません (Edge の拡張)")
-        print(f"  ⚠ メルカリの購入履歴を読めませんでした: {str(e)[:100]}")
-        return {}
+        import mercari_mail_purchases as MM
+        buys = MM.fetch_purchases()
+    except Exception as e_mail:                                # noqa: BLE001
+        print(f"  ⚠ メルカリの購入メールを読めませんでした: {str(e_mail)[:80]} → Edge の拡張で読みます")
+        src = "Edge の拡張"
+        try:
+            buys = MP.fetch_purchases()
+        except Exception as e:                                 # noqa: BLE001
+            # ★2026-10-04: ログイン切れで購入が結べず、仕入れ済みのミュウが「仕入れ待ち」に残っていた。
+            #   走行ログにしか出ていなかったので、神風の注文の枠に出す (_write_status が書く)
+            LINK_WARN.append("メルカリの購入履歴を読めません (Edge でメルカリにログイン)" if "ログイン" in str(e)
+                             else "メルカリの購入履歴を読めません (Edge の拡張)")
+            print(f"  ⚠ メルカリの購入履歴を読めませんでした: {str(e)[:100]}")
+            return {}
     # ★2026-10-04: 「売れた PSA の仕入れ先を探す」の画面に出した候補から買った物も結ぶ (ユーザー OK)。
     #   仕入元・補URL だけだと、探し直して見つけた別の出品から買った分が「仕入れ待ち」に残っていた
     try:
@@ -594,9 +604,21 @@ def _link_mercari(targets, linked):
                             {n: norm_order(r[C_ORDER]) for n, r, _o in targets})
     key_of = {id(p): k for p, k in free}
     hit = MP.match(orders, [p for p, _k in free])
-    print(f"  メルカリ購入履歴 (Edge の拡張から) {len(buys)}件 (ほかの注文に結び済み {len(buys) - len(free)}件) / 結べた注文 {len(hit)}件")
+    # ★2026-10-11: 仕入元・補URL に無い出品で買った分は、カード番号で結ぶ (メールにしか番号は無い)。
+    #   メルカリで探し直して別の出品を買うと、それまでは仕入れ待ちに残っていた
+    by_no = {}
+    if src == "購入メール":
+        taken = {id(p) for p in hit.values()}
+        rest = [(n, _jst_day(o.get("creationDate")), r[C_TITLE]) for n, r, o in targets
+                if n not in hit and _jst_day(o.get("creationDate"))]
+        by_no = MM.match_by_no(rest, [p for p, _k in free if id(p) not in taken])
+        hit.update(by_no)
+    # ★走行ログで「動いた」が分かる1行 (0件でも出す)
+    print(f"  メルカリ購入 ({src}から) {len(buys)}件 (ほかの注文に結び済み {len(buys) - len(free)}件)"
+          f" / 結べた注文 {len(hit)}件 (うちカード番号で {len(by_no)}件)")
     return {n: (p["at"].date(), p["url"], "%s %s" % (p["at"].strftime("%m/%d %H:%M"), p["title"][:30]),
-                (getattr(cand, "prices", {}).get(p["id"]) if p.get("shops") else None), key_of[id(p)])
+                (p.get("price") or (getattr(cand, "prices", {}).get(p["id"]) if p.get("shops") else None)),
+                key_of[id(p)])
             for n, p in hit.items()}
 
 
