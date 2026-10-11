@@ -386,8 +386,11 @@ def _guard_price_drop(row: dict, sub_results: list) -> bool:
     在庫ありのまま (取下げはしない)。見つけた行は **M を前回のまま据え置く** (True を返し、呼出側が
     price_jpy=None にする)。ほかの仕入元の値段に乗り換えると、正しい安値 (例 ¥10,999) が既に M の行で
     M が ¥35,000 に跳ねて eBay の値段まで上がる (10/09 の試走で 150 行中 2 行)。目視で決まるまで動かさない。
+    ★ 2026-10-12 (B-20261012-001): 同じ値段帯の急落が 2 回続いたら採る (SG.PriceStreak)。採った安値がある行は
+      据え置かない (最安がその安値になるので、ほかの高値に跳ねる心配が無い)。
     """
     flagged = False
+    adopted = False
     prev_m = SG.parse_jpy(row.get("current_m_jpy_str"))
     live = [s for s in sub_results
             if s.get("is_sold") is False and isinstance(s.get("price_jpy"), int)
@@ -396,6 +399,18 @@ def _guard_price_drop(row: dict, sub_results: list) -> bool:
     for s in live:
         others = [prices[id(o)] for o in live if o is not s]
         reason = SG.price_drop(prices[id(s)], others, prev_m)
+        if not reason:
+            SG.streak().clear(s["url"])
+            continue
+        n = SG.streak().bump(s["url"], prices[id(s)])
+        if n >= SG.PRICE_STREAK_ADOPT:
+            # ★ 2026-10-12 (B-20261012-001): 同じ値段帯が 2 回続いた = 入替え直後の一時的な安値ではない。
+            #   鑑定・名前の見張りはこの前に通っている (通らなければ is_sold=True で ここに来ない)。M に採る。
+            s["guard_price_adopted"] = f"{reason} が {n} 回続いた → 採る"
+            SG.COUNTS["price_adopted"] += 1
+            log(f"    [🏷] {reason} が {n} 回続いた: {s['url']} → M に採る")
+            adopted = True
+            continue
         if reason:
             s["guard_price"] = reason
             s["price_excluded_jpy"] = prices[id(s)]
@@ -404,7 +419,7 @@ def _guard_price_drop(row: dict, sub_results: list) -> bool:
             SG.record_review("price", s["url"], row, reason, s.get("supply_name", ""), prices[id(s)])
             log(f"    [🏷] {reason}: {s['url']} → 仕入値は前回のまま (目視へ)")
             flagged = True
-    return flagged
+    return flagged and not adopted
 
 
 def check_one_row(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
@@ -1966,6 +1981,7 @@ def process_sheet(
     # ★ 2026-10-09 (HQ GO B-20261009-014): 0 件でも毎回 1 行出す
     log(f"    {SG.summary_line()}")
     SG.baseline().save()
+    SG.streak().save()
     if url_alerts:
         log(f"  [!] URL 不正で在庫検出スキップ: {len(url_alerts)} 件 (スプシ修正必要)")
         for a in url_alerts[:10]:

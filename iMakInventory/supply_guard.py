@@ -29,8 +29,11 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DECISION_LOG_DIR = SCRIPT_DIR / "decision_log"
 BASELINE_PATH = DECISION_LOG_DIR / "supply_name_baseline.json"
 REVIEW_PATH = DECISION_LOG_DIR / "supply_guard_review.jsonl"
+STREAK_PATH = DECISION_LOG_DIR / "supply_price_streak.json"
 
 PRICE_DROP_RATIO = 0.6          # 基準の 60% 未満 (= 4 割以上安い) で外す
+PRICE_STREAK_ADOPT = 2          # 同じ値段帯の急落が この回数続いたら M に採る (2026-10-12 ブラボー GO B-20261012-001)
+PRICE_STREAK_BAND = 0.10        # 「同じ値段帯」= 前回の急落値の ±10%
 
 # ── 1. 鑑定 ──────────────────────────────────────────────────────────────
 # HQ iMakHQ/tools/mercari_psa_resource.is_psa10 と同じ判定 (LAPTOP の巡回は HQ を import しない流儀のため写し)。
@@ -168,6 +171,67 @@ def price_drop(price: int, other_prices: list, prev_m: Optional[int]) -> str:
     return ""
 
 
+class PriceStreak:
+    """URL → 急落と出た値段と、続けて出た回数。2 回続けて同じ値段帯なら M に採る.
+
+    ★ 2026-10-12 (B-20261012-001): 急落で M を据え置くと、目視する人がいないので M が古い高値のまま凍った
+      (3 日で 16 行。例 ハンコック M ¥38,999 のまま、仕入元は相場に近い ¥13,000)。シャワーズ型の入替え直後は
+      1 回目で止まり、続けて同じ値段が出る正しい安値だけ採れる (復活の 2 回確認と同じ考え)。
+    """
+
+    def __init__(self, path: Path = STREAK_PATH):
+        self.path = Path(path)
+        try:
+            self.data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self.data = {}
+        self.touched: dict = {}
+
+    def bump(self, url: str, price: int) -> int:
+        """急落と出た。同じ値段帯が続いていれば回数 +1、違えば 1 からやり直し。今の回数を返す."""
+        prev = self.data.get(url) or {}
+        p0 = prev.get("price")
+        same = isinstance(p0, int) and p0 > 0 and abs(price - p0) <= p0 * PRICE_STREAK_BAND
+        ent = {"price": price, "count": (prev.get("count", 0) + 1) if same else 1,
+               "ts": datetime.now().isoformat(timespec="seconds")}
+        self.data[url] = ent
+        self.touched[url] = ent
+        return ent["count"]
+
+    def clear(self, url: str) -> None:
+        if url in self.data:
+            self.data.pop(url, None)
+            self.touched[url] = None
+
+    def save(self) -> None:
+        if not self.touched:
+            return
+        try:
+            cur = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cur = {}
+        for k, v in self.touched.items():          # 自分が触った URL だけ上書き (ほかの巡回の分は残す)
+            if v is None:
+                cur.pop(k, None)
+            else:
+                cur[k] = v
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, self.path)
+        self.touched = {}
+
+
+_STREAK: Optional[PriceStreak] = None
+
+
+def streak() -> PriceStreak:
+    global _STREAK
+    if _STREAK is None:
+        _STREAK = PriceStreak()
+        atexit.register(_STREAK.save)
+    return _STREAK
+
+
 def parse_jpy(s) -> Optional[int]:
     try:
         v = int(str(s).replace(",", "").replace("¥", "").strip())
@@ -177,7 +241,7 @@ def parse_jpy(s) -> Optional[int]:
 
 
 # ── 集計 + 目視の控え ────────────────────────────────────────────────────
-COUNTS = {"read": 0, "grade": 0, "name": 0, "price": 0}
+COUNTS = {"read": 0, "grade": 0, "name": 0, "price": 0, "price_adopted": 0}
 _REVIEWED_THIS_RUN: set = set()
 _READ_URLS: set = set()
 
@@ -193,7 +257,11 @@ _ALREADY_LOGGED: Optional[set] = None
 
 
 def _already_logged() -> set:
-    """前の巡回までに目視の控えに載せた (kind, url, reason)。二度見せないため、載せ直さない."""
+    """前の巡回までに目視の控えに載せた (種類, 行)。二度見せないため、同じ行・同じ種類は載せ直さない.
+
+    ★ 2026-10-12: 旧版は理由の文 (値段入り) で見ていたので、値段が少し動くたびに同じ行が載り直った (16 行で 58 件)。
+    行は itemID で見る (行番号は行の削除でずれる)。
+    """
     global _ALREADY_LOGGED
     if _ALREADY_LOGGED is None:
         _ALREADY_LOGGED = set()
@@ -201,12 +269,16 @@ def _already_logged() -> set:
             for line in REVIEW_PATH.read_text(encoding="utf-8").splitlines():
                 try:
                     d = json.loads(line)
-                    _ALREADY_LOGGED.add((d.get("kind"), d.get("url"), d.get("reason")))
+                    _ALREADY_LOGGED.add((d.get("kind"), _row_key(d)))
                 except ValueError:
                     continue
         except OSError:
             pass
     return _ALREADY_LOGGED
+
+
+def _row_key(d: dict) -> str:
+    return str(d.get("item_id") or "").strip() or f"row{d.get('row_index')}"
 
 
 def record_review(kind: str, url: str, row: dict, reason: str, name: str = "", price=None) -> None:
@@ -217,9 +289,9 @@ def record_review(kind: str, url: str, row: dict, reason: str, name: str = "", p
     _REVIEWED_THIS_RUN.add(key)
     COUNTS[kind] += 1
     seen = _already_logged()
-    if (kind, url, reason) in seen:
+    if (kind, _row_key(row)) in seen:
         return
-    seen.add((kind, url, reason))
+    seen.add((kind, _row_key(row)))
     ent = {"ts": datetime.now().isoformat(timespec="seconds"), "kind": kind, "reason": reason,
            "row_index": row.get("row_index"), "item_id": row.get("item_id"),
            "title": (row.get("title") or "")[:80], "url": url, "supply_name": name[:120],
@@ -233,4 +305,5 @@ def record_review(kind: str, url: str, row: dict, reason: str, name: str = "", p
 
 def summary_line() -> str:
     return (f"🏷 商品名が PSA10 でない仕入元: {COUNTS['grade']}本 / 名前が変わった: {COUNTS['name']}本 / "
-            f"値段が急落: {COUNTS['price']}本 (商品名を読んだ {COUNTS['read']}本のうち)")
+            f"値段が急落: {COUNTS['price']}本 (商品名を読んだ {COUNTS['read']}本のうち)"
+            f" / 急落を2回続けて採った {COUNTS['price_adopted']}本 / 据え置き {COUNTS['price']}本")

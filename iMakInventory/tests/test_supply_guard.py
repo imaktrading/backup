@@ -101,6 +101,7 @@ def _setup(monkeypatch, tmp_path, pages):
     monkeypatch.setattr(G, "REVIEW_PATH", tmp_path / "r.jsonl")
     monkeypatch.setattr(G, "_REVIEWED_THIS_RUN", set())
     monkeypatch.setattr(G, "_ALREADY_LOGGED", None)
+    monkeypatch.setattr(G, "_STREAK", G.PriceStreak(tmp_path / "s.json"))
     monkeypatch.setattr(m, "fetch_mercari", lambda url, **_k: pages[url])
     monkeypatch.setattr(m.time, "sleep", lambda *_a, **_k: None)
     return m
@@ -162,4 +163,40 @@ def test_review_file_does_not_repeat_across_runs(monkeypatch, tmp_path):
         monkeypatch.setattr(G, "_REVIEWED_THIS_RUN", set())
         monkeypatch.setattr(G, "_ALREADY_LOGGED", None)
         G.record_review("price", "u1", {"row_index": 1}, "安い", "", 100)
+    assert len((tmp_path / "r.jsonl").read_text(encoding="utf-8").splitlines()) == 1
+
+
+def _hancock(m, price):
+    main = "https://jp.mercari.com/item/m25937896428"
+    return {"row_index": 4, "item_id": "820045156348", "title": "PSA10 ボア・ハンコック OP01-078", "url": main,
+            "backup_url_slots": [None] * 5, "current_m_jpy_str": "38999"}
+
+
+def test_price_drop_adopted_after_two_runs(monkeypatch, tmp_path):
+    """ハンコック: M ¥38,999 のまま凍っていた。¥13,000 が 2 回続いたら採る."""
+    main = "https://jp.mercari.com/item/m25937896428"
+    m = _setup(monkeypatch, tmp_path, {main: _merc("PSA10 ボア・ハンコック OP01-078", True, 13000)})
+    r1 = m.check_one_row_with_fallback(_hancock(m, 13000), sleep_sec=0)
+    assert r1["price_jpy"] is None                                  # 1 回目は据え置き
+    G._STREAK.save()
+    monkeypatch.setattr(G, "_STREAK", G.PriceStreak(tmp_path / "s.json"))   # 次の巡回 = 別プロセス
+    r2 = m.check_one_row_with_fallback(_hancock(m, 13000), sleep_sec=0)
+    assert r2["price_jpy"] == 13000                                 # 2 回目で採る
+
+
+def test_price_streak_resets_when_price_band_changes(tmp_path):
+    s = G.PriceStreak(tmp_path / "s.json")
+    assert s.bump("u", 13000) == 1
+    assert s.bump("u", 13500) == 2          # ±10% 以内
+    assert s.bump("u", 9000) == 1           # 値段帯が変わった = やり直し
+    s.clear("u")
+    assert s.bump("u", 9000) == 1
+
+
+def test_review_one_entry_per_row_and_kind(monkeypatch, tmp_path):
+    monkeypatch.setattr(G, "REVIEW_PATH", tmp_path / "r.jsonl")
+    monkeypatch.setattr(G, "_ALREADY_LOGGED", None)
+    for price in (9600, 9800, 9700):                 # 値段が少し動いても 1 件
+        monkeypatch.setattr(G, "_REVIEWED_THIS_RUN", set())
+        G.record_review("price", "u1", {"row_index": 2874, "item_id": "999"}, f"安い ¥{price}", "", price)
     assert len((tmp_path / "r.jsonl").read_text(encoding="utf-8").splitlines()) == 1
