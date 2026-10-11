@@ -179,6 +179,43 @@ def listing_moves(active, inactive, day):
             "new_per_day": new_month / days if days else 0}
 
 
+# ── トレハン・キャラを回す時期 ──────────────────────────────────
+HARVEST_DAYS = 7      # 出品の待ちが「1日の新規 × この日数」を切ったら回す (2026-10-11 ユーザー確定)
+
+
+def harvest_timing(listable, per_day, treasure_left, chara_left, days=HARVEST_DAYS):
+    """トレハン・キャラを次にいつ回すか (純関数)。
+
+    ★2026-10-11 ユーザー「たくさんとっても、出品が追い付かず売り切れたら API コストの無駄使い」:
+      出品の待ち (PSA 新規に今出せる物) が1週間分を切ったら回す。中間スプシに在庫が残っている探し方は先にそれを足す。
+    """
+    per_day = per_day or 0
+    line = round(per_day * days)
+    left_days = (listable / per_day) if per_day else None
+    run = listable < line
+    if not run:
+        what = "まだ回さない"
+    elif chara_left > 0 and treasure_left == 0:
+        what = "トレジャーを回す (キャラは中間スプシの在庫から先に HIGH へ足す)"
+    elif treasure_left == 0 and chara_left == 0:
+        what = "トレジャーとキャラを回す"
+    else:
+        what = "中間スプシの在庫から先に HIGH へ足す"
+    return {"listable": listable, "line": line, "left_days": left_days, "run": run, "what": what,
+            "treasure_left": treasure_left, "chara_left": chara_left}
+
+
+def _intermediate_left():
+    """中間スプシの B列が空の行 (= HIGH に足せる候補) の数 (I/O)。"""
+    import sheet_io as S
+    import treasure_fill_key as T
+    out = {}
+    for k, tab in (("treasure", "mercari_psa10_treasure"), ("chara", "mercari_psa10_chara")):
+        rows = S.read_tab(tab, sheet_id=T.SHEET_ID)[1:]
+        out[k] = sum(1 for r in rows if r and r[0].strip() and not (r[1].strip() if len(r) > 1 else ""))
+    return out
+
+
 # ── Claude の一言 (有料・1回 数円) ────────────────────────────────
 def ai_comment(facts):
     """今日の数字から1〜2文。失敗しても止めない (理由を返す)。戻り: (文, 円, 理由)。"""
@@ -248,7 +285,7 @@ def yen(x):
     return ("▲" if x < 0 else "") + "¥{:,.0f}".format(abs(x))
 
 
-def render(plan, ms, mv, ai_text, ai_yen, ai_err, today):
+def render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv=None):
     e = html.escape
     goal = plan["goal_profit_jpy"]
     pct = ms["profit"] / goal * 100 if goal else 0
@@ -295,6 +332,12 @@ def render(plan, ms, mv, ai_text, ai_yen, ai_err, today):
                 c = "down" if mv["net_month"] < 0 else "up"
                 now = (f'<b class="num {c}">{mv["net_month"]:+d}</b> {"純減" if mv["net_month"] < 0 else "純増"}'
                        f' ({mv["day"].month}/1〜{mv["day"].day} 新規 {mv["new_month"]} − 取下げ {mv["ended_month"]})')
+            if m.get("metric") == "harvest" and hv:
+                c = "down" if hv["run"] else "up"
+                d = f'約{hv["left_days"]:.0f}日分' if hv["left_days"] is not None else "日数不明"
+                now = (f'出品の待ち (PSA 新規に今出せる物) <b class="num">{hv["listable"]}</b>件 ({d}) ・ '
+                       f'{hv["line"]}件 (1週間分) を切ったら回す → <b class="{c}">{e(hv["what"])}</b><br>'
+                       f'中間スプシの在庫: トレジャー {hv["treasure_left"]:,} ・ キャラ {hv["chara_left"]:,}')
             # ★2026-10-11 ユーザー「メールで送る日報に書いておいて」: 中見出しごとの決めたことを日付つきで出す
             dec = "".join(f'<br><span class="small">決めたこと: {e(x)}</span>' for x in (m.get("decided") or []))
             out.append(f'<div class="k"><div class="kt">{e(m["name"])}<span class="st {stc}">● {e(m["status"])}</span></div>'
@@ -352,6 +395,15 @@ def main():
         rd = lambda p: list(csv.DictReader(open(p, encoding="utf-8-sig", errors="replace")))  # noqa: E731
         mv = listing_moves(rd(act_p), rd(ina_p), rday)
 
+    hv = None
+    try:
+        import psa_new_count as PN
+        left = _intermediate_left()
+        hv = harvest_timing(PN.count_workload().get("n", 0), mv["new_per_day"] if mv else 0,
+                            left["treasure"], left["chara"])
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ トレハンの時期を出せず: {type(e).__name__}: {str(e)[:80]}")
+
     ai_text, ai_yen, ai_err = "", 0.0, ""
     if not (a.dry_run or a.no_ai):
         facts = {k: v for k, v in ms.items() if k not in ("pending", "negative", "yesterday")}
@@ -361,9 +413,10 @@ def main():
         facts["goal"] = plan["goal_profit_jpy"]
         facts["listing"] = mv
         facts["mids"] = [(m["name"], m["status"]) for p in plan["pillars"] for m in p["mids"]]
+        facts["harvest_timing"] = hv
         ai_text, ai_yen, ai_err = ai_comment(facts)
 
-    body = render(plan, ms, mv, ai_text, ai_yen, ai_err, today)
+    body = render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv)
     with open(OUT_HTML, "w", encoding="utf-8") as f:
         f.write(body)
     subject = (f"PDCA {today.month}/{today.day} 利益 {yen(ms['profit'])} ({ms['profit'] / plan['goal_profit_jpy'] * 100:.0f}%)"

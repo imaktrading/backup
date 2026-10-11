@@ -67,3 +67,11 @@ def test_バリエーションは1出品として数える():
            _l("US", "Jun-01-26 01:00:00 PDT", iid="8", qty="0")]
     mv = P.listing_moves(act, [], dt.date(2026, 10, 9))
     assert mv["live"] == 1
+
+
+def test_トレハンを回す時期():
+    h = P.harvest_timing(587, 25, 0, 2232)
+    assert h["line"] == 175 and h["run"] is False and h["what"] == "まだ回さない"
+    h = P.harvest_timing(150, 25, 0, 2232)
+    assert h["run"] is True and h["what"].startswith("トレジャーを回す")
+    assert P.harvest_timing(150, 25, 0, 0)["what"] == "トレジャーとキャラを回す"
