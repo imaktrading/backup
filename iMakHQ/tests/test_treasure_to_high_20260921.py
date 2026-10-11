@@ -35,3 +35,17 @@ def test_KEYとitemIDは書かずカテゴリはTCG():
     assert row[34] == "" and row[1] == "" and row[17] == "TCG"
     assert row[8] == "1" and row[5] == "5000"          # 鑑定番号と仕入値は入れる
     assert row[12] == "" and row[13] == "" and row[15] == ""   # M / N / P は書かない
+
+
+def test_B列の印と候補外の理由_20261011():
+    """B列が空 = 追加できる。印がある行・候補外の理由がある行は足さない (2026-10-11)。"""
+    a = _r("u1", "1", "5000")
+    b = _r("u2", "2", "5000")
+    b[1] = "HIGH追加済"
+    c = _r("u3", "3", "5000") + [""] * 40
+    c[40] = "vision_skipped_未読取(要確認)"
+    d = _r("u4", "4", "90000")
+    add, _paint, n = TH.plan([a, b, c, d], [], reason_col=40)
+    assert [r[0] for _i, r in add] == ["u1"]
+    assert n["flagged"] == 1 and n["reason"] == 1
+    assert n["flags"] == {4: "候補外: 写真を読めていない", 5: "候補外: 7万円超"}

@@ -44,31 +44,61 @@ def _price(s):
     return int(re.sub(r"[^\d]", "", s or "") or 0)
 
 
-def plan(treasure_rows, high_rows, cap=COST_CAP):
+# ★2026-10-11 ユーザー「空欄が追加できると判断したい」「中間スプシ内だけで活用したらいいやん」:
+#   中間スプシの B列 (見出し itemID・どのタブも空だった) に印を書く。B列が空 = HIGH に追加できる。
+#   印のある行は足さない。候補外の理由がある行も足さない (それまで理由を見ずに 368行を足す計算になっていた)
+COL_FLAG = 1
+FLAG_HIGH = "HIGH追加済"
+REASON_LABEL = (("vision_skipped", "写真を読めていない"), ("card_cost_over", "値段が上限超え"),
+                ("seller_rating", "出品者の評価不足"), ("bundle", "まとめ売り"), ("sold", "売り切れ"))
+
+
+def flag_of_reason(reason):
+    """候補外の理由 → B列に書く印 (純関数)。"""
+    r = (reason or "").strip()
+    for k, label in REASON_LABEL:
+        if r.startswith(k):
+            return "候補外: " + label
+    return "候補外: " + r[:20]
+
+
+def plan(treasure_rows, high_rows, cap=COST_CAP, reason_col=None):
     """どの行を足して、どの行を塗るか (純関数)。
 
     treasure_rows / high_rows: 見出しを除いた行 (list)。戻り: (足す[(シート行番号, 行)], 塗る行番号, 数)
+    数["flags"] = {シート行番号: B列に書く印} (足す行は書いた後に HIGH追加済 を付ける)
     """
     hu = {_g(r, 0) for r in high_rows if _g(r, 0)}
     hc = {_g(r, 8) for r in high_rows if _g(r, 8)}
     add, paint, seen = [], [], set()
-    n = {"over": 0, "noprice": 0, "in_high": 0, "dup_tab": 0}
+    n = {"over": 0, "noprice": 0, "in_high": 0, "dup_tab": 0, "flagged": 0, "reason": 0, "flags": {}}
     for i, r in enumerate(treasure_rows, start=2):
         url, cert, p = _g(r, 0), _g(r, 8), _price(_g(r, 5))
+        if _g(r, COL_FLAG):
+            n["flagged"] += 1                                   # もう印がある = 判断済み
+            continue
         if url in hu or (cert and cert in hc):
             n["in_high"] += 1
             paint.append(i)
+            n["flags"][i] = FLAG_HIGH
+            continue
+        if reason_col is not None and _g(r, reason_col):
+            n["reason"] += 1
+            n["flags"][i] = flag_of_reason(_g(r, reason_col))
             continue
         if not p:
             n["noprice"] += 1
+            n["flags"][i] = "候補外: 値段が読めない"
             continue
         if p > cap:
             n["over"] += 1
+            n["flags"][i] = "候補外: 7万円超"
             continue
         key = url or cert
         if key in seen:
             n["dup_tab"] += 1
             paint.append(i)
+            n["flags"][i] = "候補外: タブ内の重複"
             continue
         seen.add(key)
         row = [""] * 39
@@ -119,22 +149,24 @@ def pick_buyable(add, limit, check=None):
 def main(argv):
     import psa_hoju_fill as H
     tab = tab_of(argv)
-    tr = S.read_tab(tab, sheet_id=T.SHEET_ID)[1:]
+    _all = S.read_tab(tab, sheet_id=T.SHEET_ID)
+    tr = _all[1:]
     if not tr:
         print(f"中間スプシ {tab} に行がありません")
         return 0
+    rc = _all[0].index("候補外の理由") if "候補外の理由" in _all[0] else None
     hi = H._read_high()[1:]
-    add, paint, n = plan(tr, hi)
+    add, paint, n = plan(tr, hi, reason_col=rc)
     print(f"中間スプシ {len(tr)}行 → HIGH に足す {len(add)}行 / 塗る {len(paint)}行")
     print(f"  7万円超 {n['over']} / 値段が読めない {n['noprice']} / もう HIGH にある {n['in_high']} / "
-          f"タブ内の重複 {n['dup_tab']}")
+          f"タブ内の重複 {n['dup_tab']} / 候補外の理由あり {n['reason']} / B列に印あり (判断済み) {n['flagged']}")
     lim = next((int(a.split("=", 1)[1]) for a in argv if a.startswith("--limit=")), None)
     if lim is not None:
         # ★2026-10-05 ユーザー「200追加して」: 一度に全部 (3,474行) 入れると新規の目視が溢れるので件数で区切る。
         #   入れる前にメルカリで今も買えるかを確かめ、買える物だけを上から lim 件 (10/5 の抜き取りで 9割が買えた)
         add, skipped = pick_buyable(add, lim)
         allowed = {i for i, _r in add}
-        planned = {i for i, _r in plan(tr, hi)[0]}
+        planned = {i for i, _r in plan(tr, hi, reason_col=rc)[0]}
         paint = [i for i in paint if i not in planned or i in allowed]   # 入れなかった行は塗らない (次回の候補)
         print(f"  --limit={lim}: 買える物を {len(add)}行 選んだ (確かめて売り切れ・読めないで外した {skipped}行)")
     if "--write" not in argv:
@@ -150,7 +182,15 @@ def main(argv):
     reqs = [{"range": f"A{i}:{last}{i}", "format": {"backgroundColor": GREEN}} for i in ok]
     for k in range(0, len(reqs), 200):
         ws.batch_format(reqs[k:k + 200])
-    print(f"HIGH に足した {added}行 / HIGH に見当たらない {len(miss)}行 / 緑に塗った {len(ok)}行")
+    # B列に印 (HIGH に入ったのを確かめた行だけ HIGH追加済。入らなかった行は空のまま = 次回の候補)
+    flags = dict(n["flags"])
+    flags.update({i: FLAG_HIGH for i, _r in add if i not in miss})
+    if flags:
+        ws.batch_update([{"range": f"B{i}", "values": [[v]]} for i, v in sorted(flags.items())],
+                        value_input_option="RAW")
+    # ★走行ログで「動いた」が分かる1行 (0件でも出す)
+    print(f"HIGH に足した {added}行 / HIGH に見当たらない {len(miss)}行 / 緑に塗った {len(ok)}行"
+          f" / B列に印 {len(flags)}行 (HIGH追加済 {sum(1 for v in flags.values() if v == FLAG_HIGH)})")
     if miss:
         print("⚠️要対応: HIGH に入っていない行 (塗っていない):", miss[:20])
         return 1
