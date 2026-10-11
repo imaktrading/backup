@@ -908,8 +908,12 @@ def main():
                 _n_chart = 1 if _chart and _chart in _imgs else 0
                 # ★2026-10-07 目視で選んだ追加の写真 (同じ物 / 自分で探したURL) も数を出す (0でも)
                 _n_x = len([u for u in _imgs if u in set(cat_v.get("img_extra") or [])])
+                # ★2026-10-12 ユーザー「出品に使う写真の出どころを書いておいて、ちゃんと出ているかわかるから」:
+                #   目視で選んだ追加の写真のうち、載らなかった枚数も出す (0でも)
+                _n_xsel = len(cat_v.get("img_extra") or [])
                 print(f"    🖼 画像 {len(_imgs)}枚 (カタログ {len(_imgs) - _n_sup - _n_chart - _n_x}"
-                      f" + 追加 {_n_x} + 仕入元 {_n_sup}" + (" + サイズ表 1" if _n_chart else "") + ")")
+                      f" + 追加 {_n_x} + 仕入元 {_n_sup}" + (" + サイズ表 1" if _n_chart else "") + ")"
+                      f" / 目視で選んだ追加 {_n_xsel}枚のうち載らなかった {_n_xsel - _n_x}枚")
 
         # 出品価格（SSOT: pricing_engine = cost-plus + tier判定 + gap_limit）
         price_str = re.sub(r"[^0-9]", "", target["price_jpy"])
