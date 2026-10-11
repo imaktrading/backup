@@ -295,8 +295,10 @@ def render(plan, ms, mv, ai_text, ai_yen, ai_err, today):
                 c = "down" if mv["net_month"] < 0 else "up"
                 now = (f'<b class="num {c}">{mv["net_month"]:+d}</b> {"純減" if mv["net_month"] < 0 else "純増"}'
                        f' ({mv["day"].month}/1〜{mv["day"].day} 新規 {mv["new_month"]} − 取下げ {mv["ended_month"]})')
+            # ★2026-10-11 ユーザー「メールで送る日報に書いておいて」: 中見出しごとの決めたことを日付つきで出す
+            dec = "".join(f'<br><span class="small">決めたこと: {e(x)}</span>' for x in (m.get("decided") or []))
             out.append(f'<div class="k"><div class="kt">{e(m["name"])}<span class="st {stc}">● {e(m["status"])}</span></div>'
-                       f'<div class="kd">{e(m["desc"])}<br>{now}</div></div>')
+                       f'<div class="kd">{e(m["desc"])}<br>{now}{dec}</div></div>')
         out.append('</div>')
     out.append('</div>')
     y = ms["yesterday"]
