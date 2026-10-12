@@ -720,6 +720,12 @@ def build_job(today):
     fill = H.select_backfill_targets(vals, max_backups=H.CONFIRM_MAX_BACKUPS, watch=watch)
     swap = H.select_backfill_targets(vals, max_backups=H.AUXN + 1, min_backups=H.CONFIRM_MAX_BACKUPS,
                                      watch=watch)
+    # ★2026-10-13 売れ筋 × 補2本以下・補がよく売り切れる出品を先に (途中で止まっても先に済むように。
+    #   KAGOYA は上限なしで全部探すので枠の半分の上限 (家の夜の cap) は付けない)
+    fill, _n_hot = H.urgent_first(fill, H.load_market_sold([t.get("key") for t in fill]),
+                                  churn=H.load_churn(vals))
+    print(f"  🔥 売れ筋で補{H.URGENT_MAX_BACKUPS}本以下・補が{H.CHURN_DAYS}日で{H.CHURN_MIN}回以上売り切れを先に探す: "
+          f"{_n_hot}件 / 補充の対象 {len(fill)}件")
     # ★2026-10-04 棚② の「補優先」を先に探す (途中で止まっても先に済むように)
     _prio = H.load_shelf_priority()
     fill, swap = H.put_priority_first(fill, _prio), H.put_priority_first(swap, _prio)
