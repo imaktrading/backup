@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import webbrowser
 from pathlib import Path
@@ -148,6 +149,21 @@ def parse_best_offers(xml, into=None):
     return out
 
 
+def available_qty(getitem_xml):
+    """GetItem の応答 → 今買える数 (Quantity − QuantitySold)。読めなければ None (純関数)。
+
+    ★2026-10-12 ユーザー「出さないで欲しい」: 親 (US) が売れて在庫0のミラーに、オファーが
+      「受信中」のまま残っていた (eBay は在庫0でもオファーを取り消さない)。在庫0の出品の
+      オファーは承諾しても履行できないので、画面にも件数にも出さない。
+      読めない時は None = 出す (知らずに隠さない)。
+    """
+    q = re.search(r"<Quantity>(\d+)</Quantity>", getitem_xml or "")
+    if not q:
+        return None
+    s = re.search(r"<QuantitySold>(\d+)</QuantitySold>", getitem_xml or "")
+    return int(q.group(1)) - (int(s.group(1)) if s else 0)
+
+
 def count_workload():
     """受信中のオファーの件数 (画面のラベル用・2026-09-19 ユーザー「反映してないね」)。
 
@@ -180,6 +196,12 @@ def count_workload():
                             t, _re.S)
             if pr and n >= int(pr.group(1)):
                 break
+        # ★2026-10-12 在庫0の出品のオファーは数えない (画面に出さない物を件数に入れない)
+        for _iid in list(by_item):
+            _gi = fx.post("GetItem", f"<ItemID>{_iid}</ItemID><DetailLevel>ReturnSummary</DetailLevel>",
+                          tok, site="0")
+            if available_qty(_gi) == 0:
+                del by_item[_iid]
         out["items"] = len(by_item)
         out["actionable"] = sum(len(_re.findall(r"<BestOffer>", v.get("xml") or ""))
                                 for v in by_item.values())
@@ -284,12 +306,16 @@ def fetch_offers():
             return 0
 
     out = []
+    _no_stock = []
     for iid, meta in items.items():
         # 3) オファー明細は 1) で取得済 (item ごとの再取得はしない)
         x = offers_by_item[iid]["xml"]
         # 4) SKU (= 仕入元 mercari item ID) と 出品価格 を取る
         gi = fx.post("GetItem", f"<ItemID>{iid}</ItemID><DetailLevel>ReturnAll</DetailLevel>",
                      tok, site="0")
+        if available_qty(gi) == 0:
+            _no_stock.append(iid)          # ★2026-10-12 在庫0 (親が売れたミラー等) のオファーは出さない
+            continue
         m = re.search(r"<SKU>(.*?)</SKU>", gi)
         sku = m.group(1) if m else ""
         # 出品価格/通貨/URL は GetItem から (GetBestOffers は返さない)
@@ -408,6 +434,9 @@ def fetch_offers():
                 #   (豪州等のミラーの番号では引けず、タイトルだけで探していた)
                 "sku": sku, "usItem": (parent or {}).get("iid", "") if parent else "",
             })
+    # ★走行ログで「動いた」が分かる1行 (0件でも出す)
+    print(f"⏭ 在庫0の出品のオファーは出さない: {len(_no_stock)}件 / オファー付き {len(items)}出品"
+          + (f" ({', '.join(_no_stock)})" if _no_stock else ""))
     out.sort(key=lambda o: o["expire"])
     return out
 
