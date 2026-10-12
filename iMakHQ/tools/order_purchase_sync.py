@@ -698,13 +698,50 @@ def _format(ws, last_row):
 LINK_WARN: list = []                       # 購入履歴を読めなかった知らせ (神風の注文の枠に出す)
 
 
-def _write_status(rows):
+def backup_counts(prod_rows, item_ids):
+    """商品管理シート → {itemID: 補URL (AC〜AG) の本数} (純関数)。シートに行が無い itemID は None。
+
+    ★2026-10-13 ユーザー「そだね」: 売れた後は買い手キャンセルに備えて少し置いてから仕入れる
+      (purchase_then_wait_then_source)。その間に唯一の仕入元が売れた (バリヤード CLK 013/032・
+      補URL 0本 → どこにも在庫なし)。予備の無い注文だけ「待たずにすぐ買う」と出す。
+    """
+    import sheet_io
+    aux = range(sheet_io.PRODUCT_COL_AUX_START, sheet_io.PRODUCT_COL_AUX_START + sheet_io.PRODUCT_AUX_MAX)
+    want = {str(i).strip() for i in item_ids if str(i).strip()}
+    out = {i: None for i in want}
+    for r in (prod_rows or [])[1:]:
+        iid = (r[1] if len(r) > 1 else "").strip()
+        if iid in want:
+            out[iid] = sum(1 for c in aux if len(r) > c and r[c].strip())
+    return out
+
+
+def _product_rows():
+    """商品管理シートの全行 (I/O)。読めなければ None (印を出さないだけ・取り込みは止めない)。"""
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        import sheet_io
+        gc = gspread.authorize(Credentials.from_service_account_file(
+            sheet_io.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"]))
+        return sheet_io._read_with_quota_retry(gc.open_by_key(sheet_io.PRODUCT_SHEET_ID)
+                                               .get_worksheet_by_id(sheet_io.PRODUCT_GID).get_all_values)
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 商品管理シートを読めず、予備の仕入元の本数を出せません ({type(e).__name__}: {str(e)[:60]})")
+        return None
+
+
+def _write_status(rows, prod_rows=None):
     w = waiting(rows)
     shipby = sorted(r[C_SHIPBY] for _n, r in w if r[C_SHIPBY])
+    bk = backup_counts(prod_rows, [r[C_ITEM] for _n, r in w]) if prod_rows is not None else {}
+    items = [{"row": n, "no": r[C_NO], "title": r[C_TITLE][:60], "ship_by": r[C_SHIPBY],
+              "backups": bk.get(r[C_ITEM].strip()) if bk else None} for n, r in w]
     st = {"at": dt.datetime.now().isoformat(timespec="seconds"), "waiting": len(w),
           "earliest_ship_by": shipby[0] if shipby else "",
           "warn": " / ".join(dict.fromkeys(LINK_WARN)),
-          "items": [{"row": n, "no": r[C_NO], "title": r[C_TITLE][:60], "ship_by": r[C_SHIPBY]} for n, r in w]}
+          "no_backup": sum(1 for x in items if x["backups"] == 0),
+          "items": items}
     os.makedirs(os.path.dirname(STATUS), exist_ok=True)
     tmp = STATUS + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -780,9 +817,12 @@ def main(argv):
     link_purchases(ws, by_id, _read_with_quota_retry(ws.get_all_values))
     fill_mercari_cost(ws, _read_with_quota_retry(ws.get_all_values))
     fill_ship_cost(ws, _read_with_quota_retry(ws.get_all_values))
-    st = _write_status(_read_with_quota_retry(ws.get_all_values))
+    st = _write_status(_read_with_quota_retry(ws.get_all_values), _product_rows())
     print(f"  書きました: 足した {len(add)}行 / 仕入れ待ち {st['waiting']}件"
           + (f" (いちばん早い発送期限 {st['earliest_ship_by']})" if st["earliest_ship_by"] else ""))
+    # ★走行ログで「動いた」が分かる1行 (0件でも出す)
+    print(f"  🚨 予備の仕入元 (補URL) が無い仕入れ待ち = 待たずにすぐ買う: {st['no_backup']}件 / 仕入れ待ち {st['waiting']}件"
+          + "".join(f"\n     - {x['title'][:50]} (発送期限 {x['ship_by']})" for x in st["items"] if x["backups"] == 0))
     return 0
 
 

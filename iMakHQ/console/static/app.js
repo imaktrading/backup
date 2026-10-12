@@ -389,6 +389,8 @@
         (dj.warn ? '<span class="d" style="color:var(--crit,#e66)">⚠ ' + esc(dj.warn) +
                    " — 仕入れ済みでも結び付きません" + (dj.warn.indexOf("メルカリ") >= 0
                      ? "。デスクトップの「メルカリ購入履歴_ログインし直す」→ 取り込む" : "") + "</span>" : "") +
+        (dj.no_backup && dj.no_backup.length ? '<span class="d" style="color:var(--crit,#e66)"><b>🚨 予備の仕入元なし ' + dj.no_backup.length +
+          "件 — 待たずにすぐ買う</b>: " + dj.no_backup.map(function (x) { return esc(x.title.slice(0, 40)) + (x.ship_by ? " (期限 " + esc(x.ship_by) + ")" : ""); }).join(" / ") + "</span>" : "") +
         '<span class="d">' + (dj.psa ? "売れた PSA の仕入れ先を、仕入元・補URL・メルカリ・スニダンから安い順に開きます"
                                      : "PSA の仕入れ待ちはありません (" + esc(dj.note || "") + ")") + "</span>" +
         '<span class="ugo">' + (dj.psa && ps ? jobBtn(ps, "仕入れ先を探す").replace("<button", '<button class="run hot"') : "") + "</span></div>");

@@ -438,7 +438,10 @@ def order_job_info(st):
     # ★2026-10-04: 今日やることの「注文」枠に、うち PSA の件数と一番近い発送期限を出す
     psa = sum(1 for x in (st.get("items") or []) if "PSA" in (x.get("title") or "").upper())
     return {"n": n, "state": "todo" if n else "done", "note": "最後の取り込み %s" % at, "hold": 0,
-            "psa": psa, "ship_by": st.get("earliest_ship_by") or "", "warn": st.get("warn") or ""}
+            "psa": psa, "ship_by": st.get("earliest_ship_by") or "", "warn": st.get("warn") or "",
+            # ★2026-10-13 予備の仕入元 (補URL) が無い仕入れ待ち = 待たずにすぐ買う (唯一の仕入元が待つ間に売れた)
+            "no_backup": [{"title": x.get("title") or "", "ship_by": x.get("ship_by") or ""}
+                          for x in (st.get("items") or []) if x.get("backups") == 0]}
 
 
 def _home_worker():
