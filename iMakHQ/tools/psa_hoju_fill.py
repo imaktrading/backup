@@ -143,9 +143,55 @@ def rotate_by_last_shown(targets, last_shown):
 
 
 URGENT_MAX_BACKUPS = 2      # 売れ筋でこの本数以下 = 先に探す・先に目視に出す
+CHURN_MIN, CHURN_DAYS = 10, 30      # 補が30日でこの回数以上売り切れた出品も先に (補の本数に関係なく)
+_AUX_LOG = r"C:/dev/iMak/iMakHQ/review_logs/aux_url_log.jsonl"
+_NOT_BUYABLE = r"C:/dev/iMak_data/hq/not_buyable_urls.json"
 
 
-def urgent_first(targets, market_sold, max_backups=URGENT_MAX_BACKUPS):
+def sold_out_churn(not_buyable, aux_rows, row_to_iid, today, days=CHURN_DAYS):
+    """出品ごとの「補URL が売り切れて外れた回数」(直近 days 日) → {itemID: 回数} (純関数)。
+
+    ★2026-10-13 ユーザー「埋まるというか、補の売り切れが頻発しているものじゃない」→「1はやりたいね」。
+      実測: 30日で補 4,008本が売り切れ、107出品は10回以上 (ミュウex SSR 35回 等)。毎日1本消える出品は
+      5本あっても数日で空になる (ピカチュウ CHR 820077375175 は33回で今0本)。
+    not_buyable: {url: {why, at}} (監視くんの消込) / aux_rows: 補URL を書いた記録 [{url, row}] /
+    row_to_iid: 商品管理シートの行番号 → itemID。
+    """
+    import datetime as _dt
+    since = (today - _dt.timedelta(days=days)).isoformat()
+    row_of = {}
+    for e in aux_rows or []:
+        if e.get("url") and e.get("row"):
+            row_of[e["url"]] = e["row"]
+    out = {}
+    for u, v in (not_buyable or {}).items():
+        if "売り切れ" not in str((v or {}).get("why") or "") or str((v or {}).get("at") or "") < since:
+            continue
+        iid = row_to_iid.get(row_of.get(u))
+        if iid:
+            out[iid] = out.get(iid, 0) + 1
+    return out
+
+
+def load_churn(vals):
+    """sold_out_churn の I/O 側。読めなければ {} = 今までどおりの並び。"""
+    import datetime as _dt
+    try:
+        nb = json.load(open(_NOT_BUYABLE, encoding="utf-8"))
+        aux = []
+        with open(_AUX_LOG, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    aux.append(json.loads(line))
+                except ValueError:
+                    continue
+        r2i = {i: (r[1] if len(r) > 1 else "").strip() for i, r in enumerate(vals or [], start=1)}
+        return sold_out_churn(nb, aux, {k: v for k, v in r2i.items() if v}, _dt.date.today())
+    except Exception:                                          # noqa: BLE001 並びの材料なので止めない
+        return {}
+
+
+def urgent_first(targets, market_sold, max_backups=URGENT_MAX_BACKUPS, churn=None, churn_min=CHURN_MIN, cap=None):
     """**売れ筋 (市場で売れた実績あり) × 補が max_backups 本以下** の出品を先頭に (純関数・安定)。
 
     ★2026-10-13 ユーザー「探す優先に入れることと、補充の目視に優先的に出すこと」→「うん」。
@@ -156,10 +202,20 @@ def urgent_first(targets, market_sold, max_backups=URGENT_MAX_BACKUPS):
     """
     ms = market_sold or {}
 
+    ch = churn or {}
+
     def hot(t):
+        if ch.get(t.get("itemID"), 0) >= churn_min:    # ★2026-10-13 補がよく売り切れる出品は本数に関係なく
+            return True
         return ms.get(t.get("key"), 0) > 0 and int(t.get("n_backups") or 0) <= max_backups
-    out = sorted(targets or [], key=lambda t: not hot(t))
-    return out, sum(1 for t in out if hot(t))
+    # cap: 先頭に出すのは cap 件まで。残りの急ぎは元の位置のまま (夜の枠を急ぎだけで埋めて、
+    #   ほかの出品が永久に探されなくなるのを防ぐ。2026-10-13 実測: 急ぎ130件 = 夜の枠130件)
+    tl = list(targets or [])
+    first = [t for t in tl if hot(t)]
+    if cap is not None:
+        first = first[:cap]
+    ids = {id(t) for t in first}
+    return first + [t for t in tl if id(t) not in ids], len(first)
 
 
 def load_market_sold(keys):
@@ -1283,6 +1339,7 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
     import snkrdunk_psa_resource as sp
 
     today = datetime.date.today().isoformat()
+    targets_given = targets is not None
     if targets is None:
         _vals = _read_high()
         targets = select_backfill_targets(_vals, max_backups=max_backups,
@@ -1295,8 +1352,12 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
     cache = {} if fresh else _load_cache()
     todo = targets if fresh else targets_needing_search(targets, cache, today)
     # ★2026-10-13 売れ筋 × 補2本以下を先に探す (limit で切られて取り合いのカードが後回しにならないように)
-    todo, _n_hot = urgent_first(todo, load_market_sold([t.get("key") for t in todo]))
-    print(f"🔥 売れ筋で補{URGENT_MAX_BACKUPS}本以下を先に探す: {_n_hot}件 / 探す対象 {len(todo)}件", flush=True)
+    _churn = load_churn(_vals if targets_given is False else _read_high())
+    todo, _n_hot = urgent_first(todo, load_market_sold([t.get("key") for t in todo]), churn=_churn,
+                                cap=(limit // 2) if limit else None)
+    print(f"🔥 売れ筋で補{URGENT_MAX_BACKUPS}本以下・補が{CHURN_DAYS}日で{CHURN_MIN}回以上売り切れを先に探す: "
+          f"{_n_hot}件 / 探す対象 {len(todo)}件 (よく売り切れる出品 {sum(1 for v in _churn.values() if v >= CHURN_MIN)}件)",
+          flush=True)
     # ★2026-10-04 棚② の「補優先」は夜の検索でも先に探す (limit で切られて後回しにならないように)
     todo = put_priority_first(todo, load_shelf_priority())
     total_targets = len(targets)
@@ -2802,8 +2863,10 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     targets = rotate_by_last_shown(targets, load_last_shown())
     # ★2026-10-13 売れ筋 × 補2本以下を一番上の組に (組の中は前に出した順のまま回す)
     if min_backups < CONFIRM_MAX_BACKUPS:
-        targets, _n_hot = urgent_first(targets, _msold)
-        print(f"  🔥 売れ筋で補{URGENT_MAX_BACKUPS}本以下を先に出す: {_n_hot}件 / 対象 {len(targets)}件", flush=True)
+        _churn = load_churn(vals)
+        targets, _n_hot = urgent_first(targets, _msold, churn=_churn)
+        print(f"  🔥 売れ筋で補{URGENT_MAX_BACKUPS}本以下・補が{CHURN_DAYS}日で{CHURN_MIN}回以上売り切れを先に出す: "
+              f"{_n_hot}件 / 対象 {len(targets)}件", flush=True)
     if min_backups >= CONFIRM_MAX_BACKUPS:             # 入れ替えボタン単独: クリックされない出品から先に
         targets = put_priority_first(targets, load_swap_priority())
     # ★2026-10-04 棚② の新ルール: 落とす前に「補優先」と決めた出品は、補充・入れ替えとも一番先に出す
