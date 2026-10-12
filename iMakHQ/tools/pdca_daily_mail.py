@@ -281,11 +281,55 @@ body{margin:0;background:#e9edf0;color:#1d2a33;font-family:"Hiragino Sans","Yu G
 """
 
 
+OFFER_SUBJECTS = ("新しいオファーがあります", "購入者が新しいオファーを送信しました")
+
+
+def offer_counts(dates, today):
+    """受信したオファーの日付 → {yesterday, last7, prev7} (純関数)。last7 = 昨日までの7日 / prev7 = その前の7日。
+
+    ★2026-10-12 ユーザー「メールで取れない？」→「日報に追記して欲しい」: eBay はオファーの履歴を返さない
+      (GetBestOffers は受信中だけ)。届いたメール「📩 新しいオファーがあります」を数える。
+    """
+    y = today - dt.timedelta(days=1)
+    return {"yesterday": sum(1 for d in dates if d == y),
+            "last7": sum(1 for d in dates if y - dt.timedelta(days=6) <= d <= y),
+            "prev7": sum(1 for d in dates if y - dt.timedelta(days=13) <= d <= y - dt.timedelta(days=7))}
+
+
+def offer_mail_dates(days=16):
+    """Gmail の eBay のオファー受信メール → 受信日 (JST) の list (I/O)。読めなければ例外。"""
+    import email
+    import imaplib
+    from email.header import decode_header
+    from email.utils import parsedate_to_datetime
+    import snkrdunk_purchases as SN
+    jst = dt.timezone(dt.timedelta(hours=9))
+    im = imaplib.IMAP4_SSL("imap.gmail.com")
+    try:
+        im.login(SN.USER, SN._password())
+        im.select("INBOX", readonly=True)
+        _t, d = im.search(None, "X-GM-RAW", f'"from:ebay@ebay.com newer_than:{days}d offer"')
+        out = []
+        for i in d[0].split():
+            _t, m = im.fetch(i, "(BODY.PEEK[HEADER.FIELDS (DATE SUBJECT)])")
+            h = email.message_from_bytes(m[0][1])
+            subj = "".join(x.decode(c or "utf-8", "replace") if isinstance(x, bytes) else x
+                           for x, c in decode_header(h.get("Subject") or ""))
+            if any(k in subj for k in OFFER_SUBJECTS):
+                out.append(parsedate_to_datetime(h["Date"]).astimezone(jst).date())
+        return out
+    finally:
+        try:
+            im.logout()
+        except Exception:                                      # noqa: BLE001
+            pass
+
+
 def yen(x):
     return ("▲" if x < 0 else "") + "¥{:,.0f}".format(abs(x))
 
 
-def render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv=None):
+def render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv=None, of=None):
     e = html.escape
     goal = plan["goal_profit_jpy"]
     pct = ms["profit"] / goal * 100 if goal else 0
@@ -354,7 +398,10 @@ def render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv=None):
                    f'<td><span class="mk">純増</span><br><span class="mv {"down" if mv["net"] < 0 else "up"}">{mv["net"]:+d}</span>件<br><span class="small">出品中 {mv["live"]:,}</span></td>'
                    f'<td><span class="mk">売れた件数</span><br><span class="mv">{len(y)}</span>件<br><span class="small">今月 {ms["n"]}件</span></td>'
                    f'<td><span class="mk">利益</span><br><span class="mv">{yen(sum(s["profit"] for s in y))}</span><br><span class="small">{"仮を含む" if any(not s["confirmed"] for s in y) else "確定"}</span></td>'
-                   '</tr></table></div>')
+                   + (f'<td><span class="mk">オファー</span><br><span class="mv">{of["yesterday"]}</span>件<br>'
+                      f'<span class="small">7日 {of["last7"]}件 (前の7日 {of["prev7"]}件)</span></td>' if of else
+                      '<td><span class="mk">オファー</span><br><span class="mv">?</span><br><span class="small">メールを読めず</span></td>')
+                   + '</tr></table></div>')
     else:
         out.append('<div class="sec"><div class="sech">昨日の動き</div><div class="small down">Seller Hub のレポートが見つからない (データ欠け)</div></div>')
     if ai_text:
@@ -404,6 +451,13 @@ def main():
     except Exception as e:                                     # noqa: BLE001
         print(f"  ⚠ トレハンの時期を出せず: {type(e).__name__}: {str(e)[:80]}")
 
+    of, of_err = None, ""
+    try:
+        of = offer_counts(offer_mail_dates(), today)
+    except Exception as e:                                     # noqa: BLE001
+        of_err = f"{type(e).__name__}: {str(e)[:80]}"
+        print(f"  ⚠ オファーのメールを読めず: {of_err}")
+
     ai_text, ai_yen, ai_err = "", 0.0, ""
     if not (a.dry_run or a.no_ai):
         facts = {k: v for k, v in ms.items() if k not in ("pending", "negative", "yesterday")}
@@ -414,9 +468,10 @@ def main():
         facts["listing"] = mv
         facts["mids"] = [(m["name"], m["status"]) for p in plan["pillars"] for m in p["mids"]]
         facts["harvest_timing"] = hv
+        facts["offers_received"] = of
         ai_text, ai_yen, ai_err = ai_comment(facts)
 
-    body = render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv)
+    body = render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv, of)
     with open(OUT_HTML, "w", encoding="utf-8") as f:
         f.write(body)
     subject = (f"PDCA {today.month}/{today.day} 利益 {yen(ms['profit'])} ({ms['profit'] / plan['goal_profit_jpy'] * 100:.0f}%)"
@@ -428,6 +483,7 @@ def main():
         sent = "送った" if r.returncode == 0 else f"送れなかった (exit {r.returncode}) {r.stderr[-200:]}"
     # ★走行ログで「動いた」が分かる1行 (0件でも出す)
     print(f"📧 PDCA メール: {sent} / 今月の利益 {yen(ms['profit'])} ({ms['n']}件・まだ動く {len(ms['pending'])}件)"
+          f" / オファー {('昨日 %d件・7日 %d件 (前の7日 %d件)' % (of['yesterday'], of['last7'], of['prev7'])) if of else '読めず ' + of_err}"
           f" / 出品の動き {mv['day'] if mv else 'データ欠け'} / 一言 {'約%.1f円' % ai_yen if ai_text else ('なし' if not ai_err else '失敗: ' + ai_err)}")
     return 0 if (a.dry_run or sent == "送った") else 1
 
