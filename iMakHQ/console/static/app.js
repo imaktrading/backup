@@ -9,10 +9,10 @@
   var MATRIX = {
     hoju: {
       title: "補URL", target: "出品中 (在庫あり)", purpose: "予備の仕入元を足す・安い仕入元に入れ替える",
-      cols: ["① 当日分", "② 夜に探す", "③ 補充 (補が3本以下)", "③ 入れ替え (補4〜5本)"],
-      rows: [["PSA", ["hoju_search_now", "hoju_search", "hoju_confirm", "hoju_swap"]],
-             ["UT", ["ut_search_now", "ut_search", "ut_confirm", "ut_swap_confirm"]],
-             ["一番くじ", [null, "kuji_search", "kuji_confirm", null]]]
+      cols: ["① 当日分", "② 夜に探す", "③ 補0本だけ", "③ 補充 (補が3本以下)", "③ 入れ替え (補4〜5本)"],
+      rows: [["PSA", ["hoju_search_now", "hoju_search", "hoju_zero", "hoju_confirm", "hoju_swap"]],
+             ["UT", ["ut_search_now", "ut_search", null, "ut_confirm", "ut_swap_confirm"]],
+             ["一番くじ", [null, "kuji_search", null, "kuji_confirm", null]]]
     },
     restock: {
       title: "再仕入れ", target: "売り切れ (在庫0)", purpose: "また買える仕入元を見つけて在庫を戻す",
