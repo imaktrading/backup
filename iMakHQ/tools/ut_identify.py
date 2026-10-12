@@ -420,6 +420,16 @@ def _retry_nocat(entry, today=None, st=None):
     return ((today or datetime.datetime.now()) - t).days >= NOCAT_RETRY_DAYS
 
 
+def needs_color(entry):
+    """「この商品」で決めた柄の記録なのに色が空の行か (純関数) → 目視にもう一度出す。
+
+    ★2026-10-12: 柄の記録は色をメルカリの表記から取る。空のまま確定できたため、出品で毎回
+      「色がカタログの色に無い」で止まり、決着済みなので画面にも二度と出なかった (17件中11件)。
+    """
+    e = entry or {}
+    return e.get("decision") == "go" and bool(e.get("design")) and not (e.get("color") or "").strip()
+
+
 def pending_rows(src, decided, in_high, today=None, status=None):
     """中間タブ → 目視に出す行 [(行番号, row)]。純関数。
 
@@ -435,7 +445,8 @@ def pending_rows(src, decided, in_high, today=None, status=None):
             continue
         if url in in_high:
             continue
-        if url in decided and not _retry_nocat(decided.get(url), today, status.get(url)):
+        if url in decided and not _retry_nocat(decided.get(url), today, status.get(url)) \
+                and not needs_color(decided.get(url)):
             continue
         out.append((i, r))
     return out
@@ -474,7 +485,8 @@ def sheet_pending_rows(rows2d, decided, today=None, status=None):
         url = (r[C_URL] or "").strip()
         if not url.startswith("http"):
             continue
-        if url in decided and not _retry_nocat(decided.get(url), today, (status or {}).get(url)):
+        if url in decided and not _retry_nocat(decided.get(url), today, (status or {}).get(url)) \
+                and not needs_color(decided.get(url)):
             continue
         out.append((i, r))
     return out
@@ -1150,7 +1162,9 @@ function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason
         if(!add&&off)drop.push(u);if(add&&!off){extra.push(u);if(xc&&i.dataset.src==='ref')xcat.push(u);}});
       var f1=b.querySelector('.imgpick img.first');var main=f1&&f1.dataset.raw?decodeURIComponent(f1.dataset.raw):'';
       var dz=b.dataset.design==='1';var cn=((b.querySelector('input.cn')||{}).value||'').trim();
-      if(!b.dataset.pid||(!c&&!dz)){nocolor++;holds.push(idx);}
+      // ★2026-10-12 柄の記録は色の欄が空なら確定しない (空のまま確定した11件が出品で毎回止まっていた)
+      var lcv=dz?(((b.querySelector('.lv input.lc')||{}).value)||'').trim():'';
+      if(!b.dataset.pid||(!c&&!dz)||(dz&&!lcv)){nocolor++;holds.push(idx);}
       else if(useCount(b)>MAXPIC){nopicover++;holds.push(idx);}
       else{var lv=b.querySelector('.lv');if(!b.dataset.lvok)nolv++;
         picks.push({idx:idx,pid:b.dataset.pid,color:dz?lv.querySelector('input.lc').value.trim():c,drop:drop,main:main,design:dz,char:dz?cn:'',
@@ -1954,6 +1968,8 @@ def load_items(limit=DEFAULT_LIMIT, new_only=False, stats=None):
     # ★2026-10-06 ユーザー「UT 目視特定開いたけど、何が変わるの？」: カタログが回答した行 (追加依頼の結果) は
     #   KEY 埋めより先に出す。20件の枠が KEY 埋めで埋まり、回答の来た行が1件も出ていなかった
     rows = answered_first(rows, led, status)
+    # ★2026-10-12 色を入れれば出せる行 (needs_color) は一番先に (商品はもう決まっている)
+    rows = sorted(rows, key=lambda t: not needs_color(led.get((t[1][C_URL] or "").strip())))
     catalog = load_catalog()
     official = load_official_l1()
     stats["official"] = 0
@@ -2173,6 +2189,10 @@ def main():
     # ★2026-10-07 0件でも出す (動いたかがログで分かるように)
     print(f"  ✔ 前に決めた商品を選んだ状態で出す: {sum(_ln.values())}件 "
           f"(同じタイトル {_ln.get('タイトル', 0)} / 同じタグの番号 {_ln.get('タグの番号', 0)}) / 画面に出す {len(items)}件")
+    _led_nc = load_ledger()
+    _nc = sum(1 for it in items if needs_color(_led_nc.get((it["row"][C_URL] or "").strip())))
+    print(f"  🎨 色が空のまま確定していた柄の記録をもう一度出す: {_nc}件 (残り全体 "
+          f"{sum(1 for v in _led_nc.values() if needs_color(v))}件) — 色の欄を入れて確定")
     n_c = sum(1 for it in items if it["cands"])
     print(f"  カタログ候補が並ぶ {n_c}件 / 候補なし (検索欄で探す) {len(items) - n_c}件")
     page = build_html(items, load_catalog(), summary=_stats.get("catalog_status"))

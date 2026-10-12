@@ -726,6 +726,7 @@ def main():
     import ut_catalog_values as UCV
     from whitelist_registry import validate_and_normalize as _wl_validate
     ut_ledger = UCV.load_ledger()
+    _n_color_en = 0      # ★2026-10-12 柄の記録の色をメルカリの日本語から eBay の色に置き換えた件数 (走行ログ用)
     # ★2026-09-12 ユーザー「補の概念とか重複出品とか PSA と同じ運用にするんだよ」(設計 iMakHQ/UT_FLOW.md):
     #   同じ商品・色・サイズが**既に出品中**なら出さない。捨てずに、その出品の補URLに足す
     #   (無在庫なので仕入元は多いほど強い。PSA の「2つ目は補URLへ」と同じ)
@@ -763,6 +764,9 @@ def main():
             continue
         if cat_v:
             print(f"    📚 目視で特定済み {cat_v['product_id']} → 色/素材/原産国/サイズ表をカタログから写す")
+            if cat_v.get("color_from_jp"):
+                _n_color_en += 1
+                print(f"    🎨 柄の記録の色: {cat_v['color_from_jp']} → {cat_v['color_name']} (タイトル・説明文は英語)")
             # KEY は出品に出す値 (CSV の C:Model / C:Color / C:Size) と同じ材料で作る
             _key = UCV.identity_key(cat_v["product_id"], cat_v["specs"]["Color"], cat_v["size_jp"])
             _off = ut_official.get(_key)
@@ -1070,6 +1074,7 @@ def main():
             print(f"⚠️ Free Shipping post-process 失敗 (Tshirt): {type(_e).__name__}: {_e}")
         print(f"\n完了！出力: {output_file}")
         print(f"成功: {len(rows)-1}件")
+        print(f"🎨 柄の記録の色を日本語から英語に置き換えた: {_n_color_en}件 (タイトル・説明文)")
 
         # チェッカー自動実行
         print(f"\n{'═'*60}")

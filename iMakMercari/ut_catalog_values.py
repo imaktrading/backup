@@ -271,7 +271,10 @@ def build_values(product, color_name, size_text, mercari_text="", work_en=""):
         raise NotListable(f"性別 {gender or '?'} はこのカテゴリ (Men's 15687) では出さない")
     col = next((c for c in s.get("color_variants") or [] if c.get("name") == color_name), None)
     if (not col or not col.get("ebay_color")) and design and not s.get("color_variants"):
-        col = {"name": color_name, "ebay_color": design_color(color_name)}
+        # ★2026-10-12 (B-20261012-010): 名前もメルカリの日本語 (ブラック) のままだと、タイトル・説明文に
+        #   日本語が出て監査で除外された (m23226148693)。柄の記録の色の名前は eBay の色 (Black) にする
+        _ec = design_color(color_name)
+        col = {"name": _ec or color_name, "ebay_color": _ec, "from_jp": color_name if _ec else ""}
     if not col or not col.get("ebay_color"):
         raise NotListable(f"色 {color_name} がカタログの色に無い")
     size = jp_size(size_text)
@@ -307,7 +310,8 @@ def build_values(product, color_name, size_text, mercari_text="", work_en=""):
     if s.get("themes"):
         specs["Theme"] = ", ".join(s["themes"])
     return {"specs": specs, "size_jp": size, "size_us": JP_TO_US.get(size, ""),
-            "product_id": product.get("product_id", ""), "color_name": color_name,
+            "product_id": product.get("product_id", ""), "color_name": col["name"],
+            "color_from_jp": col.get("from_jp") or "",
             "material_line": mat_line, "origin_line": coo_line,
             "chart_html": chart_html(chart_row(s.get("size_chart_inch"), size), size),
             "collab_jp": s.get("collab") or product.get("name") or "", "is_gu": is_gu,
