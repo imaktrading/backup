@@ -100,6 +100,29 @@ def search_snkrdunk(w):
     return out
 
 
+NTFY_TOPIC = r"C:/dev/iMak_data/credentials/ntfy_topic.txt"
+
+
+def push(w, hits):
+    """スマホに通知 (ntfy・I/O)。送れたら True。
+
+    ★2026-10-13 ユーザー「メールは来たけど、gmail が大量に届くから、通知も 251578件」→ 見張り専用の通知アプリ。
+      通知を押すと1件目の出品が開く。合言葉 (topic) は credentials に置く (知られると他人も送れる・読める)。
+    """
+    import requests
+    try:
+        topic = open(NTFY_TOPIC, encoding="utf-8").read().strip()
+    except OSError:
+        return False
+    h0 = hits[0]
+    body = "\n".join(f"{h['site']} ¥{h['price']:,} {h['name'][:40]}" if isinstance(h.get("price"), int)
+                     else f"{h['site']} {h['name'][:40]}" for h in hits)
+    r = requests.post(f"https://ntfy.sh/{topic}", data=body.encode("utf-8"), timeout=30,
+                      headers={"Title": f"仕入元が出た: {w['name'][:40]}".encode("utf-8"),
+                               "Priority": "high", "Click": h0["url"], "Tags": "rotating_light"})
+    return r.ok
+
+
 def mail(w, hits):
     """見つけた物をメールで送る (I/O)。送れたら True。"""
     lines = [f"{h['site']} ¥{h['price']:,} {h['name'][:60]}\n{h['url']}" if isinstance(h.get("price"), int)
@@ -133,11 +156,16 @@ def main(argv=None):
         hits = new_hits(found, w.get("notified"))
         sent = ""
         if hits and not a.dry_run:
-            if mail(w, hits):
+            try:
+                p = push(w, hits)
+            except Exception:                                  # noqa: BLE001
+                p = False
+            m = mail(w, hits)
+            if p or m:
                 w.setdefault("notified", []).extend(h["id"] for h in hits)
-                sent = "メール送信"
+                sent = f"通知 {'○' if p else '×'} / メール {'○' if m else '×'}"
             else:
-                sent = "⚠ メールを送れず (次の回にまた送る)"
+                sent = "⚠ 通知もメールも送れず (次の回にまた送る)"
         msgs.append(f"{w['name']}: 販売中 {len(found)}件 / 新しく見つけた {len(hits)}件 {sent}"
                     + (f" / 読めず {', '.join(errs)}" if errs else ""))
     if not a.dry_run and act:
