@@ -48,3 +48,15 @@ def test_cap_keeps_rest_in_place():
     ts = [_t("a", "c", 0), _t("h1", "h", 0), _t("b", "c", 0), _t("h2", "h", 0), _t("h3", "h", 0)]
     out, n = H.urgent_first(ts, {"h": 1}, cap=2)
     assert [t["itemID"] for t in out] == ["h1", "h2", "a", "b", "h3"] and n == 2
+
+
+def test_dry_streak_with_few_backups_goes_first():
+    ts = [_t("a", "k", 0), _t("d1", "k", 0), _t("d2", "k", 4)]
+    dry = {"d1": {"streak": 5}, "d2": {"streak": 5}}
+    out, n = H.urgent_first(ts, {}, dry=dry)
+    assert [t["itemID"] for t in out] == ["d1", "a", "d2"] and n == 1
+
+
+def test_kagoya_does_not_rest_dry_listings():
+    src = open(os.path.join(os.path.dirname(__file__), "..", "tools", "kagoya_offload.py"), encoding="utf-8").read()
+    assert "lambda e, t: False" in src and "dry=_dry" in src

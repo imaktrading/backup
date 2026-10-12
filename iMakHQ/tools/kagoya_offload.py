@@ -722,10 +722,11 @@ def build_job(today):
                                      watch=watch)
     # ★2026-10-13 売れ筋 × 補2本以下・補がよく売り切れる出品を先に (途中で止まっても先に済むように。
     #   KAGOYA は上限なしで全部探すので枠の半分の上限 (家の夜の cap) は付けない)
+    _dry = H.load_dry()
     fill, _n_hot = H.urgent_first(fill, H.load_market_sold([t.get("key") for t in fill]),
-                                  churn=H.load_churn(vals))
-    print(f"  🔥 売れ筋で補{H.URGENT_MAX_BACKUPS}本以下・補が{H.CHURN_DAYS}日で{H.CHURN_MIN}回以上売り切れを先に探す: "
-          f"{_n_hot}件 / 補充の対象 {len(fill)}件")
+                                  churn=H.load_churn(vals), dry=_dry)
+    print(f"  🔥 売れ筋で補{H.URGENT_MAX_BACKUPS}本以下・補が{H.CHURN_DAYS}日で{H.CHURN_MIN}回以上売り切れ・"
+          f"空振り続きで補{H.URGENT_MAX_BACKUPS}本以下を先に探す: {_n_hot}件 / 補充の対象 {len(fill)}件")
     # ★2026-10-04 棚② の「補優先」を先に探す (途中で止まっても先に済むように)
     _prio = H.load_shelf_priority()
     fill, swap = H.put_priority_first(fill, _prio), H.put_priority_first(swap, _prio)
@@ -737,7 +738,9 @@ def build_job(today):
     cache = H._load_cache() if _mode() == "live" else _merged_view(H)
     # ★2026-10-01 (総点検 ⑧): 入れ替え (補4〜5本) の間隔は offload.json の "swap_every_days" で変えられる
     #   (無ければ SWAP_EVERY_DAYS=2)。KAGOYA の空き時間に余裕があれば 1 にして毎日探す。
-    targets, counts = plan_job(fill, swap, restock, cache, H.load_dry(), today, H.should_skip_dry,
+    # ★2026-10-13 KAGOYA は上限なしで全部探すので、空振り続きを休ませない (休ませる理由は家の夜の枠だった)。
+    #   家の夜 (run_night_search・1晩130件) は今までどおり休ませる
+    targets, counts = plan_job(fill, swap, restock, cache, _dry, today, lambda e, t: False,
                                swap_every=swap_every_days(_cfg()))
     out, no_q = [], 0
     for t in targets:

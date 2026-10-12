@@ -191,7 +191,8 @@ def load_churn(vals):
         return {}
 
 
-def urgent_first(targets, market_sold, max_backups=URGENT_MAX_BACKUPS, churn=None, churn_min=CHURN_MIN, cap=None):
+def urgent_first(targets, market_sold, max_backups=URGENT_MAX_BACKUPS, churn=None, churn_min=CHURN_MIN, cap=None,
+                 dry=None):
     """**売れ筋 (市場で売れた実績あり) × 補が max_backups 本以下** の出品を先頭に (純関数・安定)。
 
     ★2026-10-13 ユーザー「探す優先に入れることと、補充の目視に優先的に出すこと」→「うん」。
@@ -206,6 +207,10 @@ def urgent_first(targets, market_sold, max_backups=URGENT_MAX_BACKUPS, churn=Non
 
     def hot(t):
         if ch.get(t.get("itemID"), 0) >= churn_min:    # ★2026-10-13 補がよく売り切れる出品は本数に関係なく
+            return True
+        # ★2026-10-13 ユーザー「何度探しても見つからない出品こそ、探し続ける必要があるのでは」「特に優先順位高い」:
+        #   空振りが続いて補が少ない = 仕入元が切れたら終わりで、次の個体も市場に少ない
+        if dry and int((dry.get(t.get("itemID")) or {}).get("streak") or 0) >= DRY_SKIP_AFTER                 and int(t.get("n_backups") or 0) <= max_backups:
             return True
         return ms.get(t.get("key"), 0) > 0 and int(t.get("n_backups") or 0) <= max_backups
     # cap: 先頭に出すのは cap 件まで。残りの急ぎは元の位置のまま (夜の枠を急ぎだけで埋めて、
