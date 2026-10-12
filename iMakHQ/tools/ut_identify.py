@@ -1724,12 +1724,28 @@ def past_requests(url, dir_path=CATALOG_REQ_DIR):
     return out
 
 
+def request_path(dir_path, today):
+    """今日の依頼書の置き場 (I/O)。回答済み (兄弟に _response 等がある) の物には足さず、_2, _3 … の新しい物にする。
+
+    ★2026-10-12 (B-20261012-009): 回答済みの 10/12 の依頼書に 17:34 の10件を足した。置き場では
+      済んだ扱いで配られない (ブラボーが拾ってカタログへ回した)。
+    """
+    from worktree_board import CLOSED_SUFFIXES
+    names = os.listdir(dir_path) if os.path.isdir(dir_path) else []
+    n = 1
+    while True:
+        stem = f"{today:%Y-%m-%d}_ut_not_in_catalog" + ("" if n == 1 else f"_{n}")
+        if not any(f.startswith(stem + s) for f in names for s in CLOSED_SUFFIXES):
+            return os.path.join(dir_path, stem + ".md")
+        n += 1
+
+
 def write_catalog_request(rows, dir_path=CATALOG_REQ_DIR, today=None):
-    """依頼書を書く (同じ日の分は追記)。戻り: (path, 追加件数)。書けなければ (None, 0)。"""
+    """依頼書を書く (同じ日のまだ回答の無い分は追記)。戻り: (path, 追加件数)。書けなければ (None, 0)。"""
     if not rows:
         return None, 0
     today = today or datetime.date.today()
-    path = os.path.join(dir_path, f"{today:%Y-%m-%d}_ut_not_in_catalog.md")
+    path = request_path(dir_path, today)
     try:
         existing = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
         md = request_md(rows, today, existing)
