@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import glob
 import html as _html
 import json
 import os
@@ -153,7 +154,9 @@ def _tokens(p):
     raw.append(p.get("name") or "")
     for s in raw:
         # 「すみっコぐらし UT グラフィックTシャツ コンプリートセット」は「 UT 」で切って前を採る
-        for part in re.split(r"[/／|（()）]|\s+UT(?:\s+|$)", unicodedata.normalize("NFKC", s)):
+        # ★2026-10-12 (B-20261012-005): 括弧【】「」『』も区切りにする。「【推しの子】 UT」の当て語が「【推しの子】」になり、
+        #   タイトル「推しの子 UT B小町」で候補に1件も出なかった (9/16 の「実は在った」E473120-000)
+        for part in re.split(r"[/／|（()）【】「」『』\[\]〔〕]|\s+UT(?:\s+|$)", unicodedata.normalize("NFKC", s)):
             v = norm(part)
             # 商品名に付く型の言葉を削る (「すみっコぐらし UT グラフィックTシャツ」→「すみっコぐらし」)
             v = re.sub(r"(ut)?(グラフィック)?(tシャツ|t)?$", "", v)
@@ -1530,7 +1533,9 @@ def request_md(rows, today=None, existing=""):
         "- 判定: ①カタログのデータ (公式に在ったはずの商品がカタログに無い)\n\n"
         "## 経緯\n\n"
         "メルカリの新品 UT を目視でカタログの商品に当てる画面 (`iMakHQ/tools/ut_identify.py`) で、\n"
-        "**カタログに候補が無かった**行です。海外限定・旧作・GU など、公式の検索に出ない物が多いはずです。\n"
+        "**カタログの候補に当たらなかった**行です (候補が無い / 出した候補を目視で違うと判断)。\n"
+        "参考URL の欄に「目視で出した候補」がある行は、その中に本当は在るかもしれません。在れば品番を返してください。\n"
+        "海外限定・旧作・GU など、公式の検索に出ない物が多いはずです。\n"
         "**分かる範囲で構いません。** 無い物は「無い」と返してください (出品側はその行を出しません)。\n\n"
         "- **作品名 (目視)** … 目視した人の見当 (任意・空のことがある)\n"
         "- **参考URL** … 目視した人が見つけた公式ページ等 (任意)。あれば品番はここから引けるはず\n"
@@ -1545,7 +1550,10 @@ def request_md(rows, today=None, existing=""):
             title=_cell_md(r.get("title"))[:60],
             color=_cell_md(r.get("color")), size=_cell_md(r.get("size")),
             tag=_cell_md(r.get("tag")) or "-", work=_cell_md(r.get("work")) or "-",
-            ref=_cell_md(r.get("ref")) or "-", kw=_cell_md(r.get("kw")) or "-",
+            ref=_cell_md(" ".join(x for x in [r.get("ref") or "",
+                                               ("目視で出した候補 (違うと判断): " + ", ".join(r["shown"]))
+                                               if r.get("shown") else ""] if x).strip()) or "-",
+            kw=_cell_md(r.get("kw")) or "-",
             url=r.get("url") or "",
             photos=" ".join(f"[{n}]({u})" for n, u in
                             enumerate(r.get("photos") or ([r["photo"]] if r.get("photo") else []), 1))
@@ -1694,6 +1702,26 @@ def write_character_inputs(inputs, dir_path=CATALOG_REQ_DIR):
         json.dump(out, f, ensure_ascii=False, indent=1)
     os.replace(tmp, path)
     return len([k for k in inputs if inputs[k]])
+
+
+def past_requests(url, dir_path=CATALOG_REQ_DIR):
+    """同じメルカリの出品を、前にカタログへ依頼した依頼書の名前 (I/O)。回答・済みの物も含めて探す。
+
+    ★2026-10-12 (B-20261012-005): m26495721051 (ヤムチャ 50th) は 9/13 に依頼済みで、カタログはそれで行を作ったのに、
+      10/12 にまた「無い」と依頼した。書く前に同じ URL (メルカリの番号) を過去の依頼で引く。
+    """
+    m = re.search(r"(m\d{8,})", url or "")
+    key = m.group(1) if m else (url or "").strip()
+    if not key:
+        return []
+    out = []
+    for f in sorted(glob.glob(os.path.join(dir_path, "*ut_not_in_catalog*.md"))):
+        try:
+            if key in open(f, encoding="utf-8", errors="replace").read():
+                out.append(os.path.basename(f))
+        except OSError:
+            continue
+    return out
 
 
 def write_catalog_request(rows, dir_path=CATALOG_REQ_DIR, today=None):
@@ -2038,15 +2066,20 @@ def save(items, res, now=None):
         add_led[r[C_URL].strip()] = {"decision": "skip", "product_id": p["pid"], "color": p["color"],
                                      "reason": p["reason"], "title": r[C_TITLE], "size": r[C_SIZE],
                                      "at": now}
-    req_rows = []
+    req_rows, asked_before = [], []
     for idx in res["nocat"]:
         it = by_idx.get(idx)
         if not it:
             continue
         r = it["row"]
+        _past = past_requests(r[C_URL])
+        if _past:
+            asked_before.append((r[C_URL].strip(), _past))
         photos = _own_photos(r)
         _info = (res.get("nocat_info") or {}).get(idx) or {}
-        req_rows.append({"url": r[C_URL].strip(), "title": r[C_TITLE], "color": r[C_COLOR],
+        if not _past:                                  # 前に依頼済みなら書かない (下で件数を出す)
+            req_rows.append({"url": r[C_URL].strip(), "title": r[C_TITLE], "color": r[C_COLOR],
+                         "shown": [c["pid"] for c in (it.get("cands") or [])][:5],
                          "size": r[C_SIZE], "tag": r[C_TAG], "kw": r[C_KW],
                          "photo": photos[0] if photos else "", "photos": photos[:10],
                          "work": _info.get("work", ""),
@@ -2066,6 +2099,9 @@ def save(items, res, now=None):
     req_path, n_req = write_catalog_request(req_rows, CATALOG_REQ_DIR)
     if n_req:
         print(f"  📮 カタログに追加依頼: {n_req}件 → {os.path.basename(req_path)}")
+    # ★走行ログで「動いた」が分かる1行 (0件でも出す)
+    print(f"  📮 前に依頼済みなので書かなかった: {len(asked_before)}件"
+          + "".join(f" / {u[-14:]} ({', '.join(f[:10] for f in fs)})" for u, fs in asked_before[:5]))
     if works_added:
         print(f"  📝 英語の作品名を対応表に足した: {works_added}件 → iMakMercari/ut_title_names.yaml")
     n_pref = save_img_prefs([p for p in res["picks"] if p.get("pid") in catalog])
