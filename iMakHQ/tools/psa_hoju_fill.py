@@ -142,6 +142,26 @@ def rotate_by_last_shown(targets, last_shown):
     return sorted(targets or [], key=lambda t: ls.get(str(t.get("itemID")), ""))
 
 
+URGENT_MAX_BACKUPS = 2      # 売れ筋でこの本数以下 = 先に探す・先に目視に出す
+
+
+def urgent_first(targets, market_sold, max_backups=URGENT_MAX_BACKUPS):
+    """**売れ筋 (市場で売れた実績あり) × 補が max_backups 本以下** の出品を先頭に (純関数・安定)。
+
+    ★2026-10-13 ユーザー「探す優先に入れることと、補充の目視に優先的に出すこと」→「うん」。
+      バリヤード CLK 013/032 は補11本を入れたのに5日で全部売れ (市場で買い集められた)、売れた時に
+      補2本・その日のうちに0本。夜の探索は「古い順の一巡」だけ、目視は「前に出した順」が売れ筋の並びに勝ち、
+      取り合いのカードが後ろに回っていた。組の中の順 (古い順・前に出した順) はそのまま残す。
+    戻り: (並べ替えた list, 先頭に出した件数)
+    """
+    ms = market_sold or {}
+
+    def hot(t):
+        return ms.get(t.get("key"), 0) > 0 and int(t.get("n_backups") or 0) <= max_backups
+    out = sorted(targets or [], key=lambda t: not hot(t))
+    return out, sum(1 for t in out if hot(t))
+
+
 def load_market_sold(keys):
     """KEY → 市場で売れた数 (Terapeak の台帳)。読めなければ {} = 今までどおりの並び (I/O)。"""
     try:
@@ -1274,6 +1294,9 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
         label = "RESTOCK候補"       # 呼び手が対象を決めた(= 再仕入れ候補の先読み)
     cache = {} if fresh else _load_cache()
     todo = targets if fresh else targets_needing_search(targets, cache, today)
+    # ★2026-10-13 売れ筋 × 補2本以下を先に探す (limit で切られて取り合いのカードが後回しにならないように)
+    todo, _n_hot = urgent_first(todo, load_market_sold([t.get("key") for t in todo]))
+    print(f"🔥 売れ筋で補{URGENT_MAX_BACKUPS}本以下を先に探す: {_n_hot}件 / 探す対象 {len(todo)}件", flush=True)
     # ★2026-10-04 棚② の「補優先」は夜の検索でも先に探す (limit で切られて後回しにならないように)
     todo = put_priority_first(todo, load_shelf_priority())
     total_targets = len(targets)
@@ -2777,6 +2800,10 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     # ★2026-09-19: **前に出した順**に回す (ユーザー「全部に順番が回るようにしたい」)。
     #   並びが毎回同じで、1回に見る件数を超えた分は毎回同じ顔ぶれしか出ていなかった。
     targets = rotate_by_last_shown(targets, load_last_shown())
+    # ★2026-10-13 売れ筋 × 補2本以下を一番上の組に (組の中は前に出した順のまま回す)
+    if min_backups < CONFIRM_MAX_BACKUPS:
+        targets, _n_hot = urgent_first(targets, _msold)
+        print(f"  🔥 売れ筋で補{URGENT_MAX_BACKUPS}本以下を先に出す: {_n_hot}件 / 対象 {len(targets)}件", flush=True)
     if min_backups >= CONFIRM_MAX_BACKUPS:             # 入れ替えボタン単独: クリックされない出品から先に
         targets = put_priority_first(targets, load_swap_priority())
     # ★2026-10-04 棚② の新ルール: 落とす前に「補優先」と決めた出品は、補充・入れ替えとも一番先に出す
