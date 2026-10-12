@@ -40,9 +40,13 @@ _RE_PSA_SKU = re.compile(r"^PSA10-(\d{6,10})$")
 #   20:13 の 🤖自動 が同じ行を「未出品」として選び直し → eBay が重複で拒否 →
 #   1件目で止まる設計なので **同じ走行の他10件も出品されなかった**。
 #   同日「スニダンだけ見ていない」は3件目 (種の値段 / 補URLの値段 / これ)。
-_RE_SUPPLY_SKU = re.compile(r"^(m\d{8,}|[A-Z0-9]{10}|\d{6,10})$")
+# ★2026-10-12: **ラクマが入っていなかった**。Tシャツのラクマ仕入は SKU = ラクマの出品番号の末尾8桁 (16進・
+#   tshirt_listing.py)。10/12 の🤖自動で出した11件のうち8件 (ラクマ) の itemID が書き戻されず、
+#   「書き戻し漏れ 0件」と出ていた = 監視くんが取り下げられない出品 (fail-OPEN)。広告8% も付かなかった。
+_RE_SUPPLY_SKU = re.compile(r"^(m\d{8,}|[A-Z0-9]{10}|\d{6,10}|[0-9a-f]{8})$")
 _RE_SUPPLY_URL = re.compile(r"/dp/([A-Z0-9]{10})|/item/(m\d+)|/shops/product/([A-Za-z0-9]+)"
-                            r"|snkrdunk\.com/apparels/\d+/used/(\d+)")
+                            r"|snkrdunk\.com/apparels/\d+/used/(\d+)"
+                            r"|fril\.jp/[0-9a-f]*([0-9a-f]{8})(?![0-9a-f])")
 
 
 def build_live_index(live: dict) -> tuple[dict, dict]:

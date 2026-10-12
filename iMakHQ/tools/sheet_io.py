@@ -963,6 +963,11 @@ def supply_id_from_url(url):
     ここ1か所にする。
     """
     import re as _re
+    # ★2026-10-12 ラクマ: SKU は出品番号の末尾8桁 (tshirt_listing.py)。入っていなかったため、Tシャツ🤖自動の
+    #   ラクマ仕入8件に広告8% が付かず、入稿直前の在庫確認も効いていなかった (itemID 書戻しも同じ穴)
+    m = _re.search(r"fril\.jp/([0-9a-f]{8,})", url or "")
+    if m:
+        return m.group(1)[-8:]
     for pat in (r"/item/(\w+)",              # メルカリ  /item/m123...
                 r"/shops/product/(\w+)",     # メルカリShops
                 r"/used/(\w+)",              # SNKRDUNK  /apparels/520558/used/49216166
