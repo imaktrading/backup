@@ -47,6 +47,9 @@
 
   var HIDDEN_KINDS = ["restock_build", "restock_wb",   // PSA 再仕入れ ②③ (① から続けて走る・2026-10-04)
                       "sold_restock"];                  // 売れた分を補充 (目視なし・毎晩自動。ユーザー「ボタン化する意味ある？」10/4)
+  // 今日やることにだけ出さない (ボタンは新規出品のページに残す)。
+  // ★2026-10-12 ユーザー「目視特定だけ、今日やることに出さなくていい」: 件数は KEY 埋めだけで、出品の仕事は 🤖自動 の目視が拾う
+  var NOT_TODAY_KINDS = ["ut_identify"];
   var jobs = {}, jobList = [], buttons = [], running = null, logAfter = 0, toastTimer, drawerHidden = true, schLoaded = false;
   // 今日やることの「状態の1行」と「期限のある物」(2026-09-29)。各所が材料を入れ、renderStrip が描く
   var STRIP = { counts: null, night: null, watch: null, integrity: null, errors: [], offer: null, order: null }, autoRecounted = false;
@@ -279,7 +282,7 @@
   }
 
   function paintToday() {
-    var todo = todoOf(jobList);
+    var todo = todoOf(jobList).filter(function (j) { return NOT_TODAY_KINDS.indexOf(j.kind) < 0; });
     var elsewhere = todo.filter(function (j) { return !j.runnable; }).length;
     $("kp-todo").textContent = todo.length;
     $("kp-total").textContent = sum(todo, function (j) { return j.n; }).toLocaleString("ja-JP");
