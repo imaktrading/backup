@@ -203,7 +203,7 @@ button.cell:disabled{opacity:.5;cursor:default}
 .hojutop .ht .row{display:flex;align-items:center;gap:8px}
 .hojutop .ht .n{font:500 22px/1 var(--f-mono);min-width:34px}
 .hojutop .ht .n.todo{color:var(--ai)} .hojutop .ht .n.zero{color:var(--ink-3)}
-@media (max-width:720px){.hojutop{grid-template-columns:1fr}}
+/* 幅が狭くても横に3つ (ユーザー「並んでない」2026-10-13) */
 td.hot{background:color-mix(in srgb,var(--ai-soft) 55%,transparent)}
 .list{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
 .li{padding:14px 18px 14px 22px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);
