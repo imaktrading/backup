@@ -96,7 +96,8 @@ def test_入れ替えの基準は今の5本の一番高い値段():
 def test_補URLの値段が1本でも分からなければ仕入値のまま():
     aux = [f"https://a/{i}" for i in range(5)]
     prices = {H._norm_url(u): 5800 for u in aux[:4]}
-    assert H.swap_baseline(9000, {"row": 2}, _vals_with_aux(aux), prices) == 9000
+    assert H.swap_baseline(9000, {"row": 2}, _vals_with_aux(aux), prices) == 5800   # ★2026-10-13 分かる値段の一番高い補と比べる
+    assert H.swap_baseline(9000, {"row": 2}, _vals_with_aux(aux), {}) == 9000      # 1本も分からない時だけ仕入値
 
 
 # ── 安い既存の補URLを押し出さない (同日 ユーザー「安いのを捨てたらあかんやろ」) ──
