@@ -634,6 +634,51 @@ def build_confirm_html(items):
             f"<div id='done'></div>{ZOOM_OVERLAY}<script>{_JS}{ZOOM_JS}</script></body></html>")
 
 
+SEEN_MIN_VISIBLE_MS = 3000      # 画面が前に出て見えていた時間がこれ未満の確定は受け付けない
+EDGE_EXE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+
+# ★2026-10-13 ユーザー「HTML出ずに確定したことが問題では？」「勝手に確定にならない仕組みも入れて」。
+#   補URL③ 補0本の2回目 (09:49) は、画面が Edge の裏で開いて目に入らないまま確定が届き、16行に59本書かれた
+#   (戻した)。候補は最初からチェック済みなので、確定1回で全部「同じ」になる。
+#   画面が「前に出て見えていた時間」と「人の操作 (isTrusted のクリック・キー)」を確定に添えて送らせ、
+#   受け口で足りなければ断る。プログラムの .click() は isTrusted にならないので数えない。
+SEEN_GUARD_JS = """<script>(function(){var t0=Date.now(),vis=0,acts=0,last=Date.now();
+function tick(){var n=Date.now();if(document.visibilityState==='visible'&&document.hasFocus())vis+=n-last;last=n;}
+setInterval(tick,250);
+['pointerdown','keydown'].forEach(function(ev){document.addEventListener(ev,function(e){if(e.isTrusted)acts++;},true);});
+var of=window.fetch;window.fetch=function(u,o){o=o||{};
+ if(String(o.method||'GET').toUpperCase()==='POST'){tick();
+  var h={};try{if(o.headers)Object.keys(o.headers).forEach(function(k){h[k]=o.headers[k];});}catch(e){}
+  h['X-Seen']=JSON.stringify({open_ms:Date.now()-t0,visible_ms:vis,acts:acts});o.headers=h;}
+ return of.call(window,u,o).then(function(r){if(r.status===409){return r.json().then(function(j){
+  alert((j&&j.error)||'受け付けませんでした');return new Promise(function(){});});}return r;});};})();</script>""".encode("utf-8")
+
+
+def seen_check(header, min_visible_ms=SEEN_MIN_VISIBLE_MS):
+    """確定に添えられた X-Seen → (受け付けるか, 走行ログの1行) (純関数)。読めなければ断る (fail-closed)。"""
+    try:
+        s = json.loads(header or "")
+        vis, acts, op = int(s.get("visible_ms") or 0), int(s.get("acts") or 0), int(s.get("open_ms") or 0)
+    except (TypeError, ValueError, AttributeError):
+        return False, "🛡 確定を断った: 画面の見え方が分からない (古い画面か、画面以外から届いた)"
+    desc = f"開いてから {op // 1000}秒 / 前に出て見えていた {vis // 1000}秒 / 人の操作 {acts}回"
+    if vis < min_visible_ms or acts < 1:
+        return False, f"🛡 確定を断った: {desc} (見えていない・人が押していない)"
+    return True, f"🛡 確定を受けた: {desc}"
+
+
+def open_in_front(url):
+    """目視の画面を Edge の新しい窓で開く (裏のタブに紛れないように)。Edge が無ければ既定のブラウザ。"""
+    try:
+        if os.path.exists(EDGE_EXE):
+            import subprocess
+            subprocess.Popen([EDGE_EXE, "--new-window", url])
+            return
+    except Exception:                                          # noqa: BLE001
+        pass
+    webbrowser.open(url)
+
+
 def _serve_confirm(page_bytes, extract, timeout, api=None):
     """page を /img プロキシ付きで配信し、POST(JSON)を extract(data)->result で受けて返す。
 
@@ -646,6 +691,9 @@ def _serve_confirm(page_bytes, extract, timeout, api=None):
            確定 (POST) は従来どおり1回きりで、api は何度呼んでも画面を閉じない。
     """
     state = {"done": False, "result": None}
+    pb = page_bytes if isinstance(page_bytes, (bytes, bytearray)) else str(page_bytes).encode("utf-8")
+    page_bytes = (pb.replace(b"</body>", SEEN_GUARD_JS + b"</body>", 1) if b"</body>" in pb
+                  else pb + SEEN_GUARD_JS)
 
     class H(http.server.BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -698,6 +746,18 @@ def _serve_confirm(page_bytes, extract, timeout, api=None):
                 data = json.loads(self.rfile.read(ln) or b"{}")
             except Exception:
                 data = {}
+            ok, line = seen_check(self.headers.get("X-Seen"))
+            print(f"  {line}", flush=True)                 # ★走行ログで分かる1行 (受けても断っても出す)
+            if not ok:
+                body = json.dumps({"error": "画面が前に出て見えていない間の確定なので、受け付けませんでした。"
+                                            "答えはそのまま残っています。見比べてから、もう一度「確定」を押してください。"},
+                                  ensure_ascii=False).encode("utf-8")
+                self.send_response(409)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             state["result"] = extract(data)
             state["done"] = True
             self.send_response(200)
@@ -713,7 +773,7 @@ def _serve_confirm(page_bytes, extract, timeout, api=None):
     print(f"  ブラウザで確認してください → {url}", flush=True)
     if os.environ.get("IMAK_NO_BROWSER") != "1":
         try:
-            webbrowser.open(url)
+            open_in_front(url)
         except Exception:
             pass
     deadline = time.time() + timeout

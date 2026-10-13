@@ -1288,8 +1288,12 @@ def _run_worker(script, cmd=None):
                 _m = _REVIEW_RE.search(line)
                 if _m:
                     try:
-                        import webbrowser
-                        webbrowser.open(_m.group(1))
+                        # ★2026-10-13 目視の画面が Edge の裏のタブで開き、見えないまま確定が届いた。新しい窓で前に出す
+                        if os.path.exists(EDGE):
+                            subprocess.Popen([EDGE, "--new-window", _m.group(1)])
+                        else:
+                            import webbrowser
+                            webbrowser.open(_m.group(1))
                     except Exception:                          # noqa: BLE001
                         pass
             if fh:
