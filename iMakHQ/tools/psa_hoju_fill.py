@@ -70,7 +70,7 @@ CONFIRM_MAX_BACKUPS = 4             # 補<4 = **3本以下**で発動
 SWAP_MIN_GAIN = 1000
 # 補が足りない札 (補3本以下) で許す仕入値の上限 = 今の仕入値の何倍まで。
 # ★2026-09-19 ユーザー確定 1.5倍。0 や None にすると青天井になるので必ず値を入れる。
-BACKFILL_MAX_RATIO = 1.5                # 入れ替えは「今より ¥1,000以上 安い」候補だけ目視に出す
+BACKFILL_MAX_RATIO = 1.5                # 補2〜3本の補充は今の仕入値の1.5倍まで (補0〜1本は上限なし 2026-10-13)
 HIGH_SHEET_ID = "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk"
 HIGH_GID = 851100680
 
@@ -999,7 +999,7 @@ def _row_cost_and_dead(t, vals):
     return (int(d) if d else None), bool(str(_cell_(3) or "").strip())   # D列 = 売り切れ
 
 
-def candidate_cost_conflicts(price, now_cost, main_dead, min_gain=0):
+def candidate_cost_conflicts(price, now_cost, main_dead, min_gain=0, n_backups=None):
     """その候補を **目視に出す価値が無い** か (純関数, test可)。
 
     ★2026-09-08 ユーザー確定。補URLは「主が売れた時に買う先」なので、
@@ -1023,6 +1023,12 @@ def candidate_cost_conflicts(price, now_cost, main_dead, min_gain=0):
     if main_dead:
         return False
     if not min_gain:
+        # ★2026-10-13 ユーザー確定「補がないよりは、高くてもあった方がいい」「補0〜1本の出品だけね」:
+        #   補0〜1本は 1.5倍の上限を外す。補で仕入れる時は監視くんが M列をその値段にし、出品価格も
+        #   そこから上がるので赤字にならない (赤字は 主が切れてから値段が直るまでの間に売れた時だけ)。
+        #   補2〜3本は 1.5倍までのまま。¥70,000 の上限は候補を作る段で全部に残る。
+        if n_backups is not None and n_backups <= 1:
+            return False
         if price is None or not now_cost:
             return False               # 判定材料が無い = 落とさない (従来どおり)
         return price > now_cost * BACKFILL_MAX_RATIO
@@ -1045,6 +1051,10 @@ def min_gain_for(t):
     return SWAP_MIN_GAIN if (t or {}).get("n_backups", 0) >= CONFIRM_MAX_BACKUPS else 0
 
 
+# ★2026-10-13 補0〜1本で 1.5倍を超えたが上限を外したので目視に出した候補の数 (走行ログ用)
+HIGH_KEPT_LOW_BACKUP = {"cands": 0}
+
+
 def filter_candidates_by_cost(cands, t, vals):
     """今の仕入値より高い候補を除く (入れ替えは ¥1,000以上安くない分も除く)。
 
@@ -1063,8 +1073,11 @@ def filter_candidates_by_cost(cands, t, vals):
         p = prices.get(_norm_url(c.get("url")))
         if p is None and isinstance(c.get("price"), int) and c["price"] > 0:
             p = c["price"]                     # 値段表に無い時は候補が持っている値段 (目視待ちの棚卸しが書いた今の値段)
-        (drop if candidate_cost_conflicts(p, now_cost, main_dead, min_gain)
+        (drop if candidate_cost_conflicts(p, now_cost, main_dead, min_gain, t.get("n_backups"))
          else keep).append(c)
+        if (not min_gain and not main_dead and p and now_cost and p > now_cost * BACKFILL_MAX_RATIO
+                and (t.get("n_backups") is not None and t.get("n_backups") <= 1)):
+            HIGH_KEPT_LOW_BACKUP["cands"] += 1
     return keep, drop
 
 
@@ -3108,6 +3121,8 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     no_cardno, no_ref = stats["no_cardno"], stats["no_ref"]
     no_cand_after_filter = (stats["all_known"] + stats["all_number"] + stats["all_ng"]
                             + stats["all_used"] + stats["all_art"])
+    print(f"💴 補0〜1本で今の仕入値の1.5倍を超えたが目視に出した候補: {HIGH_KEPT_LOW_BACKUP['cands']}候補 "
+          f"(補2〜3本は1.5倍まで / ¥70,000 の上限は全部に残す)", flush=True)
     print(f"昼確認: 対象(補<{max_backups}) {len(targets)}件 / キャッシュ未取得skip {no_cache} / "
           f"候補なしskip {no_cand} / 探索不能skip {no_cardno} / 現物画像なしskip {no_ref} / "
           f"既知URL除外 {stats['cand_known']}候補 / 番号不一致で除外 {stats['cand_number']}候補 / "

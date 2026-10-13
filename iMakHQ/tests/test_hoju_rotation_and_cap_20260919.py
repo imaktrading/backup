@@ -40,3 +40,13 @@ def test_入れ替えは1000円以上安い物だけ():
     now = 34444
     assert H.candidate_cost_conflicts(now - 1500, now, False, H.SWAP_MIN_GAIN) is False
     assert H.candidate_cost_conflicts(now - 500, now, False, H.SWAP_MIN_GAIN) is True
+
+
+def test_backups_0_1_have_no_ratio_cap():
+    # ★2026-10-13 ユーザー「補がないよりは、高くてもあった方がいい」「補0〜1本の出品だけね」
+    for nb in (0, 1):
+        assert H.candidate_cost_conflicts(30000, 5000, False, 0, nb) is False
+    for nb in (2, 3):
+        assert H.candidate_cost_conflicts(9000, 5000, False, 0, nb) is True
+        assert H.candidate_cost_conflicts(7000, 5000, False, 0, nb) is False
+    assert H.candidate_cost_conflicts(9000, 5000, False, 1000, 1) is True     # 入れ替えは今までどおり
