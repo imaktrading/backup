@@ -49,7 +49,7 @@ def test_値段が分からない候補は落とさない():
 def test_閾値は補URLの本数で決まる_ボタンの引数ではない():
     """パネルの件数(count_workload)と実走行が同じ関数を通るので、ここ1か所で決める。"""
     assert H.min_gain_for({"n_backups": 5}) == H.SWAP_MIN_GAIN
-    assert H.min_gain_for({"n_backups": 4}) == H.SWAP_MIN_GAIN   # 入れ替えの下限
+    assert H.min_gain_for({"n_backups": 4}) == 0                 # ★2026-10-13 補4本は空き枠に足すだけ = 差額を求めない
     assert H.min_gain_for({"n_backups": 3}) == 0                 # ここから補充
     assert H.min_gain_for({"n_backups": 0}) == 0
     assert H.min_gain_for({}) == 0
