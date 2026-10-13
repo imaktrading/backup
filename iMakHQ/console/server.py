@@ -233,6 +233,9 @@ def summarize(d, nightly_ok=False):
                 note = (note + " / " if note else "") +                     "答えたら 仕入元の照合 %d件 に進みます" % _num(p.get("actionable"))
             if kind == "shelf_evict" and n:
                 note = (note + " / " if note else "") + shelf_note(p)
+            # ★2026-10-13 (B-20261013-002) 在庫0の出品に来ているオファーは件数に入れず、隠さずに書き添える
+            if kind == "offer_calc" and _num(p.get("soldout")):
+                note = (note + " / " if note else "") + "在庫0の出品に %d件 (押すと画面の下に仕入元と一緒に出ます)" % _num(p.get("soldout"))
             if kind == "sold_restock" and _num(p.get("unknown")):
                 note = (note + " / " if note else "") + "判定できない %d件 (押しても動きません)" % _num(p.get("unknown"))
             put(kind, n, n > 0, note, hold)

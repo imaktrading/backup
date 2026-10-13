@@ -173,7 +173,7 @@ def count_workload():
 
     戻り: {"actionable": オファーの数, "items": 出品の数, "error": 読めなかった理由}
     """
-    out = {"actionable": 0, "items": 0, "error": ""}
+    out = {"actionable": 0, "items": 0, "soldout": 0, "error": ""}
     try:
         import re as _re
         sys.path.insert(0, r"C:\dev\iMak\iMakeBayAPI")
@@ -196,11 +196,13 @@ def count_workload():
                             t, _re.S)
             if pr and n >= int(pr.group(1)):
                 break
-        # ★2026-10-12 在庫0の出品のオファーは数えない (画面に出さない物を件数に入れない)
+        # ★2026-10-12 在庫0の出品のオファーは「対応する」件数に入れない。
+        # ★2026-10-13 (B-20261013-002) ただし隠さず別に数える (同じ出品に来ていた別の人のオファー)
         for _iid in list(by_item):
             _gi = fx.post("GetItem", f"<ItemID>{_iid}</ItemID><DetailLevel>ReturnSummary</DetailLevel>",
                           tok, site="0")
             if available_qty(_gi) == 0:
+                out["soldout"] += len(_re.findall(r"<BestOffer>", by_item[_iid].get("xml") or ""))
                 del by_item[_iid]
         out["items"] = len(by_item)
         out["actionable"] = sum(len(_re.findall(r"<BestOffer>", v.get("xml") or ""))
@@ -313,9 +315,11 @@ def fetch_offers():
         # 4) SKU (= 仕入元 mercari item ID) と 出品価格 を取る
         gi = fx.post("GetItem", f"<ItemID>{iid}</ItemID><DetailLevel>ReturnAll</DetailLevel>",
                      tok, site="0")
-        if available_qty(gi) == 0:
-            _no_stock.append(iid)          # ★2026-10-12 在庫0 (親が売れたミラー等) のオファーは出さない
-            continue
+        # ★2026-10-13 (B-20261013-002・ユーザー「仕入元があれば応じれるでしょ。その辺が分かりにくい」):
+        #   在庫0 (親が売れたミラー等) のオファーは、普通のオファーとは分けて補URLの本数と一緒に出す (隠さない)
+        _soldout = available_qty(gi) == 0
+        if _soldout:
+            _no_stock.append(iid)
         m = re.search(r"<SKU>(.*?)</SKU>", gi)
         sku = m.group(1) if m else ""
         # 出品価格/通貨/URL は GetItem から (GetBestOffers は返さない)
@@ -433,10 +437,12 @@ def fetch_offers():
                 # ★2026-10-07 仕入れ先を探す (psa_sold_cheapest --offers) が商品管理シートの行を引けるように
                 #   (豪州等のミラーの番号では引けず、タイトルだけで探していた)
                 "sku": sku, "usItem": (parent or {}).get("iid", "") if parent else "",
+                "soldout": _soldout,
             })
     # ★走行ログで「動いた」が分かる1行 (0件でも出す)
-    print(f"⏭ 在庫0の出品のオファーは出さない: {len(_no_stock)}件 / オファー付き {len(items)}出品"
-          + (f" ({', '.join(_no_stock)})" if _no_stock else ""))
+    _so = [o for o in out if o.get("soldout")]
+    print(f"📦 在庫0の出品のオファー: {len(_so)}件 (補あり {sum(1 for o in _so if o.get('supply'))}件)"
+          f" / オファー付き {len(items)}出品" + (f" ({', '.join(_no_stock)})" if _no_stock else ""))
     out.sort(key=lambda o: o["expire"])
     return out
 
@@ -953,8 +959,35 @@ document.getElementById('eucty').addEventListener('change', render);
      来ている全件を1枚の表にして、各件の **オファー額の利益 (16行目相当)** と
      **出品価格のままの利益 (9行目相当)**、**いくらまで通るか** を並べる。
      計算は下の内訳と同じ calc() を使う (プロモは外した前提 = 承諾時の見方)。 */
+  /* ★2026-10-13 (B-20261013-002) 在庫0の出品に来ているオファー (同じ出品に来ていた別の人) を分けて出す。
+     補URL があれば在庫を戻せば応じられる。戻す操作はまだ無い (発送前は出し直さない決まりの例外になるため、ユーザーに確認中) */
+  function soldoutTable(){
+    var so = [];
+    P.offers.forEach(function(o, i){ if (o.soldout) so.push([o, i]); });
+    if (!so.length) return '<div style="color:#888;font-size:12px;margin-top:10px">在庫0の出品に来ているオファー: 0件</div>';
+    var rows = so.map(function(p){
+      var o = p[0], i = p[1];
+      var ov = {dest: o.dest, cat: o.cat, cost: o.cost, pt: 0, list: o.list, promo: 0};
+      var r = calc(o.price, ov);
+      var has = (+o.supply || 0) > 0;
+      return '<tr class="orow ' + (has ? 'warn' : 'ng') + '" data-i="' + i + '">'
+        + '<td>' + (o.title || '').slice(0, 38) + '<br><span style="color:#888;font-size:11px">'
+          + o.destLabel + '／期限 ' + o.expire + '／' + o.buyer + '</span></td>'
+        + '<td><b>' + o.sym + (+o.price).toFixed(2) + '</b></td>'
+        + '<td>' + (o.cost ? yen(r.profit) : '—') + '<br><span style="color:#888;font-size:11px">仕入値 '
+          + (o.cost ? '¥' + (+o.cost).toLocaleString() : '—') + '</span></td>'
+        + '<td>' + (has ? '補URL ' + o.supply + '本' : '<b style="color:#f88">仕入元なし</b>') + '</td>'
+        + '<td>' + (has ? '⚠️ 在庫を戻せば応じられる (戻す操作は未対応)' : '🚫 応じられない') + '</td></tr>';
+    }).join('');
+    return '<h3 style="margin:14px 0 4px;font-size:14px">📦 在庫0の出品に来ているオファー (同じ出品に来ていた別の人) '
+      + so.length + '件</h3>'
+      + '<table class="otbl"><tr><th>出品／バイヤー</th><th>オファー</th><th>この額の利益</th><th>仕入元</th><th>判定</th></tr>'
+      + rows + '</table>';
+  }
+
   (function(){
     var rows = P.offers.map(function(o, i){
+      if (o.soldout) return '';
       var ov = {dest: o.dest, cat: o.cat, cost: o.cost, pt: 0, list: o.list, promo: 0};
       var r = calc(o.price, ov), be = solve(0, ov);
       var lp = (+o.list || 0) > 0 ? calc(o.list, ov) : null;
@@ -980,7 +1013,8 @@ document.getElementById('eucty').addEventListener('change', render);
       + '<th>この額の利益</th><th>出品価格のまま</th><th>ここまでなら</th><th>判定</th></tr>'
       + rows + '</table>'
       + '<div style="color:#888;font-size:11px;margin-top:4px">'
-      + 'プロモを外した前提（承諾時の見方）。行をクリックすると下に内訳が出ます</div>';
+      + 'プロモを外した前提（承諾時の見方）。行をクリックすると下に内訳が出ます</div>'
+      + soldoutTable();
     Array.prototype.forEach.call(document.querySelectorAll('.orow'), function(tr){
       tr.addEventListener('click', function(){
         sel.value = tr.getAttribute('data-i');

@@ -30,4 +30,5 @@ def test_unreadable_is_not_hidden():
 def test_list_and_count_both_filter():
     src = open(os.path.join(os.path.dirname(__file__), "..", "tools", "offer_calc.py"), encoding="utf-8").read()
     assert src.count("available_qty(") >= 3          # 定義 + 画面 + 件数
-    assert "在庫0の出品のオファーは出さない" in src
+    # ★2026-10-13 (B-20261013-002) 隠さず、分けて仕入元と一緒に出す
+    assert '"soldout": _soldout' in src and "soldoutTable" in src and "在庫0の出品のオファー:" in src
