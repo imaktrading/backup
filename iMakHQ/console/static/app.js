@@ -9,8 +9,8 @@
   var MATRIX = {
     hoju: {
       title: "補URL", target: "出品中 (在庫あり)", purpose: "予備の仕入元を足す・安い仕入元に入れ替える",
-      cols: ["① 当日分", "② 夜に探す", "③ 補0本だけ", "③ 補充 (補が3本以下)", "③ 入れ替え (補4〜5本)"],
-      rows: [["PSA", ["hoju_search_now", "hoju_search", "hoju_zero", "hoju_confirm", "hoju_swap"]],
+      cols: ["① 当日分", "② 夜に探す", "③ 補が少ない (0本・1本)", "③ 補充 (補が3本以下)", "③ 入れ替え (補4〜5本)"],
+      rows: [["PSA", ["hoju_search_now", "hoju_search", ["hoju_zero", "hoju_one"], "hoju_confirm", "hoju_swap"]],
              ["UT", ["ut_search_now", "ut_search", null, "ut_confirm", "ut_swap_confirm"]],
              ["一番くじ", [null, "kuji_search", null, "kuji_confirm", null]]]
     },
@@ -24,6 +24,7 @@
     }
   };
   var SHELF_KINDS = ["cull_end", "shelf_evict"];
+  var HALF_LABEL = { hoju_zero: "補0本", hoju_one: "補1本" };
   var SEED_KINDS = ["ut_identify", "newcand", "newcand_high"];
   var INFO = {   // 画面だけの短い説明 (control_panel の tip は長いので見出し用に短く)
     ut_identify: "メルカリの新品 UT をカタログに当てる",
@@ -103,7 +104,7 @@
   // ---------------------------------------------------------------- 在庫メンテ
   function matrix(id, m) {
     var kinds = [];
-    m.rows.forEach(function (r) { r[1].forEach(function (k) { if (k) kinds.push(k); }); });
+    m.rows.forEach(function (r) { r[1].forEach(function (k) { [].concat(k || []).forEach(function (x) { if (x) kinds.push(x); }); }); });
     if (m.side) kinds.push(m.side.kind);
     var list = kinds.map(job).filter(Boolean);
     var todo = todoOf(list);
@@ -118,6 +119,18 @@
 
     var body = m.rows.map(function (r, ri) {
       var tds = r[1].map(function (k) {
+        // ★2026-10-13 1つの枠に2つ (["hoju_zero","hoju_one"]) = 半分の高さで縦に並べる
+        if (Array.isArray(k)) {
+          var js = k.map(job).filter(Boolean);
+          var anyHot = js.some(function (j) { return j.state === "todo"; });
+          return '<td class="pad' + (anyHot ? " hot" : "") + '"><div class="halves">' + js.map(function (j) {
+            var hot = j.state === "todo";
+            return openTag(j, "cell half", "", ' title="' + esc(tipOf(j)) + '"') +
+              '<span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" +
+              '<span class="lb">' + esc(HALF_LABEL[j.kind] || "") + "</span>" +
+              '<span class="act">' + goMark(j) + "</span>" + closeTag(j);
+          }).join("") + "</div></td>";
+        }
         var j = k && job(k);
         if (!j) return '<td class="pad"><div class="cell na">この段は無し</div></td>';
         var hot = j.state === "todo";
@@ -446,7 +459,7 @@
   function paintLeftovers() {
     var placed = {};
     Object.keys(MATRIX).forEach(function (k) {
-      MATRIX[k].rows.forEach(function (r) { r[1].forEach(function (x) { if (x) placed[x] = 1; }); });
+      MATRIX[k].rows.forEach(function (r) { r[1].forEach(function (x) { [].concat(x || []).forEach(function (y) { if (y) placed[y] = 1; }); }); });
       if (MATRIX[k].side) placed[MATRIX[k].side.kind] = 1;
     });
     SHELF_KINDS.concat(SEED_KINDS).forEach(function (k) { placed[k] = 1; });

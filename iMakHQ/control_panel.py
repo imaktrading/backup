@@ -1854,6 +1854,22 @@ SCRIPTS = [
                      "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk/edit#gid=851100680"),
     },
     {
+        # ★2026-10-13 ユーザー「補0本のボタンサイズを半分にして、同じ大きさで補1本ボタンを追加して」
+        #   「補が少ないボタンが独立している方が、分かりやすいわ」
+        "category": None, "type": "utility",
+        "label": "🚨 PSA 補URL ③ 補1本",
+        "tip": "予備の仕入元が1本だけの出品を出す。あと1本切れたら補0本になる。"
+               "夜に溜めた候補を現物と見比べて、同じ物だけ書く。1回15件ずつ。",
+        "badge": "hoju_one",
+        "label_fg": "#c63",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_hoju_fill.py", "confirm", "--min-backups=1", "--max-backups=2", "--limit=15"],
+        "params": [],
+        "skip_postprocess": True,
+        "open_url": ("https://docs.google.com/spreadsheets/d/"
+                     "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk/edit#gid=851100680"),
+    },
+    {
         # slice3: cache済候補を現物と視覚確証(ブラウザ)→正変種だけ補URL(AC-AG)へ既存保持+空き枠冪等書込。主URL不可触。
         "category": None, "type": "utility",
         "label": "🩹 PSA 補URL ③ 補充",
@@ -4310,7 +4326,7 @@ class ListingPanel:
     #   押した後に減っていないように見えた。**残り** と **今回** を分けて出す。
     #   数字は SCRIPTS の cmd (--limit) と各モジュールの CAP が正。ここに写さない。
     # ★2026-09-13: UT も PSA と同じ4ボタンにしたので、1回で押せる上限も同じ形に持つ
-    PRESS_CAP = {"hoju_search_now": 15, "hoju_confirm": 15, "hoju_swap": 15, "hoju_zero": 15,
+    PRESS_CAP = {"hoju_search_now": 15, "hoju_confirm": 15, "hoju_swap": 15, "hoju_zero": 15, "hoju_one": 15,
                  "ut_search_now": 15,
                  "newcand": 20, "ut_identify": 20}
 
@@ -4977,8 +4993,10 @@ class ListingPanel:
                 of_txt = "\n※今 来ているオファーはありません"
             _zr = w.get("zero") or {}         # ★2026-10-13 補0本だけの補充ボタン
             z_txt = self.todo_line("hoju_zero", _zr.get("ready", 0) + _zr.get("unjudged", 0), "目視します")
+            _o1 = w.get("one") or {}
+            o1_txt = self.todo_line("hoju_one", _o1.get("ready", 0) + _o1.get("unjudged", 0), "目視します")
             by_kind = {"hoju_search": s_txt, "hoju_search_now": sn_txt,
-                       "hoju_confirm": c_txt, "hoju_swap": sw_txt, "hoju_zero": z_txt, "newcand": n_txt,
+                       "hoju_confirm": c_txt, "hoju_swap": sw_txt, "hoju_zero": z_txt, "hoju_one": o1_txt, "newcand": n_txt,
                        "newcand_high": nh_txt,
                        "ut_search": ut_s_txt, "ut_confirm": ut_c_txt,
                        "ut_search_now": ut_sn_txt, "ut_swap_confirm": ut_sw_txt,
@@ -5050,7 +5068,7 @@ class ListingPanel:
             else:
                 msg = f"\n(残件 取得できず: {why[:40]})"
                 by_kind = {"hoju_search": msg, "hoju_search_now": msg,
-                           "hoju_confirm": msg, "hoju_zero": msg, "newcand": msg,
+                           "hoju_confirm": msg, "hoju_zero": msg, "hoju_one": msg, "newcand": msg,
                            "newcand_high": msg}
             try:
                 self.append_log(f"⚠️ 補URL 残件の取得に失敗: {why}\n")
