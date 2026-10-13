@@ -13,7 +13,7 @@
     "snkrdunk_id": スニダンのカード番号 or null, "notified": [知らせた出品ID]}]
   期限を過ぎた物・"done": true の物は見ない。
 
-    python card_watch.py            # 1回見る (10分おきの予約から呼ぶ)
+    python card_watch.py            # 1回見る (2分おきの予約 iMakHQ_CardWatch_2min から呼ぶ・2026-10-14 10分→2分)
     python card_watch.py --dry-run  # 見るだけ (メールを送らない・記録しない)
 """
 from __future__ import annotations
