@@ -707,6 +707,13 @@ def _run_mismatch_pdca(rejected, confirmed_idx, idx_row, targets, cert_map, mp, 
             with open(p, "w", encoding="utf-8") as f:
                 f.write(pdca.build_catalog_request_md(cat, today))
             print(f"   → Catalog修正依頼書: {p} ({len(cat)}件)")
+            # ★2026-10-13 プログラムからの依頼もブラボー経由 (ユーザー「あなたがルール破ってどうするの」で洗い出し)
+            try:
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                import bell as _bell
+                _bell.notify_bg("再仕入れ照合 (psa_resource_gate.py)", p, "PSA 不一致のカタログ修正 %d件 (自動)" % len(cat))
+            except Exception as _e_bell:                       # noqa: BLE001
+                print(f"   ⚠️ ブラボーに呼び鈴を鳴らせません ({type(_e_bell).__name__}) — 依頼書は置いてある")
         for k in ("cert", "listing"):
             n = len(buckets.get(k) or [])
             if n:
