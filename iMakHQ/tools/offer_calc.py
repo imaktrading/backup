@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import webbrowser
@@ -149,6 +150,71 @@ def parse_best_offers(xml, into=None):
     return out
 
 
+OFFER_SUPPLY = Path(r"C:/dev/iMak_data/hq/offer_supply_cache.json")
+OFFER_SUPPLY_MAX_AGE_H = 6       # これより古い控えは押した時に探し直す (仕入元は売れて消えるので)
+SUPPLY_TOP = 3
+
+
+def supply_summary(cands, marks_of):
+    """仕入元の候補 (安い順) → 画面に出す形 {top:[{src,price,url,marks}], best_ok, n, n_ok} (純関数)。
+
+    ★2026-10-13 (B-20261013-003・ユーザー「神風のオファーを開いていると、安い仕入元が探せないから、
+      オファーの判断ができない」): 上位3本と、条件OK (版確認済・送料込み・評価) の一番安い値段。
+    """
+    cs = [c for c in (cands or []) if isinstance(c.get("price"), int) and c.get("buyable", True) is not False]
+    ok = [c for c in cs if not marks_of(c)]
+    return {"top": [{"src": c.get("src") or c.get("channel") or "", "price": c["price"], "url": c.get("url") or "",
+                     "marks": list(marks_of(c) or [])} for c in cs[:SUPPLY_TOP]],
+            "best_ok": ok[0]["price"] if ok else None, "n": len(cs), "n_ok": len(ok)}
+
+
+def _load_supply():
+    try:
+        return json.loads(OFFER_SUPPLY.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_supply(d):
+    OFFER_SUPPLY.parent.mkdir(parents=True, exist_ok=True)
+    tmp = OFFER_SUPPLY.with_suffix(".tmp")
+    tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(OFFER_SUPPLY)
+
+
+def supply_stale(entry, now, max_age_h=OFFER_SUPPLY_MAX_AGE_H):
+    """控えが無い・古いか (純関数)。"""
+    import datetime as _dt
+    try:
+        at = _dt.datetime.fromisoformat((entry or {}).get("at") or "")
+    except ValueError:
+        return True
+    return (now - at).total_seconds() > max_age_h * 3600
+
+
+def prefetch_supply(offers, only_missing=True):
+    """PSA のオファーの仕入元を探して控える (I/O・メルカリ・スニダンを探す)。戻り: (探した件数, 秒数)。
+
+    ★background_work_done_overnight: 画面を開いた時に探すと待たされるので、10分おきの数え直しで
+      新しいオファーを見つけた時に裏で探しておく。押した時は控えを読むだけ (無い・古い時だけ探す)。
+    """
+    import datetime as _dt
+    import time as _t
+    import psa_sold_cheapest as PSC
+    now = _dt.datetime.now()
+    store = _load_supply()
+    targets = [t for t in PSC.offer_targets(offers)
+               if not only_missing or supply_stale(store.get(t["item_id"]), now)]
+    if not targets:
+        return 0, 0.0
+    t0 = _t.time()
+    for d in PSC.find_for(targets):
+        store[d["item_id"]] = {"at": _dt.datetime.now().isoformat(timespec="seconds"),
+                               **supply_summary(d.get("cands"), PSC.marks_of)}
+    _save_supply(store)
+    return len(targets), _t.time() - t0
+
+
 def available_qty(getitem_xml):
     """GetItem の応答 → 今買える数 (Quantity − QuantitySold)。読めなければ None (純関数)。
 
@@ -207,12 +273,14 @@ def count_workload():
         out["items"] = len(by_item)
         out["actionable"] = sum(len(_re.findall(r"<BestOffer>", v.get("xml") or ""))
                                 for v in by_item.values())
+        # ★2026-10-13 (B-20261013-003) 新しいオファーの仕入元は裏で先に探しておく (押した時に待たせない)
+        out["supply_prefetch"] = maybe_prefetch_in_background(list(by_item))
     except Exception as e:                                     # noqa: BLE001
         out["error"] = f"{type(e).__name__}: {e}"[:60]
     return out
 
 
-def fetch_offers():
+def fetch_offers(attach_supply=True):
     """受信中の Best Offer を eBay から取り、商品管理シートの仕入値まで解決して返す。
 
     なぜ (2026-07-31 ユーザー要望「ボタンを押せば仕入れ値まで拾って HTML を出せる?」):
@@ -444,7 +512,51 @@ def fetch_offers():
     print(f"📦 在庫0の出品のオファー: {len(_so)}件 (補あり {sum(1 for o in _so if o.get('supply'))}件)"
           f" / オファー付き {len(items)}出品" + (f" ({', '.join(_no_stock)})" if _no_stock else ""))
     out.sort(key=lambda o: o["expire"])
+    if attach_supply:
+        attach_supply_info(out)
     return out
+
+
+def attach_supply_info(offers):
+    """オファーに今買える仕入元 (控え) を付ける。控えが無い・古い PSA だけここで探す (I/O)。"""
+    import time as _t
+    t0 = _t.time()
+    try:
+        n, _sec = prefetch_supply(offers, only_missing=True)
+    except Exception as e:                                     # noqa: BLE001
+        n = 0
+        print(f"  ⚠ 仕入元を探せず ({type(e).__name__}: {str(e)[:60]}) — 控えだけで出します")
+    store = _load_supply()
+    for o in offers:
+        o["supplyNow"] = store.get(str(o.get("itemId"))) or None
+    have = sum(1 for o in offers if o.get("supplyNow"))
+    # ★走行ログで「動いた」が分かる1行 (0件でも出す)
+    print(f"🛒 オファーの仕入元: 控えあり {have}件 / 今探した {n}件 ({_t.time() - t0:.0f}秒) / オファー {len(offers)}件")
+
+
+def maybe_prefetch_in_background(item_ids):
+    """10分おきの数え直しで、控えの無い (新しい) オファーがあれば裏で探しに行く。待たない。"""
+    import datetime as _dt
+    import subprocess as _sp
+    now = _dt.datetime.now()
+    store = _load_supply()
+    new = [i for i in item_ids if supply_stale(store.get(i), now)]
+    lock = OFFER_SUPPLY.with_suffix(".lock")
+    if not new:
+        return 0
+    try:
+        if lock.exists() and (_dt.datetime.now().timestamp() - lock.stat().st_mtime) < 1800:
+            return 0                          # 前の探索がまだ動いている (30分以内)
+        _log = open(r"C:/dev/iMak/iMakHQ/review_logs/offer_supply_prefetch.log", "a", encoding="utf-8")
+        _log.write(f"--- {now:%Y-%m-%d %H:%M:%S} 新しいオファー {len(new)}件 → 裏で仕入元を探す" + chr(10))
+        _log.flush()
+        _sp.Popen([sys.executable, "-X", "utf8", str(Path(__file__)), "--prefetch-supply"],
+                  cwd=str(Path(__file__).parent), stdout=_log, stderr=_log,
+                  env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+                  creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
+    except Exception:                                          # noqa: BLE001
+        return 0
+    return len(new)
 
 
 def fetch():
@@ -961,6 +1073,25 @@ document.getElementById('eucty').addEventListener('change', render);
      計算は下の内訳と同じ calc() を使う (プロモは外した前提 = 承諾時の見方)。 */
   /* ★2026-10-13 (B-20261013-002) 在庫0の出品に来ているオファー (同じ出品に来ていた別の人) を分けて出す。
      補URL があれば在庫を戻せば応じられる。戻す操作はまだ無い (発送前は出し直さない決まりの例外になるため、ユーザーに確認中) */
+  /* ★2026-10-13 (B-20261013-003) 今買える安い仕入元 (上位3本) と、条件OKの一番安い値段で仕入れた時の利益 */
+  function supplyCell(o, ov){
+    var s = o.supplyNow;
+    if (!s) return '<span style="color:#888;font-size:11px">' + (/PSA/i.test(o.title || '') ? '仕入元の控えなし' : '—') + '</span>';
+    var top = (s.top || []).map(function(c){
+      return '<a href="' + c.url + '" target="_blank">¥' + (+c.price).toLocaleString() + '</a> '
+        + '<span style="color:#888;font-size:11px">' + (c.src || '') + (c.marks && c.marks.length ? ' ⚠' + c.marks.join('・') : '') + '</span>';
+    }).join('<br>');
+    var best = '';
+    if (s.best_ok){
+      var rb = calc(o.price, Object.assign({}, ov, {cost: s.best_ok}));
+      best = '<br><b>条件OK最安 ¥' + (+s.best_ok).toLocaleString() + ' なら ' + yen(rb.profit) + '</b>';
+    } else {
+      best = '<br><span style="color:#f88;font-size:11px">条件OKの仕入元なし</span>';
+    }
+    return (top || '<span style="color:#f88">今買える仕入元なし</span>') + best
+      + '<br><span style="color:#888;font-size:10px">' + (s.at || '').replace('T', ' ').slice(5, 16) + ' 時点</span>';
+  }
+
   function soldoutTable(){
     var so = [];
     P.offers.forEach(function(o, i){ if (o.soldout) so.push([o, i]); });
@@ -1006,11 +1137,12 @@ document.getElementById('eucty').addEventListener('change', render);
                     : '—') + '</td>'
         + '<td>' + (nocost ? '—' : o.sym + be.toFixed(2)) + '</td>'
         + '<td>' + (nocost ? '<b style="color:#f88">仕入値が取れていません</b>' : mark) + '</td>'
+        + '<td style="font-size:12px">' + supplyCell(o, ov) + '</td>'
         + '</tr>';
     }).join('');
     document.getElementById('offertbl').innerHTML =
       '<table class="otbl"><tr><th>出品／バイヤー</th><th>オファー</th>'
-      + '<th>この額の利益</th><th>出品価格のまま</th><th>ここまでなら</th><th>判定</th></tr>'
+      + '<th>この額の利益</th><th>出品価格のまま</th><th>ここまでなら</th><th>判定</th><th>今買える安い仕入元</th></tr>'
       + rows + '</table>'
       + '<div style="color:#888;font-size:11px;margin-top:4px">'
       + 'プロモを外した前提（承諾時の見方）。行をクリックすると下に内訳が出ます</div>'
@@ -1038,7 +1170,15 @@ document.getElementById('eucty').addEventListener('change', render);
       + (o.costSrc ? `（${o.costSrc}）` : '')
       + ` ／ バイヤー ${o.buyer}（${o.country}・評価${o.fb}）`
       + (o.stock ? ` ／ 在庫確認 ${o.stock}` : '')
-      + (o.supply ? ` ／ 補URL ${o.supply}本` : '');
+      + (o.supply ? ` ／ 補URL ${o.supply}本` : '')
+      + (o.supplyNow && (o.supplyNow.top || []).length
+         ? '<br>今買える仕入元: ' + o.supplyNow.top.map(function(c){
+             return '<a href="' + c.url + '" target="_blank">¥' + (+c.price).toLocaleString() + ' ' + (c.src || '') + '</a> '
+               + '<button type="button" class="usecost" data-c="' + c.price + '">この値段で計算</button>';
+           }).join(' ／ ') : '');
+    Array.prototype.forEach.call(document.querySelectorAll('.usecost'), function(b){
+      b.addEventListener('click', function(){ document.getElementById('cost').value = b.getAttribute('data-c'); render(); });
+    });
     ctrTouched = false;          // 別のオファーに移ったら目安を入れ直す
     render();
   }
@@ -1185,6 +1325,19 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
+    if "--prefetch-supply" in sys.argv:
+        # 裏の探索 (maybe_prefetch_in_background から)。画面は作らない・開かない
+        lock = OFFER_SUPPLY.with_suffix(".lock")
+        try:
+            lock.write_text(str(os.getpid()), encoding="utf-8")
+            n, sec = prefetch_supply(fetch_offers(attach_supply=False), only_missing=True)
+            print(f"🛒 オファーの仕入元を裏で探した: {n}件 ({sec:.0f}秒)")
+        finally:
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+        return 0
     p = fetch()
 
     # ★既定で受信中オファーを読む (2026-07-31)。オファーは期限が短く、

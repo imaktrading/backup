@@ -440,43 +440,17 @@ def offer_targets(offers):
     return out
 
 
-def main(argv=None) -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--item", help="この itemID だけ")
-    ap.add_argument("--offers", action="store_true", help="オファーが来ている PSA の出品を探す (売れる前)")
-    ap.add_argument("--no-open", action="store_true")
-    ap.add_argument("--no-sync", action="store_true", help="先に注文の取り込みをしない")
-    a = ap.parse_args(argv)
+def find_for(orders):
+    """探す対象 (offer_targets / load_waiting_orders の形) → 仕入元の候補を付けた list (I/O・メルカリ・スニダンを探す)。
 
+    ★2026-10-13 (B-20261013-003) main から切り出した。オファー対応の画面 (offer_calc) からも呼ぶ。
+    """
     import mercari_psa_resource as mp
     import psa_hoju_fill as hoju
     import psa_resource_confirm as prc
     import sheet_io as S
     import snkrdunk_psa_resource as sp
     import sold_restock_worklist as W
-
-    # ★2026-10-04 ユーザー「すでに仕入れた出品も表示されている。スプシ更新のタイミングを調整して」:
-    #   仕入済のチェックは「注文の取り込み」が購入履歴と結んだ時に付く。先に取り込んでから仕入れ待ちを読む
-    if a.offers:
-        import offer_calc
-        orders = offer_targets(offer_calc.fetch_offers())
-        print(f"オファーが来ている PSA: {len(orders)}件")
-        if not orders:
-            print("✅ オファーが来ている PSA はありません")
-            return 0
-    else:
-        if not a.no_sync:
-            print("▶ 先に注文の取り込み (購入履歴と結ぶ) をします", flush=True)
-            try:
-                import order_purchase_sync as _ops
-                _ops.main(["--write"])
-            except Exception as e:                             # noqa: BLE001
-                print(f"  ⚠ 注文の取り込みに失敗 ({type(e).__name__}: {str(e)[:80]}) — 前回の状態のまま探します", flush=True)
-        orders = load_waiting_orders(a.item)
-        print(f"仕入れ待ちの PSA: {len(orders)}件")
-        if not orders:
-            print("✅ 仕入れ待ちの PSA はありません")
-            return 0
     sheets = W._sheets()
     aux = S.PRODUCT_COL_AUX_START
     done = []
@@ -534,6 +508,47 @@ def main(argv=None) -> int:
               + (f" / 最安 ¥{ok[0]['price']:,} ({ok[0]['src']})" if ok else ""), flush=True)
         done.append({**o, "key": key, "cost_jpy": cost, "note": note, "cands": cands,
                      "ref_images": [u for u in refs if u]})
+    return done
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--item", help="この itemID だけ")
+    ap.add_argument("--offers", action="store_true", help="オファーが来ている PSA の出品を探す (売れる前)")
+    ap.add_argument("--no-open", action="store_true")
+    ap.add_argument("--no-sync", action="store_true", help="先に注文の取り込みをしない")
+    a = ap.parse_args(argv)
+
+    import mercari_psa_resource as mp
+    import psa_hoju_fill as hoju
+    import psa_resource_confirm as prc
+    import sheet_io as S
+    import snkrdunk_psa_resource as sp
+    import sold_restock_worklist as W
+
+    # ★2026-10-04 ユーザー「すでに仕入れた出品も表示されている。スプシ更新のタイミングを調整して」:
+    #   仕入済のチェックは「注文の取り込み」が購入履歴と結んだ時に付く。先に取り込んでから仕入れ待ちを読む
+    if a.offers:
+        import offer_calc
+        orders = offer_targets(offer_calc.fetch_offers())
+        print(f"オファーが来ている PSA: {len(orders)}件")
+        if not orders:
+            print("✅ オファーが来ている PSA はありません")
+            return 0
+    else:
+        if not a.no_sync:
+            print("▶ 先に注文の取り込み (購入履歴と結ぶ) をします", flush=True)
+            try:
+                import order_purchase_sync as _ops
+                _ops.main(["--write"])
+            except Exception as e:                             # noqa: BLE001
+                print(f"  ⚠ 注文の取り込みに失敗 ({type(e).__name__}: {str(e)[:80]}) — 前回の状態のまま探します", flush=True)
+        orders = load_waiting_orders(a.item)
+        print(f"仕入れ待ちの PSA: {len(orders)}件")
+        if not orders:
+            print("✅ 仕入れ待ちの PSA はありません")
+            return 0
+    done = find_for(orders)
     import datetime as _dt
     import order_purchase_sync as ops
     store = load_shown()
