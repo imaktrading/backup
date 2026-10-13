@@ -30,5 +30,6 @@ def test_run_logs_mirror_line(tmp_path):
     B.run(log, lines.append, ledger_path=str(tmp_path / "l.json"), verified_path=str(tmp_path / "v.json"),
           add_backlog=lambda c, r: 0, mirror_path=str(tmp_path / "m.json"))
     assert any(l.startswith("🪞 ミラーの行の作成を頼んだ: 1件") for l in lines)
-    # ★2026-10-13 プログラムからの依頼もブラボー経由: 呼び鈴の1行が必ず出る (テスト中は鳴らさない)
-    assert any(l.startswith("🔔 ミラーの行の依頼でブラボーに呼び鈴: ") for l in lines)
+    # ★2026-10-13 ブラボー: ミラーの入力は依頼ではないので呼び鈴を鳴らさない
+    assert not any("呼び鈴" in l for l in lines)
+    assert "bell" not in open(os.path.join(os.path.dirname(__file__), "..", "tools", "build_fail_watch.py"), encoding="utf-8").read()

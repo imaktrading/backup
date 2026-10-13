@@ -181,15 +181,7 @@ def run(log_text, append_log, ledger_path=LEDGER, verified_path=VERIFIED, add_ba
         mreq = mirror_requests(reasons)
         mnew = write_mirror_input(mreq, now, path=mirror_path or MIRROR_INPUT)
         append_log("🪞 ミラーの行の作成を頼んだ: %d件 (ミラーで落ちた %d件・カタログが毎時に作る)\n" % (mnew, len(mreq)))
-        # ★2026-10-13 ユーザー「プログラムもブラボー経由じゃなかった？」: 新しく頼んだ時はブラボーに呼び鈴
-        rung = False
-        if mnew:
-            import sys as _sys
-            _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-            import bell as _bell
-            rung = _bell.notify_bg("出品くん (build_fail_watch.py)", mirror_path or MIRROR_INPUT,
-                                   "ミラー (リバースホロ) の行の作成 %d件 (自動)" % mnew)
-        append_log("🔔 ミラーの行の依頼でブラボーに呼び鈴: %s\n" % ("鳴らした" if rung else "鳴らさない (新しい依頼 0件 or テスト中)"))
+        # ★2026-10-13 ブラボー回答: この入力は依頼ではない (カタログが毎時に読んで作る・人は要らない) → 呼び鈴は鳴らさない
     except Exception as e:                                      # noqa: BLE001
         append_log("  ⚠️ ミラーの行の作成を頼めなかった: %s: %s\n" % (type(e).__name__, e))
     answered = [c for c in reasons if (ledger.get(c) or {}).get("answered")]
