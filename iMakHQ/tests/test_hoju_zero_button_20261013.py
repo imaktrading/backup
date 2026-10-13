@@ -25,4 +25,4 @@ def test_server_puts_zero_count():
 def test_matrix_has_column():
     src = open(os.path.join(_H, "console", "static", "app.js"), encoding="utf-8").read()
     # ★2026-10-13 補0本・補1本を1つの枠に半分の高さで2つ
-    assert '["hoju_zero", "hoju_one"]' in src and "③ 補が少ない (0本・1本)" in src
+    assert '"hoju_zero", "hoju_one", "hoju_two"' in src and "③ 補2〜3本" in src and '"hoju_confirm"];' in src

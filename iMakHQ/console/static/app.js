@@ -9,10 +9,10 @@
   var MATRIX = {
     hoju: {
       title: "補URL", target: "出品中 (在庫あり)", purpose: "予備の仕入元を足す・安い仕入元に入れ替える",
-      cols: ["① 当日分", "② 夜に探す", "③ 補が少ない (0本・1本)", "③ 補充 (補が3本以下)", "③ 入れ替え (補4〜5本)"],
-      rows: [["PSA", ["hoju_search_now", "hoju_search", ["hoju_zero", "hoju_one"], "hoju_confirm", "hoju_swap"]],
-             ["UT", ["ut_search_now", "ut_search", null, "ut_confirm", "ut_swap_confirm"]],
-             ["一番くじ", [null, "kuji_search", null, "kuji_confirm", null]]]
+      cols: ["① 当日分", "② 夜に探す", "③ 補0本", "③ 補1本", "③ 補2〜3本", "③ 入れ替え (補4〜5本)"],
+      rows: [["PSA", ["hoju_search_now", "hoju_search", "hoju_zero", "hoju_one", "hoju_two", "hoju_swap"]],
+             ["UT", ["ut_search_now", "ut_search", {k: "ut_confirm", span: 3}, "ut_swap_confirm"]],
+             ["一番くじ", [null, "kuji_search", {k: "kuji_confirm", span: 3}, null]]]
     },
     restock: {
       title: "再仕入れ", target: "売り切れ (在庫0)", purpose: "また買える仕入元を見つけて在庫を戻す",
@@ -44,10 +44,11 @@
     order: ["注文の取り込み", "仕入れ先を探す"],
     shelf: ["取下再出品", "再仕入れ一覧"]
   };
-  var STATE_LABEL = { todo: "要対応", night: "夜間で自動", hold: "止めている", done: "残りなし", error: "数えられない", unknown: "未集計" };
+  var STATE_LABEL = { todo: "要対応", night: "夜間で自動", hold: "止めている", done: "0件 (残りなし)", error: "数えられない", unknown: "未集計" };
 
   var HIDDEN_KINDS = ["restock_build", "restock_wb",   // PSA 再仕入れ ②③ (① から続けて走る・2026-10-04)
-                      "sold_restock"];                  // 売れた分を補充 (目視なし・毎晩自動。ユーザー「ボタン化する意味ある？」10/4)
+                      "sold_restock",
+                      "hoju_confirm"];                  // PSA 補URL③ 補充 (補0〜3本) → 補0本/補1本/補2〜3本 に分けた (2026-10-13)                  // 売れた分を補充 (目視なし・毎晩自動。ユーザー「ボタン化する意味ある？」10/4)
   // 今日やることにだけ出さない (ボタンは新規出品のページに残す)。
   // ★2026-10-12 ユーザー「目視特定だけ、今日やることに出さなくていい」: 件数は KEY 埋めだけで、出品の仕事は 🤖自動 の目視が拾う
   var NOT_TODAY_KINDS = ["ut_identify"];
@@ -104,7 +105,7 @@
   // ---------------------------------------------------------------- 在庫メンテ
   function matrix(id, m) {
     var kinds = [];
-    m.rows.forEach(function (r) { r[1].forEach(function (k) { [].concat(k || []).forEach(function (x) { if (x) kinds.push(x); }); }); });
+    m.rows.forEach(function (r) { r[1].forEach(function (k) { [].concat(k && k.k ? k.k : (k || [])).forEach(function (x) { if (x) kinds.push(x); }); }); });
     if (m.side) kinds.push(m.side.kind);
     var list = kinds.map(job).filter(Boolean);
     var todo = todoOf(list);
@@ -131,10 +132,13 @@
               '<span class="act">' + goMark(j) + "</span>" + closeTag(j);
           }).join("") + "</div></td>";
         }
+        // ★2026-10-13 {k, span}: 横に何列ぶんか (UT・一番くじの補充は 補0本/補1本/補2〜3本 の3列ぶん)
+        var span = (k && k.span) ? ' colspan="' + k.span + '"' : "";
+        if (k && k.k) k = k.k;
         var j = k && job(k);
-        if (!j) return '<td class="pad"><div class="cell na">この段は無し</div></td>';
+        if (!j) return '<td class="pad"' + span + '><div class="cell na">この段は無し</div></td>';
         var hot = j.state === "todo";
-        return '<td class="pad' + (hot ? " hot" : "") + '">' + openTag(j, "cell", "", ' title="' + esc(tipOf(j)) + '"') +
+        return '<td class="pad' + (hot ? " hot" : "") + '"' + span + '>' + openTag(j, "cell", "", ' title="' + esc(tipOf(j)) + '"') +
           '<span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" +
           '<span class="meta">' + chip(j) + "</span>" +
           '<span class="act">' + goMark(j) + "</span>" + closeTag(j) + "</td>";
@@ -459,7 +463,7 @@
   function paintLeftovers() {
     var placed = {};
     Object.keys(MATRIX).forEach(function (k) {
-      MATRIX[k].rows.forEach(function (r) { r[1].forEach(function (x) { [].concat(x || []).forEach(function (y) { if (y) placed[y] = 1; }); }); });
+      MATRIX[k].rows.forEach(function (r) { r[1].forEach(function (x) { [].concat(x && x.k ? x.k : (x || [])).forEach(function (y) { if (y) placed[y] = 1; }); }); });
       if (MATRIX[k].side) placed[MATRIX[k].side.kind] = 1;
     });
     SHELF_KINDS.concat(SEED_KINDS).forEach(function (k) { placed[k] = 1; });

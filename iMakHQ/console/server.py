@@ -129,7 +129,7 @@ def summarize(d, nightly_ok=False):
             out[k] = {"n": None, "state": "error", "note": str(part.get("error"))[:90], "hold": 0}
 
     h = d.get("hoju") or {}
-    hk = ("hoju_search", "hoju_search_now", "hoju_confirm", "hoju_swap", "hoju_zero", "hoju_one")
+    hk = ("hoju_search", "hoju_search_now", "hoju_confirm", "hoju_swap", "hoju_zero", "hoju_one", "hoju_two")
     if h.get("error"):
         err(hk, h)
     elif h:
@@ -146,6 +146,9 @@ def summarize(d, nightly_ok=False):
         o1 = h.get("one") or {}
         n = _num(o1.get("ready")) + _num(o1.get("unjudged"))
         put("hoju_one", n, n > 0, "予備1本 = あと1本切れたら補0本")
+        t2 = h.get("two") or {}
+        n = _num(t2.get("ready")) + _num(t2.get("unjudged"))
+        put("hoju_two", n, n > 0, "予備2〜3本")
 
     u = d.get("ut") or {}
     uk = ("ut_search", "ut_search_now", "ut_confirm", "ut_swap_confirm",

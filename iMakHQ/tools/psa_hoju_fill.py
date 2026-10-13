@@ -2727,6 +2727,7 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
     ready = unjudged = 0
     zero_ready = zero_unjudged = 0      # ★2026-10-13 補0本だけの補充ボタン用 (補充の内数)
     one_ready = one_unjudged = 0        # ★2026-10-13 補1本だけの補充ボタン用 (補充の内数)
+    two_ready = two_unjudged = 0        # ★2026-10-13 補2〜3本の補充ボタン用 (補充の内数)
     swap_ready = swap_unjudged = 0
     swap_targets = select_backfill_targets(vals, max_backups=AUXN + 1,
                                            min_backups=CONFIRM_MAX_BACKUPS)
@@ -2758,10 +2759,12 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
             unjudged += 1        # 判定待ちが混ざる = 押すまで出るか確定しない
             zero_unjudged += 1 if t["n_backups"] == 0 else 0
             one_unjudged += 1 if t["n_backups"] == 1 else 0
+            two_unjudged += 1 if t["n_backups"] in (2, 3) else 0
         else:
             ready += 1
             zero_ready += 1 if t["n_backups"] == 0 else 0
             one_ready += 1 if t["n_backups"] == 1 else 0
+            two_ready += 1 if t["n_backups"] in (2, 3) else 0
     # ★2026-09-06: 「その夜に何件 探せたか」を出すため、**探した日ごと**の件数を返す。
     #   done は「今日(暦日)探し済み」なので、夜間は 23:30 開始で前日の日付が焼かれ、
     #   朝に見ると **必ず 0件** になっていた (実測: 9/5 の夜に128件 探せていたのに
@@ -2782,7 +2785,8 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
                         "blocked": {k: stats[k] for k in STOP_REASONS}},
             "swap": {"ready": swap_ready, "unjudged": swap_unjudged},
             "zero": {"ready": zero_ready, "unjudged": zero_unjudged},
-            "one": {"ready": one_ready, "unjudged": one_unjudged}}
+            "one": {"ready": one_ready, "unjudged": one_unjudged},
+            "two": {"ready": two_ready, "unjudged": two_unjudged}}
 
 
 # ★2026-09-30 ユーザー確定: 入れ替え (補4〜5本) は「表示が多いのにクリックされない」出品から先に回す。
