@@ -190,6 +190,13 @@ python -u night_step.py hoju psa_hoju_fill.newcand-aux --check >> "%LOG%" 2>&1 |
 python -u psa_hoju_fill.py newcand-aux >> "%LOG%" 2>&1
 python -u night_step.py hoju psa_hoju_fill.newcand-aux --done %errorlevel% >> "%LOG%" 2>&1
 :skip8
+REM --- 3d) remove aux URLs whose price went over the cost cap (global.yaml cost_sanity, 2026-10-14)
+REM     re-checks the current price first; keeps the URL when it cannot be checked
+echo [sweep-overcap] %date% %time% >> "%LOG%"
+python -u night_step.py hoju psa_hoju_fill.sweep-overcap --check >> "%LOG%" 2>&1 || goto :skip8b
+python -u psa_hoju_fill.py sweep-overcap >> "%LOG%" 2>&1
+python -u night_step.py hoju psa_hoju_fill.sweep-overcap --done %errorlevel% >> "%LOG%" 2>&1
+:skip8b
 
 REM --- 4) prefetch for ichibankuji aux URLs (candidates only, no UI, no sheet)
 echo [ichibankuji] prefetch %date% %time% >> "%LOG%"

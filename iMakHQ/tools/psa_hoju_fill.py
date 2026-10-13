@@ -2198,6 +2198,69 @@ def drop_unbuyable_now(cands, check=None, remember=None):
     return [c for c in cands if c.get("url") not in bad]
 
 
+def overcap_aux_plan(vals, prices, is_over, aux_max=None):
+    """今入っている補のうち、値段表で仕入上限を超えている物 (純関数)。
+
+    ★2026-10-14 ユーザー「そだね」(¥70,000 を超えた補は夜の掃除で外す)。補に入れた時は上限内でも、
+      後から出品者が値上げすると誰も外していなかった (ロー ¥950,000 / ¥1,587,800 など出品中 4件・行は8本)。
+    is_over(price) = True で外す候補。戻り: {行: [超えたURL]}。外すかどうかは今の値段で確かめてから決める。
+    """
+    aux_max = aux_max or AUXN
+    out = {}
+    for i, r in enumerate(vals[1:], 2):
+        for k in range(aux_max):
+            u = _cell(r, AUX0 + k)
+            p = (prices or {}).get(_norm_url(u)) if u else None
+            if isinstance(p, (int, float)) and p > 0 and is_over(p):
+                out.setdefault(i, []).append(u)
+    return out
+
+
+def run_sweep_overcap(dry_run=False):
+    """夜の掃除: 仕入上限 (global.yaml cost_sanity) を超えた補を外す (I/O)。
+
+    値段表は探した時の値段なので、外す前に **今の値段** をメルカリ API / スニダンの出品一覧で確かめる。
+    今も上限超え → 外す / 下がっていた → 残す / 確かめられない → 残す (外す側に倒さない)。
+    """
+    import hoju_url_from_dupes as _hd
+    import aux_pending_refresh as _apr
+    import sheet_io as _sio
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "iMakeBayAPI"))
+    from pricing_engine import cost_sanity
+    vals = _read_high()
+    plan = overcap_aux_plan(vals, _price_cache_get(_hd), lambda p: cost_sanity(int(p)) is not None)
+    urls = [u for us in plan.values() for u in us]
+    live = _apr.check_urls(urls) if urls else {}
+    row_to_urls, expect, removed, kept = {}, {}, [], []
+    for row, us in plan.items():
+        r = vals[row - 1]
+        drop = set()
+        for u in us:
+            res = live.get(u) or {}
+            p = res.get("price")
+            if res.get("live") is True and isinstance(p, (int, float)) and cost_sanity(int(p)) is not None:
+                drop.add(u)
+                removed.append({"date": time.strftime("%Y-%m-%d"), "row": row, "itemID": _cell(r, 1),
+                                "url": u, "price": int(p), "why": "仕入上限を超えた補 (夜の掃除)"})
+            else:
+                kept.append(u)
+        if drop:
+            cur = [x for x in (_cell(r, AUX0 + k) for k in range(AUXN)) if x and x not in drop]
+            row_to_urls[row] = cur
+            expect[row] = _cell(r, 1) or ("A", _cell(r, 0))
+    written = 0
+    if row_to_urls and not dry_run:
+        written = _sio.write_aux_urls(row_to_urls, expect_iid=expect)
+        if written:
+            with open(r"C:/dev/iMak/iMakHQ/review_logs/aux_pending_removed.jsonl", "a", encoding="utf-8") as f:
+                for x in removed:
+                    f.write(json.dumps(x, ensure_ascii=False) + "\n")
+    print(f"🧹 仕入上限を超えた補を外した: {len(removed) if written or dry_run else 0}本 ({written}行"
+          f"{' DRY' if dry_run else ''}) / 値段表で超えていた {len(urls)}本 / 今は下がっていた・確かめられず残した {len(kept)}本",
+          flush=True)
+    return removed
+
+
 def dead_existing_aux(confirmed, item_targets, vals, aux_max=None):
     """書く出品の今の補のうち、**今は買えないと確かめた** 物 (正規化URL の集合)。I/O。
 
@@ -3710,6 +3773,9 @@ def main():
         print(f"RESTOCK候補 {len(tg)}件 を先読み(limit={limit if limit else '全件'})")
         if tg:
             run_night_search(targets=tg, limit=limit)
+        return
+    if "sweep-overcap" in sys.argv:
+        run_sweep_overcap(dry_run="--dry-run" in sys.argv)
         return
     if "newcand-aux" in sys.argv:
         run_newcand_aux(dry_run="--dry-run" in sys.argv)
