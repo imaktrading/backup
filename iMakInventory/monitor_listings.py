@@ -2129,6 +2129,15 @@ def process_sheet(
     price_surge_stats: dict = {}
     backup_clear_result: dict = {"cleared": 0, "skipped_mismatch": [], "held": False,
                                  "candidate_count": len(clear_candidates), "surge": False}
+    # ★ 2026-10-14 (B-20261014-004): リバイスへの合図は「最後まで走って書込が成功した」時だけ出す。その判定材料。
+    #   m_changed = 前回の M と違う値段を書いた行 (0 ならリバイスは送らなくてよい)。
+    sheet_write = {"ok": False, "reason": "dry-run" if dry_run else "", "written": 0,
+                   "m_changed": sum(1 for r in results
+                                    if isinstance(r.get("price_jpy"), int)
+                                    and r.get("price_jpy") != SG.parse_jpy(r.get("current_m_jpy_str"))),
+                   "d_changed": sum(1 for r in results if r.get("delta") in ("newly_sold", "newly_in_stock"))}
+    if not updates and not dry_run:
+        sheet_write.update(ok=True, reason="書く行なし")
     if dry_run:
         log("  [DRY RUN] スプシ書込 skip")
         for r in [x for x in results if x["delta"] in ("newly_sold", "newly_in_stock")][:10]:
@@ -2164,6 +2173,9 @@ def process_sheet(
                     log(f"  [!] 売切日時ヘッダ設定 skip: {type(_he).__name__}: {_he}")
             res = update_listings_sold_marks(
                 ws, updates, price_col_idx=price_col, enable_points=True)
+            sheet_write.update(ok=True, written=res.get("updated", 0))
+            if res.get("m_held"):                    # 価格急増ガードで M を書かなかった行がある
+                sheet_write["m_held"] = res.get("m_held")
             _price_letter = _col_letter(price_col)
             log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / price[{_price_letter}]_writes={res.get('m_writes', '?')} / k_writes={res.get('k_writes', '?')} / o_writes={res.get('o_writes', '?')} / err_writes={res.get('err_writes', '?')} / sold_at_writes={res.get('sold_at_writes', 0)} / sold_at_clears={res.get('sold_at_clears', 0)})")
             # ★ 価格急増ガード: HOLD 対象 supplier があれば prominent に告知 (非 silent)。
@@ -2269,6 +2281,7 @@ def process_sheet(
         except Exception as e:
             log(f"  [NG] スプシ書込失敗: {type(e).__name__}: {e}")
             log(traceback.format_exc())
+            sheet_write.update(ok=False, reason=f"スプシ書込失敗 {type(e).__name__}")
 
         # AC-AG (補 URL) 色塗り: 補 URL 設定 row のみ paint。売切は赤字、それ以外は黒字。
         # ★ 2026-07-25: backup_slot_results (固定 5 枠 positional、空枠=None) を列番号ベースで参照。
@@ -2401,6 +2414,7 @@ def process_sheet(
         "backup_clear":         backup_clear_result,  # 補URL消込結果 (cleared/skipped_mismatch/held/surge)
         "rescue":               rescue_result,        # 補URL救済 (new_events/current_rescued/appended)
         "revive":               revive_result,        # 復活 2cycle 確定 (promoted/first_seen/cleared/stayed)
+        "sheet_write":          sheet_write,          # リバイスへの合図の判定材料 (B-20261014-004)
     }
 
 

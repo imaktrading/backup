@@ -1199,6 +1199,25 @@ def run_cycle(
         )
         cycle_log["phases"]["monitor"] = m
 
+        # ★ 2026-10-14 (ブラボー GO B-20261014-004): M・在庫を書き終えた合図を「既存メンテ」タブ `合図` へ。
+        #   KAGOYA のリバイスくんがそれを読んで、変わった行だけ値段を直す。完走して書込が成功した時だけ書く。
+        if not test_mode:
+            try:
+                import cycle_signal as _sig  # noqa: PLC0415
+                _started = str(cycle_log.get("ts_start") or "")[:19].replace("T", " ")
+                for _lbl, _st in ((m or {}).get("by_sheet") or {}).items():
+                    _kind = _sig.LABEL_OF_CYCLE.get(str(_lbl).upper())
+                    if _kind is None:
+                        continue                      # CAND = 出品前の候補 (リバイスの対象外)
+                    _sw = (_st or {}).get("sheet_write")
+                    if limit is not None:
+                        _sw = {"ok": False, "reason": f"件数を絞った回 (--limit {limit})"}
+                    cycle_log["phases"].setdefault("signal", {})[_kind] = _sig.signal(
+                        _kind, _started, _sw, (_st or {}).get("processed", 0),
+                        log=lambda msg: _log(msg, test_mode))
+            except Exception as e:
+                _log(f"  🔔 合図: 例外 (巡回は続行) {type(e).__name__}: {e}", test_mode)
+
         # Phase 1.5: D 列差分 → diff_<cycle_ts>.md (Phase 8b)
         progress_writer.update(phase="d_diff", force=True)
         try:

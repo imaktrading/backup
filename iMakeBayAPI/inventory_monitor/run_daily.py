@@ -522,6 +522,26 @@ def main():
             subject + "\n\n" + body, encoding="utf-8")
     except Exception as e:
         _log(f"[report] 本文ファイル保存失敗: {type(e).__name__}: {e}")
+    # ★ 2026-10-14 (ブラボー GO B-20261014-004): 在庫 (SKU 詳細・eBay の数量) を書き終えた合図を
+    #   「既存メンテ」タブ `合図` の D1 (OFFICIAL) へ。仕入元の巡回 (monitor) と 実 eBay × 仕入元 (zero) が
+    #   両方成功した時だけ書く。書けなくても巡回は止めない。
+    try:
+        sys.path.insert(0, str(SCRIPT_DIR.parent.parent / "iMakInventory"))
+        import cycle_signal as _sig  # noqa: PLC0415
+        _ok = dict(step_results)
+        _sync = _load_sync_result(start)
+        _sw = {"ok": bool(_ok.get("monitor") and _ok.get("zero") and _sync),
+               "reason": "" if (_ok.get("monitor") and _ok.get("zero")) else "monitor / zero の step が失敗",
+               "written": ((_sync or {}).get("sheet") or {}).get("updated", 0),
+               "m_changed": 0,
+               "d_changed": len(((_sync or {}).get("done") or {}).get("zero") or [])
+                            + len(((_sync or {}).get("done") or {}).get("restore") or [])}
+        if not _sync and _sw["ok"] is False and not _sw["reason"]:
+            _sw["reason"] = "ebay_supplier_sync の結果が無い"
+        _sig.signal("OFFICIAL", start.strftime("%Y-%m-%d %H:%M:%S"), _sw, monitor.get("listings", 0) or 0,
+                    log=_log)
+    except Exception as e:  # noqa: BLE001
+        _log(f"  🔔 合図: 例外 (巡回は続行) {type(e).__name__}: {e}")
     sent = _send_report_email(subject, body)
     _log(f"[mail] 統合 report 送信: {'OK' if sent else 'NG'}")
 
