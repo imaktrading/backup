@@ -74,8 +74,31 @@ def sales_rows(rows2d):
     return out
 
 
-def month_summary(sales, today, goal):
-    """今月の進捗 (純関数)。today = メールを作る日 (前日までを数える)。"""
+LOSS_TAB = "損失"
+
+
+def loss_rows(rows2d):
+    """販売実績シートの「損失」タブ → [{date, what, amount}] (純関数)。読めない行は飛ばす。
+
+    ★2026-10-13 ユーザー「これらも月利に入れないとあかんな」「こういうミスも含めよう」:
+      間違って買った PSA7 (10/9 シャワーズex ¥4,830・キャンセル不可) が、どの注文にも載らず月の利益が多く見えていた。
+      売れた件数には数えない。損失にした物が後で売れたら、その売り上げは仕入原価0円で入れる。
+    """
+    out = []
+    for r in (rows2d or [])[1:]:
+        r = list(r) + [""] * 5
+        d = _parse_date(r[0])
+        try:
+            amt = float(str(r[2]).replace(",", "").replace("¥", "").replace("▲", "").strip() or 0)
+        except ValueError:
+            continue
+        if d and amt:
+            out.append({"date": d, "what": r[1].strip(), "amount": abs(amt)})
+    return out
+
+
+def month_summary(sales, today, goal, losses=None):
+    """今月の進捗 (純関数)。today = メールを作る日 (前日までを数える)。losses = 損失タブ (利益から引く)。"""
     last = today - dt.timedelta(days=1)
     m0 = last.replace(day=1)
     days_in = (m0.replace(month=m0.month % 12 + 1, year=m0.year + (m0.month == 12)) - m0).days
@@ -90,19 +113,27 @@ def month_summary(sales, today, goal):
         b0 = (b0 - dt.timedelta(days=1)).replace(day=1)
     base = [s for s in sales if b0 <= s["date"] < m0]
     base_days = (m0 - b0).days or 1
-    daily_avg = sum(s["profit"] for s in base) / base_days
+    L = losses or []
+
+    def lsum(a, b):
+        return sum(x["amount"] for x in L if a <= x["date"] <= b)
+    cur_loss = lsum(m0, last)
+    daily_avg = (sum(s["profit"] for s in base) - lsum(b0, m0 - dt.timedelta(days=1))) / base_days
     unit_avg = (sum(s["profit"] for s in base) / len(base)) if base else 0
-    profit = sum(s["profit"] for s in cur)
-    fixed = sum(s["profit"] for s in cur if s["confirmed"])
+    sales_profit = sum(s["profit"] for s in cur)
+    profit = sales_profit - cur_loss
+    fixed = sum(s["profit"] for s in cur if s["confirmed"]) - cur_loss
     remain = days_in - elapsed
     need_day = max(0.0, (goal - profit) / remain) if remain else 0.0
     return {
         "month": m0, "last": last, "elapsed": elapsed, "days_in": days_in, "remain": remain,
         "profit": profit, "fixed": fixed, "tmp": profit - fixed,
         "n": len(cur), "n_fixed": sum(1 for s in cur if s["confirmed"]),
-        "unit": (profit / len(cur)) if cur else 0,
-        "prev_same_n": len(prev_same), "prev_same_profit": sum(s["profit"] for s in prev_same),
-        "prev_profit": sum(s["profit"] for s in prev_all),
+        "unit": (sales_profit / len(cur)) if cur else 0,
+        "loss": cur_loss, "losses": [x for x in L if m0 <= x["date"] <= last],
+        "prev_same_n": len(prev_same),
+        "prev_same_profit": sum(s["profit"] for s in prev_same) - lsum(pm0, pm0 + dt.timedelta(days=elapsed - 1)),
+        "prev_profit": sum(s["profit"] for s in prev_all) - lsum(pm0, m0 - dt.timedelta(days=1)),
         "prev_unit": (sum(s["profit"] for s in prev_all) / len(prev_all)) if prev_all else 0,
         "daily_avg": daily_avg, "projection": profit + remain * daily_avg,
         "need_day": need_day, "need_units_day": (need_day / unit_avg) if unit_avg else 0,
@@ -345,7 +376,10 @@ def render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv=None, of=None):
                f'<div class="bar"><i style="left:0;width:{fix_w:.1f}%;background:#17324a"></i>'
                f'<i style="left:{fix_w:.1f}%;width:{tmp_w:.1f}%;background:#8aa6bd"></i>'
                f'<i style="left:{pace:.1f}%;width:2px;top:-4px;bottom:-4px;background:#b07a10"></i></div>'
-               f'<div class="small">■ 確定 {yen(ms["fixed"])} ({ms["n_fixed"]}件)　■ まだ動く {yen(ms["tmp"])} ({ms["n"] - ms["n_fixed"]}件)　| 今日までに届いていたい所 {pace:.0f}%</div>')
+               f'<div class="small">■ 確定 {yen(ms["fixed"])} ({ms["n_fixed"]}件)　■ まだ動く {yen(ms["tmp"])} ({ms["n"] - ms["n_fixed"]}件)　| 今日までに届いていたい所 {pace:.0f}%</div>'
+               + (f'<div class="small down">うち損失 {yen(-ms["loss"])} ({len(ms["losses"])}件: '
+                  + " / ".join(f'{x["date"].month}/{x["date"].day} {e(x["what"][:30])} {yen(-x["amount"])}' for x in ms["losses"])
+                  + ') — 確定から引いています</div>' if ms.get("loss") else ""))
     out.append('<table class="trio"><tr>'
                f'<td><span class="small">売れた件数</span><br><b>{ms["n"]}</b> 件<br><span class="small">先月同期 {ms["prev_same_n"]}件 ({yen(ms["prev_same_profit"])})</span></td>'
                f'<td><span class="small">利益単価</span><br><b>{yen(ms["unit"])}</b><br><span class="small">先月 {yen(ms["prev_unit"])}</span></td>'
@@ -433,8 +467,14 @@ def main():
     from google.oauth2.service_account import Credentials
     gc = gspread.authorize(Credentials.from_service_account_file(
         LF.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"]))
-    rows = gc.open_by_key(R.SALES_SHEET_ID).get_worksheet_by_id(R.SALES_GID).get_all_values()
-    ms = month_summary(sales_rows(rows), today, plan["goal_profit_jpy"])
+    _sh = gc.open_by_key(R.SALES_SHEET_ID)
+    rows = _sh.get_worksheet_by_id(R.SALES_GID).get_all_values()
+    try:
+        losses = loss_rows(_sh.worksheet(LOSS_TAB).get_all_values())
+    except Exception as e:                                     # noqa: BLE001 タブが無い = 損失なし
+        losses = []
+        print(f"  ⚠ 損失タブを読めず ({type(e).__name__}) — 損失 0 として出す")
+    ms = month_summary(sales_rows(rows), today, plan["goal_profit_jpy"], losses)
 
     mv = None
     act_p, ina_p, rday = latest_reports()
@@ -483,6 +523,7 @@ def main():
         sent = "送った" if r.returncode == 0 else f"送れなかった (exit {r.returncode}) {r.stderr[-200:]}"
     # ★走行ログで「動いた」が分かる1行 (0件でも出す)
     print(f"📧 PDCA メール: {sent} / 今月の利益 {yen(ms['profit'])} ({ms['n']}件・まだ動く {len(ms['pending'])}件)"
+          f" / 損失 {len(ms['losses'])}件 {yen(-ms['loss'])}"
           f" / オファー {('昨日 %d件・7日 %d件 (前の7日 %d件)' % (of['yesterday'], of['last7'], of['prev7'])) if of else '読めず ' + of_err}"
           f" / 出品の動き {mv['day'] if mv else 'データ欠け'} / 一言 {'約%.1f円' % ai_yen if ai_text else ('なし' if not ai_err else '失敗: ' + ai_err)}")
     return 0 if (a.dry_run or sent == "送った") else 1
