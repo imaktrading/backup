@@ -730,6 +730,18 @@ def build_job(today):
     # ★2026-10-04 棚② の「補優先」を先に探す (途中で止まっても先に済むように)
     _prio = H.load_shelf_priority()
     fill, swap = H.put_priority_first(fill, _prio), H.put_priority_first(swap, _prio)
+    # ★2026-10-14 次の仕入元で買うと赤字になる出品は、補の本数に関係なく一番先に・毎日探す
+    #   (補4〜5本は入れ替えの組 = 2日おきだったので、補充の組の先頭へ移す)
+    try:
+        import hoju_url_from_dupes as _hd
+        _loss = H.mark_loss_risk(list(fill) + list(swap), vals, H._price_cache_get(_hd))
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  ⚠ 赤字になる出品を数えられず ({type(e).__name__}) — 今までの並び")
+        _loss = set()
+    _lt = sorted([t for t in list(fill) + list(swap) if t["itemID"] in _loss], key=lambda t: -t.get("loss_gap", 0))
+    fill = _lt + [t for t in fill if t["itemID"] not in _loss]
+    swap = [t for t in swap if t["itemID"] not in _loss]
+    print(f"  💴 次の仕入元で買うと赤字になる出品を一番先に・毎日探す: {len(_lt)}件")
     try:
         restock = H.restock_targets()
     except Exception as e:                                       # noqa: BLE001

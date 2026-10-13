@@ -33,4 +33,4 @@ def test_select_backfill_targets_uses_market_sold():
     import inspect
     assert "market_sold" in inspect.signature(H.select_backfill_targets).parameters
     src = inspect.getsource(H.run_daytime_confirm)
-    assert src.count("market_sold=_msold") == 2        # 補充と、混ぜる入れ替えの両方
+    assert src.count("market_sold=_msold") == 3        # 補充と、混ぜる入れ替えと、次で赤字 (2026-10-14) の3つ

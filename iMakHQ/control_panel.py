@@ -1854,6 +1854,23 @@ SCRIPTS = [
                      "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk/edit#gid=851100680"),
     },
     {
+        # ★2026-10-14 ユーザー「次の補で買うと赤字になるもの」「それも専用がいいな。優先順位が高い順に処理したい」:
+        #   今一番安い仕入元が切れた時、次に安い仕入元で買うと赤字になる出品だけ (赤字の大きい順)。補1〜5本にまたがる。
+        #   補1本 / 補2〜3 / 入れ替え のボタンからは外す (同じ出品は1つにしか出ない)
+        "category": None, "type": "utility",
+        "label": "🚨 PSA 補URL ③ 次で赤字",
+        "tip": "今の仕入元が切れた時、次に安い仕入元で買うと赤字になる出品だけを出す (補0本の次に急ぐ)。"
+               "次の仕入元より安い候補を見つけて差を縮める。赤字の大きい順・1回15件ずつ。",
+        "badge": "hoju_loss",
+        "label_fg": "#c33",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_hoju_fill.py", "confirm", "--loss-risk", "--limit=15"],
+        "params": [],
+        "skip_postprocess": True,
+        "open_url": ("https://docs.google.com/spreadsheets/d/"
+                     "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk/edit#gid=851100680"),
+    },
+    {
         # ★2026-10-13 ユーザー「補0本のボタンサイズを半分にして、同じ大きさで補1本ボタンを追加して」
         #   「補が少ないボタンが独立している方が、分かりやすいわ」
         "category": None, "type": "utility",
@@ -4341,7 +4358,7 @@ class ListingPanel:
     #   押した後に減っていないように見えた。**残り** と **今回** を分けて出す。
     #   数字は SCRIPTS の cmd (--limit) と各モジュールの CAP が正。ここに写さない。
     # ★2026-09-13: UT も PSA と同じ4ボタンにしたので、1回で押せる上限も同じ形に持つ
-    PRESS_CAP = {"hoju_search_now": 15, "hoju_confirm": 15, "hoju_swap": 15, "hoju_zero": 15, "hoju_one": 15, "hoju_two": 15,
+    PRESS_CAP = {"hoju_search_now": 15, "hoju_confirm": 15, "hoju_swap": 15, "hoju_zero": 15, "hoju_loss": 15, "hoju_one": 15, "hoju_two": 15,
                  "ut_search_now": 15,
                  "newcand": 20, "ut_identify": 20}
 
@@ -5008,12 +5025,14 @@ class ListingPanel:
                 of_txt = "\n※今 来ているオファーはありません"
             _zr = w.get("zero") or {}         # ★2026-10-13 補0本だけの補充ボタン
             z_txt = self.todo_line("hoju_zero", _zr.get("ready", 0) + _zr.get("unjudged", 0), "目視します")
+            _ls = w.get("loss") or {}         # ★2026-10-14 次の仕入元で買うと赤字になる出品
+            ls_txt = self.todo_line("hoju_loss", _ls.get("ready", 0) + _ls.get("unjudged", 0), "目視します")
             _o1 = w.get("one") or {}
             o1_txt = self.todo_line("hoju_one", _o1.get("ready", 0) + _o1.get("unjudged", 0), "目視します")
             _t2 = w.get("two") or {}
             t2_txt = self.todo_line("hoju_two", _t2.get("ready", 0) + _t2.get("unjudged", 0), "目視します")
             by_kind = {"hoju_search": s_txt, "hoju_search_now": sn_txt,
-                       "hoju_confirm": c_txt, "hoju_swap": sw_txt, "hoju_zero": z_txt, "hoju_one": o1_txt, "hoju_two": t2_txt, "newcand": n_txt,
+                       "hoju_confirm": c_txt, "hoju_swap": sw_txt, "hoju_zero": z_txt, "hoju_loss": ls_txt, "hoju_one": o1_txt, "hoju_two": t2_txt, "newcand": n_txt,
                        "newcand_high": nh_txt,
                        "ut_search": ut_s_txt, "ut_confirm": ut_c_txt,
                        "ut_search_now": ut_sn_txt, "ut_swap_confirm": ut_sw_txt,
@@ -5085,7 +5104,7 @@ class ListingPanel:
             else:
                 msg = f"\n(残件 取得できず: {why[:40]})"
                 by_kind = {"hoju_search": msg, "hoju_search_now": msg,
-                           "hoju_confirm": msg, "hoju_zero": msg, "hoju_one": msg, "hoju_two": msg, "newcand": msg,
+                           "hoju_confirm": msg, "hoju_zero": msg, "hoju_loss": msg, "hoju_one": msg, "hoju_two": msg, "newcand": msg,
                            "newcand_high": msg}
             try:
                 self.append_log(f"⚠️ 補URL 残件の取得に失敗: {why}\n")

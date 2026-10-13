@@ -1055,6 +1055,60 @@ def min_gain_for(t):
     return SWAP_MIN_GAIN if (t or {}).get("n_backups", 0) >= AUXN else 0
 
 
+def _profit_rate(cost_jpy):
+    """出品価格に乗せている利益の割合 (仕入値の帯ごと・pricing_engine と同じ表)。読めなければ None。"""
+    try:
+        _api = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "iMakeBayAPI")
+        if _api not in sys.path:
+            sys.path.insert(0, _api)
+        import pricing_engine as _pe
+        return float(_pe._profit_rate_from_cost_v5(cost_jpy))
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+def loss_risk_next(t, vals, prices, rate_of=_profit_rate):
+    """今一番安い仕入元が切れた時、次に安い仕入元で買うと赤字になるなら **その次の値段**、ならない・分からないなら None (純関数寄り)。
+
+    ★2026-10-14 ユーザー「次の補で買うと赤字になるもの、とゆー定義やな」「それも専用がいいな。優先順位が高い順に処理したい」。
+      赤字 = 次に安い仕入元の値段 − 今の仕入値 (N列) > 今の仕入値 × 利益の割合 (売った値段は変わらないので、上がった分だけ利益が減る)。
+      仕入元 = 主 (A列) と補 (AC〜AG)。主の値段が値段表に無い時は、今の仕入値を主の値段とみなす。
+      補が無い (補0本) は赤字ではなくキャンセルなので対象外 (補0本のボタン)。
+    """
+    row = (t or {}).get("row")
+    r = vals[row - 1] if (row and 0 < row <= len(vals)) else []
+    d = re.sub(r"[^0-9]", "", str(_cell(r, 13) or ""))
+    now = int(d) if d else 0
+    if not now:
+        return None
+    mu = _norm_url(_cell(r, 0))
+    aux = [u for u in (_cell(r, AUX0 + k) for k in range(AUXN)) if u and _norm_url(u) != mu]
+    ap = [p for p in ((prices or {}).get(_norm_url(u)) for u in aux) if isinstance(p, (int, float)) and p > 0]
+    if not ap:
+        return None
+    mp = (prices or {}).get(mu)
+    sup = sorted(([mp] if isinstance(mp, (int, float)) and mp > 0 else [now]) + ap)
+    nxt = sup[1] if len(sup) > 1 else sup[0]
+    rate = rate_of(now)
+    if rate is None:
+        return None
+    return int(nxt) if nxt - now > now * rate else None
+
+
+def mark_loss_risk(targets, vals, prices):
+    """赤字になる出品に t["loss_next"] (次の値段) / t["loss_gap"] (赤字の目安 円) を付ける。戻り = その itemID の集合。"""
+    ids = set()
+    for t in targets or []:
+        nxt = loss_risk_next(t, vals, prices)
+        if nxt:
+            d = re.sub(r"[^0-9]", "", str(_cell(vals[t["row"] - 1], 13) or ""))
+            now = int(d) if d else 0
+            t["loss_next"] = nxt
+            t["loss_gap"] = int(nxt - now - now * (_profit_rate(now) or 0))
+            ids.add(t["itemID"])
+    return ids
+
+
 # ★2026-10-13 補0〜1本で 1.5倍を超えたが上限を外したので目視に出した候補の数 (走行ログ用)
 HIGH_KEPT_LOW_BACKUP = {"cands": 0}
 
@@ -1077,8 +1131,11 @@ def filter_candidates_by_cost(cands, t, vals):
         p = prices.get(_norm_url(c.get("url")))
         if p is None and isinstance(c.get("price"), int) and c["price"] > 0:
             p = c["price"]                     # 値段表に無い時は候補が持っている値段 (目視待ちの棚卸しが書いた今の値段)
-        (drop if candidate_cost_conflicts(p, now_cost, main_dead, min_gain, t.get("n_backups"))
-         else keep).append(c)
+        _conf = candidate_cost_conflicts(p, now_cost, main_dead, min_gain, t.get("n_backups"))
+        # ★2026-10-14 赤字の出品 (loss_next) は、次の仕入元より安い候補なら差が縮むので残す (補5本でも一番高い補を押し出す)
+        if _conf and t.get("loss_next") and isinstance(p, (int, float)) and 0 < p < t["loss_next"]:
+            _conf = False
+        (drop if _conf else keep).append(c)
         if (not min_gain and not main_dead and p and now_cost and p > now_cost * BACKFILL_MAX_RATIO
                 and (t.get("n_backups") is not None and t.get("n_backups") <= 1)):
             HIGH_KEPT_LOW_BACKUP["cands"] += 1
@@ -2818,8 +2875,14 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
     one_ready = one_unjudged = 0        # ★2026-10-13 補1本だけの補充ボタン用 (補充の内数)
     two_ready = two_unjudged = 0        # ★2026-10-13 補2〜3本の補充ボタン用 (補充の内数)
     swap_ready = swap_unjudged = 0
+    loss_ready = loss_unjudged = 0      # ★2026-10-14 次の仕入元で買うと赤字になる出品 (専用ボタン・他のボタンからは外す)
     swap_targets = select_backfill_targets(vals, max_backups=AUXN + 1,
                                            min_backups=CONFIRM_MAX_BACKUPS)
+    try:
+        import hoju_url_from_dupes as _hd_l
+        _loss_ids = mark_loss_risk(list(c_targets) + list(swap_targets), vals, _price_cache_get(_hd_l))
+    except Exception:                                          # noqa: BLE001
+        _loss_ids = set()
     _pll, _uv = load_same_verdicts()
     set_label_context(vals)                    # ★2026-10-06 仕入元 URL の鑑定番号 → ラベルでカード
     # ★2026-10-10: 目視待ちも本番と同じ関数で混ぜて数える (以前はボタンに出ず、押すと増えていた)
@@ -2841,6 +2904,16 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
         if not cands:
             continue
         waiting = any(c.get("_art_unjudged") for c in cands)
+        if t["itemID"] in _loss_ids:
+            loss_unjudged += 1 if waiting else 0
+            loss_ready += 0 if waiting else 1
+            if is_swap:
+                continue                 # 入れ替えのボタンには出さない (補充の合計 confirm には今までどおり入れる)
+            if waiting:
+                unjudged += 1
+            else:
+                ready += 1
+            continue
         if is_swap:
             swap_unjudged += 1 if waiting else 0
             swap_ready += 0 if waiting else 1
@@ -2875,7 +2948,8 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
             "swap": {"ready": swap_ready, "unjudged": swap_unjudged},
             "zero": {"ready": zero_ready, "unjudged": zero_unjudged},
             "one": {"ready": one_ready, "unjudged": one_unjudged},
-            "two": {"ready": two_ready, "unjudged": two_unjudged}}
+            "two": {"ready": two_ready, "unjudged": two_unjudged},
+            "loss": {"ready": loss_ready, "unjudged": loss_unjudged}}
 
 
 # ★2026-09-30 ユーザー確定: 入れ替え (補4〜5本) は「表示が多いのにクリックされない」出品から先に回す。
@@ -2941,7 +3015,7 @@ def split_fill_and_swap(items, item_targets, limit, swap_limit=0):
     return [items[k] for k in keep], [item_targets[k] for k in keep]
 
 
-def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups=0, swap_limit=0):
+def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups=0, swap_limit=0, loss_only=False):
     """昼の確認(impure)。slice2 が焼いた当日キャッシュから候補を出し、現物と視覚確証→
     確定URLを補URL(AC-AG)へ **安い順に最大5本** 書く(2026-09-05)。主URL(A)は触らない。
 
@@ -2990,6 +3064,19 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
         _swap_t = put_priority_first(rotate_by_last_shown(_swap_t, load_last_shown()),
                                      load_shelf_priority() + load_swap_priority())
         targets = list(targets) + [t for t in _swap_t if t["itemID"] not in _have_iid]
+    # ★2026-10-14 ユーザー「それも専用がいいな。優先順位が高い順に処理したい」: 次の仕入元で買うと赤字になる出品は
+    #   専用ボタン (--loss-risk) にだけ出す。赤字の大きい順。他のボタンからは外す (同じ出品は1つにしか出ない)
+    import hoju_url_from_dupes as _hd_l
+    if loss_only:
+        _all = select_backfill_targets(vals, max_backups=AUXN + 1, min_backups=1, watch=load_watch_by_item(),
+                                       market_sold=_msold)
+        _ids = mark_loss_risk(_all, vals, _price_cache_get(_hd_l))
+        targets = sorted([t for t in _all if t["itemID"] in _ids], key=lambda t: -t.get("loss_gap", 0))
+    else:
+        _ids = mark_loss_risk(targets, vals, _price_cache_get(_hd_l))
+        targets = [t for t in targets if t["itemID"] not in _ids]
+    print(f"  💴 次の仕入元で買うと赤字になる出品: {len(_ids)}件 → "
+          f"{'このボタンで出す (赤字の大きい順)' if loss_only else 'このボタンには出さない (専用ボタン)'}", flush=True)
     cache = _load_cache()
 
     # ★前提(skip台帳 cooldown / 候補NG / 他出品が使用中のURL)は build_confirm_context に1本化。
@@ -3793,7 +3880,8 @@ def main():
             elif a.startswith("--swap-limit="):
                 swap_limit = int(a.split("=", 1)[1])
         run_daytime_confirm(max_backups=max_backups, limit=limit, dry_run=dry,
-                            min_backups=min_backups, swap_limit=swap_limit)
+                            min_backups=min_backups, swap_limit=swap_limit,
+                            loss_only="--loss-risk" in sys.argv)
         return
     if "workload" in sys.argv:
         # ボタンのラベル / status_now が使う件数を JSON で1行。**API/スクレイプ無し**。

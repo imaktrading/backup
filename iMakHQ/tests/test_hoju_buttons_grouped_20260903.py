@@ -128,7 +128,7 @@ def test_badge_texts_are_defined_on_every_path():
       by_kind に渡す名前は、その手前で必ず両方の分岐に現れる。
     """
     i = _SRC.index("by_kind = {")
-    head = _SRC[max(0, i - 3200):i]
+    head = _SRC[max(0, i - 4000):i]      # ★2026-10-14 次で赤字の2行を足して UT の代入が窓から出たので広げた
     names = re.findall(r'"[\w]+": (\w+_txt)', _SRC[i:i + 1400])
     for n in sorted(set(names)):
         if not n.startswith("ut_"):

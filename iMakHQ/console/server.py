@@ -129,7 +129,7 @@ def summarize(d, nightly_ok=False):
             out[k] = {"n": None, "state": "error", "note": str(part.get("error"))[:90], "hold": 0}
 
     h = d.get("hoju") or {}
-    hk = ("hoju_search", "hoju_search_now", "hoju_confirm", "hoju_swap", "hoju_zero", "hoju_one", "hoju_two")
+    hk = ("hoju_search", "hoju_search_now", "hoju_confirm", "hoju_swap", "hoju_zero", "hoju_one", "hoju_two", "hoju_loss")
     if h.get("error"):
         err(hk, h)
     elif h:
@@ -149,6 +149,10 @@ def summarize(d, nightly_ok=False):
         t2 = h.get("two") or {}
         n = _num(t2.get("ready")) + _num(t2.get("unjudged"))
         put("hoju_two", n, n > 0, "予備2〜3本")
+        # ★2026-10-14 次の仕入元で買うと赤字になる出品 (専用ボタン)
+        ls = h.get("loss") or {}
+        n = _num(ls.get("ready")) + _num(ls.get("unjudged"))
+        put("hoju_loss", n, n > 0, "次の仕入元で買うと赤字")
 
     u = d.get("ut") or {}
     uk = ("ut_search", "ut_search_now", "ut_confirm", "ut_swap_confirm",
@@ -380,7 +384,7 @@ def refresh_counts(wait=False, keys=None):
     try:
         r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(HERE, "counts.py")] + list(keys or []),
                            capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           timeout=480, cwd=TOOLS,   # 2026-09-25: 240 だと打ち切られ続けた (実測 185秒+上限待ち65秒)
+                           timeout=900, cwd=TOOLS,   # 2026-09-25: 240 だと打ち切られ続けた (実測 185秒+上限待ち65秒) / 2026-10-14: 480 も打ち切り (実測 8分38秒・補URLの数えが約4分)
                            env=dict(os.environ, PYTHONIOENCODING="utf-8", SHEET_READ_MEMO="1"),
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         out = (r.stdout or "").strip().splitlines()

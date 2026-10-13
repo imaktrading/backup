@@ -194,7 +194,7 @@ button.cell:disabled{opacity:.5;cursor:default}
 .cell.half .lb{font-size:11px;color:var(--ink-2);white-space:nowrap}
 .halves{display:flex;flex-direction:column;gap:4px}
 /* ★2026-10-13 在庫メンテの一番上に固定する 補0本 / 補1本 / 補2〜3本 */
-.hojutop{position:sticky;top:0;z-index:5;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;
+.hojutop{position:sticky;top:0;z-index:5;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;
   padding:10px 0;background:var(--bg,var(--surface))}
 .hojutop .ht{display:flex;flex-direction:column;gap:4px;text-align:left;padding:10px 14px;border-radius:12px;
   border:1px solid var(--line);background:var(--surface);font:inherit;color:inherit;cursor:pointer}
