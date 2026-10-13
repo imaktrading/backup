@@ -1136,7 +1136,7 @@ def swap_baseline(now_cost, t, vals, prices, aux_max=None):
       毎回「仕入値より¥1,000安い」を通り、入れ替わらないのに目視に出続けていた
       (実測: ゼクロム ¥5,800 が6本ずつ繰り上がって出た)。
       入れ替えは **今の5本のうち一番高い物を追い出せる時だけ**意味がある。
-      5本とも値段が分かる時は、その一番高い値段と今の仕入値の低い方を基準にする。
+      5本とも値段が分かる時は、その一番高い値段を基準にする (2026-10-13 今の仕入値とは比べない)。
       1本でも値段が分からない時は今までどおり仕入値 (判断材料が無いので広げない)。
     """
     aux_max = aux_max or AUXN
@@ -1148,8 +1148,10 @@ def swap_baseline(now_cost, t, vals, prices, aux_max=None):
     ps = [(prices or {}).get(_norm_url(u)) for u in aux]
     if any(not isinstance(p, (int, float)) or p <= 0 for p in ps):
         return now_cost
-    top = max(ps)
-    return min(now_cost, top) if now_cost else top
+    # ★2026-10-13 ユーザー「安い補があれば優先的に上書きするよね？」→「うん」: 5本の中で一番高い補と比べる。
+    #   今の仕入値と比べていた (min) ため、一番高い補より安くても今の仕入値より高い候補が出ず、高い補が残っていた。
+    #   書く時は安い順に5本に詰め直すので、一番高い補が追い出される。
+    return max(ps)
 
 
 _PRICE_CACHE = {}

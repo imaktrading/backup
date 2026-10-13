@@ -139,3 +139,13 @@ def test_個別確認の値段を読める(tmp_path):
     got = HD.load_recheck_prices(str(p))
     assert got == {HD._norm("https://snkrdunk.com/apparels/1/used/9"): 5800.0}
     assert HD.load_recheck_prices(str(tmp_path / "none.json")) == {}
+
+
+def test_swap_compares_with_most_expensive_backup_not_cost():
+    # ★2026-10-13 ユーザー「安い補があれば優先的に上書きするよね？」: 今の仕入値が安くても、一番高い補と比べる
+    aux = [f"https://a/{i}" for i in range(5)]
+    prices = {H._norm_url(u): p for u, p in zip(aux, (5000, 6000, 7000, 8000, 15000))}
+    base = H.swap_baseline(5000, {"row": 2}, _vals_with_aux(aux), prices)
+    assert base == 15000
+    assert H.candidate_cost_conflicts(12000, base, False, H.SWAP_MIN_GAIN) is False   # 一番高い補を追い出せる
+    assert H.candidate_cost_conflicts(14500, base, False, H.SWAP_MIN_GAIN) is True    # ¥1,000 未満の差は出さない
