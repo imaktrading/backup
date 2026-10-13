@@ -25,4 +25,8 @@ def test_server_puts_zero_count():
 def test_matrix_has_column():
     src = open(os.path.join(_H, "console", "static", "app.js"), encoding="utf-8").read()
     # ★2026-10-13 補0本・補1本を1つの枠に半分の高さで2つ
-    assert '"hoju_zero", "hoju_one", "hoju_two"' in src and "③ 補2〜3本" in src and '"hoju_confirm"];' in src
+    # ★2026-10-13 ユーザー「在庫メンテの一番上に横並び」: 補0本 / 補1本 / 補2〜3本 は表から出して一番上に固定
+    assert '["hoju_zero", "補0本"' in src and '["hoju_one", "補1本"' in src and '["hoju_two", "補2〜3本"' in src
+    assert '"@top"' in src and '"hoju_confirm"];' in src
+    html = open(os.path.join(_H, "console", "static", "index.html"), encoding="utf-8").read()
+    assert 'id="g-hojutop"' in html

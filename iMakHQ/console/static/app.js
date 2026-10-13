@@ -9,10 +9,10 @@
   var MATRIX = {
     hoju: {
       title: "補URL", target: "出品中 (在庫あり)", purpose: "予備の仕入元を足す・安い仕入元に入れ替える",
-      cols: ["① 当日分", "② 夜に探す", "③ 補0本", "③ 補1本", "③ 補2〜3本", "③ 入れ替え (補4〜5本)"],
-      rows: [["PSA", ["hoju_search_now", "hoju_search", "hoju_zero", "hoju_one", "hoju_two", "hoju_swap"]],
-             ["UT", ["ut_search_now", "ut_search", {k: "ut_confirm", span: 3}, "ut_swap_confirm"]],
-             ["一番くじ", [null, "kuji_search", {k: "kuji_confirm", span: 3}, null]]]
+      cols: ["① 当日分", "② 夜に探す", "③ 補充", "③ 入れ替え (補4〜5本)"],
+      rows: [["PSA", ["hoju_search_now", "hoju_search", "@top", "hoju_swap"]],
+             ["UT", ["ut_search_now", "ut_search", "ut_confirm", "ut_swap_confirm"]],
+             ["一番くじ", [null, "kuji_search", "kuji_confirm", null]]]
     },
     restock: {
       title: "再仕入れ", target: "売り切れ (在庫0)", purpose: "また買える仕入元を見つけて在庫を戻す",
@@ -135,6 +135,7 @@
         // ★2026-10-13 {k, span}: 横に何列ぶんか (UT・一番くじの補充は 補0本/補1本/補2〜3本 の3列ぶん)
         var span = (k && k.span) ? ' colspan="' + k.span + '"' : "";
         if (k && k.k) k = k.k;
+        if (k === "@top") return '<td class="pad"' + span + '><div class="cell na">↑ 一番上の 補0本・補1本・補2〜3本</div></td>';
         var j = k && job(k);
         if (!j) return '<td class="pad"' + span + '><div class="cell na">この段は無し</div></td>';
         var hot = j.state === "todo";
@@ -188,8 +189,29 @@
     return html + (extra || "");
   }
 
+  // ★2026-10-13 在庫メンテの一番上に固定: PSA の補充を補の本数ごとに3つ (同じ出品は1つにしか出ない)
+  var HOJU_TOP = [["hoju_zero", "補0本", "仕入元が切れたら終わり"], ["hoju_one", "補1本", "あと1本切れたら補0本"],
+                  ["hoju_two", "補2〜3本", "予備を5本まで足す"]];
+  function paintHojuTop() {
+    var el = $("g-hojutop");
+    if (!el) return;
+    el.innerHTML = HOJU_TOP.map(function (x) {
+      var j = job(x[0]);
+      if (!j) return '<div class="ht na"><span class="t">PSA ' + esc(x[1]) + '</span><span class="note">まだ数えていません</span></div>';
+      var hot = j.state === "todo";
+      return openTag(j, "ht" + (hot ? " hot" : ""), "", ' title="' + esc(tipOf(j)) + '"') +
+        '<span class="t">PSA ' + esc(x[1]) + '</span><span class="note">' + esc(x[2]) + '</span>' +
+        '<span class="row"><span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" +
+        chip(j) + goMark(j) + "</span>" + closeTag(j);
+    }).join("");
+  }
+
   function paintMaint() {
+    paintHojuTop();
     var h = matrix("g-hoju", MATRIX.hoju), r = matrix("g-restock", MATRIX.restock);
+    // 一番上の3つも 補URL の数に入れる (表から出しただけで、補URL の仕事のまま)
+    var tj = HOJU_TOP.map(function (x) { return job(x[0]); }).filter(Boolean);
+    h.todo += todoOf(tj).length; h.total += sum(tj, function (j) { return j.n; }); h.hold += sum(tj, function (j) { return j.hold; });
     var sl = SHELF_KINDS.map(job).filter(Boolean);
     $("g-shelf").innerHTML = '<div class="gh"><h3>取下げ・棚</h3><span class="target">仕入元が死んだ / 長く売れない</span>' +
       '<span class="purpose">出品を落として棚 (出品枠の金額) を空ける</span><span class="tot">要対応 <b>' + todoOf(sl).length +
@@ -464,6 +486,7 @@
     var placed = {};
     Object.keys(MATRIX).forEach(function (k) {
       MATRIX[k].rows.forEach(function (r) { r[1].forEach(function (x) { [].concat(x && x.k ? x.k : (x || [])).forEach(function (y) { if (y) placed[y] = 1; }); }); });
+      HOJU_TOP.forEach(function (x) { placed[x[0]] = 1; });
       if (MATRIX[k].side) placed[MATRIX[k].side.kind] = 1;
     });
     SHELF_KINDS.concat(SEED_KINDS).forEach(function (k) { placed[k] = 1; });

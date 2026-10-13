@@ -191,6 +191,19 @@ button.cell:disabled{opacity:.5;cursor:default}
 .cell.half .n{grid-row:auto;font-size:16px;min-width:28px}
 .cell.half .lb{font-size:11px;color:var(--ink-2);white-space:nowrap}
 .halves{display:flex;flex-direction:column;gap:4px}
+/* ★2026-10-13 在庫メンテの一番上に固定する 補0本 / 補1本 / 補2〜3本 */
+.hojutop{position:sticky;top:0;z-index:5;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;
+  padding:10px 0;background:var(--bg,var(--surface))}
+.hojutop .ht{display:flex;flex-direction:column;gap:4px;text-align:left;padding:10px 14px;border-radius:12px;
+  border:1px solid var(--line);background:var(--surface);font:inherit;color:inherit;cursor:pointer}
+.hojutop .ht.hot{border-color:var(--ai);background:var(--ai-soft)}
+.hojutop .ht.na{cursor:default;opacity:.7}
+.hojutop .ht .t{font:600 14px var(--f-head)}
+.hojutop .ht .note{font-size:11.5px;color:var(--ink-3)}
+.hojutop .ht .row{display:flex;align-items:center;gap:8px}
+.hojutop .ht .n{font:500 22px/1 var(--f-mono);min-width:34px}
+.hojutop .ht .n.todo{color:var(--ai)} .hojutop .ht .n.zero{color:var(--ink-3)}
+@media (max-width:720px){.hojutop{grid-template-columns:1fr}}
 td.hot{background:color-mix(in srgb,var(--ai-soft) 55%,transparent)}
 .list{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
 .li{padding:14px 18px 14px 22px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);
