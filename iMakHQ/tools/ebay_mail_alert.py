@@ -165,6 +165,7 @@ def main(argv=None):
         print(f"📨 eBay メールの見張り: 初回なので {len(new)}通を見た扱いにしました (通知なし)")
         new = []
     offers = p = None
+    failed = []
     for m in new:
         if m["kind"] == "offer":
             if offers is None:
@@ -185,18 +186,24 @@ def main(argv=None):
             title, body = paid_line(name, sheet_info(iid) if iid else None)
             click = "https://www.ebay.com/sh/ord" if not iid else "https://www.ebay.com/itm/%s" % iid
         print(f"  → {title} | {body.replace(chr(10), ' / ')}")
+        ok = False
         if not dry:
             try:
-                if push(title, body, click):
-                    sent += 1
+                ok = push(title, body, click)
             except Exception as e:                             # noqa: BLE001
                 print(f"  ⚠️ 通知を送れません ({type(e).__name__})")
-        seen.add(m["id"])
+            if not ok:
+                failed.append(m["id"])
+                print("  ⚠️ 通知を送れなかった → 次の回にもう一度送る")
+        if ok:
+            sent += 1
+            seen.add(m["id"])
     # ★0件でも必ず出す (動いたかが走行ログで分かるように)
     print(f"📨 eBay メールの見張り: 新しい合図 {len(new)}通 (オファー {sum(1 for m in new if m['kind'] == 'offer')} / "
-          f"売れた {sum(1 for m in new if m['kind'] == 'paid')}) / 通知 {sent}件" + (" [試しに見ただけ]" if dry else ""))
+          f"売れた {sum(1 for m in new if m['kind'] == 'paid')}) / 通知 {sent}件 / 送れず {len(failed)}件" + (" [試しに見ただけ]" if dry else ""))
     if not dry:
-        keep = sorted(seen | {m["id"] for m in mails})[-2000:]
+        # 送れなかった物は「見た」にしない (次の回に送り直す)。それ以外のメールは見た扱い
+        keep = sorted((seen | {m["id"] for m in mails}) - set(failed))[-2000:]
         os.makedirs(os.path.dirname(STATE), exist_ok=True)
         json.dump({"seen": keep, "at": dt.datetime.now().isoformat(timespec="seconds")},
                   open(STATE, "w", encoding="utf-8"))
