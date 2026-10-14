@@ -45,6 +45,9 @@ class TradingAuthError(RuntimeError):
 
 
 _TOK = {"value": "", "until": 0.0}
+# ★2026-10-14 つなぎっぱなしで使い回す。requests.post を毎回呼ぶと、そのたびに証明書の束を読み直す
+#   (この PC で1回 0.6秒)。再仕入れ ③ で 164件ずつ聞くと、それだけで1分半かかっていた
+_HTTP = requests.Session()
 
 
 def _access_token():
@@ -119,7 +122,7 @@ def fetch_listing_images(item_id, _cache={}):
         r = None
         for attempt in range(4):
             try:
-                r = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30)
+                r = _HTTP.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30)
                 break
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
                 if attempt < 3:
@@ -177,7 +180,7 @@ def fetch_listing_condition(item_id):
         text = None
         for attempt in range(4):
             try:
-                text = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30).text
+                text = _HTTP.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30).text
                 _check_auth(text)
                 break
             except requests.exceptions.ConnectionError:
@@ -252,7 +255,7 @@ def fetch_listing_status(item_id):
         text = None
         for attempt in range(4):
             try:
-                text = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr,
+                text = _HTTP.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr,
                                      timeout=30).text
                 _check_auth(text)
                 break
@@ -288,7 +291,7 @@ def fetch_listing_qty(item_id):
         text = None
         for attempt in range(4):
             try:
-                text = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30).text
+                text = _HTTP.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30).text
                 _check_auth(text)
                 break
             except requests.exceptions.ConnectionError:
@@ -331,7 +334,7 @@ def fetch_listing_status(item_id):
         text = None
         for attempt in range(4):
             try:
-                text = requests.post(_ENDPOINT, data=body.encode("utf-8"),
+                text = _HTTP.post(_ENDPOINT, data=body.encode("utf-8"),
                                      headers=hdr, timeout=30).text
                 _check_auth(text)
                 break
@@ -368,7 +371,7 @@ def fetch_listing_price(item_id):
         text = None
         for attempt in range(4):
             try:
-                text = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30).text
+                text = _HTTP.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30).text
                 _check_auth(text)
                 break
             except requests.exceptions.ConnectionError:

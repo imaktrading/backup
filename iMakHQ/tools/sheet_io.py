@@ -373,12 +373,7 @@ _PRODUCT_GUARDED_COLS = {
 
 
 def _product_ws():
-    import gspread
-    from google.oauth2.service_account import Credentials
-    creds = Credentials.from_service_account_file(
-        CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(PRODUCT_SHEET_ID)
+    sh = _open(PRODUCT_SHEET_ID)                   # ★2026-10-14 開いたスプシを使い回す (_open の説明)
     ws = next((w for w in sh.worksheets() if w.id == PRODUCT_GID), None)
     if ws is None:
         raise RuntimeError(f"商品管理シート gid={PRODUCT_GID} が見つからない")
@@ -844,13 +839,29 @@ def restock_reactivate_master(itemid_to_row, itemid_to_url, itemid_to_cost=None)
     return n
 
 
+_OPENED = {}
+_OPEN_TTL_SEC = 600
+
+
 def _open(sheet_id=MAINT_SHEET_ID):
-    """スプシを開く (I/O)。読み書き共通の入口 = ここを差し替えれば test できる。"""
+    """スプシを開く (I/O)。読み書き共通の入口 = ここを差し替えれば test できる。
+
+    ★2026-10-14 1つのプロセスの中では、一度開いたスプシを使い回す。読むたびに鍵の取り直しと
+      スプシを開き直していて (1回約2秒)、再仕入れ ① はタブを12回読むだけで約30秒かかっていた。
+      中身 (タブの値) は毎回取りに行くので、古い値を返すことはない。
+      神風のサーバーのように何日も動くプロセスで切れた接続を掴まないよう、使い回すのは10分まで。
+    """
+    import time as _t
+    hit = _OPENED.get(sheet_id)
+    if hit and _t.time() - hit[0] < _OPEN_TTL_SEC:
+        return hit[1]
     import gspread
     from google.oauth2.service_account import Credentials
     creds = Credentials.from_service_account_file(
         CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
-    return gspread.authorize(creds).open_by_key(sheet_id)
+    sh = gspread.authorize(creds).open_by_key(sheet_id)
+    _OPENED[sheet_id] = (_t.time(), sh)
+    return sh
 
 
 def is_quota_error(e):
@@ -907,11 +918,7 @@ def write_rows_to_tab(tab, rows2d, sheet_id=MAINT_SHEET_ID):
     タブは維持 (gid 安定)。戻り: 書込行数。失敗は例外送出 (呼出側で握る)。
     """
     import gspread
-    from google.oauth2.service_account import Credentials
-    creds = Credentials.from_service_account_file(
-        CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(sheet_id)
+    sh = _open(sheet_id)                           # ★2026-10-14 開いたスプシを使い回す (_open の説明)
     ncols = max((len(r) for r in rows2d), default=4)
     try:
         ws = sh.worksheet(tab)

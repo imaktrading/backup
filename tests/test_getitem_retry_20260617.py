@@ -27,6 +27,7 @@ def test_retries_on_connection_error_then_succeeds(monkeypatch):
         return _R()
 
     monkeypatch.setattr(m.requests, "post", fake_post)
+    monkeypatch.setattr(m._HTTP, "post", fake_post)
     monkeypatch.setattr(m, "_load_keys", lambda: {"AppID": "", "DevID": "", "AppSecret": "", "AuthToken": ""})
     # ★2026-09-06: 認証を OAuth に寄せたので _access_token も requests.post を使う。
     #   ここで止めないと「GetItem の呼び出し回数」にトークン取得ぶんが混ざる。
@@ -42,6 +43,7 @@ def test_failure_not_cached_as_empty(monkeypatch):
         raise m.requests.exceptions.ConnectionError("dns")
 
     monkeypatch.setattr(m.requests, "post", always_fail)
+    monkeypatch.setattr(m._HTTP, "post", always_fail)
     monkeypatch.setattr(m, "_load_keys", lambda: {"AppID": "", "DevID": "", "AppSecret": "", "AuthToken": ""})
     # ★2026-09-06: 認証を OAuth に寄せたので _access_token も requests.post を使う。
     #   ここで止めないと「GetItem の呼び出し回数」にトークン取得ぶんが混ざる。
@@ -63,6 +65,7 @@ def test_retries_on_read_timeout_then_succeeds(monkeypatch):
         return _R()
 
     monkeypatch.setattr(m.requests, "post", fake_post)
+    monkeypatch.setattr(m._HTTP, "post", fake_post)
     monkeypatch.setattr(m, "_load_keys", lambda: {"AppID": "", "DevID": "", "AppSecret": "", "AuthToken": ""})
     # ★2026-09-06: 認証を OAuth に寄せたので _access_token も requests.post を使う。
     #   ここで止めないと「GetItem の呼び出し回数」にトークン取得ぶんが混ざる。

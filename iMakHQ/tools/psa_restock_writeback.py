@@ -18,6 +18,7 @@ ST_DONE = "実行済(qty復活)"
 ST_PENDING = "入稿待ち(qty=0)"
 ST_UNKNOWN = "状態不明(要確認)"
 ST_ENDED = "終了済(reviseでは戻せない)"
+GETITEM_WORKERS = 8      # eBay に在庫数を同時に聞く数 (2026-10-14)
 
 
 def first_supply_url(joined):
@@ -183,10 +184,24 @@ def reconcile_and_write(today):
     cost_i = header.index("最安¥") if "最安¥" in header else None
     body = [r for r in rows[1:] if any(r)]
     items = [{"itemID": (r[iid_i] if iid_i < len(r) else "")} for r in body]
-    qty_map = {it["itemID"]: fetch_listing_qty(it["itemID"]) for it in items if it["itemID"]}
-    # qty=0 の分だけ「出品が生きているか」を追加で見る (終了済を入稿待ちに混ぜない)
-    status_map = {iid: fetch_listing_status(iid)
-                  for iid, q in qty_map.items() if q is not None and q < 1}
+    # ★2026-10-14 ユーザー「目視して在庫を戻す、20分やで」: ③ の9分のうち約8分が、確定164件の在庫数を
+    #   **1件ずつ順に** eBay に聞く時間だった (1件約3秒)。聞く中身・件数は同じまま、8件ずつ同時に聞く
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor
+    _t0 = _time.time()
+    _iids = list(dict.fromkeys(it["itemID"] for it in items if it["itemID"]))
+    try:                                    # 鍵は先に1回だけ取る (同時に8回取り直さない)
+        import ebay_getitem_images as _eg
+        _eg._access_token()
+    except Exception:                                          # noqa: BLE001 取れなければ各呼び出しが今までどおり取る
+        pass
+    with ThreadPoolExecutor(max_workers=GETITEM_WORKERS) as ex:
+        qty_map = dict(zip(_iids, ex.map(fetch_listing_qty, _iids)))
+        # qty=0 の分だけ「出品が生きているか」を追加で見る (終了済を入稿待ちに混ぜない)
+        _zero = [iid for iid, q in qty_map.items() if q is not None and q < 1]
+        status_map = dict(zip(_zero, ex.map(fetch_listing_status, _zero)))
+    print(f"⏱ eBay の在庫数を確かめた: {len(qty_map)}件 + 出品の状態 {len(status_map)}件 / "
+          f"{_time.time() - _t0:.0f}秒 ({GETITEM_WORKERS}件ずつ同時)", flush=True)
     cls = classify_restock(items, qty_map, status_map)
 
     # 復活分(qty>=1)の商品管理シート master 同期: A列(供給URL)更新 + D列(売り切れ)クリア
