@@ -9,7 +9,8 @@
   依頼者 / 状態 / 処理時刻)。状態が空 = 未処理。
   ① 補 (AC〜AG) を書いた時 → 理由=補を書いた (psa_hoju_fill の確定の後から呼ぶ)
   ② 急ぐ出品を2時間おき → 理由=急ぐ (python quick_watch_request.py urgent)
-     急ぐ = 補0本 / 次の仕入元で買うと赤字 (psa_hoju_fill.mark_loss_risk が正) / よく売れる (urgent_first と同じ判定)
+     急ぐ = 補0本 / 次の仕入元で買うと赤字 (psa_hoju_fill.mark_loss_risk が正)
+     ★「よく売れる」は入れない (ブラボー判断 2026-10-14: 入れると293行/2時間でメルカリの負担が見込みの3倍強になる)
 
 ★タブ全体を書き直さず **末尾に足す** (監視くんが同じタブの状態を書いているので、書き直すと取り合いで消える)。
 ★未処理のまま同じ itemID が載っていれば足さない (二重に頼まない)。
@@ -88,11 +89,8 @@ def urgent_ids():
     live = H.select_backfill_targets(vals, max_backups=H.AUXN + 1)
     zero = [t["itemID"] for t in live if int(t.get("n_backups") or 0) == 0]
     loss = sorted(H.mark_loss_risk(live, vals, H._price_cache_get(hd)))
-    ms = H.load_market_sold([t.get("key") for t in live])
-    hot_list, n_hot = H.urgent_first(live, ms, churn=H.load_churn(vals))
-    hot = [t["itemID"] for t in hot_list[:n_hot]]
-    ids = list(dict.fromkeys(zero + loss + hot))
-    return ids, {"補0本": len(zero), "次で赤字": len(loss), "よく売れる": len(hot)}
+    ids = list(dict.fromkeys(zero + loss))
+    return ids, {"補0本": len(zero), "次で赤字": len(loss)}
 
 
 def main():
