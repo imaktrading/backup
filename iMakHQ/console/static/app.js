@@ -61,7 +61,11 @@
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   // ★2026-10-02: KAGOYA で動くボタンに印 (ユーザー要望「移行したマークつけれない？」)
-  function kg(x) { return x && x.kagoya ? '<span class="kg" title="押すと KAGOYA で動きます (画面はこの PC で開きます)">KAGOYA</span>' : ""; }
+  function kg(x) {
+    // ★2026-10-15 ユーザー「ボタンの版管理は？ボタンに書かないの？」: 版 = 直した日-その日の何回目 (git から自動)
+    var v = x && x.ver ? '<span class="bver" title="このボタンのプログラムが最後に直された日と、その日の何回目か (走行ログの2行目にも出ます)">版 ' + esc(x.ver) + "</span>" : "";
+    return (x && x.kagoya ? '<span class="kg" title="押すと KAGOYA で動きます (画面はこの PC で開きます)">KAGOYA</span>' : "") + v;
+  }
   function money(v) {
     if (v == null) return "—";
     return Math.abs(v) >= 1e6 ? "$" + (v / 1e6).toFixed(2) + "M" : "$" + Math.round(v).toLocaleString("en-US");

@@ -549,6 +549,29 @@ def get_crew():
     return STATE["crew"] or {"rows": [], "route": 0, "loading": True}
 
 
+# ★2026-10-15 ユーザー「それぞれのボタンを版管理したら？」「ボタンに書かないの？」: ボタンごとの版
+#   (version.button_version = git の記録から自動)。git を呼ぶので裏で10分おきに作り、画面はそれを読むだけ
+_BTN_VERS = {}
+
+
+def _btn_key(script):
+    return (script.get("category") or "", script.get("label") or "")
+
+
+def _btn_ver_loop():
+    while True:
+        try:
+            for s in _cp().SCRIPTS:
+                _BTN_VERS[_btn_key(s)] = version.button_version(s)
+        except Exception:                                      # noqa: BLE001 版が出ないだけ (ボタンは押せる)
+            pass
+        time.sleep(600)
+
+
+def btn_ver(script):
+    return _BTN_VERS.get(_btn_key(script), "")
+
+
 def get_jobs():
     cp = _cp()
     nightly = (STATE["home"] or {}).get("nightly") or {}
@@ -566,7 +589,8 @@ def get_jobs():
         jobs.append({"kind": kind, "i": i, "label": label, "step": m.group(0) if m else "",
                      "group": group_of(label), "tip": (s.get("tip") or "")[:400],
                      "runnable": runnable(s), "params": s.get("params") or [],
-                     "ask_amount": bool(s.get("ask_amount")), "kagoya": is_remote(s, _remote_set()), **info})
+                     "ask_amount": bool(s.get("ask_amount")), "kagoya": is_remote(s, _remote_set()),
+                     "ver": btn_ver(s), **info})
     # ★2026-10-05: 新規に出せる PSA の枚数 (今日やることの状態の1行に出す)
     psa_new = (STATE["counts"] or {}).get("psa_new") or {}
     offer_send = (STATE["counts"] or {}).get("offer_send") or {}     # ★2026-10-09 オファーを送れる件数
@@ -598,7 +622,8 @@ def get_buttons():
                     "label": display_label(s["label"]), "badge": s.get("badge"),
                     "runnable": runnable(s), "why": version.why_not_runnable(s),
                     "params": s.get("params") or [], "ask_amount": bool(s.get("ask_amount")),
-                    "tip": (s.get("tip") or "")[:400], "kagoya": is_remote(s, _remote_set())})
+                    "tip": (s.get("tip") or "")[:400], "kagoya": is_remote(s, _remote_set()),
+                    "ver": btn_ver(s)})
     return {"buttons": out}
 
 
@@ -1228,12 +1253,14 @@ def _run_worker(script, cmd=None):
     label = display_label(script["label"])
     cmd = list(cmd or script["cmd"])
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1", **(script.get("env") or {}))
-    _log("▶ %s  (%s)" % (label, " ".join(cmd)))
+    _log("▶ %s  版 %s  (%s)" % (label, btn_ver(script) or "—", " ".join(cmd)))
     fh = path = None
     try:
         fh, path = cp._open_run_log(script["label"])
-        fh.write("=== %s (%s) console ===\ncwd: %s\ncmd: %s\n\n" % (
+        fh.write("=== %s (%s) console ===\ncwd: %s\ncmd: %s\n" % (
             script["label"], time.strftime("%Y-%m-%d %H:%M:%S"), script["cwd"], " ".join(cmd)))
+        # ★2026-10-15 どの版で動いたか (ログを貼ればわかる)。版 = 直した日-その日の何回目 (git から自動)
+        fh.write("版: %s\n\n" % (btn_ver(script) or version.button_version(script) or "不明"))
         _log("  記録: %s" % path)
     except Exception:                                          # noqa: BLE001
         fh = path = None
@@ -1752,6 +1779,7 @@ def main():
     threading.Thread(target=get_home, daemon=True).start()
     threading.Thread(target=_watcher_loop, daemon=True).start()
     threading.Thread(target=_offer_loop, daemon=True).start()
+    threading.Thread(target=_btn_ver_loop, daemon=True).start()
     threading.Thread(target=adopt_orphan_run, daemon=True).start()
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     if "--no-open" not in sys.argv:
