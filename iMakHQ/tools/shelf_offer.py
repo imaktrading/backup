@@ -565,7 +565,38 @@ def mark_sent(iid, pct=None):
     if pct is not None:
         e["pct_sent"] = pct
     save_json(OFFERS_PATH, ledger)
+    sent_tab_append([[iid, e["sent"], e["expires"]]])
     return {"ok": True}
+
+
+SENT_TAB = "送ったオファー"
+SENT_TAB_HEADER = ["itemID", "送った時刻", "期限"]
+
+
+def sent_tab_append(rows, log=print):
+    """「既存メンテ」タブ `送ったオファー` の末尾に足す (I/O)。失敗しても送った記録 (台帳) は残るので止めない。
+
+    ★2026-10-14 ブラボー GO (B-20261014-014): 送ったオファーは一覧の API が無いので、リバイスが読めるようにここへ書く。
+      リバイスは期限内の itemID の値下げを止める (値上げは止めない)。期限が過ぎた行は残してよい。0件でも1行ログ。
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):                # テスト中は本物のスプシに書かない
+        log(f"📮 送ったオファーのタブに足した: 0件 (テスト中・{len(rows)}件は書かない)")
+        return 0
+    try:
+        import sheet_io
+        sh = sheet_io._open(sheet_io.MAINT_SHEET_ID)
+        try:
+            ws = sh.worksheet(SENT_TAB)
+        except Exception:                                      # noqa: BLE001
+            ws = sh.add_worksheet(title=SENT_TAB, rows=100, cols=3)
+            ws.update(range_name="A1", values=[SENT_TAB_HEADER], value_input_option="RAW")
+        if rows:
+            ws.append_rows(rows, value_input_option="RAW")
+        log(f"📮 送ったオファーのタブに足した: {len(rows)}件")
+        return len(rows)
+    except Exception as ex:                                    # noqa: BLE001
+        log(f"⚠️要対応 送ったオファーのタブに足せなかった ({len(rows)}件): {type(ex).__name__}: {ex}")
+        return 0
 
 
 def build_store_plan(log=print, limit=None):
