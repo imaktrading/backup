@@ -41,6 +41,7 @@ QUICK_LOCK = DECISION_LOG_DIR / ".quick.lock"
 MAX_ITEMS_PER_RUN = 200                               # 1 回に見る上限 (メルカリ API の負担を抑える)
 URGENT_WORD = "急ぐ"
 URGENT_EVERY_MIN = 55                                 # 急ぐ行を また見るまでの分 (10 分おきの起動なので 実質 1 時間おき)
+URGENT_BATCH_WINDOW_MIN = 10                          # 出品くんの「同じ回」とみなす依頼時刻の幅
 
 
 def _log(msg: str) -> None:
@@ -68,8 +69,21 @@ def pending_rows(values: list, now: datetime = None) -> list:
 
     同じ itemID が何行あっても 1 つにまとめ、いちばん下の行に結果を書く。
     見るのは 状態が空の行 か、急ぐ行で最後に見てから URGENT_EVERY_MIN 分たった物。
+    ★ 2026-10-14 (B-20261014-010 追加、出品くんの指摘): 見直し (55 分ごと) の対象は **出品くんの直近の回**
+      (急ぐの行で一番新しい依頼時刻から URGENT_BATCH_WINDOW_MIN 分以内) に載った itemID だけ。
+      急ぐでなくなった出品が見直しに残り続けないため。出品くんは 2 時間おきに今の急ぐを全部載せ直す。
     """
     now = now or datetime.now()
+    urgent_times = [t for t in (_parse_ts((list(r) + [""] * 3)[2]) for r in values[1:]
+                                if URGENT_WORD in str((list(r) + [""] * 2)[1])) if t]
+    latest = max(urgent_times) if urgent_times else None
+    in_latest = set()
+    if latest is not None:
+        for r in values[1:]:
+            r = list(r) + [""] * len(QUICK_HEADER)
+            t = _parse_ts(r[2])
+            if URGENT_WORD in str(r[1]) and t and (latest - t).total_seconds() <= URGENT_BATCH_WINDOW_MIN * 60:
+                in_latest.add(str(r[0]).strip())
     last = {}                                         # itemID → (行番号, 急ぐ?, 状態, 処理時刻)
     for i, r in enumerate(values[1:], start=2):
         r = list(r) + [""] * len(QUICK_HEADER)
@@ -85,7 +99,7 @@ def pending_rows(values: list, now: datetime = None) -> list:
         if not state:
             out.append((row_no, iid, urgent))
             continue
-        if urgent:
+        if urgent and iid in in_latest:
             t = _parse_ts(done_at)
             if t is None or (now - t).total_seconds() >= URGENT_EVERY_MIN * 60:
                 out.append((row_no, iid, urgent))
