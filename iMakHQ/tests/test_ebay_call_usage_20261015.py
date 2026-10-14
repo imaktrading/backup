@@ -84,6 +84,7 @@ def U2(tmp_path, monkeypatch):
     monkeypatch.setattr(U, "STATE_PATH", str(tmp_path / "s.json"))
     monkeypatch.setattr(U, "NTFY_TOPIC", str(tmp_path / "none.txt"))     # スマホには送らない
     monkeypatch.setattr(U, "sub_access_token", lambda: "SUB")
+    monkeypatch.setattr(U, "SWITCH_DAYS", set())
     monkeypatch.setattr(sys, "argv", ["runaway.py"])
     return U
 
@@ -167,3 +168,11 @@ def test_offer_count_says_unreadable_instead_of_zero(monkeypatch):
 def test_ebay_day_follows_pacific_midnight(when, want):
     import ebay_call_usage as U
     assert U.ebay_day(when) == want
+
+
+def test_special_day_switch_expires_at_day_change(U2, monkeypatch):
+    """2026-10-15 ユーザー「今回は特別に16時まで別のKEYで」。その eBay の日だけ切り替え、16時で本鍵に戻る"""
+    monkeypatch.setattr(U2, "SWITCH_DAYS", {"2026-10-14"})
+    U2.mark_exhausted("main", now=datetime(2026, 10, 15, 8, 0))
+    assert U2.active_key(datetime(2026, 10, 15, 15, 59)) == "sub"
+    assert U2.active_key(datetime(2026, 10, 15, 16, 0)) == "main"

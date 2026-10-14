@@ -91,6 +91,13 @@ CALLER_LIMIT = 1000
 #   ... suspension of your license」とある。上限を超えるために別の鍵へ回すのはこれに当たる恐れがあるので、
 #   ユーザーの判断が出るまで切り替えない (上限に当たったら記録して知らせ、16時まで止まる)
 SWITCH_TO_SUB = False
+# ★2026-10-15 08時 ユーザー「今回は特別に16時まで別のKEYで通常運転に戻して。16時になればいつものKEYに戻して」。
+#   eBay の日 (米国太平洋の日付) で持つので、日替わり (今日は 16:00) で自動的に外れる
+SWITCH_DAYS = {"2026-10-14"}
+
+
+def _switch_on(now=None):
+    return SWITCH_TO_SUB or ebay_day(now) in SWITCH_DAYS
 WARN_AT = 3000
 EXEMPT = {"EndItem", "EndItems", "ReviseInventoryStatus", "EndFixedPriceItem"}
 STATE_PATH = r"C:\dev\iMak_data\hq\ebay_key_state.json"
@@ -128,7 +135,7 @@ def _save_state(st, path=None):
 
 def active_key(now=None, path=None):
     """今日使う鍵。本鍵が上限に当たった日は 'sub'。日付が変われば (16時) 本鍵に戻る。"""
-    if not SWITCH_TO_SUB:
+    if not _switch_on(now):
         return "main"
     return "sub" if _load_state(path).get(ebay_day(now), {}).get("main_exhausted") else "main"
 
@@ -164,7 +171,7 @@ def mark_exhausted(key, now=None, path=None):
         st = _load_state(path)
         st.setdefault(day, {})[f"{key}_exhausted"] = True
         _save_state(st, path)
-    if key == "main" and SWITCH_TO_SUB:
+    if key == "main" and _switch_on(now):
         notify_once("main_exhausted", "eBay の上限 → 2つ目の鍵に切替",
                     "本鍵 (imax-64) が今日の上限に当たりました。16時まで imaktrading の鍵で動かします。"
                     "誰が使ったかは python iMakHQ/tools/ebay_api_usage.py", now, path)
@@ -265,7 +272,7 @@ def send(do_post, callname, headers):
     text = do_post(headers)
     if is_quota_error(text):
         mark_exhausted("sub" if was_sub else "main")
-        if not was_sub and SWITCH_TO_SUB:
+        if not was_sub and _switch_on():
             try:
                 text = do_post(dict(headers, **{"X-EBAY-API-IAF-TOKEN": sub_access_token()}))
             except Exception as e:                             # noqa: BLE001
