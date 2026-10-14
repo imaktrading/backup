@@ -735,7 +735,7 @@ def _write_status(rows, prod_rows=None):
     w = waiting(rows)
     shipby = sorted(r[C_SHIPBY] for _n, r in w if r[C_SHIPBY])
     bk = backup_counts(prod_rows, [r[C_ITEM] for _n, r in w]) if prod_rows is not None else {}
-    items = [{"row": n, "no": r[C_NO], "title": r[C_TITLE][:60], "ship_by": r[C_SHIPBY],
+    items = [{"row": n, "no": r[C_NO], "item": r[C_ITEM].strip(), "title": r[C_TITLE][:60], "ship_by": r[C_SHIPBY],
               "backups": bk.get(r[C_ITEM].strip()) if bk else None} for n, r in w]
     st = {"at": dt.datetime.now().isoformat(timespec="seconds"), "waiting": len(w),
           "earliest_ship_by": shipby[0] if shipby else "",
@@ -817,7 +817,17 @@ def main(argv):
     link_purchases(ws, by_id, _read_with_quota_retry(ws.get_all_values))
     fill_mercari_cost(ws, _read_with_quota_retry(ws.get_all_values))
     fill_ship_cost(ws, _read_with_quota_retry(ws.get_all_values))
-    st = _write_status(_read_with_quota_retry(ws.get_all_values), _product_rows())
+    _prod = _product_rows()
+    st = _write_status(_read_with_quota_retry(ws.get_all_values), _prod)
+    # ★2026-10-14 ユーザー「今後のために、修正してよ」: 補0本の仕入れ待ちは見張り (card_watch・2分おき) を自動で始める。
+    #   仕入れた・キャンセルで仕入れ待ちから外れたら自動で閉じる。商品管理シートが読めない時は触らない
+    if _prod is not None:
+        import sheet_io as _sio
+        _key = {(r[1] if len(r) > 1 else "").strip(): (r[_sio.PRODUCT_COL_KEY] if len(r) > _sio.PRODUCT_COL_KEY else "")
+                for r in _prod[1:]}
+        import card_watch as _cw
+        _cw.auto_from_orders([dict(x, key=_key.get(x["item"], "")) for x in st["items"] if x["backups"] == 0],
+                             [x["item"] for x in st["items"]])
     print(f"  書きました: 足した {len(add)}行 / 仕入れ待ち {st['waiting']}件"
           + (f" (いちばん早い発送期限 {st['earliest_ship_by']})" if st["earliest_ship_by"] else ""))
     # ★走行ログで「動いた」が分かる1行 (0件でも出す)
