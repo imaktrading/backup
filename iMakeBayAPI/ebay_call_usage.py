@@ -17,9 +17,19 @@ _LOCK = threading.Lock()      # 8件ずつ同時に聞く道具があるので�
 
 
 def ebay_day(now=None):
-    """eBay の「1日」(日本時間 16:00 区切り) の日付文字列。純関数。"""
+    """eBay の「1日」の日付文字列 (now は日本時間)。純関数。
+
+    ★2026-10-15: 区切りは **米国太平洋時間の0時**。夏時間 (3月〜11月第1日曜) は日本 16:00、
+      冬時間は日本 **17:00**。16時固定だと 11/1 以降 1時間ずれる (上限の戻る時刻も 17時)。
+    """
     from datetime import datetime, timedelta
-    return ((now or datetime.now()) - timedelta(hours=16)).strftime('%Y-%m-%d')
+    now = now or datetime.now()
+    try:
+        from zoneinfo import ZoneInfo
+        la = now.replace(tzinfo=ZoneInfo("Asia/Tokyo")).astimezone(ZoneInfo("America/Los_Angeles"))
+        return la.strftime('%Y-%m-%d')
+    except Exception:                                          # noqa: BLE001 時差の表が無い時は夏時間で
+        return (now - timedelta(hours=16)).strftime('%Y-%m-%d')
 
 
 def record_call(callname, path=None, now=None, key=None):

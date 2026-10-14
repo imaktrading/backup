@@ -157,3 +157,13 @@ def test_offer_count_says_unreadable_instead_of_zero(monkeypatch):
     monkeypatch.setattr(fx, "post", lambda *a, **k: _QUOTA)
     out = O.count_workload()
     assert out["actionable"] == 0 and "読めない" in out["error"]
+
+
+@pytest.mark.parametrize("when,want", [
+    (datetime(2026, 11, 5, 16, 30), "2026-11-04"),   # 冬時間: 16時半はまだ前日
+    (datetime(2026, 11, 5, 17, 0), "2026-11-05"),    # 冬時間は 17時で日が変わる
+    (datetime(2026, 10, 15, 16, 0), "2026-10-15"),   # 夏時間は 16時
+])
+def test_ebay_day_follows_pacific_midnight(when, want):
+    import ebay_call_usage as U
+    assert U.ebay_day(when) == want
