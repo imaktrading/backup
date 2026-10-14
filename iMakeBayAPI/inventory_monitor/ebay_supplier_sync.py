@@ -296,6 +296,11 @@ def run(execute_zero: bool, execute_restore: bool, update_sheet: bool = False) -
         except Exception as ex:  # noqa: BLE001
             reports.append({"iid": iid, "why": f"eBay を読めない {type(ex).__name__}: {ex}"})
             continue
+        if item.get("status") is None:
+            # ★ 2026-10-15: GetItem が読めない (518 上限など) を「出品終了」と取り違えない。
+            #   取り違えると SKU 詳細の V 列が全部『出品終了』になる (eBay は触らないが、表が嘘になる)
+            reports.append({"iid": iid, "why": "eBay を読めない (GetItem の応答に状態が無い・上限など)"})
+            continue
         if item.get("status") != "Active":
             ended.add(iid)
             continue
