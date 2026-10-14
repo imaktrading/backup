@@ -53,8 +53,12 @@ def build_rows(item_ids, reason, pending, now):
     return out
 
 
-def add(item_ids, reason):
-    """タブの末尾に足す (I/O)。戻り: (足した件数, 未処理で重なった件数)。タブが無い・見出しが無い時は足さない。"""
+def add(item_ids, reason, skip_pending=True):
+    """タブの末尾に足す (I/O)。戻り: (足した件数, 未処理で重なった件数)。タブが無い・見出しが無い時は足さない。
+
+    ★2026-10-14 ブラボー: 監視くんは 理由=急ぐ の行を「出品くんの直近の回 (一番新しい依頼時刻) に載った itemID だけ」
+      55分おきに見直す。急ぐの回は skip_pending=False で **今の急ぐを全部** 載せる (未処理と重なっても載せる)。
+    """
     import sheet_io
     ws = sheet_io._open(sheet_io.MAINT_SHEET_ID).worksheet(TAB)
     rows = ws.get_all_values()
@@ -62,16 +66,16 @@ def add(item_ids, reason):
         print(f"  ⚠ タブ `{TAB}` の見出しがまだ無い (監視くんが作る) — 足さない", flush=True)
         return 0, 0
     pend = pending_ids(rows)
-    body = build_rows(item_ids, reason, pend, time.strftime("%Y-%m-%d %H:%M:%S"))
+    body = build_rows(item_ids, reason, pend if skip_pending else set(), time.strftime("%Y-%m-%d %H:%M:%S"))
     if body:
         ws.append_rows(body, value_input_option="RAW")
     return len(body), len([i for i in set(map(str, item_ids or [])) if i in pend])
 
 
-def add_safely(item_ids, reason):
+def add_safely(item_ids, reason, skip_pending=True):
     """失敗しても呼び手 (補の書込など) を止めない版。必ず1行ログを出す。"""
     try:
-        n, dup = add(item_ids, reason)
+        n, dup = add(item_ids, reason, skip_pending=skip_pending)
         print(f"⚡ すぐ見るに足した: {reason} {n}件 (頼んだ {len(set(item_ids or []))}件 / 未処理で重なり {dup}件)",
               flush=True)
         return n
@@ -105,7 +109,7 @@ def main():
             print(f"⚠️要対応 急ぐ出品を数えられなかった: {type(e).__name__}: {e}", flush=True)
             return 1
         print(f"  急ぐ出品: {len(ids)}件 {why}", flush=True)
-        add_safely(ids, R_URGENT)
+        add_safely(ids, R_URGENT, skip_pending=False)
         return 0
     print("使い方: python quick_watch_request.py urgent")
     return 0

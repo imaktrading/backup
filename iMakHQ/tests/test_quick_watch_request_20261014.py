@@ -22,3 +22,10 @@ def test_build_rows_skips_pending_and_duplicates():
 def test_hoju_confirm_asks_after_writing():
     src = open(os.path.join(HERE, "..", "tools", "psa_hoju_fill.py"), encoding="utf-8").read()
     assert "quick_watch_request" in src and "_qw.R_AUX" in src
+
+
+def test_urgent_round_lists_everything_even_if_pending():
+    # ★2026-10-14 監視くんは直近の回に載った itemID だけ見直す → 急ぐの回は未処理と重なっても全部載せる
+    src = open(os.path.join(HERE, "..", "tools", "quick_watch_request.py"), encoding="utf-8").read()
+    assert "add_safely(ids, R_URGENT, skip_pending=False)" in src
+    assert Q.build_rows(["111"], Q.R_URGENT, set(), "now") == [["111", "急ぐ", "now", "出品くん", "", ""]]
