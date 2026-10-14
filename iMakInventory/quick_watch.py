@@ -119,8 +119,32 @@ def result_text(res) -> tuple:
 
 
 # ── I/O ────────────────────────────────────────────────────────────────────
+def _cmdline_of(pid: int) -> str:
+    """pid のコマンドライン (取れなければ "")。窓を出さずに CIM で見る."""
+    import subprocess  # noqa: PLC0415
+    try:
+        r = subprocess.run(["powershell.exe", "-NoProfile", "-Command",
+                            f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').CommandLine"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return (r.stdout or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def is_cand_cmdline(cmd: str) -> bool:
+    """CAND (出品前の候補だけ見る巡回) か (純関数)。CAND は QUICK と同じ行を触らないので待たなくてよい."""
+    return "--sheet-label CAND" in (cmd or "")
+
+
 def high_cycle_running() -> bool:
-    """HIGH (と CAND) の巡回が動いているか。run_cycle と同じ lock を同じ判定で見る."""
+    """HIGH (SHEET) の巡回が動いているか。run_cycle と同じ lock を同じ判定で見る.
+
+    ★ 2026-10-14: CAND も同じ lock を使う (Chrome の profile を共有するため)。CAND は itemID 空の行だけ書くので
+      QUICK (itemID ありの行) とは触る行が重ならない → lock の持ち主が CAND なら待たない
+      (初日、SHEET 13:30〜15:32 の後に CAND 15:33〜 が続き、QUICK が 3 時間待った)。
+    """
+    import re  # noqa: PLC0415
     import run_cycle as rc  # noqa: PLC0415
     lf = rc.LOCK_FILE
     if not lf.exists():
@@ -131,9 +155,12 @@ def high_cycle_running() -> bool:
     except OSError:
         return False
     alive = rc._lock_pid_alive(content)
-    if alive is False:
+    if alive is False or age >= rc.LOCK_STALE_HOURS * 3600:
         return False
-    return age < rc.LOCK_STALE_HOURS * 3600
+    m = re.search(r"pid=(\d+)", content)
+    if m and is_cand_cmdline(_cmdline_of(int(m.group(1)))):
+        return False
+    return True
 
 
 def _take_own_lock() -> bool:

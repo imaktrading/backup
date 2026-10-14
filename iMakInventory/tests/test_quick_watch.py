@@ -157,3 +157,9 @@ def test_hoju_written_row_is_full_read_even_if_urgent_before():
             ["X", "急ぐ", "2026-10-14 12:25", "出品くん", "済", "2026-10-14 12:38:00", ""],
             ["X", "補を書いた", "2026-10-14 12:32", "出品くん", "", "", ""]]
     assert Q.pending_rows(vals, now=datetime(2026, 10, 14, 12, 45)) == [(3, "X", False)]
+
+
+def test_cand_does_not_block_quick():
+    assert Q.is_cand_cmdline('pythonw.exe -u run_cycle.py --sheet-id 19kj --sheet-label CAND --lock-wait-minutes 90')
+    assert not Q.is_cand_cmdline('pythonw.exe -u run_cycle.py --sheet-id 19kj --sheet-label SHEET --lock-wait-minutes 180')
+    assert not Q.is_cand_cmdline('')
