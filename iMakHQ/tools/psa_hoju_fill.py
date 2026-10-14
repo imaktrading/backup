@@ -3502,6 +3502,12 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             print(f"⚠ 補URL書込失敗: {type(e).__name__}: {e}")
     else:
         print("  書込対象なし(全て既存収載 or 満杯 or 確定ゼロ)。")
+    # ★2026-10-14 ブラボー GO (B-20261014-008): 補を書いた出品は、監視くんの短い巡回 QUICK に「すぐ見て」と頼む
+    #   (次の HIGH を待たずに M・在庫が直り、約7分でリバイスが値段を直す)。0件でも1行出す
+    if not dry_run:
+        _qids = [t["itemID"] for t in item_targets if t.get("row") in aux_writeback] if (written and aux_writeback) else []
+        import quick_watch_request as _qw
+        _qw.add_safely(_qids, _qw.R_AUX) if _qids else print("⚡ すぐ見るに足した: 補を書いた 0件 (書いた出品なし)")
 
     # ★2026-09-08: 画面に出した「目視待ち」は、採否が決まったので待ち行列から外す。
     #   外さないと毎回同じものが並び、押しても減らない画面になる
