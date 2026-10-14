@@ -52,7 +52,7 @@
   // 今日やることにだけ出さない (ボタンは新規出品のページに残す)。
   // ★2026-10-12 ユーザー「目視特定だけ、今日やることに出さなくていい」: 件数は KEY 埋めだけで、出品の仕事は 🤖自動 の目視が拾う
   var NOT_TODAY_KINDS = ["ut_identify"];
-  var jobs = {}, jobList = [], buttons = [], running = null, logAfter = 0, toastTimer, drawerHidden = true, schLoaded = false;
+  var jobs = {}, jobList = [], buttons = [], running = null, logAfter = 0, logBoot = "", toastTimer, drawerHidden = true, schLoaded = false;
   // 今日やることの「状態の1行」と「期限のある物」(2026-09-29)。各所が材料を入れ、renderStrip が描く
   var STRIP = { counts: null, night: null, watch: null, integrity: null, errors: [], offer: null, order: null }, autoRecounted = false;
   var SALES_SHEET = ["https:", "", "docs.google.com", "spreadsheets", "d",   // 販売実績シート (// を文字列に書かない)
@@ -684,6 +684,12 @@
   function pollLog() {
     getJSON("/api/log?after=" + logAfter).then(function (d) {
       var box = $("log"), stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
+      // ★2026-10-14 サーバーが入れ替わったら番号を巻き戻して読み直す (前の回のログが残って見えた)
+      if (d.boot && logBoot && d.boot !== logBoot) {
+        logBoot = d.boot; logAfter = 0; box.textContent = "";
+        return pollLog();
+      }
+      logBoot = d.boot || logBoot;
       (d.lines || []).forEach(function (l) {
         logAfter = l[0];
         var div = document.createElement("div"), t = l[1];

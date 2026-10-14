@@ -325,6 +325,11 @@ def _cp():
     return control_panel
 
 
+# ★2026-10-14 サーバーを入れ替えると STATE["seq"] が 0 に戻るのに、開いたままの画面は前の番号から先を待ち続け、
+#   「終わりました」の欄に前の回のログが残って見えた (12:54 / 12:59 の回)。起動ごとの印を返して、画面が番号を巻き戻す
+BOOT_ID = "%d" % int(time.time() * 1000)
+
+
 def _log(text):
     with _LOCK:
         for line in str(text).rstrip("\n").split("\n"):
@@ -1479,7 +1484,7 @@ class Handler(BaseHTTPRequestHandler):
             with _LOCK:
                 lines = [(s, t) for s, t in STATE["log"] if s > after]
                 job = dict(STATE["job"]) if STATE["job"] else None
-            return self._json(200, {"lines": lines, "job": job})
+            return self._json(200, {"lines": lines, "job": job, "boot": BOOT_ID})
         name = "index.html" if u.path in ("/", "") else u.path.lstrip("/")
         path = os.path.normpath(os.path.join(STATIC, name))
         if not path.startswith(STATIC) or not os.path.isfile(path):
