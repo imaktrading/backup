@@ -507,6 +507,19 @@ def main():
     # ★2026-09-08: 書く直前に「今 買えるか」を確かめる (死んだURLを補URLに入れない)。
     #   ① 台帳で無料で落とす → ② 残りを詳細ページで確認 (--no-verify で②を無効化)
     if do_write and plan:
+        # ★2026-10-14 ユーザー「PSAの自動も早くできる？」: 既に目視待ちに居る (行, URL) は、確かめても
+        #   積まれない (aux_pending.build_rows が外す)。それを毎回 約350本 API で確かめ、5分の上限で
+        #   時間切れになっていた (10/2〜10/14 の22回とも Chrome の確認は 0本・積んだのは毎回 30本前後)。先に外す
+        try:
+            import aux_pending as _ap
+            _already = _ap.queued_pairs()
+            _n0 = sum(len(v["add"]) for v in plan.values())
+            for _row, v in plan.items():
+                v["add"] = [u for u in v["add"] if (_row, (u or "").strip()) not in _already]
+            print(f"  ⏭ 既に目視待ちに居るので確かめない: {_n0 - sum(len(v['add']) for v in plan.values())}本"
+                  f" / {_n0}本のうち")
+        except Exception as e:                                 # noqa: BLE001  読めなければ今までどおり全部確かめる
+            print(f"  ⚠ 目視待ちを読めず ({type(e).__name__}) → 全部確かめます")
         # ★2026-09-12: 時間の上限があるので **危ない順**に確かめる。
         #   仕入元が今ゼロの出品に足す URL を先に見る (そこが死んでいると、売れても買えない)。
         _urgent = {u for v in plan.values() if v.get("supply_dead") for u in v["add"]}
