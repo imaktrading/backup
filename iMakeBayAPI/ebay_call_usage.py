@@ -16,20 +16,27 @@ _USAGE_PATH = r"C:\dev\iMak_data\hq\ebay_api_usage.json"
 _LOCK = threading.Lock()      # 8件ずつ同時に聞く道具があるので、同じプロセス内の書込を順番にする
 
 
+def _us_dst(d):
+    """米国の夏時間か (3月第2日曜〜11月第1日曜・日単位)。KAGOYA の Python に時差の表 (tzdata) が無いので自分で出す。"""
+    from datetime import date, timedelta
+
+    def nth_sunday(y, m, n):
+        first = date(y, m, 1)
+        return first + timedelta(days=(6 - first.weekday()) % 7 + 7 * (n - 1))
+    return nth_sunday(d.year, 3, 2) <= d < nth_sunday(d.year, 11, 1)
+
+
 def ebay_day(now=None):
     """eBay の「1日」の日付文字列 (now は日本時間)。純関数。
 
-    ★2026-10-15: 区切りは **米国太平洋時間の0時**。夏時間 (3月〜11月第1日曜) は日本 16:00、
-      冬時間は日本 **17:00**。16時固定だと 11/1 以降 1時間ずれる (上限の戻る時刻も 17時)。
+    ★2026-10-15: 区切りは **米国太平洋時間の0時**。夏時間は日本 16:00、冬時間は日本 **17:00**。
+      16時固定だと 11/1 以降 1時間ずれる。zoneinfo は KAGOYA で使えない (tzdata 無し) ので計算で出す
+      (リバイスの ebay_guard.ebay_day と同じ式)。
     """
     from datetime import datetime, timedelta
-    now = now or datetime.now()
-    try:
-        from zoneinfo import ZoneInfo
-        la = now.replace(tzinfo=ZoneInfo("Asia/Tokyo")).astimezone(ZoneInfo("America/Los_Angeles"))
-        return la.strftime('%Y-%m-%d')
-    except Exception:                                          # noqa: BLE001 時差の表が無い時は夏時間で
-        return (now - timedelta(hours=16)).strftime('%Y-%m-%d')
+    utc = (now or datetime.now()) - timedelta(hours=9)
+    la = utc - timedelta(hours=7 if _us_dst(utc.date()) else 8)
+    return la.strftime('%Y-%m-%d')
 
 
 def record_call(callname, path=None, now=None, key=None):
