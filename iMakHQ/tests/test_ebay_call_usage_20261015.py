@@ -146,3 +146,14 @@ def test_session_guarded_post_returns_failure_response(U2, monkeypatch):
     r = EG._HTTP.post("https://api.ebay.com/ws/api.dll", data=b"x",
                       headers={"X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-IAF-TOKEN": "MAIN"})
     assert "<Ack>Failure</Ack>" in r.text
+
+
+def test_offer_count_says_unreadable_instead_of_zero(monkeypatch):
+    """上限切れで GetBestOffers が失敗した時、画面に「オファー 0件」と出していた。"""
+    import offer_calc as O
+    import fix_de_speedpak_shipping as fx
+    monkeypatch.setattr(fx, "refresh", lambda: None)
+    monkeypatch.setattr(fx, "token", lambda: "t")
+    monkeypatch.setattr(fx, "post", lambda *a, **k: _QUOTA)
+    out = O.count_workload()
+    assert out["actionable"] == 0 and "読めない" in out["error"]

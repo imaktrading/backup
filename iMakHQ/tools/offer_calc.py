@@ -259,6 +259,10 @@ def count_workload():
                         f"<Pagination><EntriesPerPage>100</EntriesPerPage>"
                         f"<PageNumber>{n}</PageNumber></Pagination>"
                         "<DetailLevel>ReturnAll</DetailLevel>", tok, site="0")
+            # ★2026-10-15: eBay の上限切れで失敗しても「オファー 0件」と出ていた (読めていないのに 0)
+            if "<Ack>Failure</Ack>" in (t or "") or not t:
+                m = _re.search(r"<LongMessage>([^<]*)", t or "")
+                raise RuntimeError("オファーを読めない: " + (m.group(1) if m else "応答なし"))
             before = len(by_item)
             parse_best_offers(t, by_item)
             if len(by_item) == before and not _re.search(r"<ItemBestOffers>", t):
