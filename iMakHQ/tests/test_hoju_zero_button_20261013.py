@@ -35,4 +35,6 @@ def test_matrix_has_column():
 def test_today_lane_puts_three_on_top():
     # ★2026-10-13 ユーザー「全然ちゃうやん」: 今日やることの在庫メンテ枠の一番上に 補0本 / 補1本 / 補2〜3本 を固定
     src = open(os.path.join(_H, "console", "static", "app.js"), encoding="utf-8").read()
-    assert 'class="tasks top3"' in src and 'topKinds.indexOf(j.kind) < 0' in src
+    # ★2026-10-14 入れ替えも先頭に固定し、残りは同じ並びに詰める (1つの枠)
+    assert 'HOJU_TOP.concat([["hoju_swap", "入れ替え"' in src and 'topKinds.indexOf(j.kind) < 0' in src
+    assert "'<div class=\"tasks\">' + top + list.map" in src

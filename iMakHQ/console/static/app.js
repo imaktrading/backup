@@ -337,22 +337,25 @@
     var html = lanes.map(function (L) {
       // ★2026-10-13 ユーザー「全然ちゃうやん」: 補0本 / 補1本 / 補2〜3本 は在庫メンテの枠の一番上に、
       //   この順で横に3つ固定 (件数順に混ぜない・0件でも出す)。下の作業カードからは外す
-      var topKinds = L[0] === "maint" ? HOJU_TOP.map(function (x) { return x[0]; }) : [];
+      // ★2026-10-14 ユーザー「入れ替えを横に固定して、さらに他のボタンを詰めれない？」: 補0本 → 次で赤字 → 補1本 → 補2〜3本 →
+      //   入れ替え をこの順で先頭に固定し、残りのカードは同じ並び (1つの枠) に続けて詰める (窓の幅で列数が変わっても隙間を作らない)
+      var topDef = L[0] === "maint" ? HOJU_TOP.concat([["hoju_swap", "入れ替え", ""]]) : [];
+      var topKinds = topDef.map(function (x) { return x[0]; });
       var picked = firstStepOnly(todo.filter(function (j) { return L[3].indexOf(j.group) >= 0 && topKinds.indexOf(j.kind) < 0; }));
       waiting += picked.waiting;
       var list = picked.now.sort(function (a, b) { return (b.n || 0) - (a.n || 0); });
-      var top = L[0] === "maint" ? '<div class="tasks top3">' + HOJU_TOP.map(function (x) {
+      var top = topDef.map(function (x) {
         var j = job(x[0]), st = ' style="--gc:var(--g-hoju);--pc:var(' + L[2] + ')"';
         var head = '<span class="tag"><span class="pg it" data-it="PSA">PSA</span><span class="gp">補URL ③</span></span>' +
-          '<span class="nm">' + esc(x[1]) + "</span>";
+          '<span class="nm">' + esc(x[1]) + (j ? kg(j) : "") + "</span>";
         if (!j) return '<div class="task off"' + st + ">" + head + '<span class="row"><span class="n">—</span><span class="else">まだ数えていません</span></span></div>';
         if (!j.n) return '<div class="task off"' + st + ">" + head + '<span class="row"><span class="n">0<small>件</small></span><span class="else">残りなし</span></span></div>';
         return openTag(j, "task", st, ' title="' + esc(tipOf(j)) + '"') + head +
           '<span class="row"><span class="n">' + num(j) + "<small>件</small></span>" + goMark(j) + "</span>" + closeTag(j);
-      }).join("") + "</div>" : "";
+      }).join("");
       if (!list.length && !top) return "";
-      return '<div class="lane" style="--pc:var(' + L[2] + ')"><h2>' + esc(L[1]) + " <small>" + list.length + "</small></h2>" + top +
-        '<div class="tasks">' + list.map(function (j) {
+      return '<div class="lane" style="--pc:var(' + L[2] + ')"><h2>' + esc(L[1]) + " <small>" + list.length + "</small></h2>" +
+        '<div class="tasks">' + top + list.map(function (j) {
           return openTag(j, "task", ' style="--gc:var(--g-' + esc(j.group) + ');--pc:var(' + L[2] + ')"', ' title="' + esc(tipOf(j)) + '"') +
             '<span class="tag"><span class="pg it" data-it="' + esc(itemOf(j)) + '">' + esc(itemOf(j)) + '</span><span class="gp">' + esc(tagOf(j)) + "</span></span>" +
             '<span class="nm">' + esc(shortName(j.label)) + kg(j) + "</span>" +
