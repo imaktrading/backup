@@ -1115,6 +1115,15 @@ def cycle():
         return 0
     if st.get("job_date") == today:
         print("✅ 今日の分は済み")
+        # ★2026-10-14 ユーザー「1日2回として」→「15時は？」→「そだな」: 補0本は15時過ぎの最初の見回りでもう一度全部探す
+        #   (夜に探した後に出た候補を、16時頃の目視で補にする)。この回は急ぎの探索を次の回に回す (仕事は1つずつ)
+        if zero_midday_due(st, today, datetime.datetime.now().hour, _cfg().get("zero_midday_hour", 15)):
+            try:
+                start_midday_zero(cfg, st, today)
+            except Exception as e:                               # noqa: BLE001  次の回にまた試す
+                print(f"  ⚠ 補0本の昼の探索を始められず ({type(e).__name__}: {e})")
+            _save_state(st)
+            return 0
         # ★2026-10-01 (総点検15): 売り切れで取り下げた出品の次の仕入元を、翌日 0:20 を待たずに探す
         if _cfg().get("urgent_restock", True) is not False:
             try:
@@ -1219,6 +1228,37 @@ def start_urgent_restock(cfg, st, today):
         start_remote(cfg, job)
         print(f"🚀 急ぎの探索 {len(targets)}件 (売り切れの次の仕入元 {len(targets) - nf} / 補0本の新しい出品 {nf})")
     st["sold_seen"] = sorted(seen | {H._cell(r, H.B) for r in new})
+
+
+def zero_midday_due(st, today, hour, at_hour=15):
+    """補0本の昼の探索を今始めるか (純関数)。at_hour 時を過ぎていて、今日まだ始めていない時だけ。"""
+    return hour >= int(at_hour) and (st or {}).get("zero_mid_date") != today
+
+
+def start_midday_zero(cfg, st, today):
+    """補0本の出品を全部もう一度探す小さな仕事を送る (2026-10-14・1日1回 15時過ぎ)。
+
+    夜の仕事で今日もう探した出品も探す (それが目的)。空振り続きも休ませない (補0本は切れたら終わり)。
+    走行ログに必ず1行 (0件でも)。
+    """
+    sys.path.insert(0, HERE)
+    import psa_hoju_fill as H
+    import mercari_psa_resource as mp
+    vals = H._read_high()
+    targets, no_q = [], 0
+    for t in H.select_backfill_targets(vals, max_backups=1):
+        q = H.build_search_query(t, mp)
+        if q.get("card_no"):
+            targets.append({"itemID": t["itemID"], "kind": "fill", "q": q})
+        else:
+            no_q += 1
+    st["zero_mid_date"] = today
+    if targets:
+        sync_code_and_db(cfg, st)
+        job = {"job_id": f"{today}-urgent-zero15-{int(time.time())}", "date": today, "targets": targets,
+               "need_gb": URGENT_NEED_GB, "counts": {"restock": 0, "fill": len(targets), "urgent": True}}
+        start_remote(cfg, job)
+    print(f"🕒 補0本の昼の探索: {len(targets)}件を送った (番号が取れない {no_q}件)")
 
 
 RESUME_MAX = 2          # 進まないまま再開してよい回数
