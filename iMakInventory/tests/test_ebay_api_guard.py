@@ -15,8 +15,8 @@ def _setup(monkeypatch, tmp_path, by_caller, total=0):
     (tmp_path / "u.json").write_text(json.dumps(
         {"date": T.ebay_day(), "total": total, "by_call": {}, "by_caller": by_caller}), encoding="utf-8")
     sent = []
-    import run_cycle
-    monkeypatch.setattr(run_cycle, "_emit_nonsilent_alert", lambda *a, **k: sent.append(a))
+    import monitor_listings
+    monkeypatch.setattr(monitor_listings, "log", lambda line: sent.append(line))
     monkeypatch.setattr(T, "_caller", lambda: "ebay_supplier_sync.py")
     return sent
 

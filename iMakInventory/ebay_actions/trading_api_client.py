@@ -52,7 +52,7 @@ API_NOTIFY_STATE = Path(__file__).resolve().parent.parent / "decision_log" / "eb
 #   10/14 に全体で 5000 回を使い切り、取下げも 16 時まで送れなくなった (主因はリバイスくん)。
 #   - 1 本の道具 (起動したスクリプト) は 1 日 CALLER_LIMIT 回まで。超えたらその道具だけ止めて知らせる
 #   - **取下げ・数量 0 (EXEMPT_CALLS) は止めない**
-#   - 合計 WARN_AT 回を超えた / 上限 (518) に当たった → 1 日 1 回 知らせる (デスクトップ・メール・トースト)
+#   - 合計 WARN_AT 回を超えた / 上限 (518) に当たった → 1 日 1 回 走行ログに 1 行 (スマホ・メールには送らない)
 #   - 1 日の区切りは eBay と同じ 米国太平洋 0 時 (夏 = 日本 16:00 / 冬 11/1〜 = 17:00)
 CALLER_LIMIT = 1000
 WARN_AT = 3000
@@ -79,7 +79,7 @@ def _caller() -> str:
 
 
 def notify_once(tag: str, subject: str, msg: str, day: Optional[str] = None) -> bool:
-    """同じ eBay の 1 日・同じ tag は 1 回だけ知らせる (デスクトップ ALERT・メール・トースト)。失敗しても呼出は止めない."""
+    """同じ eBay の 1 日・同じ tag は 1 回だけ走行ログに出す。失敗しても呼出は止めない."""
     day = day or ebay_day()
     try:
         st = json.loads(API_NOTIFY_STATE.read_text(encoding="utf-8")) if API_NOTIFY_STATE.exists() else {}
@@ -95,10 +95,13 @@ def notify_once(tag: str, subject: str, msg: str, day: Optional[str] = None) -> 
         API_NOTIFY_STATE.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
     except Exception:  # noqa: BLE001
         pass
-    print(f"🚨 eBay の呼出: {subject} / {msg}", flush=True)
+    # ★ 2026-10-15 ユーザー「スマホに送るのやめて。仕入れ監視以外使わない」: メール・トースト・デスクトップには出さず、
+    #   走行ログの 1 行だけ (巡回ログ・公式のレポートの『eBay 呼出』の行と合わせて見る)
+    line = f"🚨 eBay の呼出: {subject} / {msg}"
+    print(line, flush=True)
     try:
-        import run_cycle as _rc  # noqa: PLC0415 - 巡回と同じ 3 つの口で知らせる
-        _rc._emit_nonsilent_alert(f"ebay_api_{tag}", f"[★監視くん LAPTOP] {subject}", msg)
+        import monitor_listings as _ml  # noqa: PLC0415 - 巡回の中なら巡回ログにも残す
+        _ml.log(line)
     except Exception:  # noqa: BLE001
         pass
     return True
