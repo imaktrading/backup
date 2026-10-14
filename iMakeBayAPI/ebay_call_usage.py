@@ -103,7 +103,6 @@ EXEMPT = {"EndItem", "EndItems", "ReviseInventoryStatus", "EndFixedPriceItem"}
 STATE_PATH = r"C:\dev\iMak_data\hq\ebay_key_state.json"
 SUB_KEYS = r"C:/dev/iMak_data/credentials/imaktrading.txt"
 SUB_TOKEN = r"C:/dev/iMak_data/credentials/ebay_oauth_token_imaktrading.json"
-NTFY_TOPIC = r"C:/dev/iMak_data/credentials/ntfy_topic.txt"
 _QUOTA_RE = ("exceeded usage limit", "<ErrorCode>518</ErrorCode>")
 _SUB_TOK = {"value": "", "until": 0.0}
 
@@ -141,7 +140,7 @@ def active_key(now=None, path=None):
 
 
 def notify_once(tag, title, body, now=None, path=None):
-    """同じ日・同じ tag は1回だけスマホ (ntfy) と走行ログに出す。出したら True。"""
+    """同じ日・同じ tag は1回だけ走行ログに出す。出したら True。スマホには送らない (仕入れ監視専用)。"""
     day = ebay_day(now)
     with _LOCK:
         st = _load_state(path)
@@ -153,14 +152,8 @@ def notify_once(tag, title, body, now=None, path=None):
             _save_state(st, path)
         except Exception:                                      # noqa: BLE001
             pass
+    # ★2026-10-15 ユーザー「スマホに送るのやめて。仕入れ監視以外使わない」→ 走行ログの1行だけ
     print(f"🚨 eBay の呼出: {title} / {body}", flush=True)
-    try:
-        import requests
-        topic = open(NTFY_TOPIC, encoding="utf-8").read().strip()
-        requests.post(f"https://ntfy.sh/{topic}", data=body.encode("utf-8"), timeout=20,
-                      headers={"Title": title.encode("utf-8"), "Priority": "high", "Tags": "warning"})
-    except Exception:                                          # noqa: BLE001
-        pass
     return True
 
 

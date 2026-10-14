@@ -82,7 +82,6 @@ def U2(tmp_path, monkeypatch):
     import ebay_call_usage as U
     monkeypatch.setattr(U, "_USAGE_PATH", str(tmp_path / "u.json"))
     monkeypatch.setattr(U, "STATE_PATH", str(tmp_path / "s.json"))
-    monkeypatch.setattr(U, "NTFY_TOPIC", str(tmp_path / "none.txt"))     # スマホには送らない
     monkeypatch.setattr(U, "sub_access_token", lambda: "SUB")
     monkeypatch.setattr(U, "SWITCH_DAYS", set())
     monkeypatch.setattr(sys, "argv", ["runaway.py"])
@@ -176,3 +175,10 @@ def test_special_day_switch_expires_at_day_change(U2, monkeypatch):
     U2.mark_exhausted("main", now=datetime(2026, 10, 15, 8, 0))
     assert U2.active_key(datetime(2026, 10, 15, 15, 59)) == "sub"
     assert U2.active_key(datetime(2026, 10, 15, 16, 0)) == "main"
+
+
+def test_never_pushes_to_phone():
+    """2026-10-15 ユーザー「スマホに送るのやめて。仕入れ監視以外使わない」"""
+    import inspect
+    import ebay_call_usage as U
+    assert "ntfy" not in inspect.getsource(U)
