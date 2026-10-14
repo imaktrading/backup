@@ -2103,6 +2103,15 @@ def process_sheet(
     log(f"    新規売切: {newly_sold} / 新規復活: {newly_in_stock} / 変化なし: {len(results) - newly_sold - newly_in_stock - errors} / エラー: {errors}")
     # ★ 2026-10-09 (HQ GO B-20261009-014): 0 件でも毎回 1 行出す
     log(f"    {SG.summary_line()}")
+    # ★ 2026-10-15 (手順書 RUNBOOK_EBAY_API_QUOTA §4・§7): eBay 呼出の回数を毎回 1 行
+    try:
+        from ebay_actions.trading_api_client import read_api_usage as _rau, _caller as _who  # noqa: PLC0415
+        _u = _rau()
+        _w = _who()
+        _mine = sum(int(v) for k, v in (_u.get("by_caller") or {}).items() if k.endswith("@" + _w))
+        log(f"    eBay 呼出 (LAPTOP・eBay の日 {_u.get('date')}): 合計 {_u.get('total', 0)}回 / {_w} {_mine}回 (1 本 1000 回まで・取下げは止めない)")
+    except Exception as _ue:  # noqa: BLE001
+        log(f"    eBay 呼出: 読めず ({type(_ue).__name__})")
     SG.baseline().save()
     SG.streak().save()
     if url_alerts:

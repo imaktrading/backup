@@ -512,6 +512,16 @@ def main():
             if s.startswith(("判断:", "シート:", "突合せ:", "  [zero]", "  [restore]", "  ⚠️", "  ⚠️要対応")):
                 extra.append("  " + s.strip())
     extra.append("  ※ 1 に戻すのは 仕入元 ◎ が 2 回続き 対応が 1 つに決まる枠だけ (1 回 20 枠まで)。")
+    # ★ 2026-10-15 (手順書 RUNBOOK_EBAY_API_QUOTA §4・§7): eBay 呼出の回数 (LAPTOP 全体・道具ごと)
+    try:
+        sys.path.insert(0, str(SCRIPT_DIR.parent.parent / "iMakInventory"))
+        from ebay_actions.trading_api_client import read_api_usage as _rau  # noqa: PLC0415
+        _u = _rau()
+        _top = sorted((_u.get("by_caller") or {}).items(), key=lambda kv: -kv[1])[:5]
+        extra.append(f"  eBay 呼出 (LAPTOP・eBay の日 {_u.get('date')}): 合計 {_u.get('total', 0)}回 "
+                     f"(1 本 1000 回まで) / " + ", ".join(f"{k} {v}" for k, v in _top))
+    except Exception as e:  # noqa: BLE001
+        extra.append(f"  eBay 呼出: 読めず ({type(e).__name__})")
     body = body + "\n" + "\n".join(extra)
     _log("\n" + body)
     # レポート本文を毎回ファイル保存 (= pythonw で print 破棄 + メール失敗 でも結果を失わない)

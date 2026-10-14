@@ -46,6 +46,82 @@ SITE_ID_US = "0"
 # 事前に知る手段が無かった。呼出を1本の choke point で数え、run_cycle が閾値超で
 # 非-silent 告知する (= 事故る前に気づく)。計測失敗は絶対に API 呼出を止めない。
 API_USAGE_PATH = Path(__file__).resolve().parent.parent / "decision_log" / "ebay_api_usage.json"
+API_NOTIFY_STATE = Path(__file__).resolve().parent.parent / "decision_log" / "ebay_api_notify_state.json"
+
+# ★ 2026-10-15 (ブラボー GO・手順書 iMakHQ/docs/RUNBOOK_EBAY_API_QUOTA.md §7): 監視くんの Trading の口にも歯止め。
+#   10/14 に全体で 5000 回を使い切り、取下げも 16 時まで送れなくなった (主因はリバイスくん)。
+#   - 1 本の道具 (起動したスクリプト) は 1 日 CALLER_LIMIT 回まで。超えたらその道具だけ止めて知らせる
+#   - **取下げ・数量 0 (EXEMPT_CALLS) は止めない**
+#   - 合計 WARN_AT 回を超えた / 上限 (518) に当たった → 1 日 1 回 知らせる (デスクトップ・メール・トースト)
+#   - 1 日の区切りは eBay と同じ 米国太平洋 0 時 (夏 = 日本 16:00 / 冬 11/1〜 = 17:00)
+CALLER_LIMIT = 1000
+WARN_AT = 3000
+EXEMPT_CALLS = {"ReviseInventoryStatus", "EndFixedPriceItem", "EndItem", "EndItems"}
+
+
+def ebay_day(now=None) -> str:
+    """eBay の「1 日」の日付 (now は日本時間)。HQ iMakeBayAPI/ebay_call_usage.ebay_day と同じ."""
+    from datetime import datetime as _dt, timedelta as _td  # noqa: PLC0415
+    now = now or _dt.now()
+    try:
+        from zoneinfo import ZoneInfo  # noqa: PLC0415
+        return now.replace(tzinfo=ZoneInfo("Asia/Tokyo")).astimezone(
+            ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d")
+    except Exception:  # noqa: BLE001 - 時差の表が無い時は夏時間で
+        return (now - _td(hours=16)).strftime("%Y-%m-%d")
+
+
+def _caller() -> str:
+    try:
+        return Path((_sys.argv or [""])[0] or "").name or "?"
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
+def notify_once(tag: str, subject: str, msg: str, day: Optional[str] = None) -> bool:
+    """同じ eBay の 1 日・同じ tag は 1 回だけ知らせる (デスクトップ ALERT・メール・トースト)。失敗しても呼出は止めない."""
+    day = day or ebay_day()
+    try:
+        st = json.loads(API_NOTIFY_STATE.read_text(encoding="utf-8")) if API_NOTIFY_STATE.exists() else {}
+    except Exception:  # noqa: BLE001
+        st = {}
+    sent = st.setdefault(day, [])
+    if tag in sent:
+        return False
+    sent.append(tag)
+    for k in sorted(st)[:-7]:
+        st.pop(k, None)
+    try:
+        API_NOTIFY_STATE.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+    print(f"🚨 eBay の呼出: {subject} / {msg}", flush=True)
+    try:
+        import run_cycle as _rc  # noqa: PLC0415 - 巡回と同じ 3 つの口で知らせる
+        _rc._emit_nonsilent_alert(f"ebay_api_{tag}", f"[★監視くん LAPTOP] {subject}", msg)
+    except Exception:  # noqa: BLE001
+        pass
+    return True
+
+
+def guard(call_name: str) -> Optional[str]:
+    """送る前に呼ぶ。止める時は理由、通す時は None (読むだけ・壊れていたら通す側に倒す)."""
+    u = read_api_usage()
+    total = int(u.get("total") or 0)
+    if total >= WARN_AT:
+        notify_once("warn_total", "eBay の呼出が多い (LAPTOP)",
+                    f"今日 (eBay の日 {u.get('date')}) LAPTOP から {total} 回。上限 5000 は取下げと共有。"
+                    f"内訳 {json.dumps(u.get('by_caller') or {}, ensure_ascii=False)[:400]}")
+    if call_name in EXEMPT_CALLS:
+        return None
+    who = _caller()
+    mine = sum(int(v) for k, v in (u.get("by_caller") or {}).items() if k.endswith("@" + who))
+    if mine >= CALLER_LIMIT:
+        notify_once(f"cap_{who}", f"eBay の呼出を止めた: {who}",
+                    f"{who} が今日 {mine} 回呼んだので止めました (1 本 {CALLER_LIMIT} 回まで・取下げと数量 0 は止めない)。"
+                    "eBay の日替わり (日本 16 時、冬は 17 時) に戻ります")
+        return f"{who} は今日 {mine} 回呼んだので止めた (1 本 {CALLER_LIMIT} 回まで)"
+    return None
 
 
 def record_api_call(call_name: str, n: int = 1, today: Optional[str] = None) -> dict:
@@ -55,8 +131,7 @@ def record_api_call(call_name: str, n: int = 1, today: Optional[str] = None) -> 
       日次上限 (5000) の警告が出るべき時に出なくなる。排他してから数える。
       lock が取れなくても呼出自体は止めない (カウントの精度 < 巡回の継続)。
     """
-    from datetime import datetime as _dt  # noqa: PLC0415
-    day = today or _dt.now().strftime("%Y-%m-%d")
+    day = today or ebay_day()
     try:
         from ledger_lock import ledger_lock, LedgerBusy  # noqa: PLC0415
         with ledger_lock(timeout_sec=15):
@@ -68,17 +143,20 @@ def record_api_call(call_name: str, n: int = 1, today: Optional[str] = None) -> 
 
 
 def _record_api_call_locked(call_name: str, n: int, day: str) -> dict:
-    data = {"date": day, "total": 0, "by_call": {}}
+    data = {"date": day, "total": 0, "by_call": {}, "by_caller": {}}
     try:
         if API_USAGE_PATH.exists():
             prev = json.loads(API_USAGE_PATH.read_text(encoding="utf-8"))
             if isinstance(prev, dict) and prev.get("date") == day:
                 data = {"date": day, "total": int(prev.get("total") or 0),
-                        "by_call": dict(prev.get("by_call") or {})}
+                        "by_call": dict(prev.get("by_call") or {}),
+                        "by_caller": dict(prev.get("by_caller") or {})}
     except Exception:
         pass        # 破損/読めない → 今日の分から数え直す (呼出は止めない)
     data["total"] += n
     data["by_call"][call_name] = int(data["by_call"].get(call_name) or 0) + n
+    k = f"{call_name}@{_caller()}"                     # 誰が呼んだか (起動したスクリプト名)
+    data["by_caller"][k] = int(data["by_caller"].get(k) or 0) + n
     try:
         API_USAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
         API_USAGE_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
@@ -89,16 +167,16 @@ def _record_api_call_locked(call_name: str, n: int, day: str) -> dict:
 
 def read_api_usage(today: Optional[str] = None) -> dict:
     """今日の呼出数を返す (別日 / 欠損 / 破損 は 0 件扱い)。"""
-    from datetime import datetime as _dt  # noqa: PLC0415
-    day = today or _dt.now().strftime("%Y-%m-%d")
+    day = today or ebay_day()
     try:
         d = json.loads(API_USAGE_PATH.read_text(encoding="utf-8"))
         if isinstance(d, dict) and d.get("date") == day:
             return {"date": day, "total": int(d.get("total") or 0),
-                    "by_call": dict(d.get("by_call") or {})}
+                    "by_call": dict(d.get("by_call") or {}),
+                    "by_caller": dict(d.get("by_caller") or {})}
     except Exception:
         pass
-    return {"date": day, "total": 0, "by_call": {}}
+    return {"date": day, "total": 0, "by_call": {}, "by_caller": {}}
 
 
 # ============================================================================
@@ -214,6 +292,14 @@ def _call_trading(call_name: str, body_xml: str,
     # → 「サイクル内で完結・短間隔リトライ」原則違反。 transient な requests 例外を
     # 指数 backoff (1/2/4/8s) で再試行する。 eBay の business error (Ack=Failure 等) は
     # HTTP 200 応答なので下流で通常処理され、 ここでは retry しない (= 無駄打ち防止)。
+    _stop = None
+    try:
+        _stop = guard(call_name)
+    except Exception:  # noqa: BLE001 - 歯止めが壊れても呼出は止めない
+        _stop = None
+    if _stop:
+        return {"success": False, "ack": "Failure", "error_code": "iMak_guard",
+                "error_message": f"iMak の歯止め: {_stop}", "raw_xml": ""}
     r = None
     for attempt in range(max_net_retries + 1):
         try:
@@ -244,6 +330,13 @@ def _call_trading(call_name: str, body_xml: str,
             return {"success": False, "ack": None, "error_code": "refresh_failed",
                     "error_message": f"token refresh 失敗: {e}", "raw_xml": xml[:1000]}
     ack, code, msg = _parse_ack_and_errors(xml)
+    if str(code) == "518" or "exceeded usage limit" in (msg or "").lower():
+        try:
+            notify_once("quota_518", "eBay の上限に当たった (LAPTOP から見えた)",
+                        f"{call_name} が 518 (Call usage limit reached)。取下げも日替わり (日本 16 時、冬は 17 時) まで送れない。"
+                        "取下げ待ちは FileExchange の CSV でも送れる")
+        except Exception:  # noqa: BLE001
+            pass
     success = ack in ("Success", "Warning")
     return {"success": success, "ack": ack, "error_code": code,
             "error_message": msg,

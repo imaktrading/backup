@@ -113,8 +113,19 @@ def _post_with_retry(xml: str, token: str, max_attempts: int = 5,
         "Content-Type": "text/xml; charset=utf-8",
     }
     last_exc = None
+    # ★ 2026-10-15 (手順書 §7): GetSellerList も 監視くんの Trading の数え・歯止めに通す (それまで数えていなかった)
+    try:
+        from ebay_actions.trading_api_client import guard as _guard, record_api_call as _rec  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        _guard = _rec = None
+    if _guard is not None:
+        _stop = _guard("GetSellerList")
+        if _stop:
+            raise RuntimeError(f"GetSellerList: iMak の歯止め: {_stop}")
     for attempt in range(1, max_attempts + 1):
         try:
+            if _rec is not None:
+                _rec("GetSellerList")
             r = requests.post(TRADING_API_URL, headers=headers,
                               data=xml.encode("utf-8"), timeout=90)
         except requests.exceptions.ConnectionError as e:
