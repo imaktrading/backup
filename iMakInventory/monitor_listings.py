@@ -440,6 +440,102 @@ def check_one_row(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
     return result
 
 
+# ── 仕入元ごとの値段の控え (2026-10-14 ブラボー GO B-20261014-010) ─────────────────────
+# QUICK の「急ぐ」行は 今いちばん安い 1 本だけ読む。どれが一番安いかはシートの M では分からないので、
+# 毎回の巡回の最後に 行ごとの [URL, 値段, 在庫, 見た時刻] を控える (itemID → list)。
+SUPPLY_PRICES_FILE = DECISION_LOG_DIR / "supply_prices.json"
+
+
+def load_supply_prices() -> dict:
+    try:
+        d = json.loads(SUPPLY_PRICES_FILE.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_supply_prices(results: list) -> int:
+    """この回に読んだ行の 仕入元ごとの値段・在庫を控えに書く (行単位で置き換え、ほかの行は残す)."""
+    now = datetime.now().isoformat(timespec="seconds")
+    upd = {}
+    for r in results:
+        iid = str(r.get("item_id") or "").strip()
+        subs = r.get("sub_results") or []
+        if not iid or not subs:
+            continue
+        upd[iid] = [{"url": x.get("url"), "price": x.get("price_jpy") if isinstance(x.get("price_jpy"), int) else None,
+                     "alive": x.get("is_sold") is False, "ts": now} for x in subs if x.get("url")]
+    if not upd:
+        return 0
+    with ledger_lock():
+        cur = load_supply_prices()
+        partial = {str(x.get("item_id") or "").strip() for x in results if x.get("_partial")}
+        for iid, ents in upd.items():
+            if iid in partial:                # 一番安い 1 本だけ読んだ行は、読んだ URL だけ置き換える
+                old = {e.get("url"): e for e in (cur.get(iid) or [])}
+                for e in ents:
+                    old[e["url"]] = e
+                cur[iid] = list(old.values())
+            else:
+                cur[iid] = ents
+        tmp = SUPPLY_PRICES_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, SUPPLY_PRICES_FILE)
+    return len(upd)
+
+
+def cheapest_order(row: dict, known: list) -> list:
+    """行の仕入元 URL を「控えで生きていて安い順」→「控えに無い・死んでいた物」の順に並べる (純関数).
+
+    known: 控えの [{url, price, alive}]。並べるのは今のシートにある URL (主 + 補) だけ。
+    """
+    urls = [row["url"]] + [u for u in (row.get("backup_url_slots") or row.get("backup_urls") or []) if u]
+    k = {e.get("url"): e for e in (known or [])}
+    alive = [u for u in urls if (k.get(u) or {}).get("alive") and isinstance((k.get(u) or {}).get("price"), int)]
+    alive.sort(key=lambda u: k[u]["price"])
+    rest = [u for u in urls if u not in alive]
+    return alive + rest
+
+
+def check_one_row_cheapest(row: dict, known: list, sleep_sec: float = DEFAULT_SLEEP_SEC) -> dict:
+    """QUICK の「急ぐ」行: 控えで一番安い生きている 1 本だけ読む (2026-10-14 ユーザー「一番安い仕入元だけ見ればいい」).
+
+    - 在庫あり かつ 値段 ≤ 控えの次に安い生きている物 → それで終わり
+    - 売切 / 読めない → 次に安い物を順に読む (生きている物が出るまで)
+    - 値上がりして 次に安い物 (控えの値段) より高い → 次も読み、安い方で M (ブラボーの 1 点)
+    2 番目以降の売切・補URL消込は通常の巡回で拾う (ここでは backup_slot_results を作らない = 消込しない)。
+    """
+    order = cheapest_order(row, known)
+    k = {e.get("url"): e for e in (known or [])}
+    subs, hit_index = [], -1
+    i = 0
+    while i < len(order):
+        url = order[i]
+        sub = _guard_supply_name(_check_single_url(url, sleep_sec, None, None,
+                                                   model_number=row.get("key_number", "")), row)
+        sub["_partial"] = True
+        subs.append(sub)
+        if sub["is_sold"] is False:
+            if hit_index < 0:
+                hit_index = len(subs) - 1
+            nxt = order[i + 1] if i + 1 < len(order) else None
+            nxt_price = (k.get(nxt) or {}).get("price") if nxt and (k.get(nxt) or {}).get("alive") else None
+            p = sub.get("price_jpy")
+            if isinstance(p, int) and isinstance(nxt_price, int) and p > nxt_price:
+                i += 1                       # 値上がりで次の方が安いかもしれない → 次も読む
+                continue
+            break
+        i += 1                               # 売切 / 読めない → 次へ
+    hold_price = _guard_price_drop(row, subs)
+    result = _build_row_result(row, subs, hit_index=hit_index)
+    if hold_price:
+        result["price_jpy"] = None
+        result["points_jpy"] = None
+    result["_partial"] = True
+    result["cheapest_read"] = len(subs)
+    return result
+
+
 def check_one_row_with_fallback(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
                                  mercari_driver=None, amazon_driver=None) -> dict:
     """主 URL + 補仕入URL 1〜5 を全候補チェック.
@@ -1567,6 +1663,7 @@ def process_sheet(
     rows_filter: str = "all",
     only_item_ids: Optional[set] = None,
     api_only: bool = False,
+    cheapest_only_ids: Optional[set] = None,
 ):
     """only_item_ids / api_only は QUICK (2026-10-14 B-20261014-007) 用: 指定した itemID の行だけを、
     Chrome を立てずに API だけで読む。途中再開・復活の 2 回確認・急落の 2 回確認は数えない (通常の巡回に任せる)。"""
@@ -1673,6 +1770,7 @@ def process_sheet(
     m_def, a_def = _default_profile_dirs()
     if (mercari_profile, amazon_profile) != (m_def, a_def):
         log(f"  profile: 専用 ({Path(mercari_profile).name} / {Path(amazon_profile).name})")
+    _supply_prices = load_supply_prices() if cheapest_only_ids else {}
     if api_only:
         # 通常の巡回の Chrome を殺さない・立てない (同じ profile を使っているため)
         log("  API だけで読む (Chrome は使わない。決まらない行は次の通常の巡回に任せる)")
@@ -1796,10 +1894,15 @@ def process_sheet(
             continue
 
         try:
-            res = check_one_row_with_fallback(
-                row, sleep_sec=sleep_sec,
-                mercari_driver=mercari_driver,
-                amazon_driver=amazon_driver)
+            _iid = str(row.get("item_id") or "").strip()
+            _known = _supply_prices.get(_iid) if cheapest_only_ids else None
+            if cheapest_only_ids and _iid in cheapest_only_ids and _known:
+                res = check_one_row_cheapest(row, _known, sleep_sec=sleep_sec)
+            else:
+                res = check_one_row_with_fallback(
+                    row, sleep_sec=sleep_sec,
+                    mercari_driver=mercari_driver,
+                    amazon_driver=amazon_driver)
         except Exception as e:
             res = {
                 "row_index": row["row_index"],
@@ -2337,6 +2440,12 @@ def process_sheet(
 
     # decision_log は dry_run でも記録
     append_decision_log(sheet_label, results, dry_run)
+    # 仕入元ごとの値段の控え (QUICK の「急ぐ」行が 一番安い 1 本を選ぶのに使う、B-20261014-010)
+    if not dry_run:
+        try:
+            log(f"  仕入元の値段の控え: {save_supply_prices(results)} 行")
+        except Exception as _spe:  # noqa: BLE001
+            log(f"  [!] 仕入元の値段の控え 書けず (本筋に影響なし): {type(_spe).__name__}: {_spe}")
 
     # ── 補URL救済ログ (フック2、遷移ベース dedup) ──
     # 救済 = 主URL死確定 AND 補URL≥1本 在庫あり (Phase1 救済率 signal)。前 cycle に救済状態でなかった
