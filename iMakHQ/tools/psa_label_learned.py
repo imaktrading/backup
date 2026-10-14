@@ -29,11 +29,9 @@ def label_key(category, brand, card_number, subject):
 
 
 def load(path=PATH):
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
+    # ★2026-10-14 数え直しの中では同じファイルを読み直さない (json_memo の説明を参照)
+    import json_memo
+    return json_memo.load(path)
 
 
 def save(data, path=PATH):

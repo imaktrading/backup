@@ -88,11 +88,9 @@ def verdict(entry, card_no):
 
 
 def load(path=LEDGER):
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
+    # ★2026-10-14 数え直しの中では同じファイルを読み直さない (json_memo の説明を参照)
+    import json_memo
+    return json_memo.load(path)
 
 
 def _save(data, path=LEDGER):

@@ -1417,10 +1417,11 @@ def _from_tab(kind):
 
 
 def _load_json_dict(path):
+    # ★2026-10-14 数え直しの中では同じファイルを読み直さない (json_memo)。呼び出し側が足し込むので写しを返す
     try:
-        with open(path, encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
+        import json_memo
+        d = json_memo.load(path)
+        return dict(d) if isinstance(d, dict) else {}
     except Exception:                                          # noqa: BLE001
         return {}
 

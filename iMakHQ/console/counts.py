@@ -93,11 +93,15 @@ def main():
         fns = {k: fns[k] for k in want}
     d = {}
 
+    sec = {}
+
     def grab(key):
+        t0 = time.time()
         try:
             d[key] = fns[key]()
         except Exception as e:                                 # noqa: BLE001
             d[key] = {"error": "%s: %s" % (type(e).__name__, e)}
+        sec[key] = round(time.time() - t0, 1)
 
     for key in fns:
         grab(key)
@@ -111,6 +115,10 @@ def main():
             rk["read"] = False
         for key in retry:
             grab(key)
+    # ★2026-10-14 ユーザー「数えなおし、もっと早くできない？」: 項目ごとの秒数を残す (console_counts.json の
+    #   "_sec" で、どれが遅いか・速くなったかを本番で確かめられる)。画面は決まったキーしか見ないので混ざらない
+    d["_sec"] = sec
+    print(f"⏱ 数え直し: {sum(sec.values()):.0f}秒 / " + " ".join(f"{k}={v}" for k, v in sec.items()), file=sys.stderr)
     print(json.dumps(d, ensure_ascii=False, default=str))
 
 
