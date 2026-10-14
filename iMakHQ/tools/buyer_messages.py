@@ -40,6 +40,7 @@ SNAPSHOT = os.path.join(DATA_DIR, "buyer_messages.json")
 HISTORY = os.path.join(DATA_DIR, "buyer_history.json")
 SENT_LOG = os.path.join(DATA_DIR, "buyer_messages_sent.json")
 TEMPLATES = os.path.join(DATA_DIR, "message_templates.json")
+BODY_CACHE = os.path.join(DATA_DIR, "buyer_message_bodies.json")
 URL = "https://api.ebay.com/ws/api.dll"
 AI_MODEL = "claude-opus-5-5"
 DAYS = 30
@@ -292,11 +293,22 @@ def body_text(raw_html):
 
 
 # =========================================================== eBay (I/O)
+CALLS = {}          # この走行で eBay を何回呼んだか (走行ログに出す)
+
+
 def _post(call, body):
     import requests
     import ebay_getitem_images as EG
+    CALLS[call] = CALLS.get(call, 0) + 1
     r = requests.post(URL, headers=EG._headers(call), data=body.encode("utf-8"), timeout=90)
     return r.text
+
+
+def _ok_or_raise(call, t):
+    """失敗を黙って空にしない。★2026-10-15: 上限切れの GetMyMessages が空で返り、
+    送信0通のまま一覧を保存して「定型文まだ 17件」と出ていた (送り直しを誘う)。"""
+    if "<Ack>Failure</Ack>" in (t or "") or not t:
+        raise RuntimeError(f"{call} 失敗: " + _g(r"<LongMessage>([^<]*)", t or "", "応答なし"))
 
 
 def _g(pat, s, default=""):
@@ -359,6 +371,7 @@ def fetch_messages(days=DAYS, folder=0):
         f"<StartTime>{_iso(now - timedelta(days=days))}</StartTime><EndTime>{_iso(now)}</EndTime>"
         "<Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>1</PageNumber></Pagination>"
         "</GetMyMessagesRequest>"))
+    _ok_or_raise("GetMyMessages", t)
     heads = []
     for m in re.findall(r"<Message>(.*?)</Message>", t, re.S):
         sender = _g(r"<Sender>([^<]*)", m)
@@ -371,16 +384,25 @@ def fetch_messages(days=DAYS, folder=0):
             "type": _g(r"<MessageType>([^<]*)", m), "replied": _g(r"<Replied>([^<]*)", m) == "true",
             "subject": html.unescape(_g(r"<Subject>([^<]*)", m)),
         })
-    for i in range(0, len(heads), 10):
-        chunk = heads[i:i + 10]
+    # ★2026-10-15: 本文は変わらないので、前の回に取った物は控えから使う。
+    #   毎回 全通の本文を取り直していて、30分おきに十数回 (1日 約770回) 呼んでいた。
+    #   eBay の Trading API は全部の呼び出しで1日5000回を分け合う (取下げも同じ枠)
+    cache = _load(BODY_CACHE, {})
+    need = [h for h in heads if h["mid"] not in cache]
+    for i in range(0, len(need), 10):
+        chunk = need[i:i + 10]
         t2 = _post("GetMyMessages", (
             '<?xml version="1.0" encoding="utf-8"?><GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
             "<DetailLevel>ReturnMessages</DetailLevel><MessageIDs>"
             + "".join(f"<MessageID>{h['mid']}</MessageID>" for h in chunk) + "</MessageIDs></GetMyMessagesRequest>"))
-        bodies = {_g(r"<MessageID>([^<]*)", m): body_text(_g(r"<Text>(.*?)</Text>", m))
-                  for m in re.findall(r"<Message>(.*?)</Message>", t2, re.S)}
-        for h in chunk:
-            h["text"] = bodies.get(h["mid"], "")
+        _ok_or_raise("GetMyMessages", t2)
+        for m in re.findall(r"<Message>(.*?)</Message>", t2, re.S):
+            cache[_g(r"<MessageID>([^<]*)", m)] = body_text(_g(r"<Text>(.*?)</Text>", m))
+    for h in heads:
+        h["text"] = cache.get(h["mid"], "")
+    if need:                                 # 受信と送信で同じ控えを使うので、読み直して足す。古い方から捨てる
+        merged = {**_load(BODY_CACHE, {}), **{h["mid"]: cache[h["mid"]] for h in need if h["mid"] in cache}}
+        _save(BODY_CACHE, dict(list(merged.items())[-3000:]))
     return heads
 
 
@@ -471,6 +493,7 @@ def build(orders, inbox, sent_msgs, history, sent_log, templates):
 def collect(log=print):
     """eBay から取って一覧を作り直す (I/O)。走行ログに必ず1行出す。"""
     t0 = time.time()
+    CALLS.clear()
     history = _load(HISTORY, {})
     first = not history
     orders = fetch_orders(90 if first else DAYS)          # 初回は90日ぶん取ってリピーターを覚える
@@ -489,7 +512,9 @@ def collect(log=print):
     n_reply = sum(1 for c in convs if c.get("needs_reply"))
     log(f"📨 メッセージの一覧を作り直した: 注文 {sum(1 for c in convs if c['kind'] == 'order')}件 / "
         f"返事待ち {n_reply}件 / 定型文まだ {n_todo}件 / リピーター {sum(1 for c in convs if c.get('repeat'))}件 "
-        f"/ 受信 {len(inbox)}通・送信 {len(sent_msgs)}通 ({time.time() - t0:.0f}秒)")
+        f"/ 受信 {len(inbox)}通・送信 {len(sent_msgs)}通 ({time.time() - t0:.0f}秒) "
+        f"/ eBay 呼出 {sum(CALLS.values())}回 (GetOrders {CALLS.get('GetOrders', 0)}・"
+        f"GetMyMessages {CALLS.get('GetMyMessages', 0)})")
     return snap
 
 

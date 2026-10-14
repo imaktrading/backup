@@ -76,7 +76,16 @@ def _access_token():
 
 
 def _headers(call="GetItem", site="0"):
-    """Trading API のヘッダ。鍵は OAuth 側に一本化する。"""
+    """Trading API のヘッダ。鍵は OAuth 側に一本化する。
+
+    ★2026-10-15: ここを通る呼び出し (GetItem / GetOrders / GetMyMessages 等) を数える。
+      呼ぶ直前に1回ずつ作られるので、ここで数えれば漏れない。数えられなくても呼び出しは止めない。
+    """
+    try:
+        from ebay_call_usage import record_call
+        record_call(call)
+    except Exception:                                          # noqa: BLE001
+        pass
     return {"X-EBAY-API-CALL-NAME": call,
             "X-EBAY-API-SITEID": str(site),
             "X-EBAY-API-COMPATIBILITY-LEVEL": _COMPAT,

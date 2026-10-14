@@ -67,46 +67,9 @@ def refresh():
 #   誰も自分の消費を数えていないため、犯人が分からなかった。
 #   eBay の使用量照会 (GetApiAccessRules) は廃止済 (HTTP 410) なので、自分で数えるしかない。
 # ★eBay の1日は **日本時間 16:00 区切り**。集計もその境界に合わせる。
-_USAGE_PATH = r"C:\dev\iMak_data\hq\ebay_api_usage.json"
-
-
-def ebay_day(now=None):
-    """eBay の「1日」(日本時間 16:00 区切り) の日付文字列。純関数。"""
-    from datetime import datetime, timedelta
-    return ((now or datetime.now()) - timedelta(hours=16)).strftime('%Y-%m-%d')
-
-
-def _record_call(callname, path=None, now=None):
-    """呼出を1件数える。数えられなくても API 呼出は止めない (補助なので)。"""
-    path = path or _USAGE_PATH
-    day = ebay_day(now)
-    try:
-        try:
-            with open(path, encoding='utf-8') as f:
-                data = json.load(f) or {}
-        except Exception:
-            data = {}
-        bucket = data.setdefault(day, {})
-        bucket[callname] = int(bucket.get(callname, 0)) + 1
-        bucket['_total'] = int(bucket.get('_total', 0)) + 1
-        # ★2026-10-01: 誰が呼んだか (起動したスクリプト名)。出品一覧の取り直しが日に 22〜170回と
-        #   ばらつき、どこが取っているか分からなかった (総点検 10番)。
-        try:
-            import sys as _sys
-            who = os.path.basename((_sys.argv or [''])[0] or '') or '?'
-        except Exception:                                      # noqa: BLE001
-            who = '?'
-        by = bucket.setdefault('_by_caller', {})
-        k = f'{callname}@{who}'
-        by[k] = int(by.get(k, 0)) + 1
-        for old in sorted(data)[:-14]:          # 直近14日だけ残す
-            data.pop(old, None)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=1, sort_keys=True)
-        return bucket['_total']
-    except Exception:                                          # noqa: BLE001
-        return 0
+# ★2026-10-15: 中身は ebay_call_usage へ (GetItem の口からも数えるため)
+from ebay_call_usage import _USAGE_PATH, ebay_day  # noqa: E402,F401
+from ebay_call_usage import record_call as _record_call  # noqa: E402
 
 
 def post(callname, inner, tok, site='0'):
