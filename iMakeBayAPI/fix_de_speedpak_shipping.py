@@ -70,22 +70,27 @@ def refresh():
 # ★2026-10-15: 中身は ebay_call_usage へ (GetItem の口からも数えるため)
 from ebay_call_usage import _USAGE_PATH, ebay_day  # noqa: E402,F401
 from ebay_call_usage import record_call as _record_call  # noqa: E402
+import ebay_call_usage as _U  # noqa: E402
 
 
 def post(callname, inner, tok, site='0'):
-    _record_call(callname)
     hdr = {'X-EBAY-API-CALL-NAME': callname, 'X-EBAY-API-SITEID': site,
            'X-EBAY-API-COMPATIBILITY-LEVEL': '1271', 'X-EBAY-API-IAF-TOKEN': tok, 'Content-Type': 'text/xml'}
     body = (f'<?xml version="1.0" encoding="utf-8"?><{callname}Request xmlns="urn:ebay:apis:eBLBaseComponents">'
             f'{inner}</{callname}Request>')
-    for _ in range(4):
-        try:
-            r = requests.post(EP, data=body.encode('utf-8'), headers=hdr, timeout=90)
-            r.encoding = 'utf-8'
-            return r.text
-        except requests.exceptions.ConnectionError:
-            time.sleep(3)
-    return ''
+
+    def _do(h):
+        _record_call(callname)
+        for _ in range(4):
+            try:
+                r = requests.post(EP, data=body.encode('utf-8'), headers=h, timeout=90)
+                r.encoding = 'utf-8'
+                return r.text
+            except requests.exceptions.ConnectionError:
+                time.sleep(3)
+        return ''
+    # ★2026-10-15: 使い過ぎの歯止め + 本鍵が上限なら 2つ目の鍵で呼び直す (ebay_call_usage.send)
+    return _U.send(_do, callname, hdr)
 
 
 def enumerate_free_de(tok):

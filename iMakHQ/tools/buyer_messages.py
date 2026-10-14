@@ -300,7 +300,7 @@ def _post(call, body):
     import requests
     import ebay_getitem_images as EG
     CALLS[call] = CALLS.get(call, 0) + 1
-    r = requests.post(URL, headers=EG._headers(call), data=body.encode("utf-8"), timeout=90)
+    r = EG._HTTP.post(URL, headers=EG._headers(call), data=body.encode("utf-8"), timeout=90)   # 歯止め・鍵の切替を通す
     return r.text
 
 

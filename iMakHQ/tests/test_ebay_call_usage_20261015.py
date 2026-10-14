@@ -23,6 +23,7 @@ def test_headers_records_call(tmp_path, monkeypatch):
     import ebay_getitem_images as EG
     p = str(tmp_path / "u.json")
     monkeypatch.setattr(U, "_USAGE_PATH", p)
+    monkeypatch.setattr(U, "STATE_PATH", str(tmp_path / "s.json"))
     monkeypatch.setattr(EG, "_access_token", lambda: "tok")
     EG._headers("GetOrders")
     EG._headers("GetItem")
@@ -73,3 +74,64 @@ def test_failure_is_not_saved_as_empty(BM, monkeypatch):
     monkeypatch.setattr(BM, "_post", lambda c, b: "<Ack>Failure</Ack><LongMessage>exceeded usage limit</LongMessage>")
     with pytest.raises(RuntimeError, match="exceeded usage limit"):
         BM.fetch_messages(30, 1)
+
+
+# ── 使い過ぎの歯止め / 2つ目の鍵への切替 (2026-10-15 ユーザー「止める・知らせる仕組みも」) ──
+@pytest.fixture
+def U2(tmp_path, monkeypatch):
+    import ebay_call_usage as U
+    monkeypatch.setattr(U, "_USAGE_PATH", str(tmp_path / "u.json"))
+    monkeypatch.setattr(U, "STATE_PATH", str(tmp_path / "s.json"))
+    monkeypatch.setattr(U, "NTFY_TOPIC", str(tmp_path / "none.txt"))     # スマホには送らない
+    monkeypatch.setattr(U, "sub_access_token", lambda: "SUB")
+    monkeypatch.setattr(sys, "argv", ["runaway.py"])
+    return U
+
+
+_QUOTA = "<Ack>Failure</Ack><LongMessage>Your application has exceeded usage limit on this call</LongMessage>"
+
+
+def test_quota_error_switches_to_sub_and_retries(U2):
+    seen = []
+
+    def do(h):
+        seen.append(h["X-EBAY-API-IAF-TOKEN"])
+        return _QUOTA if h["X-EBAY-API-IAF-TOKEN"] == "MAIN" else "<Ack>Success</Ack>"
+    assert U2.send(do, "GetItem", {"X-EBAY-API-IAF-TOKEN": "MAIN"}) == "<Ack>Success</Ack>"
+    assert seen == ["MAIN", "SUB"] and U2.active_key() == "sub"
+    seen.clear()                                    # 同じ日の次の呼出は最初から 2つ目の鍵
+    U2.send(do, "GetItem", {"X-EBAY-API-IAF-TOKEN": "MAIN"})
+    assert seen == ["SUB"]
+
+
+def test_day_change_returns_to_main(U2):
+    U2.mark_exhausted("main", now=datetime(2026, 10, 15, 10, 0))
+    assert U2.active_key(datetime(2026, 10, 15, 15, 59)) == "sub"
+    assert U2.active_key(datetime(2026, 10, 15, 16, 0)) == "main"     # eBay の日が変わった
+
+
+def test_one_tool_is_capped_but_takedowns_pass(U2, monkeypatch):
+    monkeypatch.setattr(U2, "CALLER_LIMIT", 3)
+    for _ in range(3):
+        U2.record_call("GetBestOffers")
+    assert U2.guard("GetBestOffers")                      # 4回目は止める
+    assert U2.guard("EndItem") is None                    # 取下げは止めない
+    assert U2.guard("ReviseInventoryStatus") is None
+    out = U2.send(lambda h: pytest.fail("送ってはいけない"), "GetBestOffers", {"X-EBAY-API-IAF-TOKEN": "MAIN"})
+    assert "<Ack>Failure</Ack>" in out and "歯止め" in out
+    monkeypatch.setattr(sys, "argv", ["other.py"])        # 他の道具は止まらない
+    assert U2.guard("GetBestOffers") is None
+
+
+def test_notify_only_once_per_day(U2):
+    assert U2.notify_once("x", "t", "b") is True
+    assert U2.notify_once("x", "t", "b") is False
+
+
+def test_session_guarded_post_returns_failure_response(U2, monkeypatch):
+    import ebay_getitem_images as EG
+    monkeypatch.setattr(U2, "CALLER_LIMIT", 1)
+    U2.record_call("GetItem")
+    r = EG._HTTP.post("https://api.ebay.com/ws/api.dll", data=b"x",
+                      headers={"X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-IAF-TOKEN": "MAIN"})
+    assert "<Ack>Failure</Ack>" in r.text

@@ -47,7 +47,31 @@ class TradingAuthError(RuntimeError):
 _TOK = {"value": "", "until": 0.0}
 # ★2026-10-14 つなぎっぱなしで使い回す。requests.post を毎回呼ぶと、そのたびに証明書の束を読み直す
 #   (この PC で1回 0.6秒)。再仕入れ ③ で 164件ずつ聞くと、それだけで1分半かかっていた
-_HTTP = requests.Session()
+class _TradingSession(requests.Session):
+    """★2026-10-15: Trading API (api.dll) への送信は ebay_call_usage.send を通す
+    (使い過ぎの歯止め + 本鍵が上限なら 2つ目の鍵で呼び直す)。それ以外の URL はそのまま。"""
+
+    def post(self, url, data=None, json=None, **kw):           # noqa: A002
+        if "api.dll" not in str(url):
+            return super().post(url, data=data, json=json, **kw)
+        import ebay_call_usage as U
+        headers = dict(kw.pop("headers", None) or {})
+        box = []
+
+        def _do(h):
+            if box:                                  # 2つ目の鍵での呼び直し (1回目は _headers で数え済み)
+                U.record_call(h.get("X-EBAY-API-CALL-NAME", "?"))
+            box.append(super(_TradingSession, self).post(url, data=data, json=json, headers=h, **kw))
+            return box[-1].text
+        text = U.send(_do, headers.get("X-EBAY-API-CALL-NAME", "?"), headers)
+        if box and box[-1].text == text:
+            return box[-1]
+        r = requests.models.Response()              # 歯止めで止めた = 送っていない。失敗の形で返す
+        r.status_code, r._content, r.encoding = 200, text.encode("utf-8"), "utf-8"
+        return r
+
+
+_HTTP = _TradingSession()
 
 
 def _access_token():

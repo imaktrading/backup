@@ -60,7 +60,7 @@ def fetch_window(frm, to):
     """1区間ぶんの取引行 [(itemId, title, qty, amount, date, sku)]。"""
     rows, page = [], 1
     while True:
-        r = requests.post(_URL, headers=EG._headers("GetOrders"),
+        r = EG._HTTP.post(_URL, headers=EG._headers("GetOrders"),   # 歯止め・鍵の切替を通す (2026-10-15)
                           data=_body(frm, to, page).encode("utf-8"), timeout=60)
         EG._check_auth(r.text)
         root = ET.fromstring(r.text)
