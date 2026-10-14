@@ -3837,6 +3837,10 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
+    # ★2026-10-14 ユーザー「よく使うボタンは見てもらった方がいいね」: 補URL ③ 補充 の候補の組み立てが
+    #   同じ JSON (答えの記録 等) を 5,482回 読み直し、機械の処理 6分のうち約3分半を使っていた。
+    #   この走行の中では一度だけ読む (ファイルが書き換わったら読み直す・json_memo)
+    os.environ.setdefault("JSON_READ_MEMO", "1")
     # slice2: `search` で夜間検索。slice3: `confirm` で昼確認→補URL書込。無引数=slice1 件数レポート。
     if "search" in sys.argv:
         max_backups, limit, fresh, commit_batch, min_reviews = 1, None, False, 8, 100

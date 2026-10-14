@@ -43,3 +43,19 @@ def test_missing_or_broken_file_is_empty(tmp_path, monkeypatch):
     bad = tmp_path / "bad.json"
     bad.write_text("{", encoding="utf-8")
     assert json_memo.load(str(bad)) == {}
+
+
+def test_on_with_json_read_memo(tmp_path, monkeypatch):
+    # 補URL ③ / 再仕入れ ① の main が JSON_READ_MEMO=1 を立てる (2026-10-14 補URL ③ 補充 6分5秒→1分22秒)
+    monkeypatch.delenv("SHEET_READ_MEMO", raising=False)
+    monkeypatch.setenv("JSON_READ_MEMO", "1")
+    p = tmp_path / "v.json"
+    p.write_text(json.dumps({"a": 1}), encoding="utf-8")
+    assert json_memo.load(str(p)) is json_memo.load(str(p))
+
+
+def test_mains_turn_memo_on():
+    here = os.path.join(os.path.dirname(__file__), "..", "tools")
+    for f in ("psa_hoju_fill.py", "psa_resource_gate.py"):
+        s = open(os.path.join(here, f), encoding="utf-8").read()
+        assert 'os.environ.setdefault("JSON_READ_MEMO", "1")' in s[s.index("def main("):]

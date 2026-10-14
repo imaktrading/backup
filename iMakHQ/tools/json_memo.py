@@ -5,7 +5,8 @@
   そのうち約2分半が **同じファイルを 5,697回 読み直す** 時間だった (答えの記録 url_card_verdicts.json 等を
   候補1件ごとに開き直していた)。
 
-数え直しのプロセス (console/counts.py が SHEET_READ_MEMO=1 で起動する) の中でだけ効く。
+数え直しのプロセス (console/counts.py が SHEET_READ_MEMO=1 で起動する) と、JSON_READ_MEMO=1 を立てた
+プロセス (補URL ③ / 再仕入れ ① の main が立てる・2026-10-14) の中でだけ効く。
 ファイルの更新時刻と大きさが変わったら読み直すので、途中で書き込まれても古い中身は返さない。
 返すのは **読んだ物そのもの** (同じ物を返すので、呼び出し側の id() での使い回しも効く)。書き換えないこと。
 """
@@ -16,7 +17,7 @@ _MEMO = {}
 
 
 def enabled():
-    return os.environ.get("SHEET_READ_MEMO") == "1"
+    return os.environ.get("SHEET_READ_MEMO") == "1" or os.environ.get("JSON_READ_MEMO") == "1"
 
 
 def load(path, default_factory=dict):

@@ -113,11 +113,20 @@ def art_match_enabled(cfg_path=None):
     p = cfg_path or _os.path.join(_os.path.dirname(_os.path.dirname(
         _os.path.dirname(_os.path.abspath(__file__)))), "iMakeBayAPI", "config", "global.yaml")
     try:
+        # ★2026-10-14 候補1件ごとに yaml を読み直していた (補URL ③ で116回・19秒)。ファイルが変わるまで覚えておく
+        sig = (p, _os.path.getmtime(p))
+        if _ENABLED_MEMO.get("sig") == sig:
+            return _ENABLED_MEMO["v"]
         import yaml
         with open(p, encoding="utf-8") as f:
-            return bool(((yaml.safe_load(f) or {}).get("art_match") or {}).get("enabled", False))
+            v = bool(((yaml.safe_load(f) or {}).get("art_match") or {}).get("enabled", False))
+        _ENABLED_MEMO.update(sig=sig, v=v)
+        return v
     except Exception:                                              # noqa: BLE001
         return False
+
+
+_ENABLED_MEMO = {}
 
 
 def _load_key():

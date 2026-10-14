@@ -727,6 +727,8 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
+    # ★2026-10-14 この走行の中では同じ JSON を読み直さない (json_memo・補URL ③ と同じ)
+    os.environ.setdefault("JSON_READ_MEMO", "1")
     limit = None
     for a in sys.argv[1:]:
         if a.startswith("--limit="):
