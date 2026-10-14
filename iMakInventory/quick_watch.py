@@ -90,16 +90,16 @@ def pending_rows(values: list, now: datetime = None) -> list:
         iid = str(r[0]).strip()
         if not iid:
             continue
-        urgent = URGENT_WORD in str(r[1])
-        prev = last.get(iid)
-        last[iid] = (i, urgent or bool(prev and prev[1]), str(r[COL_STATE - 1]).strip(),
-                     str(r[COL_DONE_AT - 1]).strip())
+        own_urgent = URGENT_WORD in str(r[1])
+        last[iid] = (i, own_urgent, str(r[COL_STATE - 1]).strip(), str(r[COL_DONE_AT - 1]).strip())
     out = []
     for iid, (row_no, urgent, state, done_at) in last.items():
         if not state:
+            # いちばん下の行が「補を書いた」等なら 全部読む (新しい補を読むため)。急ぐの行なら 1 本だけ
             out.append((row_no, iid, urgent))
             continue
-        if urgent and iid in in_latest:
+        if iid in in_latest:
+            urgent = True                             # 見直しは 急ぐの扱い (一番安い 1 本だけ)
             t = _parse_ts(done_at)
             if t is None or (now - t).total_seconds() >= URGENT_EVERY_MIN * 60:
                 out.append((row_no, iid, urgent))

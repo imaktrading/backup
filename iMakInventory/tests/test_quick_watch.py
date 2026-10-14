@@ -148,3 +148,12 @@ def test_only_latest_urgent_batch_is_rechecked():
             ["NEW2", "急ぐ", "2026-10-14 12:31", "出品くん", "済", "2026-10-14 11:50:00", ""]]   # 同じ回 (6 分差)
     got = Q.pending_rows(vals, now=now)
     assert [g[1] for g in got] == ["KEEP", "NEW2"]
+
+
+def test_hoju_written_row_is_full_read_even_if_urgent_before():
+    """同じ itemID に 急ぐ と 補を書いた がある時、補を書いた (未処理) は全部読む."""
+    from datetime import datetime
+    vals = [Q.QUICK_HEADER,
+            ["X", "急ぐ", "2026-10-14 12:25", "出品くん", "済", "2026-10-14 12:38:00", ""],
+            ["X", "補を書いた", "2026-10-14 12:32", "出品くん", "", "", ""]]
+    assert Q.pending_rows(vals, now=datetime(2026, 10, 14, 12, 45)) == [(3, "X", False)]
