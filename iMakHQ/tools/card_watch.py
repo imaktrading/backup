@@ -93,7 +93,9 @@ def search_snkrdunk(w):
     import snkrdunk_psa_resource as S
     out = []
     for x in S.psa10_listings_for(cid) or []:
-        lid = str(x.get("id") or x.get("listing_id") or "")
+        # ★2026-10-14 psa10_listings_for は {price, image, url} しか返さず id が無いので、スニダンは1件も拾えていなかった
+        #   (ユーザー「バリヤードがスニダンに出た！」で発覚)。出品の番号は url から取る
+        lid = str(x.get("id") or x.get("listing_id") or S._parse_listing_url(x.get("url"))[1] or "")
         if lid:
             out.append({"id": "snkr-" + lid, "site": "スニダン", "price": x.get("price"),
                         "name": w.get("name", ""), "url": S.LISTING_PAGE_TMPL.format(card_id=cid, listing_id=lid)})

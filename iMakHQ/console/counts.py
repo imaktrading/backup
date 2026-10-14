@@ -64,6 +64,10 @@ def main():
         return rk["rows"]
 
     fns = {
+        # ★2026-10-14 ユーザー「(仕入れ待ちが古いままだと) 困るんだけど」: 注文の取り込みを一番先に回す。
+        #   補URLの数え (約4分) の後ろにあったので、数え直しが時間切れになると取り込みまで届かなかった。
+        #   画面の仕入れ待ちは order_purchase_status.json を直接読むので、先に済めば後ろが時間切れでも新しい数が出る
+        "order": order_sync,
         "hoju": lambda: __import__("psa_hoju_fill").count_workload(),
         "newcand": lambda: __import__("newcand_confirm").count_workload(),
         "newcand_high": lambda: __import__("newcand_confirm").count_workload_high(),
@@ -73,7 +77,6 @@ def main():
         "restock": lambda: __import__("sold_restock").count_workload(),
         # ★2026-09-19: オファーは期限が短いので件数を出す (eBay 1コール)。
         "offer": lambda: __import__("offer_calc").count_workload(),
-        "order": order_sync,
         # ★2026-10-09 ユーザー「新規に出せる PSA の横にして。送れる件数を表示して」
         "offer_send": lambda: __import__("shelf_offer").count_sendable(),
         # ★2026-10-05 ユーザー「新規出品出来るカード枚数を今日やることの下に」: PSA 新規と同じ条件で数える
