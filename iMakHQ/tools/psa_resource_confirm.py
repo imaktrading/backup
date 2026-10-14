@@ -306,10 +306,31 @@ def _fix_url(u):
     return (u or "").replace("dbs-cardgame.com/fw/jp/images/", "dbs-cardgame.com/fw/images/")
 
 
+CATALOG_IMG_ROOT = os.path.normcase(os.path.normpath(r"C:/dev/iMak_data/catalog/_official_images"))
+_IMG_TYPES = {".webp": "image/webp", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+
+
+def _catalog_local_image(p):
+    """カタログの置き場の中の画像ファイル → (bytes, content-type)。置き場の外・無い物は None (配らない)。"""
+    if not p or "://" in p:
+        return None
+    path = os.path.normcase(os.path.normpath(p))
+    if not path.startswith(CATALOG_IMG_ROOT + os.sep) or not os.path.isfile(path):
+        return None
+    with open(path, "rb") as f:
+        return f.read(), _IMG_TYPES.get(os.path.splitext(path)[1], "application/octet-stream")
+
+
 def _fetch_image(url, retries=4):
     """画像を取得して (bytes, content-type) を返す。成功のみキャッシュ(失敗は次回再試行)。失敗 (None,None)。"""
     if not url:
         return None, None
+    # ★2026-10-14 ユーザー「カタログにも画像ない」(キラ・ヤマト ST04-010_p1): カタログは公式の画像を
+    #   PC の中のファイル (_official_images) で持っており、それを先頭に返す。ここはネットの URL しか
+    #   取れず、公式から取ったカード全部で 🅰 の画像が出ていなかった。カタログの置き場の中だけ配る。
+    local = _catalog_local_image(url)
+    if local:
+        return local
     url = _fix_url(url)
     # URLにスペース等が含まれると urllib が弾く(catalog の "Other Product Card" 等は実在するが
     # 生スペース)。既存の %xx を壊さず空白等だけエンコード。
@@ -943,6 +964,12 @@ def build_restock_html(items):
     candidates:[{channel,url,price}], v8}]。① 現物 と 仕入候補(買う物の出品画像) を並べ目視一致。
     候補のurl(出品ページ)はプロキシが画像へ解決(mercari→CDN / snkrdunk→og:image)。"""
     rows = []
+    # ★走行ログで「動いた」が分かる1行 (0件でも出す): 🅰 カタログ画像を PC の中のファイルから出した数
+    _cats = [(it.get("catalog") or {}) for it in items if (it.get("catalog") or {}).get("key")]
+    _n_local = sum(1 for c in _cats if _catalog_local_image(c.get("image") or ""))
+    _n_none = sum(1 for c in _cats if not c.get("image"))
+    print(f"  🅰 カタログ画像: PC内のファイル {_n_local}件 / ネット {len(_cats) - _n_local - _n_none}件 / "
+          f"無し {_n_none}件 (カタログ欄のある {len(_cats)}件のうち)", flush=True)
     for it in items:
         idx = it.get("idx")
         ref = it.get("ref_image") or ""
