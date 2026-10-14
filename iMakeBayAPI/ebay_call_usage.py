@@ -70,6 +70,10 @@ def record_call(callname, path=None, now=None, key=None):
 #   3. eBay が「上限を超えた」と返したら、その日は **2つ目の鍵 (imaktrading・同じ imax-64 の出品を操作できる)** に切り替えて
 #      呼び直し、知らせる。2つ目も使い切ったら知らせて止まる
 CALLER_LIMIT = 1000
+# ★2026-10-15 07時 止めた: eBay の API 規約に「Attempts to circumvent API call limits may result in termination
+#   ... suspension of your license」とある。上限を超えるために別の鍵へ回すのはこれに当たる恐れがあるので、
+#   ユーザーの判断が出るまで切り替えない (上限に当たったら記録して知らせ、16時まで止まる)
+SWITCH_TO_SUB = False
 WARN_AT = 3000
 EXEMPT = {"EndItem", "EndItems", "ReviseInventoryStatus", "EndFixedPriceItem"}
 STATE_PATH = r"C:\dev\iMak_data\hq\ebay_key_state.json"
@@ -107,6 +111,8 @@ def _save_state(st, path=None):
 
 def active_key(now=None, path=None):
     """今日使う鍵。本鍵が上限に当たった日は 'sub'。日付が変われば (16時) 本鍵に戻る。"""
+    if not SWITCH_TO_SUB:
+        return "main"
     return "sub" if _load_state(path).get(ebay_day(now), {}).get("main_exhausted") else "main"
 
 
@@ -141,9 +147,13 @@ def mark_exhausted(key, now=None, path=None):
         st = _load_state(path)
         st.setdefault(day, {})[f"{key}_exhausted"] = True
         _save_state(st, path)
-    if key == "main":
+    if key == "main" and SWITCH_TO_SUB:
         notify_once("main_exhausted", "eBay の上限 → 2つ目の鍵に切替",
                     "本鍵 (imax-64) が今日の上限に当たりました。16時まで imaktrading の鍵で動かします。"
+                    "誰が使ったかは python iMakHQ/tools/ebay_api_usage.py", now, path)
+    elif key == "main":
+        notify_once("main_exhausted", "eBay の上限に当たった (16時まで止まる)",
+                    "本鍵 (imax-64) が今日の上限に当たりました。取下げも16時まで送れません。"
                     "誰が使ったかは python iMakHQ/tools/ebay_api_usage.py", now, path)
     else:
         notify_once("sub_exhausted", "eBay の上限 → 2つ目の鍵も切れた",
@@ -238,7 +248,7 @@ def send(do_post, callname, headers):
     text = do_post(headers)
     if is_quota_error(text):
         mark_exhausted("sub" if was_sub else "main")
-        if not was_sub:
+        if not was_sub and SWITCH_TO_SUB:
             try:
                 text = do_post(dict(headers, **{"X-EBAY-API-IAF-TOKEN": sub_access_token()}))
             except Exception as e:                             # noqa: BLE001

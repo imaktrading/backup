@@ -91,7 +91,17 @@ def U2(tmp_path, monkeypatch):
 _QUOTA = "<Ack>Failure</Ack><LongMessage>Your application has exceeded usage limit on this call</LongMessage>"
 
 
-def test_quota_error_switches_to_sub_and_retries(U2):
+def test_quota_error_does_not_switch_while_disabled(U2):
+    """規約 (call limits の回避禁止) の確認が済むまで切り替えない。記録して止まるだけ"""
+    assert U2.SWITCH_TO_SUB is False
+    seen = []
+    out = U2.send(lambda h: seen.append(h["X-EBAY-API-IAF-TOKEN"]) or _QUOTA, "GetItem",
+                  {"X-EBAY-API-IAF-TOKEN": "MAIN"})
+    assert seen == ["MAIN"] and U2.is_quota_error(out) and U2.active_key() == "main"
+
+
+def test_quota_error_switches_to_sub_and_retries(U2, monkeypatch):
+    monkeypatch.setattr(U2, "SWITCH_TO_SUB", True)
     seen = []
 
     def do(h):
@@ -104,7 +114,8 @@ def test_quota_error_switches_to_sub_and_retries(U2):
     assert seen == ["SUB"]
 
 
-def test_day_change_returns_to_main(U2):
+def test_day_change_returns_to_main(U2, monkeypatch):
+    monkeypatch.setattr(U2, "SWITCH_TO_SUB", True)
     U2.mark_exhausted("main", now=datetime(2026, 10, 15, 10, 0))
     assert U2.active_key(datetime(2026, 10, 15, 15, 59)) == "sub"
     assert U2.active_key(datetime(2026, 10, 15, 16, 0)) == "main"     # eBay の日が変わった
