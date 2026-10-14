@@ -34,6 +34,7 @@ STREAK_PATH = DECISION_LOG_DIR / "supply_price_streak.json"
 PRICE_DROP_RATIO = 0.6          # 基準の 60% 未満 (= 4 割以上安い) で外す
 PRICE_STREAK_ADOPT = 2          # 同じ値段帯の急落が この回数続いたら M に採る (2026-10-12 ブラボー GO B-20261012-001)
 PRICE_STREAK_BAND = 0.10        # 「同じ値段帯」= 前回の急落値の ±10%
+STREAK_READONLY = False         # QUICK は 2 回確認を数えない (数分おきの読み直しで「2 回続いた」にしない)
 
 # ── 1. 鑑定 ──────────────────────────────────────────────────────────────
 # HQ iMakHQ/tools/mercari_psa_resource.is_psa10 と同じ判定 (LAPTOP の巡回は HQ を import しない流儀のため写し)。

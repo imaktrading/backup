@@ -87,6 +87,9 @@ from scrapers.rakuten_scraper import fetch_product_inventory as fetch_rakuten  #
 LOG_DIR = SCRIPT_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 DECISION_LOG_DIR = SCRIPT_DIR / "decision_log"
+# ★ 2026-10-14 (B-20261014-007): QUICK (急ぐ出品だけをすぐ見る短い巡回) は API だけで読み、Chrome を立てない。
+#   True の間は amazon の Chrome 予備も使わない (決まらない行は触らずに次の HIGH に任せる)。
+_API_ONLY = False
 DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Mercari/Amazon 1 リクエストごとの sleep 秒 (anti-bot 対策)
@@ -268,7 +271,7 @@ def _check_single_url(url: str, sleep_sec: float = DEFAULT_SLEEP_SEC,
             return out
     elif supplier == "amazon":
         try:
-            info = fetch_amazon(url, driver=amazon_driver, use_selenium_fallback=True)
+            info = fetch_amazon(url, driver=amazon_driver, use_selenium_fallback=not _API_ONLY)
         except Exception as e:
             out["error"] = f"{type(e).__name__}: {e}"
             return out
@@ -402,7 +405,7 @@ def _guard_price_drop(row: dict, sub_results: list) -> bool:
         if not reason:
             SG.streak().clear(s["url"])
             continue
-        n = SG.streak().bump(s["url"], prices[id(s)])
+        n = (SG.streak().data.get(s["url"]) or {}).get("count", 0) if SG.STREAK_READONLY             else SG.streak().bump(s["url"], prices[id(s)])
         if n >= SG.PRICE_STREAK_ADOPT:
             # ★ 2026-10-12 (B-20261012-001): 同じ値段帯が 2 回続いた = 入替え直後の一時的な安値ではない。
             #   鑑定・名前の見張りはこの前に通っている (通らなければ is_sold=True で ここに来ない)。M に採る。
@@ -1562,8 +1565,14 @@ def process_sheet(
     progress_callback=None,
     supplier_filter: str = "all",
     rows_filter: str = "all",
+    only_item_ids: Optional[set] = None,
+    api_only: bool = False,
 ):
-    global _LOG_LABEL
+    """only_item_ids / api_only は QUICK (2026-10-14 B-20261014-007) 用: 指定した itemID の行だけを、
+    Chrome を立てずに API だけで読む。途中再開・復活の 2 回確認・急落の 2 回確認は数えない (通常の巡回に任せる)。"""
+    global _LOG_LABEL, _API_ONLY
+    _API_ONLY = bool(api_only)
+    SG.STREAK_READONLY = bool(api_only)
     _LOG_LABEL = "" if (sheet_label or "").upper() in ("", "HIGH", "SHEET") else sheet_label.upper()
     log("=" * 60)
     log(f"商品管理シート [{sheet_label}] 開始 (sheet_id={sheet_id[:20]}..., dry_run={dry_run})")
@@ -1612,8 +1621,15 @@ def process_sheet(
         rows = rows[:limit]
         log(f"  --limit {limit} で絞込: {len(rows)} 件")
 
+    if only_item_ids is not None:
+        _want = {str(x).strip() for x in only_item_ids if str(x).strip()}
+        before = len(rows)
+        rows = [r for r in rows if str(r.get("item_id") or "").strip() in _want]
+        log(f"  指定の itemID だけに絞込: {before} → {len(rows)} 件 (指定 {len(_want)} 件)")
+
     # 途中再開: 全件を回す本番の巡回だけ (範囲指定・件数制限・dry-run は対象外)
-    use_ckpt = (not dry_run and limit is None and start_row == 2 and end_row is None)
+    use_ckpt = (not dry_run and limit is None and start_row == 2 and end_row is None
+                and only_item_ids is None)
     ckpt_meta = {"sheet_id": sheet_id, "rows_filter": rows_filter, "supplier_filter": supplier_filter}
     restored: list = []
     if use_ckpt:
@@ -1657,11 +1673,15 @@ def process_sheet(
     m_def, a_def = _default_profile_dirs()
     if (mercari_profile, amazon_profile) != (m_def, a_def):
         log(f"  profile: 専用 ({Path(mercari_profile).name} / {Path(amazon_profile).name})")
-    _kill_stale_scraper_chrome(log)
+    if api_only:
+        # 通常の巡回の Chrome を殺さない・立てない (同じ profile を使っているため)
+        log("  API だけで読む (Chrome は使わない。決まらない行は次の通常の巡回に任せる)")
+    else:
+        _kill_stale_scraper_chrome(log)
 
     # Mercari URL がある場合は driver を 1 つ生成して再利用 (起動コスト削減)
     mercari_driver = None
-    needs_mercari = by_sup.get("mercari", 0) > 0
+    needs_mercari = by_sup.get("mercari", 0) > 0 and not api_only
     if needs_mercari:
         log("  Mercari driver 起動中...")
         try:
@@ -1678,7 +1698,7 @@ def process_sheet(
     # それでも失敗 → cycle abort (= driver 無しで burst すると bot 検知で偽 OOS 大量化、
     # 致命的、 一旦止めて 人手で profile 復旧)。
     amazon_driver = None
-    needs_amazon = by_sup.get("amazon", 0) > 0
+    needs_amazon = by_sup.get("amazon", 0) > 0 and not api_only
     if needs_amazon:
         log("  Amazon driver 起動中 (login profile)...")
         last_err = None
@@ -2387,7 +2407,10 @@ def process_sheet(
     # revive_csv_generator (Phase 2.5/3.5) が改めて掛ける (fail-closed 多層)。
     revive_result = {"promoted": 0, "first_seen": 0, "cleared": 0, "stayed": 0}
     try:
-        revive_result = confirm_and_enqueue_revive(sheet_label, results, dry_run=dry_run)
+        if api_only:
+            log("  [復活 gate] QUICK は数えない (2 回確認は通常の巡回で)")
+        else:
+            revive_result = confirm_and_enqueue_revive(sheet_label, results, dry_run=dry_run)
         if revive_result["promoted"] or revive_result["first_seen"]:
             log(f"  [復活 gate] promoted={revive_result['promoted']} "
                 f"(2cycle 確定 → pending_revive.jsonl) / "
@@ -2415,6 +2438,12 @@ def process_sheet(
         "rescue":               rescue_result,        # 補URL救済 (new_events/current_rescued/appended)
         "revive":               revive_result,        # 復活 2cycle 確定 (promoted/first_seen/cleared/stayed)
         "sheet_write":          sheet_write,          # リバイスへの合図の判定材料 (B-20261014-004)
+        # QUICK 用: 指定した itemID ごとの結果 (タブ『すぐ見る』の結果欄に書く)
+        "item_results": ({str(r.get("item_id") or "").strip(): {
+                              "is_sold": r.get("is_sold"), "price_jpy": r.get("price_jpy"),
+                              "raw_status": r.get("raw_status"), "delta": r.get("delta"),
+                              "error": r.get("error")}
+                          for r in results} if only_item_ids is not None else None),
     }
 
 

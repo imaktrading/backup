@@ -19,8 +19,8 @@ from datetime import datetime
 
 MAINT_SHEET_ID = "1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4"   # 「既存メンテ」スプシ
 SIGNAL_TAB = "合図"
-LATEST_CELL = {"HIGH": "B1", "LOW": "C1", "OFFICIAL": "D1"}
-TOP_NOTE = "最新 done_at → B1=HIGH / C1=LOW / D1=OFFICIAL (完走して書込が成功した時だけ更新)"
+LATEST_CELL = {"HIGH": "B1", "LOW": "C1", "OFFICIAL": "D1", "QUICK": "E1"}
+TOP_NOTE = "最新 done_at → B1=HIGH / C1=LOW / D1=OFFICIAL / E1=QUICK (完走して書込が成功した時だけ更新)"
 SIGNAL_HEADER = ["label", "started_at", "done_at", "rows", "written", "m_changed", "d_changed", "writer"]
 WRITER = "監視くん(LAPTOP)"
 
@@ -69,7 +69,7 @@ def write(kind: str, row: list, sheet_id: str = MAINT_SHEET_ID) -> None:
         ws = sh.worksheet(SIGNAL_TAB)
     except Exception:  # noqa: BLE001 - 無ければ作る
         ws = sh.add_worksheet(title=SIGNAL_TAB, rows=200, cols=len(SIGNAL_HEADER))
-        ws.update(values=[[TOP_NOTE, "", "", ""], SIGNAL_HEADER], range_name="A1",
+        ws.update(values=[[TOP_NOTE, "", "", "", ""], SIGNAL_HEADER], range_name="A1",
                   value_input_option="RAW")
     ws.append_row(row, value_input_option="RAW", table_range="A2")
     ws.update(values=[[TOP_NOTE]], range_name="A1", value_input_option="RAW")
