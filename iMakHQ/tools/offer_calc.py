@@ -163,9 +163,14 @@ def supply_summary(cands, marks_of):
     """
     cs = [c for c in (cands or []) if isinstance(c.get("price"), int) and c.get("buyable", True) is not False]
     ok = [c for c in cs if not marks_of(c)]
+    # ★2026-10-14 ユーザー「今買える安い仕入元がぜんぜん違うカード。精度が低すぎる」→「そうするか。いいとこどりやな」:
+    #   上位3本は **番号と版を確かめられた物だけ** (番号未確認・版未確認 = 別のカードが多い は出さず件数だけ)。
+    #   評価が少ない・送料別などは同じカードなので印付きで出す。ゆるく拾った中の同じカードは残る (出品中20件で2件は補の絞り方より安かった)
+    same = [c for c in cs if not ({"番号未確認", "版未確認"} & set(marks_of(c) or []))]
     return {"top": [{"src": c.get("src") or c.get("channel") or "", "price": c["price"], "url": c.get("url") or "",
-                     "marks": list(marks_of(c) or [])} for c in cs[:SUPPLY_TOP]],
-            "best_ok": ok[0]["price"] if ok else None, "n": len(cs), "n_ok": len(ok)}
+                     "marks": list(marks_of(c) or [])} for c in same[:SUPPLY_TOP]],
+            "best_ok": ok[0]["price"] if ok else None, "n": len(cs), "n_ok": len(ok),
+            "n_unsure": len(cs) - len(same)}
 
 
 def _load_supply():
@@ -1088,7 +1093,9 @@ document.getElementById('eucty').addEventListener('change', render);
     } else {
       best = '<br><span style="color:#f88;font-size:11px">条件OKの仕入元なし</span>';
     }
-    return (top || '<span style="color:#f88">今買える仕入元なし</span>') + best
+    // ★2026-10-14 番号・版を確かめられない候補 (別のカードが多い) は値段を出さず件数だけ
+    var unsure = s.n_unsure ? '<br><span style="color:#888;font-size:10px">番号・版が未確認 ' + s.n_unsure + '件 (出していません)</span>' : '';
+    return (top || '<span style="color:#f88">今買える仕入元なし</span>') + best + unsure
       + '<br><span style="color:#888;font-size:10px">' + (s.at || '').replace('T', ' ').slice(5, 16) + ' 時点</span>';
   }
 

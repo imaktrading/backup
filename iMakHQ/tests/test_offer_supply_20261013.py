@@ -16,9 +16,16 @@ def test_supply_summary_top3_and_best_ok():
              {"src": "スニダン", "price": 5000, "url": "u3", "buyable": False},
              {"src": "補1", "price": 5999, "url": "u4", "buyable": True}]
     s = O.supply_summary(cands, P.marks_of)
-    assert [c["price"] for c in s["top"]] == [4666, 4777, 5999]          # 売り切れは出さない
-    assert s["best_ok"] == 4777 and s["n_ok"] == 2
-    assert s["top"][0]["marks"] == ["番号未確認"]
+    # ★2026-10-14 番号未確認 (別のカードが多い) は上位3本に出さず件数だけ / 売り切れも出さない
+    assert [c["price"] for c in s["top"]] == [4777, 5999]
+    assert s["best_ok"] == 4777 and s["n_ok"] == 2 and s["n_unsure"] == 1
+
+
+def test_same_card_with_low_reviews_is_still_shown():
+    cands = [{"src": "メルカリ", "price": 3000, "url": "u1", "channel": "mercari", "buyable": True, "version": "",
+              "ship": "送料込み", "reviews": 10}]
+    s = O.supply_summary(cands, P.marks_of)
+    assert [c["price"] for c in s["top"]] == [3000] and s["top"][0]["marks"] == ["評価10件"]
 
 
 def test_stale():
