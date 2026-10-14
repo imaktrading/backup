@@ -749,8 +749,7 @@ def _price_from_ebay(item_ids):
                     '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
                     f"<ItemID>{iid}</ItemID></GetItemRequest>")
             try:
-                r = requests.post(_G.EP, data=body.encode("utf-8"),
-                                  headers=_G.headers("GetItem"), timeout=30)
+                r = _G.post(body, "GetItem", timeout=30)
                 x = r.content.decode("utf-8", "replace")
                 m = _re.search(r'<CurrentPrice currencyID="USD">([\d.]+)</CurrentPrice>', x)
                 t = _re.search(r"<Title>(.*?)</Title>", x, _re.S)

@@ -53,7 +53,10 @@ def _tools():
 
 # ★2026-09-20: **2つ目の鍵 (imaktrading) で走る**。ユーザー指示「あたらしいKEYでやってね」。
 #   市場調査で今 動いている方 (imax-64) の枠を減らさないため。鍵は用途ごとに分ける。
-KEYS = r"C:/dev/iMak_data/credentials/imaktrading.txt"
+# ★2026-10-15 ユーザー「監視くんとリバイスくんだけ (2つ目の鍵を) 許可」→ 市場調査は **本鍵に戻した**。
+#   規約: "Attempts to circumvent API call limits may result in ... suspension"。
+#   本鍵の口 (ebay_getitem_images) を通るので、1本1日1000回の歯止めと回数の記録が効く
+KEYS = r"C:/dev/iMak_data/credentials/ebay keys.txt"
 TOKEN = r"C:/dev/iMak_data/credentials/ebay_oauth_token_imaktrading.json"
 
 
@@ -98,10 +101,20 @@ def access_token():
     return tok["access_token"]
 
 
+def _eg():
+    sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "iMakeBayAPI")))
+    import ebay_getitem_images as EG
+    return EG
+
+
 def headers(call="GetItem"):
-    return {"X-EBAY-API-IAF-TOKEN": access_token(), "X-EBAY-API-SITEID": "0",
-            "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
-            "X-EBAY-API-CALL-NAME": call, "Content-Type": "text/xml"}
+    return _eg()._headers(call, "0")
+
+
+def post(body, call="GetItem", timeout=40):
+    """本鍵の口で送る (歯止め・回数の記録を通す)。"""
+    EG = _eg()
+    return EG._HTTP.post(EP, data=body.encode("utf-8"), headers=EG._headers(call, "0"), timeout=timeout)
 
 
 def path_of(item_id):
@@ -262,8 +275,7 @@ def cmd_fetch(argv):
         xml = None
         for attempt in range(3):
             try:
-                r = requests.post(EP, data=body.encode("utf-8"),
-                                  headers=headers("GetItem"), timeout=40)
+                r = post(body, "GetItem", timeout=40)
                 xml = L.decode_xml(r.content)
                 L._check_auth(xml)          # 認証で落ちたら例外 (空を残して黙らない)
                 break
