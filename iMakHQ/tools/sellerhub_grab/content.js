@@ -257,13 +257,23 @@
       if (!row) { log(`✗ ${item.item_id} 一覧に無い (もう送れない出品)`); skipped++; continue; }
       const btn = [...row.querySelectorAll("button.primary-action__button")].find((b) => /Send offers/i.test(txt(b)));
       if (!btn) { log(`✗ ${item.item_id} 行に Send offers が無い`); skipped++; continue; }
+      btn.click();
+      let d = await fillOffer(item);
+      // ★2026-10-14 「小窓が開かない」で2件送れなかった (一覧の1件目 = 画面が押せる前に押した / 前の「送りました」の
+      //   小窓が残っていた)。閉じ残りを閉じて、もう一度だけ押す
+      if (d === "小窓が開かない") {
+        await closeSentModal();
+        await sleep(2000);
+        log(`↻ ${item.item_id} 小窓が開かないので、もう一度押します`);
+        btn.click();
+        d = await fillOffer(item);
+      }
+      if (typeof d === "string") { log(`✗ ${item.item_id} ${d} → 閉じます (広告は外していません)`); cancelDialog(); skipped++; await sleep(1500); continue; }
+      // ★2026-10-14 広告を外すのは、小窓に入れ終わった後 (前は先に外していて、送れないと広告だけ2日外れていた)
       if (mode !== "try") {
         const p = await api("POST", "/api/offers/prepare", { item_id: item.item_id });
-        if (!p || !p.ok) { log(`✗ ${item.item_id} 広告を外せず送らない (${(p && p.error) || ""})`); skipped++; continue; }
+        if (!p || !p.ok) { log(`✗ ${item.item_id} 広告を外せず送らない (${(p && p.error) || ""})`); cancelDialog(); skipped++; await sleep(1500); continue; }
       }
-      btn.click();
-      const d = await fillOffer(item);
-      if (typeof d === "string") { log(`✗ ${item.item_id} ${d} → 閉じます`); cancelDialog(); skipped++; await sleep(1500); continue; }
       if (mode === "try") {
         log(`✅ 試し: ${item.item_id} を ${item.pct}%引き・自動オファー無し・カウンター可 で入れました。送らずに止めます (小窓を見て Cancel で閉じてください)`);
         return;
