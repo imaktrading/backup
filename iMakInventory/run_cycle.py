@@ -1204,6 +1204,16 @@ def run_cycle(
         if not test_mode:
             try:
                 import cycle_signal as _sig  # noqa: PLC0415
+                import monitor_listings as _ml  # noqa: PLC0415
+
+                def _signal_log(msg):
+                    # run_cycle の _log は print だけ (タスクの pythonw では消える)。巡回ログ
+                    # (logs/listings_<label>_<日付>.log) にも残す (10/14 本番 1 回目で行が見当たらなかった)
+                    _log(msg, test_mode)
+                    try:
+                        _ml.log(msg.strip())
+                    except Exception:  # noqa: BLE001
+                        pass
                 _started = str(cycle_log.get("ts_start") or "")[:19].replace("T", " ")
                 for _lbl, _st in ((m or {}).get("by_sheet") or {}).items():
                     _kind = _sig.LABEL_OF_CYCLE.get(str(_lbl).upper())
@@ -1214,7 +1224,7 @@ def run_cycle(
                         _sw = {"ok": False, "reason": f"件数を絞った回 (--limit {limit})"}
                     cycle_log["phases"].setdefault("signal", {})[_kind] = _sig.signal(
                         _kind, _started, _sw, (_st or {}).get("processed", 0),
-                        log=lambda msg: _log(msg, test_mode))
+                        log=_signal_log)
             except Exception as e:
                 _log(f"  🔔 合図: 例外 (巡回は続行) {type(e).__name__}: {e}", test_mode)
 

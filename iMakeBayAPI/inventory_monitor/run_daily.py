@@ -538,10 +538,20 @@ def main():
                             + len(((_sync or {}).get("done") or {}).get("restore") or [])}
         if not _sync and _sw["ok"] is False and not _sw["reason"]:
             _sw["reason"] = "ebay_supplier_sync の結果が無い"
+        _sig_lines = []
         _sig.signal("OFFICIAL", start.strftime("%Y-%m-%d %H:%M:%S"), _sw, monitor.get("listings", 0) or 0,
-                    log=_log)
+                    log=_sig_lines.append)
     except Exception as e:  # noqa: BLE001
-        _log(f"  🔔 合図: 例外 (巡回は続行) {type(e).__name__}: {e}")
+        _sig_lines = [f"  🔔 合図: 例外 (巡回は続行) {type(e).__name__}: {e}"]
+    # _log は print だけ (タスクの pythonw では消える) なので、その日のログ (logs/<日付>.log) とレポート本文にも残す
+    for _ln in _sig_lines:
+        _log(_ln)
+        try:
+            with (LOG_DIR / f"{datetime.now():%Y-%m-%d}.log").open("a", encoding="utf-8") as _f:
+                _f.write(f"[{datetime.now():%H:%M:%S}] {_ln.strip()}\n")
+        except OSError:
+            pass
+    body = body + "\n" + "\n".join(_sig_lines)
     sent = _send_report_email(subject, body)
     _log(f"[mail] 統合 report 送信: {'OK' if sent else 'NG'}")
 
