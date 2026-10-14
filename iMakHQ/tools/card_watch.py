@@ -53,86 +53,6 @@ def active(watches, today):
     return [w for w in watches if not w.get("done") and (w.get("until") or "9999") >= today.isoformat()]
 
 
-NG_DEFAULT = ["連番", "セット", "まとめ", "CGC", "BGS", "ARS", "未開封", "オリパ"]
-
-
-def build_watch(item_id, title, key, ship_by, q, snkrdunk_id):
-    """売れた出品 → 見張り1件 (純関数)。q = psa_hoju_fill.build_search_query の戻り (補URLの夜の検索と同じ語)。
-
-    ★2026-10-14 ユーザー「今後のために、修正してよ」(バリヤードは手で見張りを作り、売れて丸1日後に始まった)。
-      予備の仕入元 (補) が0本の仕入れ待ちは、order_purchase_sync が取り込んだ時に自動で見張りを始める。
-    """
-    name_jp = (q or {}).get("name_jp") or ""
-    no = (q or {}).get("market_no") or ""
-    cn = (q or {}).get("card_no") or ""
-    queries = [x for x in dict.fromkeys([(q or {}).get("kw") or "", f"{name_jp} {no} PSA10".strip(),
-                                         f"{name_jp} {cn} PSA10".strip()]) if x and name_jp]
-    need_any = [x for x in dict.fromkeys([no, cn, cn.replace("-", " ")]) if x]
-    return {"name": f"{name_jp or title[:30]} {cn or no} PSA10".strip(), "until": (ship_by or "").replace("/", "-")[:10],
-            "ship_by": ship_by or "", "for_item": str(item_id), "key": key or "", "queries": queries,
-            "need_all": [], "need_any": need_any, "ng": list(NG_DEFAULT), "snkrdunk_id": snkrdunk_id,
-            "notified": [], "auto": True}
-
-
-def sync_watches(watches, want, waiting_ids, make):
-    """見張りの一覧を仕入れ待ちに合わせる (純関数)。戻り: (新しい一覧, 足した件数, 閉じた件数)。
-
-    want = 補0本の仕入れ待ち [{item, title, key, ship_by}] / waiting_ids = 仕入れ待ち全部の itemID。
-    - want にあって見張りに無い itemID → make(x) で足す (make が None を返したら足さない)
-    - 自動で作った見張り (auto) のうち、仕入れ待ちから外れた (仕入れた・キャンセル) 物 → done
-    """
-    have = {w.get("for_item") for w in watches if not w.get("done")}
-    out, added, closed = list(watches), 0, 0
-    for x in want or []:
-        if x["item"] in have:
-            continue
-        w = make(x)
-        if w:
-            out.append(w)
-            have.add(x["item"])
-            added += 1
-    ws = set(waiting_ids or ())
-    for w in out:
-        if w.get("auto") and not w.get("done") and w.get("for_item") not in ws:
-            w["done"] = True
-            closed += 1
-    return out, added, closed
-
-
-def auto_from_orders(want, waiting_ids, log=print):
-    """order_purchase_sync から呼ぶ (I/O)。失敗しても取り込みは止めない。0件でも1行出す。"""
-    try:
-        import mercari_psa_resource as mp
-        import psa_hoju_fill as H
-        import snkrdunk_psa_resource as S
-        cache = H._load_cache()
-
-        def make(x):
-            q = H.build_search_query({"title": x.get("title") or "", "key": x.get("key") or "", "itemID": x["item"]}, mp)
-            if not q.get("name_jp"):
-                return None                                    # カードが分からない = 誤った物を知らせない
-            sid = ((cache.get(x["item"]) or {}).get("snkrdunk") or {}).get("card_id")
-            if not sid and q.get("card_no"):
-                sid = S.resolve_card_id(q["card_no"], variant_hint=q.get("hint"), multi_variant=bool(q.get("multi_variant")))
-            return build_watch(x["item"], x.get("title") or "", x.get("key") or "", x.get("ship_by") or "", q, sid)
-
-        try:
-            watches = json.load(open(WATCH, encoding="utf-8"))
-        except (OSError, ValueError):
-            watches = []
-        new, added, closed = sync_watches(watches, want, waiting_ids, make)
-        if added or closed:
-            tmp = WATCH + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(new, f, ensure_ascii=False, indent=1)
-            os.replace(tmp, WATCH)
-        log(f"  👀 見張り: 補0本の仕入れ待ちから足した {added}件 / 仕入れた・キャンセルで閉じた {closed}件 / 補0本 {len(want or [])}件")
-        return added, closed
-    except Exception as e:                                     # noqa: BLE001
-        log(f"  ⚠️要対応 見張りを足せなかった (補0本 {len(want or [])}件): {type(e).__name__}: {e}")
-        return 0, 0
-
-
 def new_hits(found, notified):
     """見つけた出品のうち、まだ知らせていない物 (純関数)。found = [{id, ...}]。"""
     seen = set(notified or [])
@@ -229,15 +149,12 @@ def main(argv=None):
     act = active(watches, now.date())
     msgs = []
     for w in act:
-        found, errs, per = [], [], []
-        for fn, site in ((search_mercari, "メルカリ"), (search_snkrdunk, "スニダン")):
+        found, errs = [], []
+        for fn in (search_mercari, search_snkrdunk):
             try:
-                got = fn(w)
-                found += got
-                per.append(f"{site} {len(got)}")
+                found += fn(w)
             except Exception as e:                             # noqa: BLE001
                 errs.append(f"{fn.__name__}: {type(e).__name__}")
-                per.append(f"{site} 読めず")
         hits = new_hits(found, w.get("notified"))
         sent = ""
         if hits and not a.dry_run:
@@ -251,8 +168,7 @@ def main(argv=None):
                 sent = f"通知 {'○' if p else '×'} / メール {'○' if m else '×'}"
             else:
                 sent = "⚠ 通知もメールも送れず (次の回にまた送る)"
-        # ★2026-10-14 サイト別に出す (スニダンが常に0件だったのに、合計しか出さず気づけなかった)
-        msgs.append(f"{w['name']}: 販売中 {len(found)}件 ({' / '.join(per)}) / 新しく見つけた {len(hits)}件 {sent}"
+        msgs.append(f"{w['name']}: 販売中 {len(found)}件 / 新しく見つけた {len(hits)}件 {sent}"
                     + (f" / 読めず {', '.join(errs)}" if errs else ""))
     if not a.dry_run and act:
         tmp = WATCH + ".tmp"
