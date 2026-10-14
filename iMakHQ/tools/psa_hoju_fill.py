@@ -3506,8 +3506,11 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
     #   (次の HIGH を待たずに M・在庫が直り、約7分でリバイスが値段を直す)。0件でも1行出す
     if not dry_run:
         _qids = [t["itemID"] for t in item_targets if t.get("row") in aux_writeback] if (written and aux_writeback) else []
-        import quick_watch_request as _qw
-        _qw.add_safely(_qids, _qw.R_AUX) if _qids else print("⚡ すぐ見るに足した: 補を書いた 0件 (書いた出品なし)")
+        try:
+            import quick_watch_request as _qw
+            _qw.add_safely(_qids, _qw.R_AUX) if _qids else print("⚡ すぐ見るに足した: 補を書いた 0件 (書いた出品なし)")
+        except Exception as _e_qw:                              # noqa: BLE001
+            print(f"⚠️要対応 すぐ見るに足せなかった (補を書いた {len(_qids)}件): {type(_e_qw).__name__}: {_e_qw}")
 
     # ★2026-09-08: 画面に出した「目視待ち」は、採否が決まったので待ち行列から外す。
     #   外さないと毎回同じものが並び、押しても減らない画面になる
