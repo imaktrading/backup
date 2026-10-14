@@ -65,3 +65,37 @@ def test_call_trading_returns_failure_when_guarded(monkeypatch, tmp_path):
     monkeypatch.setattr(requests, "post", lambda *a, **k: (_ for _ in ()).throw(AssertionError("送ってはいけない")))
     r = T._call_trading("GetItem", "<x/>", access_token="t")
     assert r["success"] is False and r["error_code"] == "iMak_guard"
+
+
+class _R:
+    def __init__(self, text):
+        self.status_code, self.text = 200, text
+
+
+Q518 = "<Ack>Failure</Ack><Errors><ErrorCode>518</ErrorCode><LongMessage>exceeded usage limit</LongMessage></Errors>"
+OK = "<Ack>Success</Ack>"
+
+
+def _setup_sub(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path, {})
+    sent = []
+    import requests
+    def post(url, headers=None, data=None, timeout=None):
+        sent.append(headers["X-EBAY-API-IAF-TOKEN"])
+        return _R(Q518 if headers["X-EBAY-API-IAF-TOKEN"] == "MAIN" else OK)
+    monkeypatch.setattr(requests, "post", post)
+    monkeypatch.setattr(T, "_sub_access_token", lambda: "SUB")
+    return sent
+
+
+def test_takedown_retries_on_sub_key_only_after_518(monkeypatch, tmp_path):
+    sent = _setup_sub(monkeypatch, tmp_path)
+    r = T._call_trading("ReviseInventoryStatus", "<x/>", access_token="MAIN")
+    assert sent == ["MAIN", "SUB"] and r["success"] is True
+    assert T.read_api_usage()["by_call"]["ReviseInventoryStatus(2つ目の鍵)"] == 1
+
+
+def test_non_takedown_never_uses_sub_key(monkeypatch, tmp_path):
+    sent = _setup_sub(monkeypatch, tmp_path)
+    r = T._call_trading("GetItem", "<x/>", access_token="MAIN")
+    assert sent == ["MAIN"] and r["success"] is False

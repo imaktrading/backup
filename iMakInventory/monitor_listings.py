@@ -2109,7 +2109,8 @@ def process_sheet(
         _u = _rau()
         _w = _who()
         _mine = sum(int(v) for k, v in (_u.get("by_caller") or {}).items() if k.endswith("@" + _w))
-        log(f"    eBay 呼出 (LAPTOP・eBay の日 {_u.get('date')}): 合計 {_u.get('total', 0)}回 / {_w} {_mine}回 (1 本 1000 回まで・取下げは止めない)")
+        _sub = sum(int(v) for k, v in (_u.get("by_call") or {}).items() if "(2つ目の鍵)" in k)
+        log(f"    eBay 呼出 (LAPTOP・eBay の日 {_u.get('date')}): 合計 {_u.get('total', 0)}回 / {_w} {_mine}回 (1 本 1000 回まで・取下げは止めない) / 2 つ目の鍵に切替 {_sub}回")
     except Exception as _ue:  # noqa: BLE001
         log(f"    eBay 呼出: 読めず ({type(_ue).__name__})")
     SG.baseline().save()

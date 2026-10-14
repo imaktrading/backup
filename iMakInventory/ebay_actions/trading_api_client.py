@@ -104,6 +104,46 @@ def notify_once(tag: str, subject: str, msg: str, day: Optional[str] = None) -> 
     return True
 
 
+# ★ 2026-10-15 ユーザー判断 (手順書 RUNBOOK_EBAY_API_QUOTA §5、ブラボー B-20261015-007):
+#   2 つ目の鍵 (imaktrading、imax-64 が同意済) は **監視くんの取下げ・数量 0 だけ、本鍵が上限 (518) を返した時に限り** 使う。
+#   eBay の規約は上限の回避を禁じている ("Attempts to circumvent API call limits may result in termination")ので、
+#   平時の増枠には使わない。売切の出品を買える状態で残さない (= 履行できない注文を作らない) ための最後の口。
+SUB_KEYS = Path(r"C:/dev/iMak_data/credentials/imaktrading.txt")
+SUB_TOKEN = Path(r"C:/dev/iMak_data/credentials/ebay_oauth_token_imaktrading.json")
+SUB_ALLOWED_CALLS = EXEMPT_CALLS            # 取下げ・数量 0 だけ
+_SUB_TOK = {"value": "", "until": 0.0}
+
+
+def _sub_access_token() -> str:
+    """2 つ目の鍵のアクセストークン (メモリにだけ持つ。ファイルには書き戻さない = 書き手は HQ の market_getitem)."""
+    import datetime as _dtm  # noqa: PLC0415
+    import requests  # noqa: PLC0415
+    if _SUB_TOK["value"] and time.time() < _SUB_TOK["until"]:
+        return _SUB_TOK["value"]
+    tok = json.loads(SUB_TOKEN.read_text(encoding="utf-8"))
+    got = tok.get("_obtained_at")
+    if got:
+        age = (_dtm.datetime.now() - _dtm.datetime.fromisoformat(got)).total_seconds()
+        left = int(tok.get("expires_in", 7200)) - 300 - age
+        if left > 60:
+            _SUB_TOK.update(value=tok["access_token"], until=time.time() + left)
+            return _SUB_TOK["value"]
+    keys = {}
+    for ln in SUB_KEYS.read_text(encoding="utf-8-sig").splitlines():
+        if "=" in ln:
+            k, v = ln.split("=", 1)
+            keys[k.strip()] = v.strip()
+    auth = base64.b64encode(f"{keys['AppID']}:{keys['AppSecret']}".encode()).decode()
+    r = requests.post(OAUTH_TOKEN_URL, timeout=30,
+                      headers={"Content-Type": "application/x-www-form-urlencoded", "Authorization": "Basic " + auth},
+                      data={"grant_type": "refresh_token", "refresh_token": tok["refresh_token"]})
+    if r.status_code != 200:
+        raise RuntimeError(f"2 つ目の鍵のトークン更新に失敗: {r.status_code} {r.text[:120]}")
+    j = r.json()
+    _SUB_TOK.update(value=j["access_token"], until=time.time() + int(j.get("expires_in") or 7200) - 300)
+    return _SUB_TOK["value"]
+
+
 def guard(call_name: str) -> Optional[str]:
     """送る前に呼ぶ。止める時は理由、通す時は None (読むだけ・壊れていたら通す側に倒す)."""
     u = read_api_usage()
@@ -266,7 +306,8 @@ def _call_trading(call_name: str, body_xml: str,
                     timeout: int = 15,
                     _allow_refresh: bool = True,
                     raw_xml_cap: Optional[int] = 2000,
-                    max_net_retries: int = 4) -> dict:
+                    max_net_retries: int = 4,
+                    _key: str = "main") -> dict:
     """Trading API 共通 call wrapper.
 
     Args:
@@ -303,7 +344,7 @@ def _call_trading(call_name: str, body_xml: str,
     r = None
     for attempt in range(max_net_retries + 1):
         try:
-            record_api_call(call_name)      # 実際に送った回数を数える (retry も 1 回として計上)
+            record_api_call(call_name if _key == "main" else f"{call_name}(2つ目の鍵)")  # 送った回数 (retry も 1 回)
             r = requests.post(TRADING_API_URL, headers=headers,
                               data=body_xml.encode("utf-8"), timeout=timeout)
             break
@@ -331,6 +372,19 @@ def _call_trading(call_name: str, body_xml: str,
                     "error_message": f"token refresh 失敗: {e}", "raw_xml": xml[:1000]}
     ack, code, msg = _parse_ack_and_errors(xml)
     if str(code) == "518" or "exceeded usage limit" in (msg or "").lower():
+        if _key == "main" and call_name in SUB_ALLOWED_CALLS:
+            # 取下げ・数量 0 だけ 2 つ目の鍵で 1 回送り直す (ユーザー判断 2026-10-15)
+            try:
+                sub = _sub_access_token()
+                print(f"  [Trading API] {call_name}: 本鍵が上限 (518) → 2 つ目の鍵で送り直す", flush=True)
+                notify_once("sub_key_used", "eBay の上限 → 取下げだけ 2 つ目の鍵で送った",
+                            f"{call_name} が本鍵で 518。取下げ・数量 0 だけ imaktrading の鍵で送り直しています "
+                            "(回数は ebay_api_usage.json の『(2つ目の鍵)』)")
+                return _call_trading(call_name, body_xml, access_token=sub, timeout=timeout,
+                                     _allow_refresh=False, raw_xml_cap=raw_xml_cap,
+                                     max_net_retries=max_net_retries, _key="sub")
+            except Exception as e:  # noqa: BLE001 - 2 つ目が駄目でも本鍵の失敗として返す
+                print(f"  [Trading API] 2 つ目の鍵も使えず: {type(e).__name__}: {e}", flush=True)
         try:
             notify_once("quota_518", "eBay の上限に当たった (LAPTOP から見えた)",
                         f"{call_name} が 518 (Call usage limit reached)。取下げも日替わり (日本 16 時、冬は 17 時) まで送れない。"
