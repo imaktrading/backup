@@ -77,3 +77,12 @@ def test_single_row_sold_still_mismatch():
     high = [_row(10, "IID", "https://jp.mercari.com/item/a", "○")]
     res = _run([high, []], {"IID": 2})
     assert res["mismatch_count"] == 1
+
+
+@pytest.mark.offline
+def test_onhand_row_without_supply_url_is_not_mismatch():
+    """2026-10-15: 仕入元 URL が空 + 売切 (○) = 有在庫 (現物あり)。eBay で買えてよい → 乖離に数えない."""
+    high = [_row(616, "358645217419", "", "○")]
+    res = _run([high, []], {"358645217419": 1})
+    assert res["mismatch_count"] == 0
+    assert res["suppressed"][0]["suppressed_reason"] == "onhand_no_supply_url"

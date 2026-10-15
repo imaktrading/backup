@@ -269,6 +269,11 @@ def run_reverse_audit(
             if iid in alive_ids:
                 # silent drop 禁止: 数えないが log には残す (後から検証できる形にする)
                 suppressed.append({**entry, "suppressed_reason": "other_row_in_stock"})
+            elif not (r.get("url") or "").strip():
+                # ★ 2026-10-15 (ユーザー「トゲキッスは有在庫ちゃう？」): 仕入元 URL (A 列) が空の行は 有在庫
+                #   (HQ の決まり onhand_stock_rows_have_no_supply_url)。現物があるので eBay で買えてよい。
+                #   row616 トゲキッス (358645217419) が 10/10 から毎日「乖離 1 件」と鳴り続けていた
+                suppressed.append({**entry, "suppressed_reason": "onhand_no_supply_url"})
             else:
                 items.append(entry)
     if suppressed:
