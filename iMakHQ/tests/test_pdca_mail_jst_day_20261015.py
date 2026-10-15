@@ -42,3 +42,26 @@ def test_provisional_ship_for_psa_until_entered():
     assert [g["profit"] for g in got] == [4000, 6900, 8000, 8000]
     assert [g["ship_provisional"] for g in got] == [4000, 1100, 0, 0]
     assert not got[0]["confirmed"] and got[2]["confirmed"]
+
+
+def test_insight_facts_compares_weeks_and_lists_losses(monkeypatch):
+    """2026-10-16 ユーザー「見たらわかることを書かれても。気付きとか注意とか」: 突き合わせの材料を渡す"""
+    import pdca_daily_mail as M
+    d = dt.date
+    sales = [{"date": d(2026, 10, 14), "title": "A", "profit": -2000, "country": "US", "ship_provisional": 4000},
+             {"date": d(2026, 10, 13), "title": "B", "profit": 6000, "country": "UK", "ship_provisional": 0},
+             {"date": d(2026, 10, 3), "title": "C", "profit": 10000, "country": "US", "ship_provisional": 0}]
+    ms = {"month": d(2026, 10, 1), "last": d(2026, 10, 14)}
+    monkeypatch.setitem(sys.modules, "psa_hoju_fill", None)
+    f = M.insight_facts(sales, ms, d(2026, 10, 15))
+    assert f["sales_last7"] == {"n": 2, "avg_profit": 2000} and f["sales_prev7"]["n"] == 1   # 10/3 は前の7日 (10/1〜7)
+    assert [x["title"] for x in f["month_loss_sales"]] == ["A"]
+    assert f["month_provisional_ship_total"] == 4000
+    assert f["month_by_country"]["US"] == {"n": 2, "profit": 8000}
+
+
+def test_comment_prompt_forbids_restating():
+    import inspect
+    import pdca_daily_mail as M
+    src = inspect.getsource(M.ai_comment)
+    assert "言い直さない" in src and "recent_comments" in src

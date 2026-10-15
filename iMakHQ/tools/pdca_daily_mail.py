@@ -85,6 +85,7 @@ def sales_rows(rows2d):
         prov = provisional_ship(g(COL["title"]), g(COL["country"])) if not g(COL["ship"]) else 0
         out.append({"date": d, "title": g(COL["title"]), "price": R.money(g(COL["price"])),
                     "profit": profit - prov, "ship_provisional": prov, "missing": missing,
+                    "country": g(COL["country"]),
                     "confirmed": not missing})
     return out
 
@@ -327,13 +328,22 @@ def ai_comment(facts):
         import anthropic
         import buyer_messages as BM
         client = anthropic.Anthropic(api_key=BM._api_key())
-        system = ("あなたは eBay の無在庫販売の店 (iMak Trading Japan) の毎朝のレポートに、一言コメントを書く。"
+        # ★2026-10-16 ユーザー「見たらわかることを書かれてもね。AI ならではの視点で、気付きとか注意とか」
+        #   → メールに出ている数字の言い直しを禁止し、数字どうしの関係・変化の兆し・見落としを1つ言わせる。
+        #   前の日の一言を渡し、同じことを繰り返させない
+        system = ("あなたは eBay の無在庫販売の店 (iMak Trading Japan) の毎朝のレポートに、一言を書く相棒。"
                   "店の柱は ①新規出品 (棚に並べる数を増やす) と ②在庫メンテ (並べた物を売れる状態で保つ)。"
-                  "値段は仕入値から決まる cost-plus なので、値下げは手にしない。"
-                  "与えた数字だけを使い、日本語で1〜2文、120字以内。専門用語を使わない。"
-                  "一番効く次の一手を1つだけ言う。前置き・挨拶は書かない。")
+                  "値段は仕入値から決まる cost-plus なので、値下げは手にしない。無在庫なので在庫を抱える話はしない。"
+                  "★レポートに既に書いてある数字 (利益・達成率・件数・目標まで) をそのまま言い直さない。読めば分かることは書かない。"
+                  "代わりに、与えた数字どうしを突き合わせて初めて分かる **気付き か 注意** を1つだけ書く。"
+                  "例: 変化の兆し (先週と比べて何が増えた・減った)、偏り (国・商品・曜日)、危ない所 (赤字・仕入元が1本の出品・"
+                  "仮の送料で利益が変わる行)、人が見落としそうなつながり。根拠の数字を1つ添える。"
+                  "与えた数字だけを使い、推測で数字を作らない。言える物が無ければ「目立った変化なし」と書く。"
+                  "local_events_next7 (US/UK/AU/CA の祝日・行事・給料日が多い日) に閲覧が増えそうな日があれば、"
+                  "その前に出品数をいつもより増やす等の手を言ってよい (一般に言われることで、うちの数字では測っていないと分かる言い方で)。"
+                  "recent_comments と同じことは書かない。日本語で2文まで・120字以内。専門用語を使わない。前置き・挨拶は書かない。")
         r = client.messages.create(
-            model=BM.AI_MODEL, max_tokens=1500, output_config={"effort": "low"}, system=system,
+            model=BM.AI_MODEL, max_tokens=3000, output_config={"effort": "medium"}, system=system,
             messages=[{"role": "user", "content": json.dumps(facts, ensure_ascii=False, default=str)}])
         text = "".join(b.text for b in r.content if getattr(b, "type", "") == "text").strip()
         u = r.usage
@@ -341,6 +351,58 @@ def ai_comment(facts):
         return text, yen, ""
     except Exception as e:                                      # noqa: BLE001
         return "", 0.0, f"{type(e).__name__}: {str(e)[:120]}"
+
+
+COMMENTS_PATH = r"C:/dev/iMak_data/hq/pdca_ai_comments.json"
+
+
+def _recent_comments(n=7):
+    try:
+        d = json.load(open(COMMENTS_PATH, encoding="utf-8"))
+        return [d[k] for k in sorted(d)[-n:]]
+    except Exception:                                          # noqa: BLE001
+        return []
+
+
+def _save_comment(day, text):
+    try:
+        d = json.load(open(COMMENTS_PATH, encoding="utf-8"))
+    except Exception:                                          # noqa: BLE001
+        d = {}
+    d[day.isoformat()] = text
+    d = {k: d[k] for k in sorted(d)[-30:]}
+    with open(COMMENTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=1)
+
+
+def insight_facts(sales, ms, today):
+    """一言の材料: 直近14日の 国別・曜日別・赤字・仮の送料・利益単価の前後比較 / 仕入元が1本の出品 (純関数 + 読むだけ)。"""
+    y = today - dt.timedelta(days=1)
+    last7 = [s for s in sales if y - dt.timedelta(days=6) <= s["date"] <= y]
+    prev7 = [s for s in sales if y - dt.timedelta(days=13) <= s["date"] <= y - dt.timedelta(days=7)]
+    month = [s for s in sales if ms["month"] <= s["date"] <= ms["last"]]
+
+    def avg(xs):
+        return round(sum(x["profit"] for x in xs) / len(xs)) if xs else None
+    out = {"sales_last7": {"n": len(last7), "avg_profit": avg(last7)},
+           "sales_prev7": {"n": len(prev7), "avg_profit": avg(prev7)},
+           "month_loss_sales": [{"date": str(s["date"]), "title": s["title"][:40], "profit": s["profit"]}
+                                for s in month if s["profit"] < 0],
+           "month_provisional_ship_total": sum(s.get("ship_provisional", 0) for s in month),
+           "month_by_weekday": {}}
+    out["month_by_country"] = {}
+    for s in month:
+        k = "月火水木金土日"[s["date"].weekday()]
+        out["month_by_weekday"][k] = out["month_by_weekday"].get(k, 0) + 1
+        c = out["month_by_country"].setdefault(s.get("country") or "?", {"n": 0, "profit": 0})
+        c["n"] += 1
+        c["profit"] += round(s["profit"])
+    try:
+        import psa_hoju_fill as H
+        out["psa_listings_with_no_backup_supplier"] = len(H.select_backfill_targets(H._read_high(), max_backups=1))
+    except Exception:                                          # noqa: BLE001
+        pass
+    return out
 
 
 # ── HTML ────────────────────────────────────────────────────────
@@ -433,7 +495,7 @@ def yen(x):
     return ("▲" if x < 0 else "") + "¥{:,.0f}".format(abs(x))
 
 
-def render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv=None, of=None):
+def render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv=None, of=None, ev=None):
     e = html.escape
     goal = plan["goal_profit_jpy"]
     pct = ms["profit"] / goal * 100 if goal else 0
@@ -513,6 +575,14 @@ def render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv=None, of=None):
                    + '</tr></table></div>')
     else:
         out.append('<div class="sec"><div class="sech">昨日の動き</div><div class="small down">Seller Hub のレポートが見つからない (データ欠け)</div></div>')
+    # ★2026-10-16 この先7日の US/UK/AU/CA の祝日・行事・給料日 (閲覧に効くかは一般論・うちでは測っていない)
+    if ev is not None:
+        _cn = {"ALL": "全部", "US": "US", "UK": "UK", "AU": "AU", "CA": "CA"}
+        rows_ = "".join(f'<li>{int(x["date"][5:7])}/{int(x["date"][8:])} [{_cn.get(x["country"], x["country"])}] {e(x["name"])}'
+                        + (f' <span class="small">— {e(x["note"])}</span>' if x["note"] else "") + "</li>" for x in ev)
+        out.append('<div class="sec"><div class="sech">この先7日の地元の出来事 <span>US / UK / AU / CA ・ 閲覧への効き方は一般論 (うちでは未測定)</span></div>'
+                   + (f'<ul class="small" style="margin:0;padding-left:1.2em">{rows_}</ul>' if ev else '<div class="small">目立つ祝日・行事なし</div>')
+                   + '</div>')
     if ai_text:
         out.append(f'<div class="sec ai"><div class="sech">Claude の一言</div><p class="ait">{e(ai_text)}</p></div>')
     elif ai_err:
@@ -583,6 +653,13 @@ def main():
     except Exception as e:                                     # noqa: BLE001
         print(f"  ⚠ トレハンの時期を出せず: {type(e).__name__}: {str(e)[:80]}")
 
+    ev = []
+    try:
+        import local_events as _LE
+        ev = _LE.upcoming(today, 7)
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 地元の出来事を出せず: {type(e).__name__}")
+    print(f"🗓 この先7日の US/UK/AU/CA の出来事: {len(ev)}件")
     of, of_err = None, ""
     try:
         of = offer_counts(offer_mail_dates(), today)
@@ -601,12 +678,21 @@ def main():
         facts["mids"] = [(m["name"], m["status"]) for p in plan["pillars"] for m in p["mids"]]
         facts["harvest_timing"] = hv
         facts["offers_received"] = of
+        # ★2026-10-16: 気付きの材料 (突き合わせて初めて分かる物)
+        try:
+            facts.update(insight_facts(sales_rows(rows), ms, today))
+        except Exception as _e:                                # noqa: BLE001
+            print(f"  ⚠ 一言の材料の一部を作れず: {type(_e).__name__}")
+        facts["recent_comments"] = _recent_comments()
+        facts["local_events_next7"] = ev
         ai_text, ai_yen, ai_err = ai_comment(facts)
+        if ai_text and not a.dry_run:
+            _save_comment(today, ai_text)
 
-    body = render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv, of)
+    body = render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv, of, ev)
     with open(OUT_HTML, "w", encoding="utf-8") as f:
         f.write(body)
-    subject = (f"PDCA {today.month}/{today.day} 利益 {yen(ms['profit'])} ({ms['profit'] / plan['goal_profit_jpy'] * 100:.0f}%)"
+    subject = (f"Daily Report {today.month}/{today.day} 利益 {yen(ms['profit'])} ({ms['profit'] / plan['goal_profit_jpy'] * 100:.0f}%)"
                f" 純増 {mv['net']:+d}" if mv else "")
     sent = "送らない (--dry-run)"
     if not a.dry_run:
