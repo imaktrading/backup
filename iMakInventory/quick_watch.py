@@ -211,10 +211,83 @@ def _open_tab():
 
 _values_cache: dict = {}
 
+# ★ 2026-10-15 (ブラボー GO): タブ `すぐ見る` は 出品くんの 2 時間おきの載せ直しで 1 日 約 2,000 行増える。
+#   毎日 1 回、処理から 1 日たった 済・まとめた・シートに無い の行を `すぐ見る_済` へ移す (出品くんには他人の行を消させない)。
+#   `すぐ見る_済` は 30 日より古い行を消す。ログに「すぐ見る_済へ移した N行 / 残り M行」。
+ARCHIVE_TAB = "すぐ見る_済"
+ARCHIVE_AFTER_HOURS = 24
+ARCHIVE_KEEP_DAYS = 30
+ARCHIVE_STATE = DECISION_LOG_DIR / "quick_archive_state.json"
+DONE_STATES = {"済", "まとめた", "シートに無い"}
+
+
+def rows_to_archive(values: list, now: datetime = None) -> list:
+    """移す行の行番号 (純関数)。処理時刻から ARCHIVE_AFTER_HOURS たった 済・まとめた・シートに無い の行."""
+    now = now or datetime.now()
+    out = []
+    for i, r in enumerate(values[1:], start=2):
+        r = list(r) + [""] * len(QUICK_HEADER)
+        if str(r[COL_STATE - 1]).strip() not in DONE_STATES:
+            continue
+        t = _parse_ts(r[COL_DONE_AT - 1])
+        if t and (now - t).total_seconds() >= ARCHIVE_AFTER_HOURS * 3600:
+            out.append(i)
+    return out
+
+
+def _ranges_desc(rows: list) -> list:
+    """行番号 → 続いている範囲 [(始め, 終わり)] を 下から順に (消す時に上の行番号がずれないように)."""
+    out = []
+    for r in sorted(rows):
+        if out and r == out[-1][1] + 1:
+            out[-1][1] = r
+        else:
+            out.append([r, r])
+    return [tuple(x) for x in reversed(out)]
+
+
+def archive_daily(ws, values: list, now: datetime = None) -> None:
+    import json  # noqa: PLC0415
+    now = now or datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    try:
+        st = json.loads(ARCHIVE_STATE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        st = {}
+    if st.get("date") == today:
+        return
+    rows = rows_to_archive(values, now)
+    sh = ws.spreadsheet
+    try:
+        aws = sh.worksheet(ARCHIVE_TAB)
+    except Exception:  # noqa: BLE001
+        aws = sh.add_worksheet(title=ARCHIVE_TAB, rows=1000, cols=len(QUICK_HEADER))
+        aws.update(values=[QUICK_HEADER], range_name="A1", value_input_option="RAW")
+    if rows:
+        moved = [(list(values[i - 1]) + [""] * len(QUICK_HEADER))[:len(QUICK_HEADER)] for i in rows]
+        aws.append_rows(moved, value_input_option="RAW", table_range="A1")   # 先に写す (消してから写すと失う)
+        for a, b in _ranges_desc(rows):
+            ws.delete_rows(a, b)
+    # すぐ見る_済 の 30 日より古い行を消す
+    av = aws.get_all_values()
+    old = [i for i, r in enumerate(av[1:], start=2)
+           if (t := _parse_ts((list(r) + [""] * len(QUICK_HEADER))[COL_DONE_AT - 1]))
+           and (now - t).days > ARCHIVE_KEEP_DAYS]
+    for a, b in _ranges_desc(old):
+        aws.delete_rows(a, b)
+    ARCHIVE_STATE.write_text(json.dumps({"date": today, "moved": len(rows)}), encoding="utf-8")
+    _log(f"🗄 すぐ見る_済へ移した {len(rows)}行 / 残り {len(values) - 1 - len(rows)}行 (すぐ見る_済 から 30 日より古い {len(old)}行を消した)")
+
 
 def run() -> int:
     ws = _open_tab()
     values = ws.get_all_values()
+    try:
+        if not high_cycle_running():
+            archive_daily(ws, values)
+            values = ws.get_all_values()
+    except Exception as e:  # noqa: BLE001 - 整理できなくても見るのは続ける
+        _log(f"  [!] すぐ見る_済への整理に失敗 (見るのは続ける): {type(e).__name__}: {e}")
     _values_cache["v"] = values
     pend = pending_rows(values)
     if not pend:

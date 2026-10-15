@@ -173,3 +173,19 @@ def test_merged_rows_marks_old_duplicates_only():
             ["B", "急ぐ", "2026-10-15 05:00", "出品くん", "", "", ""],          # いちばん下・空 → 触らない
             ["C", "急ぐ", "2026-10-15 05:00", "出品くん", "", "", ""]]
     assert Q.merged_rows(vals) == [(2, 4)]
+
+
+def test_rows_to_archive_only_old_done():
+    from datetime import datetime
+    now = datetime(2026, 10, 16, 12, 0)
+    vals = [Q.QUICK_HEADER,
+            ["A", "急ぐ", "", "", "済", "2026-10-15 10:00:00", ""],        # 26 時間前 → 移す
+            ["A", "急ぐ", "", "", "まとめた", "2026-10-15 11:30:00", ""],  # 24.5 時間前 → 移す
+            ["B", "急ぐ", "", "", "済", "2026-10-16 11:00:00", ""],        # 1 時間前 → 残す
+            ["C", "補を書いた", "", "", "", "", ""],                        # 未処理 → 残す
+            ["D", "x", "", "", "シートに無い", "2026-10-14 09:00:00", ""]]  # 移す
+    assert Q.rows_to_archive(vals, now) == [2, 3, 6]
+
+
+def test_ranges_desc_deletes_bottom_first():
+    assert Q._ranges_desc([2, 3, 6, 7, 8, 10]) == [(10, 10), (6, 8), (2, 3)]
