@@ -230,15 +230,31 @@ def _write_json(path, data):
     os.replace(tmp, path)
 
 
+def request_path(dir_path, now):
+    """今日の知らせの置き場 (I/O)。回答済み (兄弟に _response 等がある) の物には足さず、_2, _3 … の新しい物にする。
+
+    ★2026-10-15 ブラボー: 10/15 の hq と revise で、回答済みの依頼書に 03:00 / 09:00 の分を足していた。
+      置き場では _response があると済んだ扱いで、新しい分が配られない (ut_identify の 2263f85a と同じ形)。
+    """
+    from worktree_board import CLOSED_SUFFIXES
+    names = os.listdir(dir_path) if os.path.isdir(dir_path) else []
+    n = 1
+    while True:
+        stem = "%s_schedule_audit%s" % (now.strftime("%Y-%m-%d"), "" if n == 1 else "_%d" % n)
+        if not any(f.startswith(stem + s) for f in names for s in CLOSED_SUFFIXES):
+            return os.path.join(dir_path, stem + ".md")
+        n += 1
+
+
 def notify(by_owner, conf, now):
-    """担当の requests/ に書く (同じ日は追記)。監視くんは受け箱にも。書いたファイルを返す。"""
+    """担当の requests/ に書く (同じ日のまだ回答の無い分は追記・回答済みなら _2, _3)。監視くんは受け箱にも。書いたファイルを返す。"""
     wrote = []
     for owner, rows in by_owner.items():
         d = (conf.get("owners") or {}).get(owner)
         if not d or not os.path.isdir(d):
             continue
-        fn = "%s_schedule_audit.md" % now.strftime("%Y-%m-%d")
-        path = os.path.join(d, fn)
+        path = request_path(d, now)
+        fn = os.path.basename(path)
         body = note_body(owner, rows, now)
         mode = "a" if os.path.exists(path) else "w"
         with open(path, mode, encoding="utf-8") as f:
