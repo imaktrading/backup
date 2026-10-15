@@ -106,6 +106,26 @@ def pending_rows(values: list, now: datetime = None) -> list:
     return out
 
 
+def merged_rows(values: list) -> list:
+    """同じ itemID の下に新しい行がある、状態が空の古い行 → [(行番号, まとめ先の行番号)] (純関数).
+
+    ★ 2026-10-15 (ブラボー・出品くんの確認): 結果は いちばん下の行にだけ書くので、出品くんが 2 時間おきに
+      載せ直すたびに 上の古い行が状態=空のまま残り、「未処理 327 行」に見えていた (実際は見ている)。
+    """
+    last = {}
+    for i, r in enumerate(values[1:], start=2):
+        iid = str((list(r) + [""])[0]).strip()
+        if iid:
+            last[iid] = i
+    out = []
+    for i, r in enumerate(values[1:], start=2):
+        r = list(r) + [""] * len(QUICK_HEADER)
+        iid = str(r[0]).strip()
+        if iid and not str(r[COL_STATE - 1]).strip() and last.get(iid, i) > i:
+            out.append((i, last[iid]))
+    return out
+
+
 def result_text(res) -> tuple:
     """process_sheet の item_results の 1 件 → (状態, 結果)."""
     if res is None:
@@ -189,9 +209,14 @@ def _open_tab():
         return ws
 
 
+_values_cache: dict = {}
+
+
 def run() -> int:
     ws = _open_tab()
-    pend = pending_rows(ws.get_all_values())
+    values = ws.get_all_values()
+    _values_cache["v"] = values
+    pend = pending_rows(values)
     if not pend:
         return 0                      # 何も無い回は ログも出さない (10 分おきなので)
     if high_cycle_running():
@@ -221,6 +246,9 @@ def _run_items(ws, pend: list) -> int:
     for row_no, iid, _u in pend:
         state, text = result_text(items.get(iid))
         cells += [{"range": f"E{row_no}:G{row_no}", "values": [[state, now, text]]}]
+    # 同じ itemID の古い行 (状態が空) には「まとめた」を書く (未処理に見せない)
+    for row_no, to_row in merged_rows(_values_cache.get("v") or []):
+        cells.append({"range": f"E{row_no}:G{row_no}", "values": [["まとめた", now, f"行 {to_row} にまとめて見た"]]})
     if cells:
         ws.batch_update(cells, value_input_option="RAW")
     # 売切は その場で取下げを送る (毎時を待たない)

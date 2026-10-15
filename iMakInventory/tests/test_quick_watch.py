@@ -163,3 +163,13 @@ def test_cand_does_not_block_quick():
     assert Q.is_cand_cmdline('pythonw.exe -u run_cycle.py --sheet-id 19kj --sheet-label CAND --lock-wait-minutes 90')
     assert not Q.is_cand_cmdline('pythonw.exe -u run_cycle.py --sheet-id 19kj --sheet-label SHEET --lock-wait-minutes 180')
     assert not Q.is_cand_cmdline('')
+
+
+def test_merged_rows_marks_old_duplicates_only():
+    vals = [Q.QUICK_HEADER,
+            ["A", "急ぐ", "2026-10-15 03:00", "出品くん", "", "", ""],          # 古い・空 → まとめた
+            ["B", "急ぐ", "2026-10-15 03:00", "出品くん", "済", "x", ""],        # 古いが済 → 触らない
+            ["A", "急ぐ", "2026-10-15 05:00", "出品くん", "済", "y", ""],        # いちばん下 (結果を書く行)
+            ["B", "急ぐ", "2026-10-15 05:00", "出品くん", "", "", ""],          # いちばん下・空 → 触らない
+            ["C", "急ぐ", "2026-10-15 05:00", "出品くん", "", "", ""]]
+    assert Q.merged_rows(vals) == [(2, 4)]
