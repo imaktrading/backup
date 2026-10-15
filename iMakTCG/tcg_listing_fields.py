@@ -419,7 +419,8 @@ _GAME_TITLE_WORD = {
 }
 _TITLE_MAX = 80
 # セット名を前から短くする時、この語で始まる候補は使わない (2026-10-05 '& Legendary …' 事故)
-_SET_HEAD_SKIP = {"&", "-", "+", "/", ":", "and", "of", "the", "for", "für", "x"}
+# ★2026-10-15 (残務 №497): in/to/a/from/with も足す (セット短縮が前置詞で始まる切れ端を出さない)
+_SET_HEAD_SKIP = {"&", "-", "+", "/", ":", "and", "of", "the", "for", "für", "x", "in", "to", "a", "from", "with"}
 
 
 def _game_word(c_game):
