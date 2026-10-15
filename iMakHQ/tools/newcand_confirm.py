@@ -1672,6 +1672,22 @@ def count_workload_high():
     return {"pending": len(items), "already_listed": demoted}
 
 
+def label_and_cert_records(picks, psa_cache, pll):
+    """確定した行 (OUT_HEADER の並び) → ラベルの記録と鑑定番号の記録に足す (I/O)。戻り: (ラベル件数, 鑑定番号件数)。"""
+    lab, certs = [], []
+    for r in picks or []:
+        cert, pid = str(r[5] or "").strip(), str(r[8] or "").strip()
+        if not (cert and pid):
+            continue
+        certs.append((cert, r[7] or pid))
+        meta = (psa_cache or {}).get(cert) or {}
+        cat = pll.category_of(pid) if meta else ""
+        k = pll.key_for_psa(cat, meta) if cat else ""
+        if k:
+            lab.append((k, pid, cert))
+    return pll.record_picks(lab) if lab else 0, pll.remember_cert_pids(certs) if certs else 0
+
+
 def save(items, res):
     """結論を書き分ける (I/O)。戻り: {list, catalog, out, hold} 件数。
 
@@ -1704,6 +1720,17 @@ def save(items, res):
         _PLL.remember_url_verdicts([(r[8], r[2], "same", "新規候補") for r in picks if r[8] and r[2]])
     except Exception as _e_uv:                                  # noqa: BLE001
         print(f"  ⚠ カード単位の記録skip ({type(_e_uv).__name__}: {_e_uv})")
+    # ★2026-10-15 ユーザー「目視系は全部資産化するように指示したはず」: 補URL③・再仕入れ①・PSA 新規と同じく、
+    #   決めたカードを **ラベルの記録** (PSA のラベルの書き方 → カード = 次の別の個体にも効く) と鑑定番号の記録に残す。
+    #   ラベルは PSA の記録 (psa_cache) にある鑑定番号だけ。無い物は出品の時の目視 (post_psa_review) で足される
+    try:
+        import psa_label_learned as _PLL
+        import psa_resource_confirm as _prc
+        _n_lab, _n_cert = label_and_cert_records(picks, _prc._load_psa_cache() or {}, _PLL)
+        print(f"  📘 ラベルの記録に足した: {_n_lab}件 / 鑑定番号の記録: {_n_cert}件 "
+              f"(鑑定番号の分かる {sum(1 for r in picks if str(r[5] or '').strip())}件 / 確定 {len(picks)}件のうち)")
+    except Exception as _e_lab:                                 # noqa: BLE001
+        print(f"  ⚠ ラベルの記録skip ({type(_e_lab).__name__}: {_e_lab})")
     if picks:
         _append_tab(OUT_TAB, OUT_HEADER, picks)
         n_list = sum(1 for r in picks if r[0] == USE_LIST)
