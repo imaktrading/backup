@@ -19,10 +19,20 @@ HOLO = "Holo"
 REVERSE_HOLO = "Reverse Holo"
 FOIL = "Foil"
 
+# ★2026-10-15 (B-20261015-024): Reverse Holo の読み方 (REV.FOIL / REVERSE FOIL 等の略記) は **ここ1か所**。
+#   psa_variant_gate.mirror_text もこれを呼ぶ (2か所に書いて食い違い、REV.FOIL が通常版で出品された)
+REVERSE_HOLO_RE = re.compile(r"REVERSE\s*HOLO|REV\.?\s*FOIL|REVERSE\s*FOIL", re.I)
+
+
+def normalize_reverse_holo(text):
+    """ラベルの Reverse Holo の略記を "REVERSE HOLO" に揃える (純関数)。"""
+    return REVERSE_HOLO_RE.sub("REVERSE HOLO", str(text or ""))
+
+
 # ★順序が意味を持つ: REVERSE 系を先に判定する。
 #   'HO-OH-REV.FOIL' を FOIL パターンで先に拾うと Reverse Holo を Foil と誤記する。
 _RULES = [
-    (re.compile(r"REVERSE\s*HOLO|REV\.?\s*FOIL|REVERSE\s*FOIL", re.I), REVERSE_HOLO),
+    (REVERSE_HOLO_RE, REVERSE_HOLO),
     (re.compile(r"HOLOFOIL|(?<![A-Z])HOLO(?![A-Z])", re.I), HOLO),
     (re.compile(r"(?<![A-Z])FOIL(?![A-Z])", re.I), FOIL),
 ]

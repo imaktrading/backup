@@ -51,6 +51,17 @@ _PROMO_WORDS = ("WINNER", "PROMO", "FLAGSHIP", "CHAMPIONSHIP", "TOURNAMENT", "BA
 _MIRROR_WORDS = ("MASTER BALL", "POKE BALL", "POKEBALL", "POKÉ BALL", "ROCKET REVERSE HOLO")
 
 
+def _normalize_rh(text):
+    """Reverse Holo の略記を揃える。読み方は iMakTCG/psa_label_finish.py が唯一の持ち主。"""
+    import os
+    import sys
+    tcg = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "iMakTCG"))
+    if tcg not in sys.path:
+        sys.path.insert(0, tcg)
+    import psa_label_finish as _plf
+    return _plf.normalize_reverse_holo(text)
+
+
 def mirror_text(text):
     """ラベル / 行の版の表記 → 揃えた形 ("MASTER BALL REVERSE HOLO" 等)。版の印が無ければ ""。純関数。
 
@@ -59,6 +70,11 @@ def mirror_text(text):
       この形で突き合わせる。版名なしの REVERSE HOLO はここでは見ない (まだ行が無い・従来どおり通常の行で出す)。
     """
     u = " ".join(str(text or "").upper().replace("POKÉ", "POKE").replace("POKEBALL", "POKE BALL").split())
+    # ★2026-10-15 (B-20261015-024): PSA の略記 REV.FOIL もミラー。読み方は psa_label_finish の1か所を使う
+    u2 = " ".join(_normalize_rh(u).split())
+    if u2 != u and "REVERSE HOLO" in u2 and "REVERSE HOLO" not in u:
+        print("    🪞 REV.FOIL をミラー (REVERSE HOLO) と読んだ: %s" % str(text or "")[:60])
+    u = u2
     for w in ("MASTER BALL", "POKE BALL", "ROCKET"):
         if w + " REVERSE HOLO" in u:
             return w + " REVERSE HOLO"

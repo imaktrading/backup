@@ -181,6 +181,9 @@ def run(log_text, append_log, ledger_path=LEDGER, verified_path=VERIFIED, add_ba
         mreq = mirror_requests(reasons)
         mnew = write_mirror_input(mreq, now, path=mirror_path or MIRROR_INPUT)
         append_log("🪞 ミラーの行の作成を頼んだ: %d件 (ミラーで落ちた %d件・カタログが毎時に作る)\n" % (mnew, len(mreq)))
+        # ★2026-10-15 (B-20261015-024): PSA の略記 REV.FOIL をミラーとして読んだ数も出す (0件でも)
+        _rf = len(set(re.findall(r"REV\.FOIL をミラー \(REVERSE HOLO\) と読んだ: (.+)", log_text or "")))
+        append_log("🪞 REV.FOIL をミラーとして読んだラベル: %d種 (止めた分は上の「ミラーで落ちた」に入る)\n" % _rf)
         # ★2026-10-13 ブラボー回答: この入力は依頼ではない (カタログが毎時に読んで作る・人は要らない) → 呼び鈴は鳴らさない
     except Exception as e:                                      # noqa: BLE001
         append_log("  ⚠️ ミラーの行の作成を頼めなかった: %s: %s\n" % (type(e).__name__, e))
