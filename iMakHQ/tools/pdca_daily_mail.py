@@ -210,6 +210,64 @@ def listing_moves(active, inactive, day):
             "new_per_day": new_month / days if days else 0}
 
 
+# ── 出品の動き (eBay から・日本時間 0〜24時) ─────────────────────
+# ★2026-10-15 ユーザー確定「日本時間の0時から24時を一日とする」: Seller Hub のレポートは1〜2日遅れで、
+#   「昨日の動き」の新規・取下げだけ別の日 (10/15 のメールに 10/13 分) が出ていた。eBay に直接
+#   「その日に始まった / 終わった出品」を聞く (GetSellerList・1日 数回)。US だけ数える (ミラーは親に付いてくる)。
+JST = dt.timezone(dt.timedelta(hours=9))
+
+
+def jst_window(d0, d1):
+    """日本時間 d0 0:00 〜 d1 24:00 → eBay に渡す UTC の (from, to) (純関数)。"""
+    a = dt.datetime.combine(d0, dt.time(), JST).astimezone(dt.timezone.utc)
+    b = dt.datetime.combine(d1 + dt.timedelta(days=1), dt.time(), JST).astimezone(dt.timezone.utc)
+    return a.strftime("%Y-%m-%dT%H:%M:%S.000Z"), b.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _seller_list(kind, d0, d1, post):
+    """kind = Start / End。その期間に始まった / 終わった出品 [{id, site, title, status}] (I/O)。"""
+    a, b = jst_window(d0, d1)
+    out, page = [], 1
+    while True:
+        inner = (f"<{kind}TimeFrom>{a}</{kind}TimeFrom><{kind}TimeTo>{b}</{kind}TimeTo>"
+                 "<GranularityLevel>Coarse</GranularityLevel>"
+                 f"<Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>{page}</PageNumber></Pagination>"
+                 "<OutputSelector>ItemID</OutputSelector><OutputSelector>Site</OutputSelector>"
+                 "<OutputSelector>Title</OutputSelector><OutputSelector>SellingStatus</OutputSelector>"
+                 "<OutputSelector>PaginationResult</OutputSelector>")
+        t = post("GetSellerList", inner)
+        if "<Ack>Failure</Ack>" in (t or "") or not t:
+            m = re.search(r"<LongMessage>(.*?)</LongMessage>", t or "")
+            raise RuntimeError("GetSellerList 失敗: " + (m.group(1) if m else "応答なし"))
+        for it in re.findall(r"<Item>(.*?)</Item>", t, re.S):
+            g = lambda tag: (re.search(rf"<{tag}>(.*?)</{tag}>", it, re.S) or [None, ""])[1]  # noqa: E731
+            out.append({"id": g("ItemID"), "site": g("Site"), "title": html.unescape(g("Title")),
+                        "status": g("ListingStatus")})
+        pages = int((re.search(r"<TotalNumberOfPages>(\d+)", t) or [0, 1])[1])
+        if page >= pages:
+            return out
+        page += 1
+
+
+def ebay_moves(day, post, live=None):
+    """day (日本時間の昨日) の新規・取下げと、その月の新規・取下げ (I/O)。listing_moves と同じ形で返す。"""
+    m0 = day.replace(day=1)
+    new_m = [x for x in _seller_list("Start", m0, day, post) if x["site"] == "US"]
+    end_m = [x for x in _seller_list("End", m0, day, post) if x["site"] == "US" and x["status"] != "Active"]
+    new_d = [x for x in _seller_list("Start", day, day, post) if x["site"] == "US"]
+    end_d = [x for x in _seller_list("End", day, day, post) if x["site"] == "US" and x["status"] != "Active"]
+    cat = {}
+    for x in new_d:
+        k = "PSA10" if "PSA" in x["title"].upper() else "他"
+        cat[k] = cat.get(k, 0) + 1
+    nm = len({x["id"] for x in new_m}); em = len({x["id"] for x in end_m})
+    days = (day - m0).days + 1
+    return {"day": day, "new": len({x["id"] for x in new_d}), "new_cat": cat, "ended": len({x["id"] for x in end_d}),
+            "net": len({x["id"] for x in new_d}) - len({x["id"] for x in end_d}), "live": live,
+            "new_month": nm, "ended_month": em, "net_month": nm - em, "new_per_day": nm / days if days else 0,
+            "src": "ebay"}
+
+
 # ── トレハン・キャラを回す時期 ──────────────────────────────────
 HARVEST_DAYS = 7      # 出品の待ちが「1日の新規 × この日数」を切ったら回す (2026-10-11 ユーザー確定)
 
@@ -425,11 +483,13 @@ def render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv=None, of=None):
     y = ms["yesterday"]
     if mv:
         nc = " ・ ".join(f"{k} {v}" for k, v in mv["new_cat"].items()) or "なし"
-        out.append(f'<div class="sec"><div class="sech">昨日の動き <span>出品は {mv["day"].month}/{mv["day"].day} (レポートの最新) ・ 売れたのは {ms["last"].month}/{ms["last"].day}</span></div>'
+        _when = (f'{mv["day"].month}/{mv["day"].day} 0〜24時 (日本時間)' if mv.get("src") == "ebay"
+                 else f'出品は {mv["day"].month}/{mv["day"].day} (レポートの最新・日がずれている) ・ 売れたのは {ms["last"].month}/{ms["last"].day}')
+        out.append(f'<div class="sec"><div class="sech">昨日の動き <span>{_when}</span></div>'
                    '<table class="moves"><tr>'
                    f'<td><span class="mk">新規</span><br><span class="mv">{mv["new"]}</span>件<br><span class="small">{nc}</span></td>'
                    f'<td><span class="mk">取下げ</span><br><span class="mv">{mv["ended"]}</span>件<br><span class="small">理由別は未取得</span></td>'
-                   f'<td><span class="mk">純増</span><br><span class="mv {"down" if mv["net"] < 0 else "up"}">{mv["net"]:+d}</span>件<br><span class="small">出品中 {mv["live"]:,}</span></td>'
+                   f'<td><span class="mk">純増</span><br><span class="mv {"down" if mv["net"] < 0 else "up"}">{mv["net"]:+d}</span>件<br><span class="small">{("出品中 %s" % format(mv["live"], ",")) if mv.get("live") is not None else ""}{(" (%d/%d 時点)" % (mv["live_day"].month, mv["live_day"].day)) if mv.get("live_day") else ""}</span></td>'
                    f'<td><span class="mk">売れた件数</span><br><span class="mv">{len(y)}</span>件<br><span class="small">今月 {ms["n"]}件</span></td>'
                    f'<td><span class="mk">利益</span><br><span class="mv">{yen(sum(s["profit"] for s in y))}</span><br><span class="small">{"仮を含む" if any(not s["confirmed"] for s in y) else "確定"}</span></td>'
                    + (f'<td><span class="mk">オファー</span><br><span class="mv">{of["yesterday"]}</span>件<br>'
@@ -444,7 +504,8 @@ def render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv=None, of=None):
         out.append(f'<div class="sec ai"><div class="sech">Claude の一言</div><p class="small">書けなかった: {e(ai_err)}</p></div>')
     cost = f" ・ 一言の費用 約{ai_yen:.1f}円" if ai_text else ""
     out.append(f'<div class="foot">出どころ: 販売実績シート ({ms["last"].month}/{ms["last"].day} まで) ・ '
-               f'Seller Hub のレポート ({(str(mv["day"].month) + "/" + str(mv["day"].day)) if mv else "なし"}){cost}</div></div>')
+               + (f'eBay (出品の新規・取下げ {mv["day"].month}/{mv["day"].day})' if mv and mv.get("src") == "ebay" else
+                  f'Seller Hub のレポート ({(str(mv["day"].month) + "/" + str(mv["day"].day)) if mv else "なし"})') + f'{cost}</div></div>')
     return f"<html><head><meta charset='utf-8'><style>{CSS}</style></head><body>{''.join(out)}</body></html>"
 
 
@@ -481,6 +542,20 @@ def main():
     if act_p and ina_p and rday:
         rd = lambda p: list(csv.DictReader(open(p, encoding="utf-8-sig", errors="replace")))  # noqa: E731
         mv = listing_moves(rd(act_p), rd(ina_p), rday)
+        mv["src"] = "report"
+    # ★2026-10-15: 新規・取下げは eBay から日本時間の昨日 0〜24時で取る (出品中の数だけレポートの物を使う)
+    try:
+        sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "iMakeBayAPI")))
+        import fix_de_speedpak_shipping as _fx
+        _tok = _fx.token()
+        mv = ebay_moves(today - dt.timedelta(days=1), lambda c, i: _fx.post(c, i, _tok, site="0"),
+                        live=(mv or {}).get("live"))
+        if act_p and rday:
+            mv["live_day"] = rday
+        print(f"📈 出品の動き (eBay・日本時間 {mv['day']:%m/%d} 0〜24時): 新規 {mv['new']} / 取下げ {mv['ended']}"
+              f" / 今月 新規 {mv['new_month']}・取下げ {mv['ended_month']}")
+    except Exception as e:                                     # noqa: BLE001 取れなければレポートの日のまま (その日付を出す)
+        print(f"  ⚠ 出品の動きを eBay から取れず ({type(e).__name__}: {str(e)[:80]}) — レポート {rday} の分を出す")
 
     hv = None
     try:
