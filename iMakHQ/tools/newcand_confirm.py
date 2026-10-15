@@ -2176,6 +2176,13 @@ def run_append_high(timeout=10800, dry_run=False):
                                            it.get("key") or it.get("pid"))
                                           for it in items if it["i"] in marked])
             print("  📘 決めたカードを鑑定番号ごとに記録: %d件 (出品時の目視で最初から出ます)" % _n)
+            # ★2026-10-15 鑑定番号が入るのはここ (確定の時点では空)。ラベルの記録 (カード単位) にもここで足す
+            import psa_resource_confirm as _prc2
+            _lab = [["", "", "", "", "", str(_certs.get(it["i"], "")).strip(), "",
+                     it.get("key") or it.get("pid"), str(it.get("pid") or "").split(":")[-1]]
+                    for it in items if it["i"] in marked]
+            _nl, _nc = label_and_cert_records(_lab, _prc2._load_psa_cache() or {}, _PLL)
+            print("  📘 ラベルの記録に足した: %d件 / %d件のうち (PSA の記録がある鑑定番号だけ)" % (_nl, len(_lab)))
         except Exception as _e:                                # noqa: BLE001
             print("  ⚠ 決めたカードの記録skip (%s: %s)" % (type(_e).__name__, _e))
     else:
