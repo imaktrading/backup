@@ -73,7 +73,10 @@ def ebay_state(item_id: str) -> tuple:
     s = re.search(r"<QuantitySold>(\d+)</QuantitySold>", xml)
     st = re.search(r"<ListingStatus>(\w+)</ListingStatus>", xml)
     if not q or not s:
-        return None, (st.group(1) if st else None)
+        if st:
+            return None, st.group(1)
+        code = res.get("error_code")
+        return None, (f"err {code} {str(res.get('error_message') or '')[:40]}" if code else None)
     return int(q.group(1)) - int(s.group(1)), (st.group(1) if st else None)
 
 
@@ -111,10 +114,16 @@ def main() -> int:
     for e in targets:
         iid = e["item_id"]
         avail, status = ebay_state(iid)
-        if avail is None:
+        if avail is None and "518" not in str(status) and "limit" not in str(status).lower():
             print(f"  {iid}: eBay の状態を取得できず → 触らない ({status})")
             failed.append(iid)
             continue
+        if avail is None:
+            # ★ 2026-10-15: 本鍵が上限 (518) で数量を読めない時も 数量 0 は送る (何度送っても害が無い)。
+            #   読めないから触らない、だと上限の間 取下げが 1 件も出ない (10/15 06:14 の巡回で 3 件残った)。
+            #   送信は本鍵が 518 なら 2 つ目の鍵で送り直す (trading_api_client、ユーザー判断 2026-10-15)
+            print(f"  {iid}: 数量を読めない (上限) → 数量 0 を送る ({status})")
+            avail = 1
         if avail <= 0 or status == "Completed":
             print(f"  {iid}: 残り {avail} ({status}) → もう買えない。何もしない")
             continue
@@ -125,9 +134,13 @@ def main() -> int:
             continue
 
         r = revise_inventory_status(iid, 0)
-        after, _ = ebay_state(iid)          # 送っただけで終わらせない
+        after, after_st = ebay_state(iid)   # 送っただけで終わらせない
         if after == 0:
             print(f"  {iid}: 取下げ完了 (残り 0 を確認)")
+            sent_ok.append(iid)
+        elif after is None and r.get("success"):
+            # 上限で読み直せない時は 送った応答 (Success/Warning) を正とし、次の回で読み直す
+            print(f"  {iid}: 数量 0 を送った (ack={r.get('ack')}。上限で読み直せないので次の回で確かめる: {after_st})")
             sent_ok.append(iid)
         else:
             code = r.get("error_code")
