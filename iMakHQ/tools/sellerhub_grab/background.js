@@ -76,3 +76,24 @@ chrome.alarms.onAlarm.addListener((a) => {
   const m = /^imak-ship-close-(\d+)$/.exec(a.name || "");
   if (m) chrome.tabs.remove(Number(m[1]), () => void chrome.runtime.lastError);
 });
+
+// ★2026-10-15 ユーザー「Cpass の窓、分からないように開けて閉じれないの？」: 読むためだけのページ (CPaSS の送料・
+//   メルカリの購入履歴) は、プログラムが神風に置いた頼みを30秒おきに拾い、**前に出さない窓** を画面の右下の端に開く。
+//   最小化はしない (最小化した窓ではページが一覧を描かず0件になる)。読み終えたら各ページの部品が閉じる
+chrome.alarms.create("imak-ext-poll", { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name !== "imak-ext-poll") return;
+  fetch("http://127.0.0.1:8770/api/ext/open", { headers: { "X-Console": "1" } })
+    .then((r) => r.json())
+    .then((j) => (j.urls || []).forEach(openQuiet))
+    .catch(() => {});
+});
+
+function openQuiet(url) {
+  chrome.system.display.getInfo((ds) => {
+    const d = (ds || []).find((x) => x.isPrimary) || (ds || [])[0];
+    const w = d ? d.workArea : { left: 0, top: 0, width: 1920, height: 1080 };
+    chrome.windows.create({ url, focused: false, state: "normal", width: 1280, height: 1400,
+                            left: w.left + w.width - 8, top: w.top + w.height - 8 });
+  });
+}

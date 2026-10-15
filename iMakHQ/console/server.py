@@ -1407,6 +1407,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         u = urlparse(self.path)
+        if u.path == "/api/ext/open":
+            # ★2026-10-15 Edge の拡張が30秒おきに聞きに来る: 前に出さない窓で開いてほしい URL (tools/ext_open.py)
+            if TOOLS not in sys.path:
+                sys.path.insert(0, TOOLS)
+            import ext_open as EO
+            try:
+                urls = EO.take()
+                if urls:
+                    _log("🪟 拡張に前に出さない窓で開いてもらう: %s" % ", ".join(x[:50] for x in urls))
+                return self._json(200, {"urls": urls})
+            except Exception as e:                       # noqa: BLE001
+                return self._json(200, {"urls": [], "error": f"{type(e).__name__}: {e}"[:200]})
         if u.path == "/api/home":
             return self._json(200, get_home())
         if u.path == "/api/jobs":
