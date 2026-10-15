@@ -24,3 +24,11 @@ def test_connect_waits_for_a_short_lock(tmp_path):
     con = P.connect(db)                   # 以前はここで database is locked
     assert con.execute("PRAGMA busy_timeout").fetchone()[0] == 60000
     con.close()
+
+
+def test_consolidated_request_rings_bravo_bell():
+    """2026-10-15 残務 №547: まとめ依頼を書いたらブラボーの呼び鈴を鳴らす"""
+    import inspect
+    import pdca_store as P
+    src = inspect.getsource(P.emit_consolidated_request)
+    assert "notify_bg(" in src and src.index("write_text") < src.index("notify_bg(")

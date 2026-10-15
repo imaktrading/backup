@@ -1056,6 +1056,14 @@ def emit_consolidated_request(con, category, out_dir, today, held_out=None, veri
     #   依頼書: hq/requests/2026-09-06_act_code_proposals_tcg.md 提案1
     (Path(out_dir) / f"{stem}.queue_ids.json").write_text(
         json.dumps([r["queue_id"] for r in pend]), encoding="utf-8")
+    # ★2026-10-15 (bravo_kaizen 4・残務 №547): 依頼を書いたらブラボーの呼び鈴を鳴らす (呼び鈴が無いと誰も気づかない)
+    if pend and str(out_dir) != ":memory:" and "iMak_data" in str(out_dir).replace("\\", "/"):
+        try:
+            import bell as _bell
+            _bell.notify_bg("改善キュー (pdca_store.py)", str(Path(out_dir) / f"{stem}.md"),
+                            f"カタログへのまとめ依頼 {len(pend)}件 ({category})")
+        except Exception:                                      # noqa: BLE001 呼び鈴が鳴らなくても依頼は置けている
+            pass
     return len(pend)
 
 
