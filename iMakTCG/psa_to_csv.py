@@ -28,6 +28,14 @@ else:
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                     "..", "iMakCatalog"))
 from integrations import psa_to_csv as catalog_psa
+# ★2026-10-15 (残務 №330): 今の引き方がセット記号を引けなかった時だけ、カタログの表 (psa_brand_set_code.yaml) で補う。
+#   引けている物の結果は変わらない。表が読めなければ何もしない
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import psa_set_code_table as _pst
+    print(f"📗 セット記号の表で補う口: {_pst.install(catalog_psa)}本 (psa_brand_set_code.yaml)")
+except Exception as _e:                                        # noqa: BLE001 付けられなくても今までどおり
+    print(f"📗 セット記号の表で補う口: 0本 (読めない: {type(_e).__name__})")
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
