@@ -178,7 +178,10 @@ def connect(db_path: str = None) -> sqlite3.Connection:
     d = os.path.dirname(db_path)
     if d and db_path != ":memory:":
         os.makedirs(d, exist_ok=True)
-    con = sqlite3.connect(db_path)
+    # ★2026-10-15 (Act 提案 10/13): 既定の5秒待ちでは、出品くんと監査くんが同時に開くと
+    #   "database is locked" で PDCA の積み上げが丸ごと抜けていた (10/12〜13 の3走行)。60秒まで待つ
+    con = sqlite3.connect(db_path, timeout=60)
+    con.execute("PRAGMA busy_timeout = 60000")
     con.row_factory = sqlite3.Row
     con.executescript(_SCHEMA)
     _migrate(con)
