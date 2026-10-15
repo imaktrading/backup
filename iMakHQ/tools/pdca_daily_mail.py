@@ -36,7 +36,7 @@ PLAN_PATH = r"C:/dev/iMak_data/hq/pdca_plan.json"
 REPORT_DIR = r"C:/dev/iMak_data/seller_hub/reports"
 OUT_HTML = r"C:/dev/iMak_data/hq/pdca_daily_last.html"
 SEND_MAIL = r"C:/dev/iMak_data/tools/send_mail.py"
-COL = {"item": 1, "title": 2, "date": 4, "price": 6, "cost": 12, "ship": 14,
+COL = {"item": 1, "title": 2, "date": 4, "country": 5, "price": 6, "cost": 12, "ship": 14,
        "profit": 15, "bought": 21, "state": 25}
 
 
@@ -48,6 +48,19 @@ def _parse_date(s):
         except ValueError:
             pass
     return None
+
+
+# ★2026-10-16 ユーザー「入力待ち・未確定の部分、PSA の US 以外は 1100円・US は 4000円で仮計上して。確定したら正式に計上」
+#   シートの営業利益は、送料 (O列) が空の間は送料を引いていない = 利益が多く見えていた。送料が入れば実額 (仮は消える)
+PROVISIONAL_SHIP_JPY = {"US": 4000, "OTHER": 1100}
+
+
+def provisional_ship(title, country):
+    """送料が未入力の PSA の仮の送料 (円・純関数)。PSA 以外は 0 (決めていないので引かない)。"""
+    if "PSA" not in (title or "").upper():
+        return 0
+    us = (country or "").strip().lower() in ("united states", "us", "usa")
+    return PROVISIONAL_SHIP_JPY["US" if us else "OTHER"]
 
 
 def sales_rows(rows2d):
@@ -68,8 +81,10 @@ def sales_rows(rows2d):
             missing.append("仕入原価が空")
         if not g(COL["ship"]):
             missing.append("送料が空")
+        profit = R.money(g(COL["profit"]))
+        prov = provisional_ship(g(COL["title"]), g(COL["country"])) if not g(COL["ship"]) else 0
         out.append({"date": d, "title": g(COL["title"]), "price": R.money(g(COL["price"])),
-                    "profit": R.money(g(COL["profit"])), "missing": missing,
+                    "profit": profit - prov, "ship_provisional": prov, "missing": missing,
                     "confirmed": not missing})
     return out
 
@@ -446,7 +461,7 @@ def render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv=None, of=None):
     if ms["pending"] or ms["negative"]:
         items = []
         for s in ms["pending"]:
-            items.append(f'<li>{s["date"].month}/{s["date"].day} {e(s["title"][:40])} (${s["price"]:.0f}) ・ {"・".join(s["missing"])} ・ 利益 {yen(s["profit"])} は仮</li>')
+            items.append(f'<li>{s["date"].month}/{s["date"].day} {e(s["title"][:40])} (${s["price"]:.0f}) ・ {"・".join(s["missing"])} ・ 利益 {yen(s["profit"])} は仮{(" (送料 仮 " + yen(s["ship_provisional"]) + " を引いた)") if s.get("ship_provisional") else ""}</li>')
         for s in ms["negative"]:
             if s in ms["pending"]:
                 continue

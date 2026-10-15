@@ -27,3 +27,18 @@ def test_ebay_moves_counts_us_only_and_ended_only():
     assert mv["new"] == 2 and mv["new_cat"] == {"PSA10": 1, "他": 1}
     assert mv["ended"] == 1                        # Active (GTC の更新) と US 以外は数えない
     assert mv["src"] == "ebay" and mv["live"] == 1000
+
+
+def test_provisional_ship_for_psa_until_entered():
+    """2026-10-16 ユーザー: 送料が未入力の PSA は US 4,000円・US 以外 1,100円を仮に引く。入れば実額"""
+    import pdca_daily_mail as M
+    head = [""] * 26
+    def row(country, ship, title="PSA 10 Pikachu"):
+        r = [""] * 26
+        r[1], r[2], r[4], r[5], r[6], r[12], r[14], r[15], r[21], r[25] = "1", title, "2026/10/15", country, "$100", "5000", ship, "¥8,000", "TRUE", "未発送"
+        return r
+    got = M.sales_rows([head, row("United States", ""), row("United Kingdom", ""), row("United States", "3500"),
+                        row("United States", "", "UNIQLO UT Tee")])
+    assert [g["profit"] for g in got] == [4000, 6900, 8000, 8000]
+    assert [g["ship_provisional"] for g in got] == [4000, 1100, 0, 0]
+    assert not got[0]["confirmed"] and got[2]["confirmed"]

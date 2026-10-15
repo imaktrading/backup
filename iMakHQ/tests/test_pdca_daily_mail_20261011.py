@@ -26,7 +26,7 @@ def test_キャンセル除外_赤字_確定の判定():
     s = P.sales_rows(rows)
     assert len(s) == 3
     assert [x["confirmed"] for x in s] == [True, False, False]
-    assert s[1]["profit"] == -3728
+    assert s[1]["profit"] == -3728 - 1100   # ★2026-10-16 送料が空の PSA は US 以外 1,100円を仮に引く
     assert s[2]["missing"] == ["仕入れが済んでいない", "仕入原価が空", "送料が空"]
 
 
@@ -36,7 +36,8 @@ def test_今月の進捗():
             _r("2026/10/03", "¥4,000"),
             _r("2026/10/10", "¥10,000", ship="")]
     ms = P.month_summary(P.sales_rows(rows), dt.date(2026, 10, 11), 100000)
-    assert ms["profit"] == 14000 and ms["fixed"] == 4000 and ms["tmp"] == 10000
+    # ★2026-10-16 送料が空の PSA (国が空 = US 以外) は 1,100円を仮に引く
+    assert ms["profit"] == 12900 and ms["fixed"] == 4000 and ms["tmp"] == 8900
     assert ms["n"] == 2 and ms["elapsed"] == 10 and ms["remain"] == 21
     assert ms["prev_same_n"] == 1 and ms["prev_profit"] == 3000
     assert len(ms["yesterday"]) == 1
