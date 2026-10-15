@@ -3576,6 +3576,20 @@ def main():
     except Exception as _e2:
         print(f"  ⚠️ 目視済スキップ読込失敗(無視して継続): {type(_e2).__name__}: {_e2}")
 
+    # ★2026-10-15 (残務 №495・Act 提案 10/01): PSA に **ページが無い** と30日以内に記録した cert は、枠を選ぶ前に外す。
+    #   台帳 (psa_cert_not_found.json) は psa_cache_warm が書き、判定も向こうの物を使う (同じ判定を2つ書かない)。
+    #   今までは毎日1枠と PSA 照会1回を使ってから落ちていた。読めなければ何もしない (外さない)
+    try:
+        import psa_cache_warm as _pcw
+        _nf = _pcw._load_not_found()
+        _nf_drop = [c for c in cert_numbers if _pcw.recently_not_found(c, _nf)]
+        if _nf_drop:
+            cert_numbers = [c for c in cert_numbers if c not in set(_nf_drop)]
+        print(f"  🚫 PSA にページが無い cert (30日以内に記録) を枠の前に外した: {len(_nf_drop)}件"
+              + (f" {_nf_drop[:5]}" if _nf_drop else ""))
+    except Exception as _nfe:                                  # noqa: BLE001 読めなければ今までどおり
+        print(f"  ⚠️ ページが無い cert の台帳を読めず (外さずに続ける): {type(_nfe).__name__}")
+
     # ★2026-08-11: **枠を選ぶ前に** catalog で解決できない cert を落とす (Advisor 依頼)。
     #   従来は 10件に絞ってから GAP/対象外が落ちていたので、**枠を食ってから消えて**
     #   入稿が 2〜6件に張り付いていた。判定は psa_preflight.classify (出品と同一 resolver)。
