@@ -41,6 +41,9 @@ TREASURE_TAB = "mercari_psa10_treasure"
 COL_JUDGMENT = 36  # AJ: 上限判定 (上限内/超過/空欄) - このタブ専用の末尾追加列
 # ★2026-10-07 HQ依頼 (promo_60_add_dropped) 🥕「拾った物は捨てない」: 候補外の理由
 COL_REASON = 39
+# ★2026-10-15 HQ依頼 (治療ハントの量の調整): シートに入れる候補が約N件で打ち切る時、
+# 回しきれなかった語を次回の先頭に積んでおく控え
+LEFTOVER_PATH = Path("C:/dev/iMak_data/harvest/treasure_leftover_keywords.json")
 
 
 def _log(m: str) -> None:
@@ -187,6 +190,9 @@ def main(argv=None) -> int:
     ap.add_argument("--add-dropped-from-json", default=None,
                     help="前回dumpの collected_urls を対象に、候補外の理由をシートに足す"
                          " (新規検索なし・鑑定番号読み取りなし)")
+    # ★2026-10-15 HQ依頼: シートに入れる候補が約N件になったら、残りの語は回さず次回に回す
+    ap.add_argument("--max-candidates", type=int, default=0,
+                    help="シートに書き込んだ候補がこの件数に届いたら打ち切る (0=無制限)")
     args = ap.parse_args(argv)
 
     from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
@@ -241,11 +247,31 @@ def _run(args) -> int:
         _log(f"一覧が空 ({csv_path or treasure_keywords.CSV_PATH}) → 何もしない")
         return 0
 
-    keywords = treasure_keywords.build_keywords(rows)
     limits = treasure_keywords.build_cost_limits(rows)
+    leftover_prev: list[str] = []
     if args.keywords:
         keywords = [k for k in args.keywords.split("|") if k.strip()]
         _log(f"検索語を指定分だけに絞った: {keywords}")
+    else:
+        # ★2026-10-15 HQ依頼: 「売れた数」の多い順に回す
+        def _sold(r):
+            try:
+                return int(float(r.get("売れた数") or 0))
+            except ValueError:
+                return 0
+        rows_sorted = sorted(rows, key=_sold, reverse=True)
+        keywords = treasure_keywords.build_keywords(rows_sorted)
+        # 前回打ち切りで残した語があれば、今回の先頭に積む (無ければ無視)
+        try:
+            prev = json.loads(LEFTOVER_PATH.read_text(encoding="utf-8"))
+            if prev.get("csv_path") == str(csv_path or treasure_keywords.CSV_PATH):
+                leftover_prev = [k for k in (prev.get("keywords") or []) if k in keywords]
+        except Exception:  # noqa: BLE001 - 控えが無い/壊れていても今回は普通に回す
+            leftover_prev = []
+        if leftover_prev:
+            rest = [k for k in keywords if k not in leftover_prev]
+            keywords = leftover_prev + rest
+            _log(f"前回残した語を先頭に積んだ: {len(leftover_prev)} 語")
     _log(f"トレジャーハント: 一覧 {len(rows)} 件 / 検索語 {len(keywords)} 語")
 
     resume = None
@@ -289,6 +315,9 @@ def _run(args) -> int:
         _log(f"  [SHEET] 途中書込: {res}")
         return len(new_cands), len(new_unreadable)
 
+    def _should_pause():
+        return bool(args.max_candidates) and len(written) >= args.max_candidates
+
     urls_override = None
     collect_dropped = False
     if args.retry_failed_from_json:
@@ -319,13 +348,41 @@ def _run(args) -> int:
     try:
         payload = psa10.collect(treasure_args, dump_path=dump_path, resume=resume,
                                 on_flush=_flush, urls_override=urls_override, detail_fn=_detail_fn,
-                                collect_dropped=collect_dropped, skip_urls=known)
+                                collect_dropped=collect_dropped, skip_urls=known,
+                                should_pause=_should_pause if args.max_candidates else None)
     finally:
         api_client.close()
 
     kept = payload["candidates"]
     unreadable = payload.get("unreadable") or []
     _log(f"候補 (事前ゲート通過): {len(kept)} 件 / 番号読めず {len(unreadable)} 件")
+
+    # ★2026-10-15 HQ依頼: 打ち切りで回せなかった語を控えて次回の先頭に積む。
+    # 「回した語」は detail処理(写真読みの前の段階含む)が実際に届いた分で判定する
+    # (シート書込の有無やdry-runとは無関係)
+    if not args.keywords and not args.retry_failed_from_json and not args.add_dropped_from_json:
+        by_kw = payload.get("by_keyword") or {}
+        processed_n = len(payload.get("processed_urls") or [])
+        cum = 0
+        ran_kw: list[str] = []
+        left_kw: list[str] = []
+        for kw in keywords:
+            n = by_kw.get(kw, 0)
+            cum += n
+            if cum <= processed_n:
+                ran_kw.append(kw)
+            else:
+                left_kw.append(kw)
+        try:
+            LEFTOVER_PATH.parent.mkdir(parents=True, exist_ok=True)
+            LEFTOVER_PATH.write_text(json.dumps(
+                {"csv_path": str(csv_path or treasure_keywords.CSV_PATH), "keywords": left_kw},
+                ensure_ascii=False, indent=1), encoding="utf-8")
+        except Exception as e:  # noqa: BLE001 - 控えを書けなくても走行結果は残す
+            _log(f"⚠️ 残した語の控えを書けず: {type(e).__name__}")
+        cap_hit = bool(payload.get("truncated"))
+        _log(f"📘 打ち切り: {'候補の上限で区切った' if cap_hit else '打ち切りなし'} / "
+             f"回した語 {len(ran_kw)} / 残した語 {len(left_kw)}")
 
     if args.dry_run:
         _log("dry-run → 書込なし")
