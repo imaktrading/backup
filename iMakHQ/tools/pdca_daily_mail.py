@@ -486,7 +486,9 @@ def main():
     try:
         import psa_new_count as PN
         left = _intermediate_left()
-        hv = harvest_timing(PN.count_workload().get("n", 0), mv["new_per_day"] if mv else 0,
+        _pn = PN.count_workload()
+        # ★2026-10-15 行の数ではなく、新しく出せるカードの種類で時期を決める (同じカードの2枚目・出品中のカードを除く)
+        hv = harvest_timing(_pn.get("cards", _pn.get("n", 0)), mv["new_per_day"] if mv else 0,
                             left["treasure"], left["chara"])
     except Exception as e:                                     # noqa: BLE001
         print(f"  ⚠ トレハンの時期を出せず: {type(e).__name__}: {str(e)[:80]}")

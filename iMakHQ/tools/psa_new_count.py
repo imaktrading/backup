@@ -21,8 +21,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 
-def count_rows(rows2d, listed_cert, listed_keys, taken_urls, already_listed, norm_url, pick_cost, key_col=34):
-    """シートの行 → 内訳 (純関数)。n が出品できる枚数。"""
+def count_rows(rows2d, listed_cert, listed_keys, taken_urls, already_listed, norm_url, pick_cost, key_col=34,
+               ok_certs=None):
+    """シートの行 → 内訳 (純関数)。n が出品できる行 (現物) の数。ok_certs (list) を渡すと、通った行の鑑定番号を足す。"""
     out = {"n": 0, "listed": 0, "taken": 0, "sold": 0, "no_go": 0, "nocost": 0}
     for row in rows2d[1:]:
         g = lambda i: (row[i] if len(row) > i else "").strip()     # noqa: E731
@@ -47,7 +48,34 @@ def count_rows(rows2d, listed_cert, listed_keys, taken_urls, already_listed, nor
             out["nocost"] += 1
             continue
         out["n"] += 1
+        if ok_certs is not None:
+            ok_certs.append(cert)
     return out
+
+
+def card_of(entry):
+    """PSA の記録1件 → カードの見分け (ブランド・番号・名前・版)。分からなければ None (純関数)。"""
+    k = tuple(str((entry or {}).get(x) or "").strip().upper() for x in ("Brand", "CardNumber", "Subject", "Variety"))
+    return k if any(k[:3]) else None
+
+
+def count_cards(ok_certs, listed_certs, psa_cache):
+    """出せる行 → {"cards": 新しく出せるカードの種類, "dup_listed": 別の鑑定番号で出品中のカード, "unknown": カードが分からない行}。
+
+    ★2026-10-15 ユーザー「意味不明な数字を出すな」: 「新規に出せる PSA 194枚」は **行 (現物) の数**で、
+      同じカードの2枚目 (出品時に補URLに回る) や、別の鑑定番号で既に出品中のカードまで数えていた
+      (実測: 194行 → カードが分かる181行 = 156種類 → うち出品中31 → 新しく出せる 125種類 / 分からない13行)。
+    """
+    listed = {card_of(psa_cache.get(str(c))) for c in listed_certs} - {None}
+    cards, unknown = set(), 0
+    for c in ok_certs:
+        k = card_of(psa_cache.get(str(c)))
+        if k is None:
+            unknown += 1
+        else:
+            cards.add(k)
+    new = {k for k in cards if k not in listed}
+    return {"cards": len(new), "dup_listed": len(cards) - len(new), "unknown": unknown}
 
 
 def count_workload():
@@ -57,9 +85,17 @@ def count_workload():
         sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "iMakeBayAPI")))
         from listing_common import pick_cost_jpy
         rows = S._product_ws().get_all_values()
-        return count_rows(rows, S.listed_certs(rows) | S.live_listed_certs(), S.listed_key_forms(rows),
-                          D.live_supply_urls(rows), S.already_listed_reason, D.norm_url, pick_cost_jpy,
-                          key_col=S.PRODUCT_COL_KEY)
+        listed = S.listed_certs(rows) | S.live_listed_certs()
+        ok = []
+        out = count_rows(rows, listed, S.listed_key_forms(rows),
+                         D.live_supply_urls(rows), S.already_listed_reason, D.norm_url, pick_cost_jpy,
+                         key_col=S.PRODUCT_COL_KEY, ok_certs=ok)
+        try:
+            import psa_resource_confirm as prc
+            out.update(count_cards(ok, listed, prc._load_psa_cache() or {}))
+        except Exception as e:                                 # noqa: BLE001 種類が出せなければ行の数だけ (画面に「行」と出す)
+            out["cards_error"] = f"{type(e).__name__}"[:40]
+        return out
     except Exception as e:                                     # noqa: BLE001
         return {"n": None, "error": f"{type(e).__name__}: {e}"[:80]}
 
