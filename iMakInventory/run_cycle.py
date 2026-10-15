@@ -93,6 +93,9 @@ LOCK_WAIT_POLL_SEC = 60
 # ★ 2026-10-05 ユーザー判断: CAND は 1日1回のまま 05:00 → 15:20 に。17:00 からの新規出品に間に合わせる。
 #   メルカリ API 化で CAND は 30 分台 (05:00 実測 33 分)。SHEET (13:30〜15:10 頃) と lock・profile を共有するので
 #   その後に置き、SHEET が延びた時は --lock-wait-minutes 90 で待つ。
+# ★ 2026-10-15 ユーザー判断: CAND に専用の Chrome profile (chrome_profile_CAND / chrome_profile_amazon_CAND) を持たせた
+#   → .cycle_CAND.lock で SHEET と並走する (補URL が増えて SHEET 13:30 が 15:33 まで延び、CAND の開始が遅れて
+#   17:00 の新規出品まで 6 分しか無かった)。書く行は重ならない (SHEET=itemID あり / CAND=空)。戻す時は profile を消す
 CYCLE_INTERVAL_HOURS = {"SHEET": 6, "LOW": 8, "CAND": 24}   # 各 label の巡回間隔 (Task Scheduler と対)
 
 # label ごとに「どの行を見るか」(2026-09-19 ユーザー判断)。
