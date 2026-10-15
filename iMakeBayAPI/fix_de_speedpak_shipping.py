@@ -73,6 +73,11 @@ from ebay_call_usage import record_call as _record_call  # noqa: E402
 import ebay_call_usage as _U  # noqa: E402
 
 
+# ★2026-10-15 つなぎっぱなしで使い回す。requests.post を毎回呼ぶと、そのたびに証明書の束を読み直す
+#   (この PC で1回 0.6秒)。再仕入れ ② は1件に3回 (状態・戻す・読み直す) 呼ぶ
+_HTTP = requests.Session()
+
+
 def post(callname, inner, tok, site='0'):
     hdr = {'X-EBAY-API-CALL-NAME': callname, 'X-EBAY-API-SITEID': site,
            'X-EBAY-API-COMPATIBILITY-LEVEL': '1271', 'X-EBAY-API-IAF-TOKEN': tok, 'Content-Type': 'text/xml'}
@@ -83,7 +88,7 @@ def post(callname, inner, tok, site='0'):
         _record_call(callname)
         for _ in range(4):
             try:
-                r = requests.post(EP, data=body.encode('utf-8'), headers=h, timeout=90)
+                r = _HTTP.post(EP, data=body.encode('utf-8'), headers=h, timeout=90)
                 r.encoding = 'utf-8'
                 return r.text
             except requests.exceptions.ConnectionError:
