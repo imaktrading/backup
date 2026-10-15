@@ -59,8 +59,9 @@ def fetch(wait=WAIT_SEC, opener=None, sleep=time.sleep, now=dt.datetime.now):
     asked = now().replace(microsecond=0)
     if opener is None:
         import mercari_purchases as MP                         # 別窓で開いて画面の右下の端に寄せる (前に出さない)
-        import ext_open as EO                                  # ★2026-10-15 まず拡張に「前に出さない窓」で開いてもらう
-        opener = lambda u: EO.ask(u, fallback=lambda x: MP._open_quiet(x, ("CPaSS", "Orange Connex", "SpeedPAK", "orangeconnex")))  # noqa: E731
+        # ★2026-10-15 拡張の「前に出さない窓」(ext_open) は、試すと窓は開いたが送料が届かなかった (18:19)。
+        #   原因が分かるまで今までの開き方に戻す
+        opener = lambda u: MP._open_quiet(u, ("CPaSS", "Orange Connex", "SpeedPAK", "orangeconnex"))  # noqa: E731
     opener(URL)
     for _ in range(int(wait / 3)):
         sleep(3)

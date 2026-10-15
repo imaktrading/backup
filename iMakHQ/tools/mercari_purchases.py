@@ -156,10 +156,7 @@ def fetch_purchases(wait=WAIT_SEC, opener=None, sleep=time.sleep, now=dt.datetim
     if cache_state(at, login, now()) == "use" and items:
         return items
     asked = now().replace(microsecond=0)
-    if opener is None:                                         # ★2026-10-15 まず拡張に「前に出さない窓」で開いてもらう
-        import ext_open as EO
-        opener = lambda u: EO.ask(u, fallback=_open_quiet)     # noqa: E731
-    opener(URL + "#imak-buys")
+    (opener or _open_quiet)(URL + "#imak-buys")                # ★2026-10-15 ext_open は CPaSS で届かなかったので使わない (調べ中)
     for _ in range(int(wait / 3)):
         sleep(3)
         at, login, items = load_cache()
