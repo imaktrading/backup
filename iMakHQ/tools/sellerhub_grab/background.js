@@ -28,6 +28,9 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
   }
   if ((u.includes("orangeconnex.com") || u.includes("cpass.ebay.com")) && u.includes("#imak-ship")) {   // ★2026-10-09 SpeedPAK の送料
     chrome.storage.local.set({ imakShipAt: Date.now() });
+    // ★2026-10-15 ユーザー「誰かが Cpass を開けて閉じてない。開けたら閉じるように」: 読み終えると閉じる作りだが、
+    //   ログイン切れ等で読めないとタブが残っていた。開いてから3分で必ず閉じる (神風が待つのは2分)
+    chrome.alarms.create("imak-ship-close-" + tabId, { delayInMinutes: 3 });
   }
   if (u.includes("ebay.com/sh/lst/active") && u.includes("#shg-offers")) {   // ★2026-10-09 オファーを送る
     chrome.storage.local.set({ shgOffersAt: Date.now() });
@@ -66,4 +69,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     addLine(`${new Date().toLocaleString()} 終了 (${msg.ok ? "成功" : "失敗"})`).then(writeLog);
     if (sender.tab && sender.tab.id != null) setTimeout(() => chrome.tabs.remove(sender.tab.id), 5000);
   }
+});
+
+// ★2026-10-15 CPaSS / SpeedPAK のタブを開いてから3分で閉じる (もう閉じていれば何もしない)
+chrome.alarms.onAlarm.addListener((a) => {
+  const m = /^imak-ship-close-(\d+)$/.exec(a.name || "");
+  if (m) chrome.tabs.remove(Number(m[1]), () => void chrome.runtime.lastError);
 });
