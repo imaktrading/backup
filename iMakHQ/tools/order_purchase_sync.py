@@ -548,7 +548,11 @@ def fill_ship_cost(ws, rows):
         print("  📦 SpeedPAK の送料: 空の行 0件")
         return 0
     fees = {t: v["yen"] for t, v in (CF.load().get("fees") or {}).items()}
-    if any(t not in fees for _n, t in want):
+    # ★2026-10-15 ユーザー「作業中に突然出るからさ」→「夜」: 神風の自動の数え直し (昼) では CPaSS を開かない。
+    #   送料は利益の計算用で急がない。夜の予約 (OrderSyncNight) と「📦 注文の取り込み」を押した時だけ読む
+    if os.environ.get("ORDER_SYNC_NO_CPASS") == "1" and any(t not in fees for _n, t in want):
+        print(f"  📦 SpeedPAK の送料: 昼の自動では CPaSS を開かない (夜に読む) / 控えにある物だけ入れます")
+    elif any(t not in fees for _n, t in want):
         try:
             fees = CF.fetch()
         except Exception as e:                                 # noqa: BLE001

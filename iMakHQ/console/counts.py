@@ -46,7 +46,8 @@ def order_sync():
     import subprocess
     r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(TOOLS, "order_purchase_sync.py"), "--write"],
                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
-                       cwd=TOOLS, env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+                       cwd=TOOLS, env=dict(os.environ, PYTHONIOENCODING="utf-8",
+                                           ORDER_SYNC_NO_CPASS="1"),   # ★2026-10-15 昼の自動では CPaSS を開かない
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if r.returncode != 0:
         raise RuntimeError(((r.stderr or r.stdout or "").strip().splitlines() or ["出力なし"])[-1][:200])
