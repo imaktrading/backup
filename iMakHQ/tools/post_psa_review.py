@@ -1189,7 +1189,10 @@ def _generate_html(targets: list[dict]) -> None:
         # ★セット名は長いので折り返して全部見せる (PSA ラベルと文字で比べるため)
         '.setname{font-size:11px;color:#9ad;margin-top:2px;line-height:1.25;'
         'word-break:break-word;max-width:150px}',
-        '.candidates.show{display:block}',
+        # ★2026-10-16 ユーザー「見比べる相手がスクロールすると分からなくなる。仕入元・PSA裏表を固定して候補がスクロールするように」:
+        #   ページは動かさず **候補の箱の中だけ** スクロールする (7/28 に不可だったのは現物を縮めて箱に入れた形。現物は今までどおり原寸)
+        '.candidates.show{display:block;max-height:55vh;overflow-y:auto;border:1px solid #444;border-radius:6px;padding:6px}',
+        '.candidates-toggle.picked{color:#9fffa0;font-weight:bold;font-size:14px}',
         '.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}',
         '.cand{border:2px solid #555;padding:8px;background:#333;text-align:center;border-radius:6px;cursor:pointer;transition:all 0.15s}',
         '.cand:hover{border-color:#80c0ff;background:#3a3a4a}',
@@ -1265,6 +1268,8 @@ def _generate_html(targets: list[dict]) -> None:
         '  document.getElementById("btn_" + cert + "_" + choice).classList.add("active");',
         '  if (choice === "NG") {',
         '    document.getElementById("cands_" + cert).classList.add("show");',
+        '  } else {',
+        '    foldCands(cert, "");',
         '  }',
         '  updateStatus();',
         '}',
@@ -1276,7 +1281,16 @@ def _generate_html(targets: list[dict]) -> None:
         '  document.querySelectorAll("#cands_" + cert + " .cand").forEach(c => c.classList.remove("selected"));',
         '  document.getElementById("cand_" + cert + "_" + pid.replace(/[^a-zA-Z0-9]/g, "_")).classList.add("selected");',
         '  document.querySelectorAll("#btns_" + cert + " .btn").forEach(b => b.classList.remove("active"));',
+        '  foldCands(cert, pid);',
         '  updateStatus();',
+        '}',
+        '',
+        # ★2026-10-16 ユーザー「カードを特定したら畳む」: 選んだら候補を畳み、選んだカードを見出しに出す (押せばまた開く)
+        'function foldCands(cert, pid) {',
+        '  var box = document.getElementById("cands_" + cert), tog = document.getElementById("ctog_" + cert);',
+        '  if (box) box.classList.remove("show");',
+        '  if (tog) { tog.textContent = (pid ? "✔ 選んだカード: " + pid + " — " : "") + "▼ 候補 " + tog.dataset.n + " 件を開く";',
+        '             tog.classList.toggle("picked", !!pid); }',
         '}',
         '',
         'function toggleCands(cert) {',
@@ -1350,7 +1364,7 @@ def _generate_html(targets: list[dict]) -> None:
         '    if (a.choice === "CHOSEN" && a.selected_pid) {',
         '      var elId = "cand_" + cert + "_" + a.selected_pid.replace(/[^a-zA-Z0-9]/g, "_");',
         '      var el = document.getElementById(elId);',
-        '      if (el) { el.classList.add("selected"); document.getElementById("target_" + cert).className = "target answered-chosen"; }',
+        '      if (el) { el.classList.add("selected"); document.getElementById("target_" + cert).className = "target answered-chosen"; foldCands(cert, a.selected_pid); }',
         '    } else if (a.choice) {',
         '      var b = document.getElementById("btn_" + cert + "_" + a.choice);',
         '      if (b) { b.classList.add("active"); document.getElementById("target_" + cert).className = "target answered-" + a.choice.toLowerCase(); }',
@@ -1477,7 +1491,8 @@ def _generate_html(targets: list[dict]) -> None:
                     f'onkeydown="if(event.key===\'Enter\'){{findCands(\'{cert}\');}}">'
                     f'<button class="btn btn-find" onclick="findCands(\'{cert}\')">探す</button>'
                     f'<span id="qmsg_{cert}" class=findmsg></span></div>')
-        html.append(f'<div class=candidates-toggle onclick="toggleCands(\'{cert}\')">▼ 候補 {len(t["candidates"])} 件 表示/非表示</div>')
+        html.append(f'<div id="ctog_{cert}" class=candidates-toggle data-n="{len(t["candidates"])}" '
+                    f'onclick="toggleCands(\'{cert}\')">▼ 候補 {len(t["candidates"])} 件 表示/非表示</div>')
         cls = "candidates show" if is_open else "candidates"
         html.append(f'<div id="cands_{cert}" class="{cls}">')
         html.append(f'<div class=grid id="grid_{cert}">')
