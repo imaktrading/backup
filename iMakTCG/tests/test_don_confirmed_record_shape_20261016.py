@@ -17,5 +17,5 @@ def test_confirmed_branch_converts_raw_row():
 
 def test_legacy_dict_has_type_from_card_type_ebay():
     import psa_to_csv as P
-    d = P.catalog_psa._to_legacy_dict({"product_id": "DON-X-001", "specs": {"card_type_ebay": "DON!! Card"}})
+    d = P.catalog_psa._to_legacy_dict({"product_id": "DON-X-001", "specs": {"card_type": "DON!! Card", "card_type_ebay": "DON!! Card"}})
     assert d["type_en"] == "DON!! Card" and d["card_id"] == "DON-X-001"
