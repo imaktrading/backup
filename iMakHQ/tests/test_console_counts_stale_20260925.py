@@ -70,3 +70,13 @@ def test_catalog_index_matches_sql():
     # LIKE 'OP11-021_%' は後ろに1文字以上 (SQL の _ は任意の1文字なので OP11-0219 も入る = 従来どおり)
     assert sorted(mp._index_lookup(idx, "op11-021")) == [1, 2, 3]
     assert mp._index_lookup(idx, "OP11-021", "other") == []
+
+
+def test_restock_buttons_also_recount_hoju():
+    """2026-10-17 再仕入れの後に補URL の入れ替えが数え直されず、神風1件・HTML2件になっていた"""
+    import sys
+    sys.path.insert(0, os.path.join(HQ, "console"))
+    sys.path.insert(0, HQ)
+    import server
+    for b in ("psa_gate", "restock_build", "restock_wb"):
+        assert "hoju" in server.count_keys_for(b), b

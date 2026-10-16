@@ -364,8 +364,10 @@ def count_keys_for(badge):
         return ["kuji"]
     table = {"newcand": ["newcand"], "newcand_high": ["newcand_high"], "cull_end": ["cull"],
              "shelf_evict": ["shelf"], "shelf_evict_label": ["shelf"], "sold_restock": ["restock"],
-             "psa_gate": ["psa_gate", "restock_build", "restock_wb"],
-             "restock_build": ["restock_build", "restock_wb"], "restock_wb": ["restock_wb"],
+             # ★2026-10-17 ユーザー「入れ替え、神風では1件なのに HTML では2件」: 再仕入れは仕入元・補を書き換えるので、
+             #   補URL (補充・入れ替え) の件数も動く。数え直さず前の数のまま出ていた
+             "psa_gate": ["psa_gate", "restock_build", "restock_wb", "hoju"],
+             "restock_build": ["restock_build", "restock_wb", "hoju"], "restock_wb": ["restock_wb", "hoju"],
              "offer_calc": ["offer"], "order_sync": []}
     return table.get(b)
 
