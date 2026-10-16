@@ -31,7 +31,7 @@ def test_paydays_month_end_workday():
 def test_mail_subject_is_daily_report():
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "pdca_daily_mail.py"),
                encoding="utf-8").read()
-    assert 'subject = (f"Daily Report ' in src and "local_events_next7" in src
+    assert 'subject = (f"KamiKaze ' in src and "local_events_next7" in src
 
 
 def test_tonight_plan_pushes_before_strong_weekday():

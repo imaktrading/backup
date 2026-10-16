@@ -729,7 +729,7 @@ def main():
     body = render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv, of, ev)
     with open(OUT_HTML, "w", encoding="utf-8") as f:
         f.write(body)
-    subject = (f"Daily Report {today.month}/{today.day} 利益 {yen(ms['profit'])} ({ms['profit'] / plan['goal_profit_jpy'] * 100:.0f}%)"
+    subject = (f"KamiKaze {today.month}/{today.day} 利益 {yen(ms['profit'])} ({ms['profit'] / plan['goal_profit_jpy'] * 100:.0f}%)"
                f" 純増 {mv['net']:+d}" if mv else "")
     sent = "送らない (--dry-run)"
     if not a.dry_run:
