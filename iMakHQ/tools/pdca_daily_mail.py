@@ -339,8 +339,9 @@ def ai_comment(facts):
                   "例: 変化の兆し (先週と比べて何が増えた・減った)、偏り (国・商品・曜日)、危ない所 (赤字・仕入元が1本の出品・"
                   "仮の送料で利益が変わる行)、人が見落としそうなつながり。根拠の数字を1つ添える。"
                   "与えた数字だけを使い、推測で数字を作らない。言える物が無ければ「目立った変化なし」と書く。"
-                  "local_events_next7 (US/UK/AU/CA の祝日・行事・給料日が多い日) に閲覧が増えそうな日があれば、"
-                  "その前に出品数をいつもより増やす等の手を言ってよい (一般に言われることで、うちの数字では測っていないと分かる言い方で)。"
+                  "今夜 (日本時間の夕方) の出品の段取りに効く気付きがあれば、それを優先して言う: tonight_listing_plan は"
+                  "「明日の曜日が直近90日で注文の多い曜日か」と「この先2日の祝日・行事・給料日」から出した材料 (夕方に出すと US の朝に並び、効くのは翌日の注文)。"
+                  "push が true なら「今夜は出品を多めに」とその理由を言ってよい。行事・給料日の効き方は一般論で、うちの数字では測っていないと分かる言い方で。"
                   "recent_comments と同じことは書かない。日本語で2文まで・120字以内。専門用語を使わない。前置き・挨拶は書かない。")
         r = client.messages.create(
             model=BM.AI_MODEL, max_tokens=3000, output_config={"effort": "medium"}, system=system,
@@ -351,6 +352,35 @@ def ai_comment(facts):
         return text, yen, ""
     except Exception as e:                                      # noqa: BLE001
         return "", 0.0, f"{type(e).__name__}: {str(e)[:120]}"
+
+
+# ── 今夜の出品 (2026-10-16 ユーザー「今朝の日報に一言あると、夕方に出品を頑張る段取りが組める」) ──
+# 夕方の出品 (日本時間 19〜20時) は US の同じ日の朝に公開され、効くのは翌日 (日本時間) の注文。
+# だから「明日の曜日が、うちの直近90日で注文が多い曜日か」と「この先2日の行事・給料日」で決める。
+PUSH_RATIO = 1.5          # 明日の曜日の注文が、曜日の平均のこの倍以上なら多め
+
+
+def tonight_plan(sales, today, events, listable=None, days=90):
+    """今夜の出品を多めにするか (純関数)。戻り {push, reasons, wd_counts}。"""
+    wd = "月火水木金土日"
+    since = today - dt.timedelta(days=days)
+    cnt = {k: 0 for k in wd}
+    for x in sales:
+        if since <= x["date"] < today:
+            cnt[wd[x["date"].weekday()]] += 1
+    total = sum(cnt.values())
+    tom = wd[(today + dt.timedelta(days=1)).weekday()]
+    reasons = []
+    avg = total / 7 if total else 0
+    if avg and cnt[tom] >= PUSH_RATIO * avg:
+        reasons.append(f"明日は{tom}曜 = 直近{days}日で注文が多い曜日 ({cnt[tom]}件 / {total}件)")
+    soon = [e for e in (events or []) if e["date"] <= (today + dt.timedelta(days=2)).isoformat()]
+    for e in soon:
+        reasons.append(f'{int(e["date"][5:7])}/{int(e["date"][8:])} [{e["country"]}] {e["name"]}')
+    push = bool(reasons)
+    if push and listable is not None and listable <= 0:
+        reasons.append("ただし出せる PSA の候補が無い")
+    return {"push": push, "reasons": reasons, "wd_counts": cnt, "tomorrow": tom, "total": total}
 
 
 COMMENTS_PATH = r"C:/dev/iMak_data/hq/pdca_ai_comments.json"
@@ -660,6 +690,12 @@ def main():
     except Exception as e:                                     # noqa: BLE001
         print(f"  ⚠ 地元の出来事を出せず: {type(e).__name__}")
     print(f"🗓 この先7日の US/UK/AU/CA の出来事: {len(ev)}件")
+    tp = None
+    try:
+        tp = tonight_plan(sales_rows(rows), today, ev, (hv or {}).get("listable"))
+        print(f"🌙 今夜の出品: {'多め' if tp['push'] else 'いつもどおり'} / 理由 {len(tp['reasons'])}件 {tp['reasons'][:3]}")
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 今夜の出品を決められず: {type(e).__name__}")
     of, of_err = None, ""
     try:
         of = offer_counts(offer_mail_dates(), today)
@@ -685,6 +721,7 @@ def main():
             print(f"  ⚠ 一言の材料の一部を作れず: {type(_e).__name__}")
         facts["recent_comments"] = _recent_comments()
         facts["local_events_next7"] = ev
+        facts["tonight_listing_plan"] = tp
         ai_text, ai_yen, ai_err = ai_comment(facts)
         if ai_text and not a.dry_run:
             _save_comment(today, ai_text)

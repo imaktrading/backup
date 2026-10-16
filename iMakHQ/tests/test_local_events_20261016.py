@@ -32,3 +32,13 @@ def test_mail_subject_is_daily_report():
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "pdca_daily_mail.py"),
                encoding="utf-8").read()
     assert 'subject = (f"Daily Report ' in src and "local_events_next7" in src
+
+
+def test_tonight_plan_pushes_before_strong_weekday():
+    """2026-10-16 ユーザー「今朝の日報に一言あると、夕方に出品を頑張る段取りが組める」— 一言の材料"""
+    import pdca_daily_mail as M
+    d = dt.date
+    sales = [{"date": d(2026, 10, 10)}] * 6 + [{"date": d(2026, 10, 6)}]        # 土曜 6件・火曜 1件
+    tp = M.tonight_plan(sales, d(2026, 10, 16), [])                           # 金曜の朝 → 明日は土曜
+    assert tp["push"] and "土曜" in tp["reasons"][0]
+    assert not M.tonight_plan(sales, d(2026, 10, 13), [])["push"]             # 火曜の朝 → 明日は水曜
