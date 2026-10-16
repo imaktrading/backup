@@ -630,6 +630,49 @@ def confirmed_product_id(cert, path=VERIFIED_CERTS_PATH):
     return pid or None
 
 
+def gundam_special_reprint(brand, card_number, subject, variety, db_rows=None, lookup_fn=None):
+    """ガンダムの SPECIAL 再録 (元の番号のまま別の弾に入った物) をカタログから1件だけ引く。引けなければ None。
+
+    条件 (全部そろった時だけ): ラベルの Variety か Subject が SPECIAL / 弾の記号がブランドから取れる /
+    product_id が「<元の番号>_<弾>_SP」/ 名前が Subject から SPECIAL を除いた物と一致 / 元の番号の下3桁 = PSA の番号。
+    2件以上・0件は None (推測で選ばない)。db_rows / lookup_fn はテスト用。
+    """
+    u_sub = (subject or "").upper()
+    if "SPECIAL" not in (variety or "").upper() and not u_sub.endswith(" SPECIAL"):
+        return None
+    try:
+        set_code = catalog_psa.extract_set_code_from_brand_gundam(brand)
+    except Exception:
+        set_code = None
+    num = re.sub(r"\D", "", str(card_number or ""))
+    if not set_code or not num:
+        return None
+    name = re.sub(r"\s+SPECIAL$", "", u_sub).strip()
+    if db_rows is None:
+        try:
+            import sqlite3
+            con = sqlite3.connect("file:C:/dev/iMak_data/catalog/products.sqlite?mode=ro", uri=True)
+            db_rows = con.execute("SELECT product_id, name FROM products WHERE category='gundam_tcg' "
+                                  "AND product_id LIKE ?", (f"%{set_code}%SP%",)).fetchall()
+            db_rows = [r for r in db_rows if f"_{set_code}_SP" in r[0]]
+        except Exception:
+            return None
+    hits = [pid for pid, nm in db_rows
+            if f"_{set_code}_SP" in pid and (nm or "").upper().strip() == name
+            and re.match(r"^[A-Z]+\d*-(\d+)", pid) and re.match(r"^[A-Z]+\d*-(\d+)", pid).group(1)[-3:] == num.zfill(3)[-3:]]
+    print(f"    🔎 ガンダム SPECIAL 再録: {set_code} #{num} {name} → 当たり {len(hits)}件 {hits[:2]}")
+    if len(hits) != 1:
+        return None
+    try:
+        if lookup_fn is None:
+            import api as _api
+            lookup_fn = _api.lookup
+        rec = lookup_fn("gundam_tcg", hits[0])
+        return catalog_psa._to_legacy_dict_gundam(rec) if rec else None
+    except Exception:
+        return None
+
+
 def confirmed_catalog_record(cert, category, path=VERIFIED_CERTS_PATH, lookup_fn=None):
     """確定済み product_id を catalog で引き直したレコード。引けなければ None。
 
@@ -2559,6 +2602,12 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         #   Variety が取れていない古いキャッシュでも、ページの行末から除いたレアリティ (LabelRarity) を渡す
         gd_card = catalog_psa.lookup_gundam(brand, card_number, subject,
                                             variety=(data.get('Variety') or data.get('LabelRarity') or ''))
+        if not gd_card:
+            # ★2026-10-16 (B-20261016-010・カタログの見立て): GD05 等の「SPECIAL」は元の弾の番号のまま再録され、
+            #   カタログの行は <元の番号>_<弾>_SP… (例 ST01-011_GD05_SP_dummy_EN_260611)。番号だけ引くと同じ弾の
+            #   別カード (GD05-011 カラミティ) に当たり名前不一致で落ちる。今の引き方が引けなかった時だけ、
+            #   ラベルが SPECIAL・弾の記号・名前・番号が全部合う行が1つだけの時にそれを使う
+            gd_card = gundam_special_reprint(brand, card_number, subject, data.get('Variety') or '')
         if gd_card:
             _catalog_hit = True
             _catalog_pid = gd_card.get("card_id") or gd_card.get("product_id") or ""
