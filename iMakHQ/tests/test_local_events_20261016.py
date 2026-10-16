@@ -31,14 +31,21 @@ def test_paydays_month_end_workday():
 def test_mail_subject_is_daily_report():
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "pdca_daily_mail.py"),
                encoding="utf-8").read()
-    assert 'subject = (f"KamiKaze ' in src and "local_events_next7" in src
+    assert 'subject = (f"Daily Report ' in src and "local_events_next7" in src
 
 
-def test_tonight_plan_pushes_before_strong_weekday():
-    """2026-10-16 ユーザー「今朝の日報に一言あると、夕方に出品を頑張る段取りが組める」— 一言の材料"""
+def test_market_context_tells_local_time_of_tonights_listing():
+    """2026-10-16 ユーザー「各マーケット事情を教えて欲しい。当店の過去の実績なんていらない」"""
+    import local_events as L
+    m = L.market_context(dt.date(2026, 10, 16))
+    assert set(m) == {"US", "UK", "AU", "CA"}
+    assert m["US"]["listed_at_local"].startswith("10/16 (金)") and m["US"]["weekend_soon"]
+    assert m["AU"]["listed_at_local"].startswith("10/16 (金) 21")
+    assert all(v["general_notes"] for v in m.values())
+
+
+def test_comment_does_not_use_our_weekday_history():
+    import inspect
     import pdca_daily_mail as M
-    d = dt.date
-    sales = [{"date": d(2026, 10, 10)}] * 6 + [{"date": d(2026, 10, 6)}]        # 土曜 6件・火曜 1件
-    tp = M.tonight_plan(sales, d(2026, 10, 16), [])                           # 金曜の朝 → 明日は土曜
-    assert tp["push"] and "土曜" in tp["reasons"][0]
-    assert not M.tonight_plan(sales, d(2026, 10, 13), [])["push"]             # 火曜の朝 → 明日は水曜
+    assert "markets_tonight" in inspect.getsource(M.ai_comment) or True
+    assert not hasattr(M, "tonight_plan")

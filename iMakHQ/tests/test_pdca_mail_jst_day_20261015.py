@@ -57,7 +57,7 @@ def test_insight_facts_compares_weeks_and_lists_losses(monkeypatch):
     assert f["sales_last7"] == {"n": 2, "avg_profit": 2000} and f["sales_prev7"]["n"] == 1   # 10/3 は前の7日 (10/1〜7)
     assert [x["title"] for x in f["month_loss_sales"]] == ["A"]
     assert f["month_provisional_ship_total"] == 4000
-    assert f["month_by_country"]["US"] == {"n": 2, "profit": 8000}
+    assert "month_by_country" not in f and "month_by_weekday" not in f   # 当店の実績の偏りは渡さない (2026-10-16)
 
 
 def test_comment_prompt_forbids_restating():

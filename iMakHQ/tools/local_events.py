@@ -88,3 +88,41 @@ def upcoming(today, days=7):
         seen.add((d, c, n))
         out.append({"date": d.isoformat(), "country": c, "name": n, "note": note})
     return out
+
+
+# ── 各マーケットの事情 (2026-10-16 ユーザー「各マーケット事情を教えて欲しい。当店の過去の実績なんていらない」) ──
+# ★ここに書くのは一般に言われていること (eBay や各国の買い物の傾向)。うちの数字では測っていない
+MARKETS = {
+    "US": {"tz": "America/New_York", "label": "US (東部)",
+           "notes": ["週末と平日の夜に閲覧が増え、日曜の夜が一番多いと言われる", "給料日は15日・月末、隔週金曜の会社も多い",
+                     "感謝祭からサイバーマンデーが年で一番の買い物の時期"]},
+    "UK": {"tz": "Europe/London", "label": "UK",
+           "notes": ["日曜の夜が一番見られると言われる", "給料日は月末の平日が多い (月末の週末は財布が緩む)",
+                     "ボクシングデー (12/26) からの年末セール"]},
+    "AU": {"tz": "Australia/Sydney", "label": "AU (シドニー)",
+           "notes": ["季節が逆 (10〜11月は春)", "給料日は隔週の木曜が多いと言われる", "11月のクリックフレンジー・ブラックフライデーでネットの買い物が増える"]},
+    "CA": {"tz": "America/Toronto", "label": "CA (トロント)",
+           "notes": ["週末と夜に閲覧が増える (US とほぼ同じ)", "給料日は隔週金曜・月末が多い", "ボクシングデー (12/26) のセール"]},
+}
+_FALLBACK_OFFSET = {"America/New_York": -4, "Europe/London": 1, "Australia/Sydney": 11, "America/Toronto": -4}
+LISTING_HOUR_JST = 19          # 夕方の出品が公開される頃 (日本時間)
+
+
+def market_context(today, hour_jst=LISTING_HOUR_JST):
+    """今夜 (today の hour_jst 時) に出した出品が、各マーケットで何曜日の何時に並ぶか + その国の今後2日の出来事 + 一般的な事情。"""
+    jst = dt.timezone(dt.timedelta(hours=9))
+    t = dt.datetime.combine(today, dt.time(hour_jst), jst)
+    ev = upcoming(today, 3)
+    out = {}
+    for k, m in MARKETS.items():
+        try:
+            from zoneinfo import ZoneInfo
+            lt = t.astimezone(ZoneInfo(m["tz"]))
+        except Exception:                                      # noqa: BLE001 時差の表が無い時は夏時間の差で
+            lt = t.astimezone(dt.timezone(dt.timedelta(hours=_FALLBACK_OFFSET[m["tz"]])))
+        wd = "月火水木金土日"[lt.weekday()]
+        out[k] = {"market": m["label"], "listed_at_local": f"{lt:%m/%d} ({wd}) {lt:%H:%M}",
+                  "weekend_soon": lt.weekday() >= 4,
+                  "events_next_2_days": [e for e in ev if e["country"] in (k, "ALL")],
+                  "general_notes": m["notes"]}
+    return out
