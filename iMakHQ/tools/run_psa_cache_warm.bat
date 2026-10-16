@@ -37,6 +37,10 @@ REM   so the backlog must reach 0 every night (10/2: 301 candidates, 33 left aft
 python -u psa_cache_warm.py --limit 200 >> "%LOG%" 2>&1
 python -u C:/dev/iMak/iMakHQ/tools/night_step.py psawarm psa_cache_warm --done %errorlevel% >> "%LOG%" 2>&1
 :skip1
+REM 2026-10-16: right after the prefetch, look up every waiting PSA row in the catalog the same way the listing does,
+REM   and send only the new misses to the catalog (one request per night), so the catalog is filled before
+REM   the next day's visual check. User: "do it during the night" / "KamiKaze work is mainly the visual check".
+python -u C:/dev/iMak/iMakHQ/tools/psa_preflight_nightly.py >> "%LOG%" 2>&1
 python -u C:/dev/iMak/iMakHQ/tools/night_step.py psawarm --end >> "%LOG%" 2>&1
 echo [end] %date% %time% >> "%LOG%"
 endlocal
