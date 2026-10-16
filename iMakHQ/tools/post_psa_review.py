@@ -1061,7 +1061,7 @@ def search_candidates(category, query, brand="", limit=30):
             "SELECT product_id FROM products WHERE category=? AND ("
             "  upper(product_id) LIKE ? OR upper(ifnull(name,'')) LIKE ?"
             "  OR upper(ifnull(name_en,'')) LIKE ?"
-            "  OR (? != '' AND upper(json_extract(specs,'$.card_number_text')) = upper(?))) ORDER BY product_id LIMIT ?",
+            "  OR (? != '' AND ltrim(upper(json_extract(specs,'$.card_number_text')),'0') = ltrim(upper(?),'0'))) ORDER BY product_id LIMIT ?",
             (category, like, like, like, printed, printed, int(limit)))
         rows = [r[0] for r in cur.fetchall()]
     except Exception:                                          # noqa: BLE001
