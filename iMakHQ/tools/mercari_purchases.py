@@ -121,7 +121,6 @@ def _open_quiet(url, words=("メルカリ", "mercari")):
     import ctypes
     import subprocess
     from ctypes import wintypes
-    subprocess.Popen([EDGE, "--new-window", url])
     u32 = ctypes.windll.user32
     found = []
 
@@ -134,10 +133,15 @@ def _open_quiet(url, words=("メルカリ", "mercari")):
             if any(w.lower() in b.value.lower() for w in words):
                 found.append(h)
         return True
+    # ★2026-10-17: 開く前からある同じ題名の窓 (人が見ている窓) は数えない・動かさない・閉じない
+    u32.EnumWindows(_cb, 0)
+    before = set(found)
+    subprocess.Popen([EDGE, "--new-window", url])
     for _ in range(40):                                        # 最大 10秒、窓が出るのを待つ
         time.sleep(0.25)
         found.clear()
         u32.EnumWindows(_cb, 0)
+        found[:] = [h for h in found if h not in before]
         if found:
             for h in found:
                 # 最小化・画面の外だと「見えていない窓」として一覧を描かず 0件で返る (実測)。

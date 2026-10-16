@@ -19,3 +19,11 @@ def test_fetch_closes_its_window_on_timeout(monkeypatch):
     with pytest.raises(RuntimeError):
         C.fetch(wait=3, sleep=lambda s: None, now=lambda: dt.datetime(2026, 10, 17, 4, 30))
     assert closed == [111]
+
+
+def test_open_quiet_ignores_windows_that_existed_before():
+    """人が開いていた CPaSS の窓まで閉じていた (2026-10-17)。開く前からある窓は返さない"""
+    import inspect
+    import mercari_purchases as MP
+    src = inspect.getsource(MP._open_quiet)
+    assert "before = set(found)" in src and src.index("before = set(found)") < src.index("subprocess.Popen")
