@@ -132,7 +132,12 @@ def _is_benign_url_swap(mismatch: dict) -> bool:
     """
     actual = (mismatch.get("actual") or "").strip()
     expected = (mismatch.get("expected_url") or "").strip()
-    return bool(actual) and actual != expected and actual.startswith(("http://", "https://"))
+    # ★ 2026-10-16 ユーザー「なら、メールいらないのでは？」: セルが空 = 消したかった売切の URL を
+    #   誰か (出品くん・HQ) が先に消していた = 結果は同じで、人がすることは無い → 告知しない。
+    #   告知するのは URL でない値 (壊れた値) が入っている時だけ。
+    if not actual:
+        return True
+    return actual != expected and actual.startswith(("http://", "https://"))
 
 
 def _should_emit_backup_clear_alert(held_max: int, mismatch_n: int) -> bool:

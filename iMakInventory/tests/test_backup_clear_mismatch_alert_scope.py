@@ -33,11 +33,11 @@ def test_hq_url_swap_is_benign():
 
 
 @pytest.mark.offline
-def test_empty_cell_is_not_benign():
-    """セルが空 = 差替ではない (誰かが消した/取りこぼし) → 告知対象のまま."""
+def test_empty_cell_is_benign():
+    """2026-10-16 ユーザー判断: セルが空 = 売切の URL を誰かが先に消した = 結果は同じ → 告知しない."""
     m = {"row_index": 1, "slot": 0,
          "expected_url": "https://jp.mercari.com/item/m1", "actual": ""}
-    assert rc._is_benign_url_swap(m) is False
+    assert rc._is_benign_url_swap(m) is True
 
 
 @pytest.mark.offline
