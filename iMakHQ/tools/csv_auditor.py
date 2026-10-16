@@ -1964,6 +1964,7 @@ def _pdca_prune_resolved(dry_run):
     """
     if dry_run:
         return 0
+    con = None
     try:
         import pdca_store as _pdca
         con = _pdca.connect()
@@ -1976,10 +1977,19 @@ def _pdca_prune_resolved(dry_run):
         #   後ろの _pdca_accumulate でしか閉じていなかったので、翌日の digest に pending のまま載っていた
         synced = _pdca.sync_processed(con, CATALOG_REQ_DIR, ts=_today())
         print(f"  🧹 カタログ処理済を先に閉じた: {synced}件")
+        con.commit()
         return pr.get("pruned") or 0
     except Exception as e:                                     # noqa: BLE001
         print(f"  ⚠️ PDCA prune(先出し) skip: {type(e).__name__}: {e}")
         return 0
+    finally:
+        # ★2026-10-16 (B-20261016-006・Act 提案): 閉じずに戻っていたので、書き込みの鍵を握ったまま後ろの
+        #   _pdca_accumulate が「database is locked」で毎回抜けていた (10/12〜 9走行中8走行・まとめ依頼が 10/5 から0本)
+        if con is not None:
+            try:
+                con.close()
+            except Exception:                                  # noqa: BLE001
+                pass
 
 
 def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku=None,
