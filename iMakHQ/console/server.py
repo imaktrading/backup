@@ -368,7 +368,9 @@ def count_keys_for(badge):
              # ★2026-10-17 ユーザー「押されて処理が完了した後で、自分のボタンの件数だけを数えなおせばいい」
              "psa_gate": ["psa_gate", "restock_build", "restock_wb"],
              "restock_build": ["restock_build", "restock_wb"], "restock_wb": ["restock_wb"],
-             "offer_calc": ["offer"], "order_sync": []}
+             "offer_calc": ["offer"], "order_sync": [],
+             # ★2026-10-17 状態の1行の件数 (時刻を押した時にそれだけ数え直す)
+             "offer_send": ["offer_send"], "psa_new": ["psa_new"]}
     return table.get(b)
 
 
@@ -605,7 +607,10 @@ def get_jobs():
     # ★2026-10-05: 新規に出せる PSA の枚数 (今日やることの状態の1行に出す)
     psa_new = (STATE["counts"] or {}).get("psa_new") or {}
     offer_send = (STATE["counts"] or {}).get("offer_send") or {}     # ★2026-10-09 オファーを送れる件数
-    return {"jobs": jobs, "psa_new": psa_new, "offer_send": offer_send, "counts_at": STATE["counts_at"], "counting": STATE["counting"],
+    _by = STATE.get("counts_at_by") or {}
+    return {"jobs": jobs, "psa_new": psa_new, "offer_send": offer_send,
+            "psa_new_at": _by.get("psa_new") or STATE["counts_at"], "offer_send_at": _by.get("offer_send") or STATE["counts_at"],
+            "counts_at": STATE["counts_at"], "counting": STATE["counting"],
             "counts_error": STATE["counts_error"]}
 
 

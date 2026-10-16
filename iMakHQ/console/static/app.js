@@ -413,14 +413,14 @@
     var pnChip = pn ? (pn.n == null ? ["warn", "新規に出せる PSA 数えられない", ""]
                                     // ★2026-10-15 ユーザー「意味不明な数字を出すな」: 行の数 (194枚) ではなく、新しく出せるカードの種類
                                     : (pn.cards != null
-                                       ? ["", "新規に出せる PSA <b>" + pn.cards + "種類</b>" + (pn.unknown ? " (+カード不明 " + pn.unknown + ")" : ""), ""]
+                                       ? ["", "新規に出せる PSA <b>" + pn.cards + "種類</b>" + (pn.unknown ? " (+カード不明 " + pn.unknown + ")" : "") + at({ kind: "psa_new", counted_at: STRIP.psaNewAt }), ""]
                                        : ["", "新規に出せる PSA <b>" + pn.n + "行</b>", ""])) : null;
     // ★2026-10-09 ユーザー「新規に出せる PSA の横にして。送れる件数を表示して」→「オファー0件の横に新規に出せる PSA、
     //   注文 仕入れ待ちの横にオファーを送れる件数を移動」: 並びは オファー → 新規に出せる PSA → 注文 → オファーを送れる
     var os_ = STRIP.offerSend;
     var osb = buttons.filter(function (b) { return b.label.indexOf("オファーを送る (") >= 0; })[0];
     var osChip = (os_ || osb) ? (os_ && os_.n == null ? ["warn", "オファーを送れる 数えられない", jobBtn(osb, "10件送る")]
-                       : ["", "オファーを送れる <b>" + (os_ ? os_.n : "—") + "件</b> (8%引き・1回10件)" +
+                       : ["", "オファーを送れる <b>" + (os_ ? os_.n : "—") + "件</b>" + at({ kind: "offer_send", counted_at: STRIP.offerSendAt }) + " (8%引き・1回10件)" +
                           (os_ && os_.sent ? " · 送った " + os_.sent + "件 → 成約 <b>" + (os_.won || 0) + "件</b>" +
                            (os_.won ? " ($" + os_.won_usd + ")" : "") : ""),
                           os_ && os_.n ? jobBtn(osb, "10件送る") : ""]) : null;
@@ -544,7 +544,8 @@
     jobs = {};
     jobList.forEach(function (j) { jobs[j.kind] = j; });
     STRIP.psaNew = d.psa_new && Object.keys(d.psa_new).length ? d.psa_new : null;
-    STRIP.offerSend = d.offer_send && Object.keys(d.offer_send).length ? d.offer_send : null;   // ★2026-10-09   // ★2026-10-05 新規に出せる PSA
+    STRIP.offerSend = d.offer_send && Object.keys(d.offer_send).length ? d.offer_send : null;
+    STRIP.offerSendAt = d.offer_send_at || ""; STRIP.psaNewAt = d.psa_new_at || "";   // ★2026-10-17 数えた時刻   // ★2026-10-09   // ★2026-10-05 新規に出せる PSA
     var at = d.counts_at ? d.counts_at.replace("T", " ").slice(5, 16) : "まだ数えていません";
     $("shop-at").textContent = (d.counting ? "数え直し中… " : "") + at + " の件数" + (d.counts_error ? " (失敗)" : "");
     // ★2026-09-25: 数え直しが240秒で打ち切られ、昨日の件数 (入れ替え 11件・実際は 0件) が出たままだった。
