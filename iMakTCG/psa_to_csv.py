@@ -2340,8 +2340,13 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             #   (台帳を先に見ると、catalog が直った後も古い人の判断で上書きしてしまう)。
             _don_hit = confirmed_catalog_record(cert_number, "one_piece_tcg")
             if _don_hit:
+                # ★2026-10-16 (B-20261016-007): api.lookup の生の行 (specs が入れ子) を、lookup_don と同じ形に直して流す。
+                #   そのままだと type_en / rarity_en / color_en が無く、Type が空でセルフチェックで落ちていた (cert 158257739)
+                _raw_pid = _don_hit.get("product_id")
+                if "type_en" not in _don_hit and hasattr(catalog_psa, "_to_legacy_dict"):
+                    _don_hit = catalog_psa._to_legacy_dict(_don_hit)
                 print(f"    🎯 DON: 目視確定済みの product_id を再利用 "
-                      f"(cert {cert_number} → {_don_hit.get('product_id')})")
+                      f"(cert {cert_number} → {_raw_pid}) / Type={_don_hit.get('type_en') or '空'}")
         if _don_hit:
             subject = _q_subj
             _don_record = _don_hit   # 本流(lookup_one_piece)は DON を解決できないので record を持ち回る
