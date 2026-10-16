@@ -1554,7 +1554,7 @@ def _generate_html(targets: list[dict]) -> None:
         # ★2026-09-16: 候補に無い時は番号で探し直す (UT の目視と同じ口)
         # ★2026-09-22: 候補一覧の外に出す。一覧が閉じていると欄が見えず使えなかった
         html.append('<div class=findbox>'
-                    f'<input id="q_{cert}" class="findq" placeholder="候補に無い時: カタログID (例 SV8a-218) か カードの番号 (例 001/022)" '
+                    f'<input id="q_{cert}" class="findq" placeholder="候補に無い時: カードに刷ってある番号 (例 037/059) か カード名 (例 ゾロアークBREAK / ZOROARK BREAK)" '
                     f'onkeydown="if(event.key===\'Enter\'){{findCands(\'{cert}\');}}">'
                     f'<button class="btn btn-find" onclick="findCands(\'{cert}\')">探す</button>'
                     f'<span id="qmsg_{cert}" class=findmsg></span></div>')
