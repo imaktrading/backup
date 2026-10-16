@@ -22,7 +22,8 @@ def test_found_option_is_a_selectable_radio_of_same_group():
 
 def test_psa_review_find_box_is_outside_collapsed_list():
     s = SRC("post_psa_review.py")
-    assert s.index("class=findbox") < s.index('class=candidates-toggle')
+    # ★2026-10-16 開閉ボタンは答えるボタンの行の右端に移った。見るのは「探す欄が閉じる箱 (cands_) の外にある」こと
+    assert s.index("class=findbox") < s.index('<div id="cands_{cert}"')
     assert 'document.getElementById("cands_" + cert).classList.add("show")' in s
 
 

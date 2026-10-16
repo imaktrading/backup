@@ -1218,7 +1218,8 @@ def _generate_html(targets: list[dict]) -> None:
         #   ★内側スクロール/sticky は 2026-07-28 にユーザーが不可と判定済 → 付けない。
         #   4枚 (300px) + 隙間 = 約1,300px なので通常の画面幅に収まる。
         '.confirm .col{flex:0 0 auto;display:flex;flex-direction:column;align-items:center}',
-        '.confirm .label{font-size:18px;color:#9fffa0;font-weight:bold;margin-bottom:6px}',
+        # ★2026-10-16 ユーザー「🛒 仕入元 (現物)〜catalog: … の文字も小さく」
+        '.confirm .label{font-size:13px;color:#9fffa0;font-weight:bold;margin-bottom:4px}',
         '.confirm img{max-width:300px;max-height:430px;border:1px solid #444;border-radius:4px}',
         '.confirm-q{font-size:24px;color:#ffd700;font-weight:bold;margin:8px 0;text-align:center;align-self:center}',
         '.no-expected{background:#3a1f1f;border-color:#f44336;color:#ffaaaa}',
@@ -1318,6 +1319,8 @@ def _generate_html(targets: list[dict]) -> None:
         '  document.getElementById("btn_" + cert + "_" + choice).classList.add("active");',
         '  if (choice === "NG") {',
         '    document.getElementById("cands_" + cert).classList.add("show");',
+        '  } else if (choice === "OK") {',          # ★2026-10-16 ユーザー「合ってるを押したら候補閉じて」
+        '    document.getElementById("cands_" + cert).classList.remove("show");',
         '  }',
         '  copySame(cert);',
         '  updateStatus();',
@@ -1526,6 +1529,9 @@ def _generate_html(targets: list[dict]) -> None:
         html.append('</select>')
         html.append(f'<input id="note_{cert}" class="note" placeholder="メモ (任意)" '
                     f'oninput="setNote(\'{cert}\', this.value)">')
+        # ★2026-10-16 ユーザー「▼ 候補 は合ってるボタンの行の一番右に。1行もったいない」
+        html.append(f'<span id="ctog_{cert}" class=candidates-toggle style="margin:0 0 0 auto" data-n="{len(t["candidates"])}" '
+                    f'onclick="toggleCands(\'{cert}\')">▼ 候補 {len(t["candidates"])} 件 表示/非表示</span>')
         html.append('</div>')
 
         # promo (配布元) 欄: promo 系カードのみ。PSA ラベル文字を見て OK/編集/消す(空=promo無し)。
@@ -1558,8 +1564,6 @@ def _generate_html(targets: list[dict]) -> None:
                     f'onkeydown="if(event.key===\'Enter\'){{findCands(\'{cert}\');}}">'
                     f'<button class="btn btn-find" onclick="findCands(\'{cert}\')">探す</button>'
                     f'<span id="qmsg_{cert}" class=findmsg></span></div>')
-        html.append(f'<div id="ctog_{cert}" class=candidates-toggle data-n="{len(t["candidates"])}" '
-                    f'onclick="toggleCands(\'{cert}\')">▼ 候補 {len(t["candidates"])} 件 表示/非表示</div>')
         cls = "candidates show" if is_open else "candidates"
         html.append(f'<div id="cands_{cert}" class="{cls}">')
         html.append(f'<div class=grid id="grid_{cert}">')
