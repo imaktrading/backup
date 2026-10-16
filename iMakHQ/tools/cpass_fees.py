@@ -57,15 +57,20 @@ def save_from_extension(body, now=None, path=None):
 def fetch(wait=WAIT_SEC, opener=None, sleep=time.sleep, now=dt.datetime.now):
     """ポータルを Edge で開いて、拡張が控えを書くのを待つ (I/O)。戻り: {追跡番号: 円}。返事が無ければ例外。"""
     asked = now().replace(microsecond=0)
+    closer = None
     if opener is None:
         import mercari_purchases as MP                         # 別窓で開いて画面の右下の端に寄せる (前に出さない)
         # ★2026-10-15 拡張の「前に出さない窓」(ext_open) は、試すと窓は開いたが送料が届かなかった (18:19)。
         #   原因が分かるまで今までの開き方に戻す
         opener = lambda u: MP._open_quiet(u, ("CPaSS", "Orange Connex", "SpeedPAK", "orangeconnex"))  # noqa: E731
-    opener(URL)
+        closer = MP.close_windows
+    opened = opener(URL)
     for _ in range(int(wait / 3)):
         sleep(3)
         d = load()
         if d.get("at") and dt.datetime.fromisoformat(d["at"]) >= asked:
             return {t: v["yen"] for t, v in d["fees"].items()}
+    # ★2026-10-17: 返事が無い (CPaSS がログアウト等) 時は、開いた窓を自分で閉じる (開きっぱなしにしない)
+    n = closer(opened) if closer and opened else 0
+    print(f"  📦 SpeedPAK の送料が届かず、開いた CPaSS の窓を閉じた: {n}枚")
     raise RuntimeError("SpeedPAK の送料が届きません (Edge で CPaSS にログインしているか・拡張 4.0 以上か)")

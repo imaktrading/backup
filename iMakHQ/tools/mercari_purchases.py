@@ -144,7 +144,24 @@ def _open_quiet(url, words=("メルカリ", "mercari")):
                 # 画面の右下に 8px だけ見える位置へ (見えている扱いのまま・前にも出さない)
                 sw, sh = u32.GetSystemMetrics(0), u32.GetSystemMetrics(1)
                 u32.SetWindowPos(h, 0, sw - 8, sh - 8, 1280, 1400, 0x0010 | 0x0004)   # NOACTIVATE | NOZORDER
-            return
+            return list(found)
+    return []
+
+
+def close_windows(handles):
+    """_open_quiet が開いた窓だけを閉じる (I/O)。★2026-10-17: CPaSS がログアウトしていると拡張が読めず、
+    夜 4:30 に開いた「サインイン CPaSS」の窓が開きっぱなしになっていた (ユーザー「誰か CPaSS の窓を開けてそのまま」)。"""
+    import ctypes
+    u32 = ctypes.windll.user32
+    n = 0
+    for h in handles or []:
+        try:
+            if u32.IsWindow(h):
+                u32.PostMessageW(h, 0x0010, 0, 0)      # WM_CLOSE
+                n += 1
+        except Exception:                              # noqa: BLE001
+            pass
+    return n
 
 
 def fetch_purchases(wait=WAIT_SEC, opener=None, sleep=time.sleep, now=dt.datetime.now):
