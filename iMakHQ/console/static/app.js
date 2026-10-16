@@ -363,7 +363,7 @@
         var head = '<span class="tag"><span class="pg it" data-it="PSA">PSA</span><span class="gp">補URL ③</span></span>' +
           '<span class="nm">' + esc(x[1]) + (j ? kg(j) : "") + "</span>";
         if (!j) return '<div class="task off"' + st + ">" + head + '<span class="row"><span class="n">—</span><span class="else">まだ数えていません</span></span></div>';
-        if (!j.n) return '<div class="task off"' + st + ">" + head + '<span class="row"><span class="n">0<small>件</small></span><span class="else">残りなし</span></span></div>';
+        if (!j.n) return '<div class="task off"' + st + ">" + head + '<span class="row"><span class="n">0<small>件</small></span>' + at(j) + '<span class="else">残りなし</span></span></div>';
         return openTag(j, "task", st, ' title="' + esc(tipOf(j)) + '"') + head +
           '<span class="row"><span class="n">' + num(j) + "<small>件</small></span>" + at(j) + goMark(j) + "</span>" + closeTag(j);
       }).join("");
