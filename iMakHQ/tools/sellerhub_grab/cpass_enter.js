@@ -27,8 +27,20 @@
       catch (e) { res({}); }
     });
     if (!link) {                                               // ログインの画面などに飛ばされた (eBay のログインが要る)
-      await api("/api/cpass/fees", { fees: {}, debug: { stage: "CPaSS に入口が無い", url: location.href,
-        text: (document.body ? document.body.innerText : "").replace(/\s+/g, " ").slice(0, 800) } });
+      // ★2026-10-17 ユーザー「再発しないの？」→ CPaSS のログインは時間で切れる。ログイン画面なら
+      //   「Log in with eBay account」を1回だけ自動で押す (Edge の eBay のログインで入れる。戻り先はこの画面 #imak-ship)。
+      //   同じ頼み (imakShipAt) で2回目にまたここに来たら、押しても入れなかった = 人のログインが要る → 今まで通り知らせる
+      const ebayLogin = [...document.querySelectorAll("a, button, span, div")].filter(visible)
+        .find((e) => /^Log in with eBay account$/i.test(txt(e)) || /eBayアカウントでログイン/.test(txt(e)));
+      const { imakCpassLoginTried: tried = 0 } = await chrome.storage.local.get("imakCpassLoginTried");
+      if (ebayLogin && tried !== at) {
+        await chrome.storage.local.set({ imakCpassLoginTried: at });
+        chrome.runtime.sendMessage({ type: "log", msg: "CPaSS のログインが切れていたので eBay のアカウントで入り直す" });
+        (ebayLogin.closest("a, button") || ebayLogin).click();
+        return;
+      }
+      await api("/api/cpass/fees", { fees: {}, debug: { stage: ebayLogin ? "CPaSS に自動で入り直せない (人のログインが要る)" : "CPaSS に入口が無い",
+        url: location.href, text: (document.body ? document.body.innerText : "").replace(/\s+/g, " ").slice(0, 800) } });
       return;
     }
     // <a href> ならそのまま同じタブで移る (新しい窓を開かない)
