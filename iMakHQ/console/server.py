@@ -343,6 +343,7 @@ def _load_counts_cache():
         with open(COUNTS_CACHE, encoding="utf-8") as f:
             c = json.load(f)
         STATE["counts"], STATE["counts_at"] = c.get("d"), c.get("at")
+        STATE["counts_at_by"] = c.get("at_by") or {k: c.get("at") for k in (c.get("d") or {}) if not str(k).startswith("_")}
     except (OSError, ValueError):
         pass
 
@@ -398,6 +399,12 @@ def refresh_counts(wait=False, keys=None):
         if not isinstance(d, dict):
             raise RuntimeError(((r.stderr or "").strip().splitlines() or ["出力なし"])[-1][:120])
         at = datetime.datetime.now().isoformat(timespec="seconds")
+        # ★2026-10-17 ユーザー確定「各ボタンが自分の件数を責任を持って数える」: 項目ごとに「いつ数えたか」を持つ
+        _by = dict(STATE.get("counts_at_by") or {})
+        for _k in d:
+            if not str(_k).startswith("_"):
+                _by[_k] = at
+        STATE["counts_at_by"] = _by
         if keys:                                     # 一部だけ数え直した → 前の数字に上書きで混ぜる
             merged = dict(STATE["counts"] or {})
             merged.update(d)
@@ -406,7 +413,7 @@ def refresh_counts(wait=False, keys=None):
         STATE["counts_fresh"] = time.time()
         os.makedirs(os.path.dirname(COUNTS_CACHE), exist_ok=True)
         with open(COUNTS_CACHE, "w", encoding="utf-8") as f:
-            json.dump({"at": at, "d": d}, f, ensure_ascii=False)
+            json.dump({"at": at, "d": d, "at_by": STATE.get("counts_at_by") or {}}, f, ensure_ascii=False)
     except Exception as e:                                     # noqa: BLE001
         STATE["counts_error"] = "%s: %s" % (type(e).__name__, e)
     finally:
@@ -587,7 +594,10 @@ def get_jobs():
         info = summ.get(kind) or {"n": None, "state": "unknown", "note": "", "hold": 0}
         if kind == "order_sync":
             info = order_job_info(_load_order_status())
-        jobs.append({"kind": kind, "i": i, "label": label, "step": m.group(0) if m else "",
+        _ks = count_keys_for(kind) or []
+        _ats = [(STATE.get("counts_at_by") or {}).get(k) for k in _ks]
+        counted_at = min([a for a in _ats if a] or [STATE["counts_at"] or ""]) if _ks else (STATE["counts_at"] or "")
+        jobs.append({"kind": kind, "counted_at": counted_at, "i": i, "label": label, "step": m.group(0) if m else "",
                      "group": group_of(label), "tip": (s.get("tip") or "")[:400],
                      "runnable": runnable(s), "params": s.get("params") or [],
                      "ask_amount": bool(s.get("ask_amount")), "kagoya": is_remote(s, _remote_set()),
@@ -974,6 +984,28 @@ def _watcher_loop():
 OFFER_EVERY_SEC = 600
 
 
+NIGHT_RECOUNT_HOUR = 4          # ★2026-10-17 夜中に1回だけ全部数え直す (PC が空いている時・ユーザー確定)
+
+
+def night_recount_due(now, last_day, running):
+    """夜中の全部の数え直しをする時か (純関数)。4時台・今日まだ・走行中でない。"""
+    return now.hour == NIGHT_RECOUNT_HOUR and last_day != now.date().isoformat() and not running
+
+
+def _night_recount_loop():
+    last = None
+    while True:
+        try:
+            now = datetime.datetime.now()
+            if night_recount_due(now, last, bool((STATE.get("job") or {}).get("running"))):
+                last = now.date().isoformat()
+                _log("🌙 夜中の数え直し: 全部のボタンの件数を数え直します")
+                refresh_counts(wait=True)
+        except Exception:                                      # noqa: BLE001
+            pass
+        time.sleep(300)
+
+
 def _offer_loop():
     """オファーの件数だけ 10分おきに数え直す (eBay 1コール)。
 
@@ -1255,6 +1287,10 @@ def _run_worker(script, cmd=None):
     cmd = list(cmd or script["cmd"])
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1", **(script.get("env") or {}))
     _log("▶ %s  版 %s  (%s)" % (label, btn_ver(script) or "—", " ".join(cmd)))
+    # ★2026-10-17 ユーザー確定: 押した時にそのボタンの件数を数え直す (走行を待たせない・裏で)。終わった時も下で数え直す
+    _pk = [] if script.get("no_recount") else (count_keys_for(script.get("badge")) or [])
+    if _pk:
+        threading.Thread(target=refresh_counts, kwargs={"wait": True, "keys": _pk}, daemon=True).start()
     fh = path = None
     try:
         fh, path = cp._open_run_log(script["label"])
@@ -1642,6 +1678,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]})
             return self._json(404, {"error": "not found"})
         if u.path == "/api/refresh":
+            # ★2026-10-17: 件数をタップした時は、そのボタンの分だけ数え直す (kind)。無ければ今までどおり全部
+            _kind = str(body.get("kind") or "")
+            _keys = count_keys_for(_kind) if _kind else None
+            if _kind and _keys:
+                threading.Thread(target=refresh_counts, kwargs={"wait": True, "keys": _keys}, daemon=True).start()
+                _log("🔢 %s の件数だけ数え直します (%s)" % (_kind, ",".join(_keys)))
+                return self._json(200, {"ok": True, "keys": _keys})
             threading.Thread(target=refresh_counts, daemon=True).start()
             STATE["crew_at"] = 0                     # ホームは数え終わってから読む (refresh_counts)
             return self._json(200, {"ok": True})
@@ -1793,6 +1836,7 @@ def main():
     threading.Thread(target=get_home, daemon=True).start()
     threading.Thread(target=_watcher_loop, daemon=True).start()
     threading.Thread(target=_offer_loop, daemon=True).start()
+    threading.Thread(target=_night_recount_loop, daemon=True).start()
     threading.Thread(target=_btn_ver_loop, daemon=True).start()
     threading.Thread(target=adopt_orphan_run, daemon=True).start()
     srv = ThreadingHTTPServer((HOST, PORT), Handler)

@@ -79,6 +79,16 @@
   function job(kind) { return jobs[kind] || null; }
   function chip(j) { return '<span class="chip ' + esc(j.state) + '">' + esc(j.state === "hold" ? "止めている " + j.hold : (STATE_LABEL[j.state] || j.state)) + "</span>"; }
   function num(j) { return j.n == null ? "—" : Number(j.n).toLocaleString("ja-JP"); }
+  // ★2026-10-17 ユーザー確定「各ボタンが自分の件数を責任を持って数える」: 件数の横に数えた時刻。1時間より古いと赤。
+  //   押すとそのボタンの件数だけ数え直す (ボタン自体は押さない)
+  function at(j) {
+    if (!j || !j.counted_at) return "";
+    var t = new Date(j.counted_at), old = (Date.now() - t.getTime()) > 3600000;
+    var hm = ("0" + t.getHours()).slice(-2) + ":" + ("0" + t.getMinutes()).slice(-2);
+    var cls = old ? "cat old" : "cat";
+    var tip = (old ? "1時間より前の件数です。" : "") + hm + " に数えた件数。押すとこのボタンの件数だけ数え直します";
+    return "<i class='" + cls + "' data-recount='" + esc(j.kind) + "' title='" + esc(tip) + "'>" + hm + "</i>";
+  }
   // ★2026-10-03: 「🔁 売れた分を補充」は目視の無いボタン (在庫を1に戻すだけ) なのに、「補充」で「目視」と出ていた
   function verb(j) { return /売れた分/.test(j.label) ? "戻す" : /目視|確認|補充|入れ替え/.test(j.label) ? "目視" : /CSV/.test(j.label) ? "CSV" : /戻す/.test(j.label) ? "戻す" : "実行"; }
   function btn(j, hot, text) {
@@ -131,7 +141,7 @@
           return '<td class="pad' + (anyHot ? " hot" : "") + '"><div class="halves">' + js.map(function (j) {
             var hot = j.state === "todo";
             return openTag(j, "cell half", "", ' title="' + esc(tipOf(j)) + '"') +
-              '<span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" +
+              '<span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" + at(j) +
               '<span class="lb">' + esc(HALF_LABEL[j.kind] || "") + "</span>" +
               '<span class="act">' + goMark(j) + "</span>" + closeTag(j);
           }).join("") + "</div></td>";
@@ -144,7 +154,7 @@
         if (!j) return '<td class="pad"' + span + '><div class="cell na">この段は無し</div></td>';
         var hot = j.state === "todo";
         return '<td class="pad' + (hot ? " hot" : "") + '"' + span + '>' + openTag(j, "cell", "", ' title="' + esc(tipOf(j)) + '"') +
-          '<span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" +
+          '<span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" + at(j) +
           '<span class="meta">' + chip(j) + "</span>" +
           '<span class="act">' + goMark(j) + "</span>" + closeTag(j) + "</td>";
       }).join("");
@@ -177,7 +187,7 @@
     return openTag(j, "li" + (hot ? " hot" : ""), "", ' title="' + esc(tipOf(j)) + '"') +
       '<span class="t">' + esc(j.label) + kg(j) + "</span>" +
       '<span class="note">' + esc(INFO[j.kind] || j.note || "") + "</span>" +
-      '<span class="row"><span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" +
+      '<span class="row"><span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" + at(j) +
       chip(j) + goMark(j) + "</span>" + closeTag(j);
   }
 
@@ -207,7 +217,7 @@
       var hot = j.state === "todo";
       return openTag(j, "ht" + (hot ? " hot" : ""), "", ' title="' + esc(tipOf(j)) + '"') +
         '<span class="t">PSA ' + esc(x[1]) + '</span><span class="note">' + esc(x[2]) + '</span>' +
-        '<span class="row"><span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" +
+        '<span class="row"><span class="n ' + (hot ? "todo" : j.n ? "" : "zero") + '">' + num(j) + "</span>" + at(j) +
         chip(j) + goMark(j) + "</span>" + closeTag(j);
     }).join("");
   }
@@ -355,7 +365,7 @@
         if (!j) return '<div class="task off"' + st + ">" + head + '<span class="row"><span class="n">—</span><span class="else">まだ数えていません</span></span></div>';
         if (!j.n) return '<div class="task off"' + st + ">" + head + '<span class="row"><span class="n">0<small>件</small></span><span class="else">残りなし</span></span></div>';
         return openTag(j, "task", st, ' title="' + esc(tipOf(j)) + '"') + head +
-          '<span class="row"><span class="n">' + num(j) + "<small>件</small></span>" + goMark(j) + "</span>" + closeTag(j);
+          '<span class="row"><span class="n">' + num(j) + "<small>件</small></span>" + at(j) + goMark(j) + "</span>" + closeTag(j);
       }).join("");
       if (!list.length && !top) return "";
       return '<div class="lane" style="--pc:var(' + L[2] + ')"><h2>' + esc(L[1]) + " <small>" + list.length + "</small></h2>" +
@@ -363,7 +373,7 @@
           return openTag(j, "task", ' style="--gc:var(--g-' + esc(j.group) + ');--pc:var(' + L[2] + ')"', ' title="' + esc(tipOf(j)) + '"') +
             '<span class="tag"><span class="pg it" data-it="' + esc(itemOf(j)) + '">' + esc(itemOf(j)) + '</span><span class="gp">' + esc(tagOf(j)) + "</span></span>" +
             '<span class="nm">' + esc(shortName(j.label)) + kg(j) + "</span>" +
-            '<span class="row"><span class="n">' + num(j) + "<small>件</small></span>" + goMark(j) + "</span>" + closeTag(j);
+            '<span class="row"><span class="n">' + num(j) + "<small>件</small></span>" + at(j) + goMark(j) + "</span>" + closeTag(j);
         }).join("") + "</div></div>";
     }).join("");
     $("today-lanes").innerHTML = html || '<div class="card"><div class="empty">押さないと減らない残件はありません</div></div>';
@@ -850,6 +860,16 @@
       });
     });
   });
+  // ★2026-10-17 件数の横の時刻を押した時は、そのボタンの件数だけ数え直す (ボタンは動かさない)
+  document.addEventListener("click", function (e) {
+    var c = e.target.closest ? e.target.closest("[data-recount]") : null;
+    if (!c) return;
+    e.preventDefault(); e.stopPropagation();
+    c.textContent = "数え中…";
+    post("/api/refresh", { kind: c.getAttribute("data-recount") }).then(function () {
+      var n = 0, t = setInterval(function () { n++; refreshJobs(); if (n > 30) clearInterval(t); }, 5000);
+    });
+  }, true);
   $("today-strip").addEventListener("click", function (e) {
     var b = e.target.closest ? e.target.closest("button[data-act=refresh]") : null;
     if (b) $("btn-refresh").click();

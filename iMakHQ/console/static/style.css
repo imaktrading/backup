@@ -470,3 +470,7 @@ svg.agsp{display:block;width:120px;height:30px}
 .mconfirm.bad{border-color:var(--crit);background:var(--crit-soft)}
 
 .bver{display:inline-block;margin-left:6px;font:500 10px/16px var(--f-mono);color:var(--ink-3);vertical-align:1px;white-space:nowrap}
+
+/* ★2026-10-17 件数を数えた時刻 (押すとそのボタンだけ数え直す)・1時間より古いと赤 */
+.cat{font-style:normal;font:400 10px var(--f-ui);color:var(--ink-3);margin-left:6px;cursor:pointer;text-decoration:underline dotted}
+.cat.old{color:#b4442f;font-weight:600}
