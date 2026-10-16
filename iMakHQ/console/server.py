@@ -1692,7 +1692,8 @@ def _port_in_use(port):
         return s.connect_ex((HOST, port)) == 0
 
 
-WINDOW_TITLE = "神風"          # index.html の <title> と同じ (2026-09-29 出品くん Console → 神風 に改名)
+WINDOW_TITLE = "KamiKaze"      # index.html の <title> と同じ (2026-09-29 出品くん Console → 神風 → 2026-10-16 KamiKaze)
+WINDOW_TITLES = (WINDOW_TITLE, "神風")   # 開きっぱなしの古い窓 (題名が 神風 のまま) も探す
 
 
 def _console_windows():
@@ -1715,7 +1716,7 @@ def _console_windows():
                 if n:
                     buf = ctypes.create_unicode_buffer(n + 1)
                     user32.GetWindowTextW(hwnd, buf, n + 1)
-                    if WINDOW_TITLE in buf.value:
+                    if any(t in buf.value for t in WINDOW_TITLES):
                         found.append(hwnd)
             return True
 
