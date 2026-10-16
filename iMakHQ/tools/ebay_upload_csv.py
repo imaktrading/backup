@@ -126,8 +126,12 @@ def build_item_xml(row, schedule_time=""):
     値は **一切作らない**。CSV に入っているものだけを写す。
     足りない必須項目は呼び出し側が missing_fields() で先に弾く。
     """
+    # ★2026-10-16: CSV の縦棒 (|) は FileExchange では「値が複数」の区切り。API では <Value> を分けて送らないと
+    #   「Promo|Starter Deck」が1つの値として載り、eBay の絞り込み (Features=Promo 等) に当たらなかった
     specs = "".join(
-        f"<NameValueList><Name>{_esc(n)}</Name><Value>{_esc(v)}</Value></NameValueList>"
+        f"<NameValueList><Name>{_esc(n)}</Name>"
+        + "".join(f"<Value>{_esc(x.strip())}</Value>" for x in v.split("|") if x.strip())
+        + "</NameValueList>"
         for n, v in item_specifics(row))
     pics = "".join(f"<PictureURL>{_esc(u)}</PictureURL>" for u in pic_urls(row))
     store_cat = (row.get("StoreCategoryID") or "").strip()
