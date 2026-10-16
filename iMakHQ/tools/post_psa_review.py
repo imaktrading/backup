@@ -1318,8 +1318,6 @@ def _generate_html(targets: list[dict]) -> None:
         '  document.getElementById("btn_" + cert + "_" + choice).classList.add("active");',
         '  if (choice === "NG") {',
         '    document.getElementById("cands_" + cert).classList.add("show");',
-        '  } else {',
-        '    foldCands(cert, "");',
         '  }',
         '  copySame(cert);',
         '  updateStatus();',
@@ -1348,11 +1346,11 @@ def _generate_html(targets: list[dict]) -> None:
         '  updateStatus();',
         '}',
         '',
-        # ★2026-10-16 ユーザー「カードを特定したら畳む」: 選んだら候補を畳み、選んだカードを見出しに出す (押せばまた開く)
+        # ★2026-10-16 選んだカードを開閉ボタンの文字に出す。ユーザー「候補選んだら閉じるのやめて。展開と閉じるはボタンのみで」
+        #   → 選んでも答えても開閉はしない (開閉は「▼ 候補」のボタンだけ)
         'function foldCands(cert, pid) {',
-        '  var box = document.getElementById("cands_" + cert), tog = document.getElementById("ctog_" + cert);',
-        '  if (box) box.classList.remove("show");',
-        '  if (tog) { tog.textContent = (pid ? "✔ 選んだカード: " + pid + " — " : "") + "▼ 候補 " + tog.dataset.n + " 件を開く";',
+        '  var tog = document.getElementById("ctog_" + cert);',
+        '  if (tog) { tog.textContent = (pid ? "✔ 選んだカード: " + pid + " — " : "") + "▼ 候補 " + tog.dataset.n + " 件 表示/非表示";',
         '             tog.classList.toggle("picked", !!pid); }',
         '}',
         '',
