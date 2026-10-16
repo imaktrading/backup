@@ -109,7 +109,7 @@ def test_no_image_check_only_drops_when_images_are_readable():
       足したぶん、同じ except 節までの距離が伸びただけ。見ている性質は変えていない。
     """
     i = SRC.find('_drop.setdefault("NO-IMAGE"')
-    tail = SRC[i:i + 900]
+    tail = SRC[i:i + 1800]   # ★2026-10-16 no_image_input に書く処理を足したぶん窓を 900→1800 (見ている性質は同じ)
     assert "except Exception:" in tail and "読めなければ落とさない" in tail
 
 

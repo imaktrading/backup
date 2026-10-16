@@ -3658,6 +3658,7 @@ def main():
         import psa_preflight as _pf
         _con = _sq3.connect(_pf.CATALOG_DB)
         _drop, _kept, _unknown, _cls = {}, [], 0, {}
+        _ni_counts = {}            # ★2026-10-16 NO-IMAGE をカタログに渡した件数 (new / same / no_photo)
         _vision_keep = []          # 文字では決まらないが写真なら決まる (番号なし DON!!)
         for _c in cert_numbers:
             _f = _pf.PSA_CERTS_DIR / f"{_c}.json"
@@ -3704,11 +3705,19 @@ def main():
                         (_r.get("category"), _pid)).fetchone()
                     if _row is not None and len(json.loads(_row[0] or "[]")) == 0:
                         _drop.setdefault("NO-IMAGE", []).append(_c)
-                        # ★画像が無いのは catalog の欠落。黙って落とすと **誰も足さない**ので
-                        #   依頼キューに積む (次の監査で catalog へ集約発行される)。
-                        _queue_finding(_r.get("category"), f"PSA10-{_c}", "images",
-                                       "catalog に画像が無く目視できないので出品できない",
-                                       identity=f"{_pid} | (画像なし) | {_r.get('category')}")
+                        # ★2026-10-16 (B-20261016-009): 依頼書の代わりに、カタログの入力 no_image_input.json に
+                        #   PSA の写真を1件書く (カタログが窓で目視して画像を入れる)。写真が無い時だけ従来どおり依頼キューへ
+                        _ni = "no_photo"
+                        try:
+                            import no_image_input as _NI
+                            _ni = _NI.add(_r.get("category"), _pid, _c)
+                        except Exception:                      # noqa: BLE001
+                            pass
+                        _ni_counts[_ni] = _ni_counts.get(_ni, 0) + 1
+                        if _ni == "no_photo":
+                            _queue_finding(_r.get("category"), f"PSA10-{_c}", "images",
+                                           "catalog に画像が無く目視できないので出品できない",
+                                           identity=f"{_pid} | (画像なし) | {_r.get('category')}")
                         continue
                 except Exception:
                     pass                       # 読めなければ落とさない
@@ -3791,6 +3800,13 @@ def main():
             print(f"     (従来は10件に絞った後で落ちていた分。GAP は missing_models 経由で catalog へ)")
             cert_numbers = _kept
             cost_map = {c: cost_map[c] for c in cert_numbers if c in cost_map}
+        print(f"  🖼 NO-IMAGE をカタログに渡した: 新しく {_ni_counts.get('new', 0)}件 / 渡し済み {_ni_counts.get('same', 0)}件"
+              f" / 写真が無く依頼キューへ {_ni_counts.get('no_photo', 0)}件")
+        try:
+            import no_image_input as _NI2
+            _NI2.ring(_ni_counts.get("new", 0))
+        except Exception:                                      # noqa: BLE001
+            pass
         if _vision_keep:
             print(f"  🔍 番号なし DON!! は **落とさず Vision に回す**: {len(_vision_keep)}件 "
                   f"→ {_vision_keep[:6]}")
