@@ -34,13 +34,21 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from viewer_zoom import ZOOM_CSS, ZOOM_JS, ZOOM_OVERLAY, zoom_button
 
 # 「一致・見送り」の見た目 (2026-09-16)
-FIND_CSS = (".findbox{display:flex;gap:6px;align-items:center;margin:6px 0}"
-            ".findq{flex:1;max-width:420px;padding:5px 8px;font-size:13px}"
-            ".btn-find{background:#31708f;color:#fff}"
+# ★2026-10-16 ユーザー「候補にないときも小さく」「該当なし・一致見送りの行も少し小さく」
+FIND_CSS = (".findbox{display:flex;gap:6px;align-items:center;margin:4px 0}"
+            ".findq{flex:1;max-width:380px;padding:3px 6px;font-size:12px}"
+            ".btn-find{background:#31708f;color:#fff;padding:4px 10px!important;font-size:12px!important}"
             ".findmsg{font-size:12px;color:#9fd}")
 PASS_CSS = (".btn-pass{background:#8a6d3b;color:#fff}"
-            ".rsn{margin-left:6px;padding:4px 6px;font-size:13px}"
-            ".note{margin-left:6px;padding:4px 6px;font-size:13px;width:180px}"
+            ".answer-btns{gap:6px!important;margin:6px 0!important;align-items:center}"
+            ".answer-btns .btn{padding:6px 12px;font-size:12px}"
+            ".rsn{margin-left:6px;padding:3px 5px;font-size:12px}"
+            ".note{margin-left:6px;padding:3px 5px;font-size:12px;width:160px}"
+            ".thead{font-size:13px;color:#ccc;margin:0 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
+            ".thead b{color:#ffd700;font-size:14px}.thead .subj{color:#fff}"
+            ".certfix-box{display:flex;gap:8px;align-items:center;margin:4px 0;padding:4px 8px;font-size:12px;"
+            "color:#e8c4b4;background:#33241f;border:1px solid #b06a4a;border-radius:6px}"
+            ".certfix-box input{width:160px;padding:3px 6px;font-size:12px}"
             ".target.answered-pass{opacity:.55}")
 from datetime import datetime
 
@@ -1044,14 +1052,17 @@ def search_candidates(category, query, brand="", limit=30):
     if not category or len(q) < 2:
         return []
     like = "%" + q.replace("/", "-").replace(" ", "%").upper() + "%"
+    # ★2026-10-16 ユーザー「001/022 でもいいの？」: カードに刷ってある番号 (分子/分母) でも引く (カタログの card_number_text)
+    printed = q.replace(" ", "") if _re_mod.fullmatch(r"[0-9A-Za-z]+/[0-9A-Za-z]+", q.replace(" ", "")) else ""
     conn = sqlite3.connect(str(CATALOG_DB))
     try:
         cur = conn.cursor()
         cur.execute(
             "SELECT product_id FROM products WHERE category=? AND ("
             "  upper(product_id) LIKE ? OR upper(ifnull(name,'')) LIKE ?"
-            "  OR upper(ifnull(name_en,'')) LIKE ?) ORDER BY product_id LIMIT ?",
-            (category, like, like, like, int(limit)))
+            "  OR upper(ifnull(name_en,'')) LIKE ?"
+            "  OR (? != '' AND upper(json_extract(specs,'$.card_number_text')) = upper(?))) ORDER BY product_id LIMIT ?",
+            (category, like, like, like, printed, printed, int(limit)))
         rows = [r[0] for r in cur.fetchall()]
     except Exception:                                          # noqa: BLE001
         rows = []
@@ -1245,7 +1256,10 @@ def _generate_html(targets: list[dict]) -> None:
         ZOOM_CSS,
         PASS_CSS,
         FIND_CSS,
-        'h1{color:#ffd700}',
+        'h1{color:#ffd700;font-size:18px;margin:6px 0}',
+        'h1 + p{font-size:12px;color:#aaa;margin:2px 0 6px}',
+        '.no-expected .label.warnline{font-size:13px;flex-basis:100%;margin:0}',
+        '.no-expected{flex-wrap:wrap!important}',
         '.toolbar{position:sticky;top:0;background:#1a1a1a;padding:10px;border-bottom:1px solid #444;z-index:100;display:flex;gap:14px;align-items:center}',
         '.toolbar #status{font-size:16px;color:#ffd700;font-weight:bold}',
         '.toolbar .btn-download{background:#ffd700;color:#000}',
@@ -1447,9 +1461,9 @@ def _generate_html(targets: list[dict]) -> None:
         expected_img = _find_expected_image(t["category"], t.get("csv_expected"), brand=t.get("brand", ""))
 
         html.append(f'<div id="target_{cert}" class=target>')
-        html.append(f'<h2>cert {cert} — {t["category"]}</h2>')
-        html.append(f'<div class=cert-info><b>Brand:</b> {t["brand"]}</div>')
-        html.append(f'<div class=cert-info><b>Subject:</b> {t["subject"]}</div>')
+        # ★2026-10-16 ユーザー「タイトル的な記述は文字を小さくして1行に」
+        html.append(f'<div class=thead><b>cert {cert}</b> — {t["category"]} ｜ {t["brand"]} ｜ '
+                    f'<span class=subj>{t["subject"]}</span></div>')
         # ★2026-10-16 同じカードの別個体: 中身は畳んでおく (先の cert に答えれば同じ答えが入る・開いて別に答えてもよい)
         _lead = lead_of.get(str(cert))
         if _lead:
@@ -1486,7 +1500,7 @@ def _generate_html(targets: list[dict]) -> None:
             html.append('</div>')
         else:
             html.append('<div class="confirm no-expected">')
-            html.append(f'<div class=label>⚠️ catalog 期待値特定不能 ({t.get("csv_expected") or "未取得"}) → 候補から選択してください</div>')
+            html.append(f'<div class="label warnline">⚠️ catalog 期待値特定不能 ({t.get("csv_expected") or "未取得"}) → 候補から選択してください</div>')
             # 2026-06-11: no-expected 分岐でも PSA 実物画像を表示 (= 期待値不明時こそ実物↔候補の
             # 見比べが要る。旧版は実物画像を出さず「元画像すらない」状態だった)
             for _label, _url in confirm_columns(t, ""):
@@ -1529,12 +1543,10 @@ def _generate_html(targets: list[dict]) -> None:
         # cert 訂正欄 (2026-08-18 ユーザー指示)
         # 仕入元の写真と PSA写真が別物 = シートの cert 番号の打ち間違い。
         # その場で正しい番号を入れられるようにする (入れた行は出品しない = 次回その番号で取り直す)。
-        html.append('<div class="certfix-box" style="margin:8px 0;padding:8px;background:#33241f;'
-                    'border:1px solid #b06a4a;border-radius:6px">')
-        html.append('<div class=label>🔢 仕入元の現物と PSA が別物 → 正しい cert 番号 '
-                    '(入れた行は今回出品せず、番号だけ直します)</div>')
-        html.append(f'<input id="certfix_{cert}" type="text" value="" placeholder="例: 153025508" '
-                    'style="width:40%;padding:5px;font-size:14px" />')
+        # ★2026-10-16 ユーザー「小さく。出来れば1行」
+        html.append('<div class="certfix-box">')
+        html.append('<span>🔢 仕入元の現物と PSA が別物 → 正しい cert 番号 (今回は出品せず番号だけ直す)</span>')
+        html.append(f'<input id="certfix_{cert}" type="text" value="" placeholder="例: 153025508" />')
         html.append('</div>')
 
         # 候補 list
@@ -1544,7 +1556,7 @@ def _generate_html(targets: list[dict]) -> None:
         # ★2026-09-16: 候補に無い時は番号で探し直す (UT の目視と同じ口)
         # ★2026-09-22: 候補一覧の外に出す。一覧が閉じていると欄が見えず使えなかった
         html.append('<div class=findbox>'
-                    f'<input id="q_{cert}" class="findq" placeholder="候補に無い時: 「カタログを見る」のカタログIDを入れる (例 SV8a-218)" '
+                    f'<input id="q_{cert}" class="findq" placeholder="候補に無い時: カタログID (例 SV8a-218) か カードの番号 (例 001/022)" '
                     f'onkeydown="if(event.key===\'Enter\'){{findCands(\'{cert}\');}}">'
                     f'<button class="btn btn-find" onclick="findCands(\'{cert}\')">探す</button>'
                     f'<span id="qmsg_{cert}" class=findmsg></span></div>')
