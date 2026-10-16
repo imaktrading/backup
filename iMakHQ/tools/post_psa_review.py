@@ -989,6 +989,34 @@ def fetch_external_image(src, retries=4, opener=None, sleep=time.sleep):
     return None
 
 
+def same_card_key(t):
+    """PSA ラベルの文字 (作品・ブランド・名前・番号) が同じ = 同じカード。名前が空なら None (純関数)。"""
+    subj = str(t.get("subject") or "").strip().upper()
+    if not subj:
+        return None
+    return (str(t.get("category") or ""), str(t.get("brand") or "").strip().upper(), subj,
+            str(t.get("card_number") or "").strip().upper())
+
+
+def same_card_leads(targets) -> dict:
+    """{後ろの cert: 先の cert} — 同じカードの別個体 (純関数・test 可)。
+
+    ★2026-10-16 ユーザー「同じカードが出てる。おかしいやん」: 鑑定番号も仕入元も別の2枚が、
+      目視に2件並んで同じ答えを2回させていた (ゾロアークBREAK ×2 / スレッタ ×2)。
+    """
+    first, out = {}, {}
+    for t in targets:
+        k = same_card_key(t)
+        if k is None:
+            continue
+        c = str(t.get("cert"))
+        if k in first:
+            out[c] = first[k]
+        else:
+            first[k] = c
+    return out
+
+
 def run_storage_key(targets) -> str:
     """その走行だけの保存キー (純関数・test 可)。
 
@@ -1150,6 +1178,13 @@ def _generate_html(targets: list[dict]) -> None:
     prior_json = json.dumps({t["cert"]: t["prior_choice"] for t in targets
                              if t.get("prior_choice")}, ensure_ascii=False)
     run_key = run_storage_key(targets)
+    # ★2026-10-16 同じカードの別個体は1回答えれば済むように、先の cert に答えが入ると後ろへ写す
+    lead_of = same_card_leads(targets)
+    same = {}
+    for f, lead in lead_of.items():
+        same.setdefault(lead, []).append(f)
+    same_json = json.dumps(same, ensure_ascii=False)
+    print(f"  🔁 同じカードの別個体: {len(lead_of)}件 (先の答えを写す) / 目視 {len(targets)}件のうち")
 
     html = [
         '<!DOCTYPE html><html><head><meta charset=utf-8><title>PSA Review (latest cycle)</title>',
@@ -1219,6 +1254,7 @@ def _generate_html(targets: list[dict]) -> None:
         '<script>',
         f'var TARGETS = {targets_json};',
         f'var PRIOR = {prior_json};',
+        f'var SAME = {same_json};',
         'var ANSWERS = {};',
         # ★2026-08-19: 回答の保存先を **その走行だけの箱** にする。
         #   旧実装は "psa_review_answers" 固定キーで、走行をまたいで消えなかった。
@@ -1254,7 +1290,7 @@ def _generate_html(targets: list[dict]) -> None:
         'function setReason(cert, v) {',
         '  var a = ANSWERS[cert] || {}; a.reason = v;',
         '  if (v) { a.choice = "PASS"; }',
-        '  ANSWERS[cert] = a; refreshCount();',
+        '  ANSWERS[cert] = a; copySame(cert); updateStatus();',
         '}',
         'function setNote(cert, v) {',
         '  var a = ANSWERS[cert] || {}; a.note = v; ANSWERS[cert] = a;',
@@ -1271,7 +1307,19 @@ def _generate_html(targets: list[dict]) -> None:
         '  } else {',
         '    foldCands(cert, "");',
         '  }',
+        '  copySame(cert);',
         '  updateStatus();',
+        '}',
+        '',
+        # ★2026-10-16 ユーザー「同じカードが出てる。おかしいやん」: 同じカードの別個体 (SAME) には、先の答えをそのまま写す
+        'function copySame(cert) {',
+        '  (SAME[cert] || []).forEach(function (f) {',
+        '    ANSWERS[f] = Object.assign({}, ANSWERS[cert]);',
+        '    var t = document.getElementById("target_" + f);',
+        '    if (t && ANSWERS[f].choice) t.className = "target answered-" + ANSWERS[f].choice.toLowerCase();',
+        '    var n = document.getElementById("dnote_" + f);',
+        '    if (n) n.dataset.done = "1";',
+        '  });',
         '}',
         '',
         'function selectCand(cert, pid) {',
@@ -1282,6 +1330,7 @@ def _generate_html(targets: list[dict]) -> None:
         '  document.getElementById("cand_" + cert + "_" + pid.replace(/[^a-zA-Z0-9]/g, "_")).classList.add("selected");',
         '  document.querySelectorAll("#btns_" + cert + " .btn").forEach(b => b.classList.remove("active"));',
         '  foldCands(cert, pid);',
+        '  copySame(cert);',
         '  updateStatus();',
         '}',
         '',
@@ -1401,6 +1450,14 @@ def _generate_html(targets: list[dict]) -> None:
         html.append(f'<h2>cert {cert} — {t["category"]}</h2>')
         html.append(f'<div class=cert-info><b>Brand:</b> {t["brand"]}</div>')
         html.append(f'<div class=cert-info><b>Subject:</b> {t["subject"]}</div>')
+        # ★2026-10-16 同じカードの別個体: 中身は畳んでおく (先の cert に答えれば同じ答えが入る・開いて別に答えてもよい)
+        _lead = lead_of.get(str(cert))
+        if _lead:
+            html.append(f'<div id="dnote_{cert}" class=prior-note>🔁 cert {_lead} と同じカード (別の個体) — '
+                        f'cert {_lead} に答えると同じ答えが入ります。'
+                        f'<a href="javascript:void(0)" style="color:#80c0ff" onclick="var b=document.getElementById(\'dbody_{cert}\');'
+                        f'b.style.display=b.style.display===\'none\'?\'block\':\'none\'">中身を見る/閉じる</a></div>')
+            html.append(f'<div id="dbody_{cert}" style="display:none">')
         # ★2026-10-07 何回目の目視か。OK したのにまた出ている = 出品の手前で落ちている
         if t.get("seen_times") or t.get("last_fail"):
             html.append(f'<div class=prior-note style="background:#4a2020;border-color:#e57373;color:#ffb4b4">'
@@ -1500,6 +1557,8 @@ def _generate_html(targets: list[dict]) -> None:
         for i, cand in enumerate(t["candidates"], 1):
             candidate_card_html(cert, cand, t, i, html)
         html.append('</div></div>')
+        if _lead:
+            html.append('</div>')                      # dbody
         html.append('</div>')
 
     html.append(ZOOM_OVERLAY)
