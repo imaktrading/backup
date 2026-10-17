@@ -10,6 +10,8 @@
   - 余力   メモリ使用率 < MEM_MAX % かつ CPU < CPU_MAX % の時だけ新しく始める
   - 期限   deadline_hour: この時刻までに終わっていなければ「期限切れ」として表に出す (黙らない)
   - 待ち   wait_for    : そこに書いた処理が動いている間は始めない (例: バックアップは夜の束の後)
+  - 順番   order       : 小さい方から先に始める (無ければ 50)。同じなら期限の早い順
+  - Chrome need_no_chrome: 自動操作の Chrome / driver が残っていたら始めない (家の PC は空きメモリが少ない)
   - 続き   動いている途中で PC が落ちたら、次の見回りでもう一度起動する。
            中の手順は各処理が自分で「済んだ」印を持っている (night_step) ので、続きから進む
 
@@ -70,7 +72,7 @@ def overdue(job, st, now):
     return now.hour >= dh and now.hour < (dh + 12)          # 期限から半日の間だけ「切れ」と出す
 
 
-def pick(jobs, states, running, now, idle_min, mem_pct, cpu_pct):
+def pick(jobs, states, running, now, idle_min, mem_pct, cpu_pct, driver_chrome=0):
     """今起動する処理の名前 list (純関数)。
 
     running: 今動いている名前の集合。重い処理は同時に1本、軽い処理は余力があれば並べる。
@@ -80,7 +82,8 @@ def pick(jobs, states, running, now, idle_min, mem_pct, cpu_pct):
     # ★2026-10-12: 余力が無い時でも ignore_load の軽い処理 (毎朝の日報メール等・数十秒) は始める。
     #   メモリ 79% のまま 6時〜7時半まで日報メールが止まっていた
     tight = mem_pct >= MEM_MAX or cpu_pct >= CPU_MAX
-    for j in sorted(jobs, key=lambda j: (j.get("deadline_hour") is None, j.get("deadline_hour") or 0)):
+    # ★2026-10-17 (B-20261017-009): order を先に見る。ハントで足した行を同じ夜の PSA の情報取りに乗せるため
+    for j in sorted(jobs, key=lambda j: (j.get("order", 50), j.get("deadline_hour") is None, j.get("deadline_hour") or 0)):
         n = j["name"]
         if n in running or not j.get("enabled", True):
             continue
@@ -92,6 +95,8 @@ def pick(jobs, states, running, now, idle_min, mem_pct, cpu_pct):
             continue
         if idle_min < j.get("need_idle_min", 0):
             continue
+        if j.get("need_no_chrome") and driver_chrome:
+            continue                                        # 自動操作の Chrome が残っている = 始めない
         if any(w in running or w in out for w in j.get("wait_for") or []):   # 同じ回に起動する物も待つ
             continue
         if j.get("heavy"):
@@ -141,6 +146,19 @@ def cpu_percent():
         return int(float(r.stdout.strip() or 100))
     except Exception:
         return 100
+
+
+def driver_chrome_count():
+    """自動操作で開いた Chrome / driver の数 (人が開いた普段の Chrome は数えない)。分からない時は 0。"""
+    q = ("@(Get-CimInstance Win32_Process -Filter \"Name='chromedriver.exe' OR Name='undetected_chromedriver.exe' "
+         "OR Name='chrome.exe'\" | Where-Object { $_.Name -ne 'chrome.exe' -or $_.CommandLine -match "
+         "'--remote-debugging-port|--headless|--test-type=webdriver' }).Count")
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", q], capture_output=True, text=True, timeout=60,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return int((r.stdout or "0").strip() or 0)
+    except Exception:
+        return 0
 
 
 def pid_alive(pid):
@@ -240,11 +258,12 @@ def tick(dry=False):
         save_states(states)
     now = dt.datetime.now()
     idle, mem, cpu = idle_minutes(), mem_percent(), cpu_percent()
-    todo = pick(jobs, states, run, now, idle, mem, cpu)
+    drv = driver_chrome_count() if any(j.get("need_no_chrome") for j in jobs) else 0
+    todo = pick(jobs, states, run, now, idle, mem, cpu, driver_chrome=drv)
     late = [j["name"] for j in jobs if j.get("enabled", True) and j["name"] not in run
             and overdue(j, states.get(j["name"]), now)]
     print(f"[{now:%m/%d %H:%M}] 触っていない {idle:.0f}分 / メモリ {mem}% / CPU {cpu}% / "
-          f"動作中 {sorted(run) or 'なし'} / 起動 {todo or 'なし'}" + (f" / ⚠期限切れ {late}" if late else ""))
+          f"自動の Chrome {drv}本 / 動作中 {sorted(run) or 'なし'} / 起動 {todo or 'なし'}" + (f" / ⚠期限切れ {late}" if late else ""))
     st = load_states()
     st["_tick"] = {"at": now.isoformat(timespec="seconds"), "late": late, "started": todo}
     if not dry:
