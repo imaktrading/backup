@@ -474,3 +474,7 @@ svg.agsp{display:block;width:120px;height:30px}
 /* ★2026-10-17 件数を数えた時刻 (押すとそのボタンだけ数え直す)・1時間より古いと赤 */
 .cat{font-style:normal;font:400 10px var(--f-ui);color:var(--ink-3);margin-left:6px;cursor:pointer;text-decoration:underline dotted}
 .cat.old{color:#b4442f;font-weight:600}
+/* ★2026-10-17 ユーザー「オファーを送れる・新規に出せるPSA の時間が他の文字に被っている」: 状態の1行は <i> を全部 8px の丸にしていて、
+   時刻 (<i class=cat>) が丸の幅からはみ出して隣の文字に重なっていた。時刻は丸にしない */
+.strip .st i.cat{width:auto;height:auto;border-radius:0;background:none;flex:none;margin-left:2px}
+.strip .st i.cat.old{background:none}
