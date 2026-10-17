@@ -1500,6 +1500,17 @@ class Handler(BaseHTTPRequestHandler):
                                         "error": d.get("error") or ""})
             except (OSError, ValueError):
                 return self._json(200, {"ok": None})
+        if u.path == "/api/freshness":
+            # ★2026-10-17 ユーザー「不具合が出て気づくまでの期間が長いね」: 毎日使う入力が新しくなっているかの点検
+            #   (トラフィックレポートが 11日 古いまま使われていた等)。ファイルの時刻と控えを読むだけ
+            try:
+                if TOOLS not in sys.path:
+                    sys.path.insert(0, TOOLS)
+                import input_freshness as IF
+                items = IF.check()
+                return self._json(200, {"items": items, "stale": [i for i in items if i["stale"]]})
+            except Exception as e:                       # noqa: BLE001
+                return self._json(200, {"items": None, "error": f"{type(e).__name__}: {e}"[:200]})
         if u.path == "/api/messages":
             return self._json(200, get_messages())
         if u.path == "/api/version":

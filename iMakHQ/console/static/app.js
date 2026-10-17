@@ -407,7 +407,7 @@
   }
   function renderStrip() {
     if (!$("today-strip")) return;
-    var oj = STRIP.offer, dj = STRIP.order, chips = [STRIP.counts, STRIP.night, STRIP.watch, STRIP.integrity, STRIP.defender];
+    var oj = STRIP.offer, dj = STRIP.order, chips = [STRIP.counts, STRIP.night, STRIP.watch, STRIP.integrity, STRIP.fresh, STRIP.defender];
     // ★2026-10-05 ユーザー「新規出品出来るカード枚数を…注文仕入れ待ち0件みたいに表示できる？」
     var pn = STRIP.psaNew;
     var pnChip = pn ? (pn.n == null ? ["warn", "新規に出せる PSA 数えられない", ""]
@@ -486,6 +486,23 @@
   }
   refreshIntegrity();
   setInterval(refreshIntegrity, 600000);
+
+  // ★2026-10-17 ユーザー「不具合が出て気づくまでの期間が長いね」: 毎日使う入力 (トラフィックレポート・夜の情報取り・
+  //   SpeedPAK の送料・オファーの送信 等) が新しくなっているか。古い物があれば赤で名前を出す
+  function refreshFreshness() {
+    return getJSON("/api/freshness").then(function (d) {
+      if (!d.items) { STRIP.fresh = ["warn", "入力の鮮度 点検できない", ""]; }
+      else if (!d.stale.length) { STRIP.fresh = ["", "入力 全部新しい <b>" + d.items.length + "項目</b>", ""]; }
+      else {
+        STRIP.fresh = ["crit", "入力が古い <b>" + d.stale.length + "件</b>: " + d.stale.map(function (i) {
+          return esc(i.name) + (i.note ? " (" + esc(i.note) + ")" : "");
+        }).join(" / "), ""];
+      }
+      renderStrip();
+    }).catch(function () {});
+  }
+  refreshFreshness();
+  setInterval(refreshFreshness, 600000);
 
   // ★2026-10-04 ユーザー「ここにボタン付けてくれない？ON/OFFで。わすれちゃうから」:
   //   Windows Defender の検査の対象外 (C:\dev)。押すと Windows の確認 (管理者) が出る → 「はい」

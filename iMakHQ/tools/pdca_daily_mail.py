@@ -693,10 +693,24 @@ def main():
             _save_comment(today, ai_text)
 
     body = render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv, of, ev)
+    # ★2026-10-17 ユーザー「不具合が出て気づくまでの期間が長いね」: 毎日使う入力が古くなっていたら、メールの一番上に赤で出す
+    #   (トラフィックレポートが 11日 古いまま使われていた等)。件名にも付ける
+    try:
+        import input_freshness as IF
+        _fr = IF.check()
+        _bad = [i for i in _fr if i["stale"]]
+        print("  " + IF.summary_line(_fr))
+    except Exception as _e:                                    # noqa: BLE001 点検できないこと自体を出す
+        _bad = [{"name": "入力の鮮度の点検", "note": "できない: %s" % type(_e).__name__}]
+    if _bad:
+        body = body.replace('<div class="plan">', '<div style="background:#fdecea;border:1px solid #c0392b;color:#7b1d12;'
+                            'padding:8px 12px;margin:8px 0;border-radius:6px"><b>⚠️ 入力が古い・止まっている %d件</b><br>' % len(_bad)
+                            + "<br>".join(html.escape("%s — %s" % (i["name"], i.get("note") or "")) for i in _bad)
+                            + '</div><div class="plan">', 1)
     with open(OUT_HTML, "w", encoding="utf-8") as f:
         f.write(body)
     subject = (f"Daily Report {today.month}/{today.day} 利益 {yen(ms['profit'])} ({ms['profit'] / plan['goal_profit_jpy'] * 100:.0f}%)"
-               f" 純増 {mv['net']:+d}" if mv else "")
+               f" 純増 {mv['net']:+d}" if mv else "") + (f" ⚠入力が古い {len(_bad)}件" if _bad else "")
     sent = "送らない (--dry-run)"
     if not a.dry_run:
         r = subprocess.run([sys.executable, SEND_MAIL, "--subject", subject, "--body-file", OUT_HTML, "--html"],
