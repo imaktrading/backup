@@ -3552,6 +3552,32 @@ def _keys_for_dropped_dupes(sheet_rows, certs, cls, cert_col=8, key_col=34):
     return rows, keys
 
 
+def answered_pid_for_cert(cert):
+    """人が新規候補の目視で決めたカード (鑑定番号ごと・カテゴリ抜き)。無ければ ""。読めなければ "" (外さない)。"""
+    try:
+        _t = r"C:/dev/iMak/iMakHQ/tools"
+        if _t not in sys.path:
+            sys.path.insert(0, _t)
+        import psa_label_learned as _PLL
+        return _PLL.expected_pid_for_cert(cert) or ""
+    except Exception:                                          # noqa: BLE001
+        return ""
+
+
+def passed_certs_now(certs, passed=None):
+    """「一致・見送り」と答え済みで、まだ見送りの日数の内にある cert (並び順のまま)。読めなければ [] (外さない)。"""
+    try:
+        if passed is None:
+            _t = r"C:/dev/iMak/iMakHQ/tools"
+            if _t not in sys.path:
+                sys.path.insert(0, _t)
+            import post_psa_review as _PPR
+            passed = _PPR.passed_active(_PPR.load_passed())
+    except Exception:                                          # noqa: BLE001
+        return []
+    return [c for c in certs if str(c) in (passed or {})]
+
+
 def main():
     print("=== iMak Trading Japan - PSA → eBay CSV Generator ===\n")
     # ★2026-10-03 ユーザー OK「PSA 新規を KAGOYA へ」: KAGOYA には Cloudflare を押す人がいない。
@@ -3743,6 +3769,7 @@ def main():
             if _active:
                 _idx, _ = _dg.live_card_index(_sheet_rows_for_dedupe, _titles, _active)
                 _dup = []
+                _dup_answered = []
                 for _c in list(_kept):
                     _r2 = _cls.get(_c)
                     if not _r2 or not _r2.get("product_id"):
@@ -3750,6 +3777,13 @@ def main():
                     _k = _dg.group_key(f"{_r2.get('category')}:{_r2['product_id']}")
                     if _k in _idx:
                         _dup.append(_c); _kept.remove(_c)
+                        continue
+                    # ★2026-10-17 (B-20261017-014): 人が目視で決めたカード (鑑定番号ごと) が出品中なら、それも枠の前で外す。
+                    #   #157351521 はシートの KEY が P-041・人の答えが P-041_r1 (出品中) で、毎回枠を取ってから後段で外れていた
+                    _ans = answered_pid_for_cert(_c)
+                    if _ans and _ans != _r2["product_id"] and                             _dg.group_key(f"{_r2.get('category')}:{_ans}") in _idx:
+                        _dup_answered.append(_c); _kept.remove(_c)
+                _drop["LIVE-DUP-ANSWERED"] = _dup_answered
                 if _dup:
                     _drop["LIVE-DUP"] = _dup
                     # ★2026-08-18: 落とす前に **KEY をシートに書く**。
@@ -3774,6 +3808,12 @@ def main():
         except Exception as _de:
             print(f"  ⚠️ 重複の前置き skip: {type(_de).__name__}: {_de}")
         _con.close()
+        # ★2026-10-17 (B-20261017-014): 「一致・見送り」と答え済みの cert も枠の前で外す (目視の手前では外していたが、枠を取った後だった)。
+        #   答えは post_psa_review の見送り台帳 (理由ごとの日数) のまま。シートの行は消さない
+        _passed_drop = passed_certs_now(_kept)
+        for _c in _passed_drop:
+            _kept.remove(_c)
+        _drop["PASSED"] = _passed_drop
         # ★2026-09-05: 仕入値の上限は **枠を選ぶ前に**見る。
         #   従来は 目視 → build → 監査 の最後で落としていたため、上限を超えた行を
         #   毎回 人に目視させてから捨てていた。行は未出品のまま残るので翌日また出る
@@ -3797,7 +3837,11 @@ def main():
                           "OUT-OF-SCOPE": "参入しないゲーム",
                           "NO-IMAGE": "catalogに画像が無く目視不能",
                           "COST-CAP": "仕入値が上限を超えている(目視しても最後に落ちる)",
-                          "LIVE-DUP": "同じカードが既に出品中(後段で必ず除外される)"}.get(_st, _st)
+                          "LIVE-DUP": "同じカードが既に出品中(後段で必ず除外される)",
+                          "LIVE-DUP-ANSWERED": "目視で決めたカードが既に出品中",
+                          "PASSED": "一致・見送りと答え済み"}.get(_st, _st)
+                if not _cs and _st not in ("PASSED", "LIVE-DUP-ANSWERED"):
+                    continue
                 print(f"  ⏭️ 枠を選ぶ前に除外 [{_st}={_label}]: {len(_cs)}件 → {_cs[:6]}")
             print(f"     (従来は10件に絞った後で落ちていた分。GAP は missing_models 経由で catalog へ)")
             cert_numbers = _kept
