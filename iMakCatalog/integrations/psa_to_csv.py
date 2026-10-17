@@ -579,6 +579,30 @@ def _search_one_piece_reprint_by_number(
     return chosen
 
 
+def _promo_rank(brand: str, subject: str, rec: dict) -> int:
+    """Promo brand の拾い直しで候補を並べる点数 (_P / _P_* suffix 付き record を優先)。"""
+    pid = rec.get("product_id", "")
+    s = 0
+    # +300: PSA brand の修飾語込み set キーワードが set_name_official に一致
+    # (Advisor 2026-07-29 §3-A: China 2nd ANNIVERSARY variant を base に負けなくする)
+    s += _brand_setname_bonus(brand, rec.get("set_name_official") or "")
+    # 末尾 '_P' または '_P_' suffix → 高優先 (promo 版そのもの)
+    if re.search(r"_P(_|$)", pid):
+        s += 100
+    # set_name_official が 'Promotion' / 'プロモーション' 含む → 中優先
+    sn = (rec.get("set_name_official") or "").lower()
+    if "promotion" in sn or "プロモーション" in (rec.get("set_name_official") or ""):
+        s += 50
+    # base record (suffix 無し) → 低優先
+    if "_" not in pid:
+        s += 10
+    # ★2026-10-17 (B-20261017-004): 日本語版の PSA に英語版の行 (_EN) は当てない
+    #   (OP07-073 Fest のルフィが OP07-073_P_EN に当たっていた。目視では _P が選ばれている)
+    if "JAPANESE" in (brand or "").upper() and pid.upper().endswith("_EN"):
+        s -= 1000
+    return s
+
+
 def _search_one_piece_promo_by_number(
     card_number: str,
     subject: str,
@@ -625,26 +649,7 @@ def _search_one_piece_promo_by_number(
     if not candidates:
         return None
 
-    # Promo brand の場合: _P / _P_* suffix 付き record を優先 (実物が promo 版だから)
-    def _promo_score(rec: dict) -> int:
-        pid = rec.get("product_id", "")
-        s = 0
-        # +300: PSA brand の修飾語込み set キーワードが set_name_official に一致
-        # (Advisor 2026-07-29 §3-A: China 2nd ANNIVERSARY variant を base に負けなくする)
-        s += _brand_setname_bonus(brand, rec.get("set_name_official") or "")
-        # 末尾 '_P' または '_P_' suffix → 高優先 (promo 版そのもの)
-        if re.search(r"_P(_|$)", pid):
-            s += 100
-        # set_name_official が 'Promotion' / 'プロモーション' 含む → 中優先
-        sn = (rec.get("set_name_official") or "").lower()
-        if "promotion" in sn or "プロモーション" in (rec.get("set_name_official") or ""):
-            s += 50
-        # base record (suffix 無し) → 低優先
-        if "_" not in pid:
-            s += 10
-        return s
-
-    candidates.sort(key=_promo_score, reverse=True)
+    candidates.sort(key=lambda r: _promo_rank(brand, subject, r), reverse=True)
     chosen = candidates[0]
     if verbose:
         pid = chosen["product_id"]
