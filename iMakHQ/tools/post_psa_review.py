@@ -2837,6 +2837,7 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
         try:
             server, thread, base_url = _start_review_server(p)
             append_log_func(f"  🌐 review server 起動: {base_url}\n")
+            append_log_func(f"⏱ {datetime.now():%H:%M:%S} 目視の画面を出した\n")   # ★2026-10-17 №650 待ちの内訳
             break
         except OSError:
             continue
@@ -3071,6 +3072,7 @@ def run_post_psa_review(csv_path: str, append_log_func) -> bool:
         try:
             server, thread, base_url = _start_review_server(p)
             append_log_func(f"  🌐 review server 起動: {base_url}\n")
+            append_log_func(f"⏱ {datetime.now():%H:%M:%S} 目視の画面を出した\n")   # ★2026-10-17 №650 待ちの内訳
             break
         except OSError:
             continue

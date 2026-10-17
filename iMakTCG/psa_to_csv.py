@@ -3563,6 +3563,8 @@ def main():
 
     # 2026-04-24: certs.txt 廃止、スプシ駆動に完全移行
     # スプシ (19kj8... gid=851100680) の I列=cert# / B列=itemID空 / A列=URL で処理対象を抽出
+    # ★2026-10-17 (№650): 押してから目視の画面までの待ちの内訳を測る (夜の準備に回すか決める材料)。時刻は走行ログの頭と比べる
+    print(f"⏱ {datetime.now():%H:%M:%S} 抽出を始めた")
     print("📊 スプシから PSA 出品対象を抽出中...")
     cert_numbers, cost_map, mercari_url_map, mercari_title_map = load_targets_from_sheet_psa()
 
@@ -3929,6 +3931,7 @@ def main():
     _skipped_unconfirmed = []
     _variant_skipped = []   # ★2026-09-28 刷りが PSA ラベルと合わず出さなかった cert
     if _verify_mode:
+        print(f"\n⏱ {datetime.now():%H:%M:%S} 抽出と枠選びが済んだ")
         print("\n🔎 verify→build モード: 先に scrape → 目視確認 → 確定カードのみ生成")
         # ★2026-09-28 ユーザー「CAP 20件は 20件出品したいから」「時間ばかり長くなっても困る」:
         #   仕入元を読んだ後に減った分 (出品中と同じカード等) を、目視に出す前に残りの候補から補う。
@@ -4041,6 +4044,7 @@ def main():
             if _tools not in sys.path:
                 sys.path.insert(0, _tools)
             from post_psa_review import run_pre_build_verify
+            print(f"⏱ {datetime.now():%H:%M:%S} PSA の情報と仕入元の読み取りが済んだ → 照合して目視の画面を作る")
             _confirmed_pids = run_pre_build_verify(cert_numbers, print)
         except Exception as _e:
             print(f"⚠️ pre-build verify 失敗 → 確定不能のため build 中止(誤出品回避): {type(_e).__name__}: {_e}")
