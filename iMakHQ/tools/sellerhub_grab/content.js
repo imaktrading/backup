@@ -313,6 +313,18 @@
     if (Array.isArray(b)) { log(`❌ ↓ の候補が ${b.length}個あって決められません (押していません)`); return; }
     b.click();
     log("✅ トラフィックレポート: 押しました (前の90日との比較つき)");
+    // ★2026-10-17 ユーザー「左下に download の箇所があるよね？」: ↓ を押すと左下に「Your report is ready /
+    //   Preparing download.. / download」の小窓が出るだけで、ファイルは落ちない (10/06 から1本も保存されていなかった)。
+    //   小窓の「download」(<a href="javascript:void(0);">download</a>・画面の控え 10/17) まで押す
+    let dl = null;
+    for (let i = 0; i < 120 && !dl; i++) {                    // 小窓が出るまで最大60秒
+      dl = [...document.querySelectorAll("a")].filter(visible)
+        .find((a) => /^download$/i.test(txt(a)) && /^javascript:/i.test(a.getAttribute("href") || ""));
+      if (!dl) await sleep(500);
+    }
+    if (!dl) { log("❌ トラフィック: 左下の「download」が出ませんでした (ファイルは落ちていません)"); return; }
+    dl.click();
+    log("✅ トラフィック: 左下の「download」を押しました");
   }
 
   function lqrButton() {
