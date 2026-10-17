@@ -50,6 +50,31 @@ def waiting_certs():
     return list(dict.fromkeys(str(c) for c in ok))
 
 
+def mirror_reasons(results, pick=None):
+    """引けた物の刷りを PSA ラベルと照らし、ミラー (REVERSE HOLO 等) の行が無くて落ちる物を拾う。
+
+    ★2026-10-17 ユーザー「せっかく夜の仕込みをしているわけだから、30/30を目指したい」: リバースホロ・マスターボールの
+      行が無い物は、出品の時に落ちてから (build_fail_watch) カタログに頼んでいた (10/17 2回目で2件落ちた)。
+      出品と同じ照合 (psa_variant_gate.pick) を夜に当て、落ちる理由の文を出品と同じ形で作る → mirror_requests が拾う。
+    戻り: {cert: 落ちる理由の文}
+    """
+    if pick is None:
+        import psa_variant_gate as _PVG
+        pick = _PVG.pick
+    out = {}
+    for r in results:
+        pid = r.get("product_id")
+        if r.get("status") != "RESOLVED" or not pid:
+            continue
+        try:
+            new, why = pick(r.get("category"), r.get("brand", ""), r.get("subject", ""), pid)
+        except Exception:                                      # noqa: BLE001 照合できない物は夜には頼まない (出品の時に今まで通り)
+            continue
+        if not new and why:
+            out[str(r["cert"])] = "刷りがPSAラベルと合わない — %s — %s" % (str(pid).split(":", 1)[-1], why)
+    return out
+
+
 def pick_new(results, ledger):
     """頼む物 (純関数): 引けない判定で、まだ頼んでいない鑑定番号だけ。"""
     return [r for r in results if r.get("status") in ASK and str(r.get("cert")) not in ledger]
@@ -119,6 +144,12 @@ def main(argv=None):
         with open(LEDGER, "w", encoding="utf-8") as f:
             json.dump(ledger, f, ensure_ascii=False, indent=1)
         ring(path, len(new))
+    # ★2026-10-17 ミラーの行 (REVERSE HOLO 等) も夜のうちに頼む (カタログが毎時に作る・出品の時の頼み方と同じ入力)
+    import build_fail_watch as _BFW
+    mreq = _BFW.mirror_requests(mirror_reasons(results))
+    mnew = 0 if a.dry_run else _BFW.write_mirror_input(mreq, dt.datetime.now().isoformat(timespec="seconds"))
+    print(f"🪞 出品待ちの先回り: ミラーの行が無くて落ちる {len(mreq)}件 / カタログに新しく頼んだ {mnew}件"
+          f"{' (試しなので頼んでいない)' if a.dry_run else ''}")
     n_ng = sum(v for k, v in counts.items() if k in ASK)
     print(f"📋 出品待ちの先回り: カタログで引けない {n_ng}件 (新しく頼んだ {0 if a.dry_run else len(new)}件"
           f"{' / 試しなので頼んでいない' if a.dry_run else ''}) / 引けた {counts.get('RESOLVED', 0)}件 / 対象外 {counts.get('OUT-OF-SCOPE', 0)}件"

@@ -26,3 +26,16 @@ def test_request_has_two_sections_and_lists_certs():
 def test_bat_runs_it_after_the_prefetch():
     bat = open(os.path.join(os.path.dirname(__file__), "..", "tools", "run_psa_cache_warm.bat"), encoding="ascii").read()
     assert bat.index("psa_cache_warm.py --limit") < bat.index("psa_preflight_nightly.py") < bat.index("psawarm --end")
+
+
+def test_mirror_reasons_uses_same_wording_as_build_failures():
+    import build_fail_watch as B
+
+    def fake_pick(cat, brand, subj, pid):
+        if pid == "SV2a-142":
+            return "", "PSA は MASTER BALL REVERSE HOLO だが行は 通常 / 合う行が0件で決められない"
+        return pid, ""
+    rs = [dict(_r("1", "RESOLVED"), product_id="SV2a-142"), dict(_r("2", "RESOLVED"), product_id="SV2a-001"),
+          dict(_r("3", "REVIEW"), product_id="SV2a-142")]
+    got = B.mirror_requests(N.mirror_reasons(rs, pick=fake_pick))
+    assert got == {"1": {"base": "SV2a-142", "psa": "MASTER BALL REVERSE HOLO"}}
