@@ -432,7 +432,11 @@ def count_sendable(now=None):
         sales = _read_sales()
         if sales is not None and match_sales(ledger, sales):
             save_json(OFFERS_PATH, ledger)
-        return {"n": sum(1 for _r, why in pick_rows(rows, el, sheet, act) if not why), **offer_stats(ledger)}
+        # ★2026-10-17 ユーザー「件数だけ減っていたよね」: 押すと「送る待ち」として台帳に入り、送れなかった分まで
+        #   数から消えていた (10/17 朝の2回は送った0件なのに 37 → 20)。送る待ちのまま残っている分も足す
+        queued = sum(1 for v in ledger.values() if offer_state(v, now) == "waiting")
+        new = sum(1 for _r, why in pick_rows(rows, el, sheet, act) if not why)
+        return {"n": new + queued, "queued": queued, **offer_stats(ledger)}
     except Exception as e:                                     # noqa: BLE001
         return {"n": None, "error": f"{type(e).__name__}: {e}"[:200]}
 

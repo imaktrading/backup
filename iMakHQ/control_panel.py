@@ -1396,6 +1396,8 @@ SCRIPTS = [
         "params": [],
         "auto_full": True,
         "auto_csv_prefix": "tcg_upload_",
+        # ★2026-10-17 終わったら「新規に出せる PSA」の件数だけ数え直す (全部だと約8分・時刻も全部同じになっていた)
+        "badge": "psa_new",
     },
     {
         "category": "リール", "type": "new", "label": "新規",
@@ -1536,7 +1538,9 @@ SCRIPTS = [
         "tip": "ウォッチ・カートの人がいる US の出品に 8%引きのオファーを **1回10件** 送ります (ウォッチの多い順・仕入元が売り切れ・返事待ちのオファーがある・30日以内に送った物は除く)。"
                "押すと一覧を作って Edge で Seller Hub を開き、拡張が1件ずつ送ってタブを閉じます。",
         "skip_postprocess": True,
-        "no_recount": True,
+        # ★2026-10-17 ユーザー「オファーを送れるボタンと新規に出せるPSAボタンの時間が被っている」: 押した後に数え直さず
+        #   18:19 の数のままだった → 終わったら「オファーを送れる」の件数だけ数え直す
+        "badge": "offer_send",
     },
     {
         # ★2026-09-19: 同上。UK/AU/CA のミラーに 広告10% と ベストオファーを付ける
@@ -5044,7 +5048,9 @@ class ListingPanel:
                        "sold_restock": sr_txt,
                        "psa_gate": pg_txt, "restock_build": rb_txt, "restock_wb": rw_txt,
                        "hoju_status": hs_txt, "kuji_supply": kv_txt, "kuji_refresh": kr_txt,
-                       "offer_calc": of_txt, "order_sync": self._order_badge()[0]}
+                       "offer_calc": of_txt, "order_sync": self._order_badge()[0],
+                       # ★2026-10-17 神風で押した後に自分の件数だけ数え直すための badge (旧パネルでは出さない)
+                       "psa_new": "", "offer_send": ""}
             # ★青の意味 = **押さないと減らない残件がある** (2026-09-03 ユーザー確定)。
             #   > 押さないと減らないのに黒文字だと、無意味
             #   > 自動で消化されるのは、黒でいいけど
