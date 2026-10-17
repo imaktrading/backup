@@ -55,6 +55,29 @@ def judge(name, ts, max_h, now, why_stale=""):
             "note": (why_stale or "%d時間前" % age) if age > max_h else ""}
 
 
+CREDIT_WORDS = ("credit balanc", "insufficient_quota", "billing_error")   # ログでは文が途中で切れていることがある (10/17 のハント)
+LOG_DIRS = [os.path.join(HERE, "..", "run_logs"), os.path.join(HERE, "..", "review_logs"),
+            os.path.join(HERE, "..", "review_logs", "job_queue")]
+
+
+def credit_check(now, dirs=None, hours=24):
+    """直近 hours 時間に書かれたログに、有料 API の残高切れの文があるか (I/O)。"""
+    hits = []
+    for d in (dirs or LOG_DIRS):
+        for f in glob.glob(os.path.join(d, "*.log")):
+            try:
+                if now - os.path.getmtime(f) > hours * 3600:
+                    continue
+                with open(f, encoding="utf-8", errors="replace") as fh:
+                    t = fh.read()
+            except OSError:
+                continue
+            if any(w in t for w in CREDIT_WORDS):
+                hits.append(os.path.basename(f))
+    return {"name": "有料 API の残高", "stale": bool(hits), "age_h": None, "max_h": None,
+            "note": ("残高切れの記録: %s" % ", ".join(hits[:3])) if hits else ""}
+
+
 def check(now=None):
     """全項目の点検 (I/O・ファイルの時刻と控えを読むだけ)。戻り [dict]。"""
     now = (now or dt.datetime.now()).timestamp()
@@ -73,6 +96,9 @@ def check(now=None):
     stage = (cp.get("debug") or {}).get("stage") if isinstance(cp.get("debug"), dict) else None
     out.append({"name": "SpeedPAK の送料", "stale": bool(stage), "age_h": None, "max_h": None,
                 "note": ("読めていない: %s" % stage) if stage else ""})
+    # ★2026-10-18 有料 API の残高切れ: 10/17 22:18 から Anthropic の残高が尽き、トレハンの写真読み 1,955件が全部失敗した
+    #   (7時間半 空回り)。直近24時間のログに残高切れの文があれば赤
+    out.append(credit_check(now))
     # オファー: 送る予定のまま3時間以上送れていない物があれば赤 (拡張が動いていない)
     try:
         import sys

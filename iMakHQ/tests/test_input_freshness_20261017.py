@@ -20,3 +20,13 @@ def test_fresh_is_not_red_and_missing_is_red():
 def test_summary_names_the_stale_ones():
     s = F.summary_line([{"name": "A", "stale": True, "note": "5時間前"}, {"name": "B", "stale": False, "note": ""}])
     assert "古い 1件" in s and "A (5時間前)" in s and "B" not in s
+
+
+def test_credit_error_in_recent_log_is_red(tmp_path):
+    import time
+    p = tmp_path / "hunt.log"
+    p.write_text("vision_api_error: Your credit balance is too low", encoding="utf-8")
+    r = F.credit_check(time.time(), dirs=[str(tmp_path)])
+    assert r["stale"] and "hunt.log" in r["note"]
+    p.write_text("ok", encoding="utf-8")
+    assert not F.credit_check(time.time(), dirs=[str(tmp_path)])["stale"]
