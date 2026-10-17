@@ -206,6 +206,71 @@ def test_skip_urls_never_reach_detail_or_vision(monkeypatch, stub):
     assert not any(u.endswith(("m0", "m2", "m4")) for u in touched)
 
 
+def test_search_crashed_keywords_logged_and_passed_through(monkeypatch, stub, tmp_path):
+    """🥕2026-10-16 HQ依頼: 検索で落ちた語は0件でもログに出す/resultに積む(次回へ渡す用)."""
+    logged = []
+    monkeypatch.setattr(R, "_log", lambda msg: logged.append(msg))
+
+    def _collect_urls(keywords, driver, **kw):
+        return {"urls": ["https://jp.mercari.com/item/m0"], "by_keyword": {keywords[0]: 1},
+                "total_raw": 1, "crashed_keywords": ["PSA10 落ちた語"]}
+
+    monkeypatch.setattr(R.MSch, "collect_multi_keyword_urls", _collect_urls)
+    monkeypatch.setattr(R, "_process_one", lambda url, *a, **k: _candidate(url))
+
+    got = R.collect(_args(), dump_path=tmp_path / "d.json")
+
+    assert got["search_crashed_keywords"] == ["PSA10 落ちた語"]
+    assert any("検索で落ちて飛ばした語 1 件" in m for m in logged)
+
+
+def test_search_crashed_keywords_zero_still_logged(monkeypatch, stub, tmp_path):
+    """落ちた語が0件でも「検索で落ちて飛ばした語 0 件」の行を出す (0件でも出す原則)."""
+    logged = []
+    monkeypatch.setattr(R, "_log", lambda msg: logged.append(msg))
+    monkeypatch.setattr(R, "_process_one", lambda url, *a, **k: _candidate(url))
+
+    got = R.collect(_args(), dump_path=tmp_path / "d.json")
+
+    assert got["search_crashed_keywords"] == []
+    assert any("検索で落ちて飛ばした語 0 件" in m for m in logged)
+
+
+def test_cap_hit_stops_remaining_keyword_search_not_just_detail(monkeypatch, tmp_path):
+    """🥕2026-10-17 HQ依頼 №610: 打ち切った後は残りの語の検索自体もしない (時間を削る)."""
+    import scrapers.mercari_search as real_MSch
+
+    searched_keywords = []
+
+    def _fake_collect_one_keyword(keyword, driver, **kw):
+        searched_keywords.append(keyword)
+        return {"keyword": keyword, "url": "u", "urls": [f"https://jp.mercari.com/item/{keyword}"],
+                "cap_hit": False, "total_seen": 1}
+
+    monkeypatch.setattr(real_MSch, "collect_search_listing_urls", _fake_collect_one_keyword)
+    monkeypatch.setattr(R.MS, "create_anonymous_driver",
+                        lambda headless=False: types.SimpleNamespace(quit=lambda: None))
+    monkeypatch.setattr(R, "_process_one", lambda url, *a, **k: _candidate(url))
+
+    processed_count = {"n": 0}
+
+    def _should_pause():
+        # 1件処理したらもう打ち切り
+        return processed_count["n"] >= 1
+
+    def _counting_process_one(url, *a, **k):
+        processed_count["n"] += 1
+        return _candidate(url)
+
+    monkeypatch.setattr(R, "_process_one", _counting_process_one)
+
+    got = R.collect(_args(keywords=["語1", "語2", "語3"]), dump_path=tmp_path / "d.json",
+                    should_pause=_should_pause)
+
+    assert searched_keywords == ["語1"]          # 語2・語3は検索していない (= 時間を使っていない)
+    assert got["truncated"] is True
+
+
 def test_resume_carries_processed_urls_forward(monkeypatch, stub, tmp_path):
     resume = {"candidates": [], "collect_reject": {},
               "processed_urls": ["https://jp.mercari.com/item/m0"]}

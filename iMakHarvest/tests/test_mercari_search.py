@@ -1,8 +1,11 @@
 """mercari_search の純関数テスト (URL builder / seller品質 parse / filter)."""
+import types
+
 import pytest
 
 from scrapers.mercari_search import (
     build_search_url,
+    collect_multi_keyword_urls,
     parse_seller_quality,
     passes_seller_filter,
 )
@@ -100,3 +103,93 @@ def test_is_tanker(title, expected):
 def test_other_brand_excluded(title):
     from scrapers.mercari_search import is_target_bag
     assert is_target_bag(title) is False
+
+
+# --------------------------------------------------------------------------
+# collect_multi_keyword_urls: 検索中の1語クラッシュで全体を殺さない (2026-10-16 HQ依頼)
+# --------------------------------------------------------------------------
+
+def test_search_crash_skips_keyword_and_rebuilds_driver(monkeypatch):
+    """1語で例外→その語だけ crashed_keywords へ、 driver_factory で作り直して次の語へ進む."""
+    import scrapers.mercari_search as MSch
+
+    def _fake_collect(keyword, driver, **kw):
+        if keyword == "落ちる語":
+            raise RuntimeError("chrome not reachable")
+        return {"keyword": keyword, "url": "u", "urls": [f"https://x/{keyword}"],
+                "cap_hit": False, "total_seen": 1}
+
+    monkeypatch.setattr(MSch, "collect_search_listing_urls", _fake_collect)
+
+    old_driver = types.SimpleNamespace(quit=lambda: None, tag="old")
+    rebuilds = []
+
+    def _factory():
+        rebuilds.append(1)
+        return types.SimpleNamespace(quit=lambda: None, tag="new")
+
+    got = collect_multi_keyword_urls(
+        ["語1", "落ちる語", "語2"], old_driver, driver_factory=_factory)
+
+    assert got["crashed_keywords"] == ["落ちる語"]
+    assert "落ちる語" not in got["by_keyword"]      # 次回また検索対象になる
+    assert got["by_keyword"] == {"語1": 1, "語2": 1}
+    assert len(rebuilds) == 1                        # 作り直しは1回
+
+
+def test_on_new_urls_called_per_keyword_and_can_stop_search(monkeypatch):
+    """🥕2026-10-17 HQ依頼 №610: 打ち切ったら残りの語は検索しない (検索と detail を交互に)."""
+    import scrapers.mercari_search as MSch
+
+    def _fake_collect(keyword, driver, **kw):
+        return {"keyword": keyword, "url": "u", "urls": [f"https://x/{keyword}/a", f"https://x/{keyword}/b"],
+                "cap_hit": False, "total_seen": 2}
+
+    monkeypatch.setattr(MSch, "collect_search_listing_urls", _fake_collect)
+
+    seen_batches = []
+
+    def _on_new_urls(new_urls, kw):
+        seen_batches.append((kw, list(new_urls)))
+        return kw == "語2"  # 語2の処理後に打ち切る
+
+    got = collect_multi_keyword_urls(
+        ["語1", "語2", "語3"], types.SimpleNamespace(quit=lambda: None),
+        on_new_urls=_on_new_urls)
+
+    assert [kw for kw, _ in seen_batches] == ["語1", "語2"]   # 語3は検索していない
+    assert got["stopped_early"] is True
+    assert "語3" not in got["by_keyword"]                     # 次回また検索対象
+
+
+def test_should_pause_stops_before_next_keyword_search(monkeypatch):
+    """should_pause が真なら、 次の語の検索自体を始めない."""
+    import scrapers.mercari_search as MSch
+
+    calls = []
+
+    def _fake_collect(keyword, driver, **kw):
+        calls.append(keyword)
+        return {"keyword": keyword, "url": "u", "urls": [f"https://x/{keyword}"],
+                "cap_hit": False, "total_seen": 1}
+
+    monkeypatch.setattr(MSch, "collect_search_listing_urls", _fake_collect)
+
+    got = collect_multi_keyword_urls(
+        ["語1", "語2", "語3"], types.SimpleNamespace(quit=lambda: None),
+        should_pause=lambda: len(calls) >= 1)
+
+    assert calls == ["語1"]              # 語2・語3は検索していない
+    assert got["stopped_early"] is True
+
+
+def test_search_crash_without_factory_still_raises(monkeypatch):
+    """driver_factory を渡さなければ従来どおり例外を伝える (後方互換)."""
+    import scrapers.mercari_search as MSch
+
+    def _boom(keyword, driver, **kw):
+        raise RuntimeError("chrome not reachable")
+
+    monkeypatch.setattr(MSch, "collect_search_listing_urls", _boom)
+    with pytest.raises(RuntimeError):
+        collect_multi_keyword_urls(["語1"], types.SimpleNamespace(quit=lambda: None))

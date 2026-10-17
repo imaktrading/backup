@@ -162,6 +162,16 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
         if _driver_box[0] is None:
             _driver_box[0] = _new_driver()
         return _driver_box[0]
+
+    def _rebuild_driver():
+        """検索中に Chrome が切れた時、 古いのを畳んで新しいのに差し替える (2026-10-16)."""
+        try:
+            if _driver_box[0] is not None:
+                _driver_box[0].quit()
+        except Exception:
+            pass
+        _driver_box[0] = _new_driver()
+        return _driver_box[0]
     # vision_error は 「写真が読めない (= 正常な reject)」 とは別枠。 混ぜると API 障害を
     # 「不鮮明が多かった」 と読み違える (2026-08-17 に残高切れで実際に起きた)
     cands, rej = [], {"sold": 0, "seller_rating": 0, "no_identity": 0,
@@ -170,11 +180,18 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                       "already_claimed_cert": 0, "item_error": 0, "auction": 0,
                       "already_in_sheet": 0}
     vision_errors: list[str] = []
+    # ★2026-10-17 HQ依頼 (B-20261017-007): 今月すでに使った分 (他走行含む) を先に測っておく。
+    # `_process_one` は args 経由でこの値を見る (呼出の度に CSV を読み直さないため一度だけ計算)。
+    monthly_cap = getattr(args, "monthly_cap_usd", 0) or 0
+    args._prior_month_vision_cost = month_to_date_vision_cost() if monthly_cap else 0.0
     # 未判定 (取得できなかった) URL。 件数だけ出して URL を捨てると拾い直せない
     failed_urls: list[str] = []
     # 鑑定番号が読めなかった分 (= I列空欄でスプシに入れて目視で拾う。 2026-08-18 user 指示)
     unreadable: list[dict] = []
     by_keyword: dict = {}
+    # ★2026-10-16 HQ依頼: 検索中に Chrome が切れて飛ばした語 (by_keyword には入れない →
+    # 次回検索し直す対象。 走行ログに0件でも1行出す。 B-20261015-022)
+    search_crashed: list[str] = []
     # ★2026-10-06 HQ/ADV依頼: read_slab の実測トークン数を走行単位で積む (費用を先に計測)
     vision_usage = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
     # ★2026-10-07 HQ依頼 🥕「拾った物は捨てない」: 候補にしなかった理由を残す (opt-in)
@@ -194,6 +211,7 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
             vision_usage[k] = vision_usage.get(k, 0) + v
         if dropped is not None:
             dropped.update(resume.get("dropped") or {})
+        search_crashed = list(resume.get("search_crashed_keywords") or [])
         _log(f"再開: 処理済 {len(done_urls)} URL / 既存候補 {len(cands)} 件 / "
              f"収集済の検索語 {len(by_keyword)} 語")
     processed: list[str] = list(done_urls)
@@ -210,7 +228,7 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                "vision_errors": sorted(set(vision_errors)),
                "processed_urls": processed, "truncated": state["truncated"],
                "by_keyword": by_keyword, "collected_urls": state["urls"],
-               "vision_usage": vision_usage}
+               "vision_usage": vision_usage, "search_crashed_keywords": search_crashed}
         if dropped is not None:
             payload["dropped"] = dropped
         _dump(payload, dump_path, quiet=True)
@@ -226,38 +244,14 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
     skip_urls = set(skip_urls or ())
 
     from sheet_writer import dedupe_key  # noqa: PLC0415
-    try:
-        if urls_override is not None:
-            urls = list(urls_override)
-            _log(f"拾い直し: {len(urls)} URL (検索はしない)")
-        else:
-            def _kw_done(merged, bk):
-                # ★1 語ごとに保存。 収集は 162 語で 1 時間半かかる (2026-09-20 実測)。
-                # 終わってから保存では、 途中で落ちた分が全部消える
-                state["urls"] = list(merged)
-                by_keyword.clear()
-                by_keyword.update(bk)
-                _save()
+    consecutive_errors_box = [0]
 
-            collected = MSch.collect_multi_keyword_urls(
-                keywords, _get_driver(), price_min=args.price_min, price_max=args.price_max,
-                cap_per_keyword=args.cap_per_keyword, manual=args.manual,
-                sleep_between_sec=args.keyword_interval,
-                progress_callback=lambda n, m: _log(f"  収集 {m}"),
-                on_keyword_done=_kw_done if dump_path else None,
-                resume_urls=state["urls"] or None,
-                resume_by_keyword=by_keyword or None,
-            )
-            urls = collected["urls"]
-            by_keyword = collected["by_keyword"]
-            _log(f"収集: {len(urls)} URL (dedup後) / by_keyword={by_keyword}")
-        if args.max_details:
-            urls = urls[:args.max_details]
-            _log(f"詳細フェッチ上限 {args.max_details} 件に制限")
-        _save()  # 収集直後に保存 (詳細で落ちても URL 収集をやり直さない)
-
-        consecutive_errors = 0
-        for i, url in enumerate(urls, 1):
+    def _process_urls(batch: list[str], total_hint: int | None = None) -> bool:
+        """1 塊の URL を詳細取得 → Vision まで処理する (検索と1語ごと交互に回せるよう切出し。
+        2026-10-17 HQ依頼 №610: 打ち切り後も残り全語を検索していた反省。
+        Returns: True = ここで走行全体を止める (should_pause 合致 / ドライバ再生成も失敗)。
+        """
+        for url in batch:
             if url in done_urls:
                 continue
             if dedupe_key(url) in claimed["urls"]:
@@ -273,16 +267,16 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                 kept = _process_one(url, _get_driver, args, claimed, rej, vision_errors,
                                     failed=failed_urls, detail_fn=detail_fn, usage=vision_usage,
                                     dropped=dropped)
-                consecutive_errors = 0
+                consecutive_errors_box[0] = 0
             except Exception as e:  # noqa: BLE001 - 1 件の失敗で走行全体を殺さない
                 rej["item_error"] += 1
                 failed_urls.append(url)
                 _record_dropped(dropped, url, "item_error")
-                consecutive_errors += 1
-                _log(f"  ⚠️ {i}/{len(urls)} 取得エラー ({consecutive_errors}連続): "
+                consecutive_errors_box[0] += 1
+                _log(f"  ⚠️ {len(processed) + 1}件目 取得エラー ({consecutive_errors_box[0]}連続): "
                      f"{type(e).__name__}")
                 _save()
-                if consecutive_errors >= args.max_consecutive_errors:
+                if consecutive_errors_box[0] >= args.max_consecutive_errors:
                     # ドライバが死んでいる可能性が高い。 作り直して続行を試す
                     _log("  ドライバを作り直します")
                     if _driver_box[0] is not None:
@@ -293,11 +287,11 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                         _driver_box[0] = None
                     try:
                         _get_driver()  # 作れるか確認 (lazy でも、 ここだけは前倒しで試す)
-                        consecutive_errors = 0
+                        consecutive_errors_box[0] = 0
                     except Exception as e2:  # noqa: BLE001
                         state["truncated"] = True
                         _log(f"  ドライバ再生成も失敗 ({type(e2).__name__}) → ここで打ち切り")
-                        break
+                        return True
                 continue
             processed.append(url)
             if kept is not None:
@@ -306,8 +300,9 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                 _save()
             if should_pause and should_pause():
                 state["truncated"] = True
-                _log(f"  一時停止の条件に合致 ({i}/{len(urls)}) → ここで区切って終了 (続きは次回)")
-                break
+                _log(f"  一時停止の条件に合致 ({len(processed)}件処理後) → ここで区切って終了 "
+                     f"(検索も残りは回さない・続きは次回)")
+                return True
             # ★スプシへも走行中に書く。 最後にまとめて書くと、 プロセスが落ちた時に
             # その走行の成果が 1 行も残らない (2026-08-18 user 指示「途中で保存してよ」)。
             if on_flush and len(processed) % args.sheet_every == 0:
@@ -315,10 +310,71 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                 flushed["c"], flushed["u"] = len(cands), len(unreadable)
                 if n_c or n_u:
                     _log(f"  [SHEET] 途中書込: 候補{n_c} / 目視待ち{n_u}")
-            if i % 5 == 0 or i == len(urls):
-                _log(f"  詳細 {i}/{len(urls)} (cert読取={len(cands)} "
+            disp_total = f"/{total_hint}" if total_hint else ""
+            if len(processed) % 5 == 0 or len(processed) == total_hint:
+                _log(f"  詳細 {len(processed)}{disp_total} (cert読取={len(cands)} "
                      f"番号読めず={len(unreadable)} rej={rej})")
             time.sleep(1.0)
+        return False
+
+    try:
+        if urls_override is not None:
+            urls = list(urls_override)
+            _log(f"拾い直し: {len(urls)} URL (検索はしない)")
+            if args.max_details:
+                urls = urls[:args.max_details]
+                _log(f"詳細フェッチ上限 {args.max_details} 件に制限")
+            _save()  # 収集直後に保存 (詳細で落ちても URL 収集をやり直さない)
+            _process_urls(urls, total_hint=len(urls))
+        else:
+            def _kw_done(merged, bk):
+                # ★1 語ごとに保存。 収集は 162 語で 1 時間半かかる (2026-09-20 実測)。
+                # 終わってから保存では、 途中で落ちた分が全部消える
+                state["urls"] = list(merged)
+                by_keyword.clear()
+                by_keyword.update(bk)
+                _save()
+
+            def _on_new_urls(new_urls, kw):
+                # ★検索1語ごとに、その場で詳細+Visionまで進める (№610)。 ここで打ち切りに
+                # 合致すれば、 以降の語は検索自体をしない (search_crash と同じ「次回また
+                # 検索対象」にするため by_keyword には既に入っている=この語の検索は完了扱い)
+                if args.max_details and len(processed) >= args.max_details:
+                    return True
+                return _process_urls(new_urls)
+
+            collected = MSch.collect_multi_keyword_urls(
+                keywords, _get_driver(), price_min=args.price_min, price_max=args.price_max,
+                cap_per_keyword=args.cap_per_keyword, manual=args.manual,
+                sleep_between_sec=args.keyword_interval,
+                progress_callback=lambda n, m: _log(f"  収集 {m}"),
+                on_keyword_done=_kw_done if dump_path else None,
+                resume_urls=state["urls"] or None,
+                resume_by_keyword=by_keyword or None,
+                driver_factory=_rebuild_driver,
+                on_new_urls=_on_new_urls,
+                should_pause=should_pause,
+            )
+            urls = collected["urls"]
+            by_keyword = collected["by_keyword"]
+            newly_crashed = collected.get("crashed_keywords") or []
+            search_crashed.extend(k for k in newly_crashed if k not in search_crashed)
+            _log(f"収集: {len(urls)} URL (dedup後) / by_keyword={by_keyword}")
+            _log(f"検索で落ちて飛ばした語 {len(newly_crashed)} 件" +
+                 (f" ({newly_crashed})" if newly_crashed else ""))
+            if collected.get("stopped_early"):
+                skipped_kw = [k for k in keywords if k not in by_keyword]
+                _log(f"  検索も打ち切り: 残り {len(skipped_kw)} 語は検索しない "
+                     f"(候補の上限に達したため・続きは次回)")
+            # ★フォールバック: `on_new_urls` が呼ばれなかった分 (= 簡易stub・古い呼出側・
+            # 1語の中で打ち切る前に積まれていた分) を取りこぼさない。 既に打ち切り済なら
+            # 追加処理はしない (打ち切り後にもう1件進めてしまうのを防ぐ)
+            if not state["truncated"]:
+                already = set(processed)
+                remaining = [u for u in urls if u not in already]
+                if remaining:
+                    _process_urls(remaining, total_hint=len(urls))
+            _save()
     finally:
         _save()  # 例外で抜けても保存する
         if _driver_box[0] is not None:
@@ -337,11 +393,20 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
     if state["truncated"]:
         _log("⚠️ 要対応: 途中で打ち切りました。 --resume-from-json で続きから再開できます")
     _log_vision_cost(vision_usage, truncated=state["truncated"])
+    # ★2026-10-17 HQ依頼 (B-20261017-007③): 読んだ件数・外した件数(理由別)・この回の額・
+    # 今月の累計額が分かる1行 (0件でも出す・スマホには送らない=走行ログだけ)
+    run_cost = _usage_cost(vision_usage)
+    mtd_total = month_to_date_vision_cost() if vision_usage.get("calls", 0) else \
+        (getattr(args, "_prior_month_vision_cost", 0.0) + run_cost)
+    _log(f"💰 写真読み: 読んだ{vision_usage.get('calls', 0)}件 / "
+         f"読む前に外した{sum(rej.values())}件 (理由別={rej}) / "
+         f"この回${run_cost:.2f} / 今月累計${mtd_total:.2f}")
     result = {"candidates": cands, "unreadable": unreadable, "collect_reject": rej,
             "failed_urls": failed_urls,
             "vision_errors": sorted(set(vision_errors)),
             "processed_urls": processed, "truncated": state["truncated"],
-            "by_keyword": by_keyword, "vision_usage": vision_usage}
+            "by_keyword": by_keyword, "vision_usage": vision_usage,
+            "search_crashed_keywords": search_crashed}
     if dropped is not None:
         result["dropped"] = dropped
         _log(f"🥕 候補外も残した: {len(dropped)}件 (理由付き・捨てていない)")
@@ -353,6 +418,14 @@ VISION_COST_LOG = Path("C:/dev/iMak_data/harvest/vision_cost_log.csv")
 HAIKU_PRICE_PER_MTOK = {"input": 1.00, "output": 5.00}
 
 
+def _usage_cost(usage: dict) -> float:
+    """vision_usage (calls/input_tokens/output_tokens) から概算 $ を出す."""
+    in_tok = usage.get("input_tokens", 0)
+    out_tok = usage.get("output_tokens", 0)
+    return (in_tok / 1_000_000) * HAIKU_PRICE_PER_MTOK["input"] + \
+           (out_tok / 1_000_000) * HAIKU_PRICE_PER_MTOK["output"]
+
+
 def _log_vision_cost(usage: dict, truncated: bool) -> None:
     """走行1回ぶんの read_slab 呼び出し回数・トークン・概算金額を1行で残す
     (2026-10-06 HQ/ADV依頼: 見積りでなく実測を先に。 置き場はこのCSV)。"""
@@ -361,8 +434,7 @@ def _log_vision_cost(usage: dict, truncated: bool) -> None:
         return  # vision を1回も呼んでいない走行は書かない (ノイズ)
     in_tok = usage.get("input_tokens", 0)
     out_tok = usage.get("output_tokens", 0)
-    cost = (in_tok / 1_000_000) * HAIKU_PRICE_PER_MTOK["input"] + \
-           (out_tok / 1_000_000) * HAIKU_PRICE_PER_MTOK["output"]
+    cost = _usage_cost(usage)
     VISION_COST_LOG.parent.mkdir(parents=True, exist_ok=True)
     is_new = not VISION_COST_LOG.exists()
     with open(VISION_COST_LOG, "a", encoding="utf-8", newline="") as f:
@@ -370,6 +442,30 @@ def _log_vision_cost(usage: dict, truncated: bool) -> None:
             f.write("timestamp,calls,input_tokens,output_tokens,est_usd,truncated\n")
         f.write(f"{datetime.now().isoformat(timespec='seconds')},{calls},{in_tok},{out_tok},"
                 f"{cost:.4f},{truncated}\n")
+
+
+def month_to_date_vision_cost(now: datetime | None = None) -> float:
+    """今月 (now基準) に vision_cost_log.csv へ積まれた est_usd の合計.
+
+    (2026-10-17 HQ依頼 B-20261017-007: 写真読みの費用は月 約$45 まで。
+    トレハン・キャラハンは同じログを共有するので、 どちらから呼んでも合算で見える)。
+    """
+    now = now or datetime.now()
+    prefix = now.strftime("%Y-%m")
+    if not VISION_COST_LOG.exists():
+        return 0.0
+    total = 0.0
+    with open(VISION_COST_LOG, encoding="utf-8") as f:
+        next(f, None)  # header
+        for line in f:
+            parts = line.rstrip("\n").split(",")
+            if len(parts) < 5 or not parts[0].startswith(prefix):
+                continue
+            try:
+                total += float(parts[4])
+            except ValueError:
+                pass
+    return total
 
 
 COST_SANITY_PATH = Path("C:/dev/iMak_data/shared/cost_sanity.json")
@@ -473,6 +569,15 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
             rej["card_cost_over"] = rej.get("card_cost_over", 0) + 1
             _record_dropped(dropped, url, "card_cost_over", detail)
             return None
+        # ★2026-10-17 HQ依頼 (B-20261017-007 無駄読み防止): タイトルに「PSA9」等 別グレード/
+        # 別鑑定会社が**はっきり書かれている**分だけ、 写真読み(課金)の前に落とす。
+        # `looks_like_psa10` (= 確証が無ければ False) は使わない。 タイトルに PSA10 と
+        # 書いていないだけの正当な出品 (写真で10と確認できる) まで pre-vision で落とすと
+        # recall が無駄に減る。 `contradicts_psa10` (= 明記されている時だけ True) が正しい。
+        if psa_grade_gate.contradicts_psa10(title=detail.get("title") or ""):
+            rej["title_not_psa10"] = rej.get("title_not_psa10", 0) + 1
+            _record_dropped(dropped, url, "title_not_psa10", detail)
+            return None
 
     if q is None:
         q = MSch.extract_seller_quality(driver_getter())  # 直前に開いた商品ページから
@@ -514,6 +619,21 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
             failed.append(url)
         _record_dropped(dropped, url, "vision_cap_reached", detail)
         return None
+
+    # ★2026-10-17 HQ依頼 (B-20261017-007): 写真読みは月 約$45まで。 今月の既出分 (他走行含む)
+    # + この走行でここまで使った分 が上限に届いたら、 ここから先は読まずに止める
+    monthly_cap = getattr(args, "monthly_cap_usd", 0) or 0
+    if monthly_cap and usage is not None:
+        so_far = getattr(args, "_prior_month_vision_cost", 0.0) + _usage_cost(usage)
+        if so_far >= monthly_cap:
+            rej["monthly_cap_reached"] = rej.get("monthly_cap_reached", 0) + 1
+            if rej["monthly_cap_reached"] == 1:
+                _log(f"💰 月の上限 ${monthly_cap:.0f} (今月実績 ${so_far:.2f}) に届いた "
+                     f"→ 今回はここから写真読みを止める")
+            if failed is not None:
+                failed.append(url)
+            _record_dropped(dropped, url, "monthly_cap_reached", detail)
+            return None
 
     vision = psa_slab_vision.read_slab(images)
     if usage is not None:

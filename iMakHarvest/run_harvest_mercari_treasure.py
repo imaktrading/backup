@@ -154,6 +154,7 @@ def _build_treasure_args(keywords: list[str], ap_args, cost_cfg, card_limits) ->
         cost_cfg=cost_cfg,
         card_limits=card_limits,
         max_vision=getattr(ap_args, "max_vision", 0),
+        monthly_cap_usd=getattr(ap_args, "monthly_cap_usd", 0),
     )
 
 
@@ -193,6 +194,10 @@ def main(argv=None) -> int:
     # ★2026-10-15 HQ依頼: シートに入れる候補が約N件になったら、残りの語は回さず次回に回す
     ap.add_argument("--max-candidates", type=int, default=0,
                     help="シートに書き込んだ候補がこの件数に届いたら打ち切る (0=無制限)")
+    # ★2026-10-17 HQ依頼 (B-20261017-007): 写真読みは月 約$45まで (トレハン・キャラハン合算)。
+    # 0=無制限 (従来互換)
+    ap.add_argument("--monthly-cap-usd", type=float, default=45.0,
+                    help="写真読み(課金)の月の上限ドル。 届いたら今回はそこで読むのを止める (0=無制限)")
     args = ap.parse_args(argv)
 
     from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
@@ -279,10 +284,28 @@ def _run(args) -> int:
         dump_path = Path(args.resume_from_json)
         resume = json.loads(dump_path.read_text(encoding="utf-8"))
     else:
-        dump_path = psa10.DUMP_DIR / f"mercari_treasure_{datetime.now():%Y%m%dT%H%M%S}.json"
+        # ★2026-10-17 HQ依頼 (B-20261017-007④): PCが落ちたら、人の手を借りずに
+        # 次回の起動で続きから入る (従来は手で --resume-from-json を撃つ運用だった)。
+        # 印 (treasure_running.flag) が残っている = 前回クラッシュ等で途中で止まった分。
+        stale = run_marker.check_stale(MARKER_PATH)
+        stale_dump = stale.get("dump_path") if stale else None
+        if stale_dump and Path(stale_dump).exists():
+            dump_path = Path(stale_dump)
+            try:
+                resume = json.loads(dump_path.read_text(encoding="utf-8"))
+            except Exception as e:  # noqa: BLE001 - 読めなければ諦めて最初から
+                _log(f"⚠️ 続きから再開しようとしたが控えを読めず ({type(e).__name__}) → 最初から")
+                resume = None
+        if resume is not None:
+            done_n = len(resume.get("by_keyword") or {})
+            _log(f"続きから再開: {done_n}/{len(keywords)}語目から "
+                 f"(前回クラッシュ等で途中で止まった分・{dump_path})")
+        else:
+            dump_path = psa10.DUMP_DIR / f"mercari_treasure_{datetime.now():%Y%m%dT%H%M%S}.json"
     _log(f"途中保存先: {dump_path}")
-    # ★手動長時間収集は自動再開しない(HQ/ADV確定)。 その代わり開始時に印を残し、
-    # 正常終了(mark_finished)でだけ消す。 印が残っている = 前回クラッシュ等で途中で止まった。
+    # ★開始時に印を残し、 正常終了(mark_finished)でだけ消す (自動再開しない運用だったが
+    # B-20261017-007④ で「次回の起動で続きから」に変更。 印が残っている=前回クラッシュ等で
+    # 途中で止まった、 を次の起動が above で検出して自動で resume= に読み込む)。
     run_marker.mark_started(MARKER_PATH, dump_path)
     treasure_args = _build_treasure_args(keywords, args, cost_cfg, limits)
 
@@ -373,6 +396,11 @@ def _run(args) -> int:
                 ran_kw.append(kw)
             else:
                 left_kw.append(kw)
+        # ★2026-10-16 HQ依頼 (B-20261015-022): 検索中に Chrome が切れて飛ばした語は
+        # 「落ちた語は残した語に入れて次回の先頭へ」。 ran_kw から除いて先頭に積む
+        search_crashed = payload.get("search_crashed_keywords") or []
+        ran_kw = [k for k in ran_kw if k not in search_crashed]
+        left_kw = list(dict.fromkeys(search_crashed + left_kw))
         try:
             LEFTOVER_PATH.parent.mkdir(parents=True, exist_ok=True)
             LEFTOVER_PATH.write_text(json.dumps(
@@ -382,7 +410,8 @@ def _run(args) -> int:
             _log(f"⚠️ 残した語の控えを書けず: {type(e).__name__}")
         cap_hit = bool(payload.get("truncated"))
         _log(f"📘 打ち切り: {'候補の上限で区切った' if cap_hit else '打ち切りなし'} / "
-             f"回した語 {len(ran_kw)} / 残した語 {len(left_kw)}")
+             f"回した語 {len(ran_kw)} / 残した語 {len(left_kw)} "
+             f"(うち検索で落ちた語 {len(search_crashed)})")
 
     if args.dry_run:
         _log("dry-run → 書込なし")

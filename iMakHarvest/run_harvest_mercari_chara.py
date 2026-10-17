@@ -152,6 +152,7 @@ def _build_chara_args(keywords: list[str], ap_args, cost_cfg) -> argparse.Namesp
         strict_gates=True,
         cost_cfg=cost_cfg,
         card_limits={},  # カード個別上限は無い。会社上限(cost_cfg)だけが効く
+        monthly_cap_usd=getattr(ap_args, "monthly_cap_usd", 0),
     )
 
 
@@ -174,6 +175,9 @@ def main(argv=None) -> int:
     ap.add_argument("--add-dropped-from-json", default=None,
                     help="前回dumpの collected_urls を対象に、候補外の理由をシートに足す"
                          " (新規検索なし・鑑定番号読み取りなし)")
+    # ★2026-10-17 HQ依頼 (B-20261017-007・treasureと同じ): 写真読みは月 約$45まで (合算)
+    ap.add_argument("--monthly-cap-usd", type=float, default=45.0,
+                    help="写真読み(課金)の月の上限ドル。 届いたら今回はそこで読むのを止める (0=無制限)")
     args = ap.parse_args(argv)
 
     from scrapers._chrome_util import kill_chrome_for_profile, kill_orphan_chromedriver
@@ -209,9 +213,26 @@ def _run(args) -> int:
         dump_path = Path(args.resume_from_json)
         resume = json.loads(dump_path.read_text(encoding="utf-8"))
     else:
-        dump_path = psa10.DUMP_DIR / f"mercari_chara_{datetime.now():%Y%m%dT%H%M%S}.json"
+        # ★2026-10-17 HQ依頼 (B-20261017-007④・treasureと同じ): PCが落ちたら人の手を
+        # 借りずに次回の起動で続きから入る。
+        stale = run_marker.check_stale(MARKER_PATH)
+        stale_dump = stale.get("dump_path") if stale else None
+        if stale_dump and Path(stale_dump).exists():
+            dump_path = Path(stale_dump)
+            try:
+                resume = json.loads(dump_path.read_text(encoding="utf-8"))
+            except Exception as e:  # noqa: BLE001 - 読めなければ諦めて最初から
+                _log(f"⚠️ 続きから再開しようとしたが控えを読めず ({type(e).__name__}) → 最初から")
+                resume = None
+        if resume is not None:
+            done_n = len(resume.get("by_keyword") or {})
+            _log(f"続きから再開: {done_n}/{len(keywords)}語目から "
+                 f"(前回クラッシュ等で途中で止まった分・{dump_path})")
+        else:
+            dump_path = psa10.DUMP_DIR / f"mercari_chara_{datetime.now():%Y%m%dT%H%M%S}.json"
     _log(f"途中保存先: {dump_path}")
-    # ★手動長時間収集は自動再開しない(HQ/ADV確定)。 開始時に印を残し、正常終了でだけ消す。
+    # ★手動長時間収集は自動再開しない(HQ/ADV確定だったが B-20261017-007④ で自動化に変更)。
+    # 開始時に印を残し、正常終了でだけ消す。
     run_marker.mark_started(MARKER_PATH, dump_path)
     chara_args = _build_chara_args(keywords, args, cost_cfg)
 

@@ -279,6 +279,9 @@ def collect_multi_keyword_urls(
     on_keyword_done: Optional[Callable[[list, dict], None]] = None,
     resume_urls: Optional[list] = None,
     resume_by_keyword: Optional[dict] = None,
+    driver_factory: Optional[Callable[[], object]] = None,
+    on_new_urls: Optional[Callable[[list, str], bool]] = None,
+    should_pause: Optional[Callable[[], bool]] = None,
 ) -> dict:
     """複数キーワードを順に検索し、 URL を横断 dedup で統合.
 
@@ -289,35 +292,78 @@ def collect_multi_keyword_urls(
     manual=True: 各キーワードでフリマアシスト手動 click 待ち (= volume 突破、 非headless)。
     sleep_between_sec: 語間の待機。 語を大量に流す時は空けた方が件数が落ちない
       (2026-08-17 実測: 8 秒空けて 10 語連続でも 15 件/語 を維持。 既定 0 = 従来動作)。
-    Returns: {"urls": list[str] (dedup済), "by_keyword": {kw: 件数}, "total_raw": int}
+
+    driver_factory: 1 語の検索中に Chrome が切れた (例外) 時に呼ぶ `() -> driver`。
+      渡すと、 その語だけ `crashed_keywords` に積んで (= by_keyword には入れない →
+      次回検索し直す対象) 古い driver を畳んで新しい driver で次の語へ続ける。
+      渡さなければ従来どおり例外を呼出側に伝える (2026-10-16 HQ依頼:
+      検索中の1語のクラッシュが走行全体を殺し、 それまでの検索成果が
+      全部埋もれていた反省。 B-20261015-022)。
+
+    on_new_urls(new_urls, keyword) -> bool: 1 語の検索が終わるたびに、 その語で**新たに**
+      見つかった URL (dedup後) を渡す。 呼出側はここで即detail+Visionまで進められる。
+      True を返すと検索自体もそこで止める (= 残りの語は検索しない)。
+    should_pause() -> bool: 次の語を検索する**前**に見る。 True なら検索をそこで止める
+      (2026-10-17 HQ依頼 №610: 打ち切った後も残り全語の検索が回り、 時間が減らない反省。
+      detail+Vision側の打ち切りと検索側を1つの判定でつなげる)。
+    Returns: {"urls": list[str] (dedup済), "by_keyword": {kw: 件数}, "total_raw": int,
+              "crashed_keywords": list[str], "stopped_early": bool}
     """
     merged: list[str] = list(resume_urls or [])
     seen: set[str] = set(merged)
     by_keyword: dict[str, int] = dict(resume_by_keyword or {})
     total_raw = 0
     searched = 0
+    crashed_keywords: list[str] = []
+    stopped_early = False
     for kw in keywords:
         if kw in by_keyword:
             continue
+        if should_pause is not None and should_pause():
+            stopped_early = True
+            break
         if searched and sleep_between_sec > 0:
             time.sleep(sleep_between_sec)
         searched += 1
-        r = collect_search_listing_urls(
-            kw, driver, price_min=price_min, price_max=price_max,
-            cap=cap_per_keyword, manual=manual,
-            shipping_payer_id=shipping_payer_id,
-            item_condition_ids=item_condition_ids,
-            progress_callback=progress_callback,
-        )
+        try:
+            r = collect_search_listing_urls(
+                kw, driver, price_min=price_min, price_max=price_max,
+                cap=cap_per_keyword, manual=manual,
+                shipping_payer_id=shipping_payer_id,
+                item_condition_ids=item_condition_ids,
+                progress_callback=progress_callback,
+            )
+        except Exception as e:  # noqa: BLE001 - 1語のクラッシュで走行全体を殺さない (2026-10-16)
+            crashed_keywords.append(kw)
+            if progress_callback:
+                try:
+                    progress_callback(0, f"keyword={kw!r}: 検索で落ちた ({type(e).__name__}) → 飛ばす")
+                except Exception:
+                    pass
+            if driver_factory is None:
+                raise
+            try:
+                driver.quit()
+            except Exception:
+                pass
+            driver = driver_factory()
+            continue
         added = 0
+        new_list: list[str] = []
         for u in r["urls"]:
             total_raw += 1
             if u in seen:
                 continue
             seen.add(u)
             merged.append(u)
+            new_list.append(u)
             added += 1
         by_keyword[kw] = added
         if on_keyword_done:
             on_keyword_done(merged, by_keyword)
-    return {"urls": merged, "by_keyword": by_keyword, "total_raw": total_raw}
+        if on_new_urls and new_list:
+            if on_new_urls(new_list, kw):
+                stopped_early = True
+                break
+    return {"urls": merged, "by_keyword": by_keyword, "total_raw": total_raw,
+            "crashed_keywords": crashed_keywords, "stopped_early": stopped_early}

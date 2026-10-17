@@ -37,6 +37,9 @@ def _stub_everything(monkeypatch, tmp_path):
                         lambda: types.SimpleNamespace(close=lambda: None))
     monkeypatch.setattr(run_marker, "mark_started", lambda *a, **k: None)
     monkeypatch.setattr(run_marker, "mark_finished", lambda *a, **k: None)
+    # ★既定は「前回クラッシュの印は無い」。 実機の debug/treasure_running.flag を読みに
+    # 行かせない (2026-10-17 自動再開機能を足した時のテスト汚染防止)
+    monkeypatch.setattr(run_marker, "check_stale", lambda *a, **k: None)
     monkeypatch.setattr(chrome_util, "kill_chrome_for_profile", lambda *a, **k: None)
     monkeypatch.setattr(chrome_util, "kill_orphan_chromedriver", lambda *a, **k: None)
     monkeypatch.setattr(R, "append_treasure_items", lambda items, known_keys=None: {
@@ -82,6 +85,68 @@ def test_leftover_written_when_truncated(monkeypatch, tmp_path):
     # 1語目(最も売れた数が多い語)だけ回った扱い、残り5語は次回に積まれる
     assert len(saved["keywords"]) == 5
     assert "PSA10 多い方" not in saved["keywords"]
+
+
+def test_search_crashed_keywords_go_to_leftover_front(monkeypatch, tmp_path):
+    """🥕2026-10-16 HQ依頼: 検索で落ちた語は『回した語』から外し、残した語の先頭に積む."""
+    def _fake_collect(args, **kw):
+        kws = list(args.keywords)
+        by_keyword = {k: 5 for k in kws if k != "PSA10 多い方"}
+        return {"candidates": [], "unreadable": [], "by_keyword": by_keyword,
+                "processed_urls": ["u"] * 10, "truncated": False,
+                "search_crashed_keywords": ["PSA10 多い方"]}
+
+    monkeypatch.setattr(psa10, "collect", _fake_collect)
+    leftover_path = R.LEFTOVER_PATH
+    R.main(["--dry-run"])
+
+    saved = json.loads(leftover_path.read_text(encoding="utf-8"))
+    assert saved["keywords"][0] == "PSA10 多い方"
+
+
+def test_auto_resume_from_stale_marker_without_manual_flag(monkeypatch, tmp_path):
+    """🥕2026-10-17 HQ依頼④: PCが落ちたら --resume-from-json を手で打たなくても
+    次回の起動が印(treasure_running.flag)を見て自動で続きから入る."""
+    stale_dump = tmp_path / "crashed.json"
+    stale_dump.write_text(json.dumps({
+        "candidates": [], "unreadable": [], "collect_reject": {},
+        "processed_urls": [], "truncated": False,
+        "by_keyword": {"PSA10 多い方": 5}, "collected_urls": [],
+    }), encoding="utf-8")
+    monkeypatch.setattr(run_marker, "check_stale",
+                        lambda *a, **k: {"dump_path": str(stale_dump)})
+
+    seen = {}
+
+    def _fake_collect(args, dump_path=None, resume=None, **kw):
+        seen["dump_path"] = dump_path
+        seen["resume"] = resume
+        return {"candidates": [], "unreadable": [], "by_keyword": {}, "processed_urls": [],
+                "truncated": False}
+
+    monkeypatch.setattr(psa10, "collect", _fake_collect)
+    R.main(["--dry-run"])
+
+    assert seen["dump_path"] == stale_dump
+    assert seen["resume"]["by_keyword"] == {"PSA10 多い方": 5}
+
+
+def test_no_auto_resume_when_marker_dump_missing(monkeypatch, tmp_path):
+    """印はあるが dump ファイル自体が無い (消えた等) 時は、最初から走る (壊れた参照で落ちない)."""
+    monkeypatch.setattr(run_marker, "check_stale",
+                        lambda *a, **k: {"dump_path": str(tmp_path / "does_not_exist.json")})
+
+    seen = {}
+
+    def _fake_collect(args, dump_path=None, resume=None, **kw):
+        seen["resume"] = resume
+        return {"candidates": [], "unreadable": [], "by_keyword": {}, "processed_urls": [],
+                "truncated": False}
+
+    monkeypatch.setattr(psa10, "collect", _fake_collect)
+    R.main(["--dry-run"])
+
+    assert seen["resume"] is None
 
 
 def test_leftover_reused_at_front_next_run(monkeypatch, tmp_path):
