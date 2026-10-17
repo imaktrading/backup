@@ -1071,9 +1071,22 @@ document.getElementById('eucty').addEventListener('change', render);
         + '<b>0件とは限りません</b></span>';
     return;
   }
+  /* ★2026-10-18 ユーザー「タイトルだと見切れているし、分かりづらいね。カード番号とかの方がいいかも」:
+     「PSA 10 Pokemon Japanese S-P: Sword & Shield Promos #024/S-P Pikachu Promo …」→「S-P #024/S-P Pikachu」。
+     弾 (Japanese の後ろ〜コロン)・番号 (#…)・番号の後ろのカード名 (Promo/Holo/年 などの手前まで)。読めなければタイトルの頭 */
+  function cardLabel(t) {
+    t = t || '';
+    var num = (t.match(/#(\S+)/) || [])[1] || '';
+    var set = (t.match(/Japanese\s+([^:#]+?):/) || [])[1] || (t.match(/Japanese\s+(.+?)\s+#/) || [])[1] || '';
+    var after = num ? t.split('#' + num)[1] || '' : '';
+    var name = after.replace(/^\s+/, '').split(/\s+(?:Promo|Holo|Full|Art|Triple|Gem|Card|Rare|Secret|Special|Reverse|SAR|SR|AR|UR|RR|RRR|HR|CHR|PSA|Japanese|\d{4})(?=\s|$)/i)[0];
+    name = name.split(/\s+/).slice(0, 4).join(' ');
+    if (!num) return t.slice(0, 38);
+    return (set ? set.replace(/\s+/g, ' ').trim() + ' ' : '') + '#' + num + (name ? ' ' + name : '');
+  }
   const sel = document.getElementById('offersel');
   P.offers.forEach((o, i) => sel.add(new Option(
-    `${o.sym}${o.price}  ${o.title.slice(0,44)}  (${o.destLabel}／期限 ${o.expire}）`, i)));
+    `${o.sym}${o.price}  ${cardLabel(o.title)}  (${o.destLabel}／期限 ${o.expire}）`, i)));
 
   /* ★2026-10-04 ユーザー「少し使いづらい。V9スプシでやっているのが実態」。
      1件ずつ選ぶ形だと複数件を比べられず、出品価格のままの利益 (9行目) も見えなかった。
@@ -1113,7 +1126,7 @@ document.getElementById('eucty').addEventListener('change', render);
       var r = calc(o.price, ov);
       var has = (+o.supply || 0) > 0;
       return '<tr class="orow ' + (has ? 'warn' : 'ng') + '" data-i="' + i + '">'
-        + '<td>' + (o.title || '').slice(0, 38) + '<br><span style="color:#888;font-size:11px">'
+        + '<td title="' + (o.title || '').replace(/"/g, '') + '"><b>' + cardLabel(o.title) + '</b><br><span style="color:#888;font-size:11px">'
           + o.destLabel + '／期限 ' + o.expire + '／' + o.buyer + '</span></td>'
         + '<td><b>' + o.sym + (+o.price).toFixed(2) + '</b></td>'
         + '<td>' + (o.cost ? yen(r.profit) : '—') + '<br><span style="color:#888;font-size:11px">仕入値 '
@@ -1139,7 +1152,7 @@ document.getElementById('eucty').addEventListener('change', render);
       var nocost = !o.cost;
       return '<tr class="orow ' + cls + '" data-i="' + i + '">'
         + '<td title="' + (o.title || '').replace(/"/g, '') + '">'
-          + (o.title || '').slice(0, 38) + '<br><span style="color:#888;font-size:11px">'
+          + '<b>' + cardLabel(o.title) + '</b><br><span style="color:#888;font-size:11px">'
           + o.destLabel + '／期限 ' + o.expire + '／' + o.buyer + '</span></td>'
         + '<td><b>' + o.sym + (+o.price).toFixed(2) + '</b></td>'
         + '<td>' + (nocost ? '<span style="color:#f88">—</span>' : yen(r.profit)) + '</td>'
