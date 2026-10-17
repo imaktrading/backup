@@ -2093,9 +2093,9 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by
         _emit_stats = {}
         emitted = _pdca.emit_consolidated_request(con, project, CATALOG_REQ_DIR, ts, held_out=held,
                                                   verify_fn=_verify, stats=_emit_stats)
-        if _emit_stats.get("verified_closed") or _emit_stats.get("folded"):
-            print(f"  🔁 発行前 読み直しclose {_emit_stats.get('verified_closed', 0)} 件 / "
-                  f"重複畳み {_emit_stats.get('folded', 0)} 件")
+        # ★2026-10-17 (B-20261017-012): 0件でも母数と一緒に出す (済んだ行が載り続けても気づけなかった)
+        print(f"  🔁 発行前の見直しで済んでいた {_emit_stats.get('verified_closed', 0)}件 / "
+              f"見直した {_emit_stats.get('checked', 0)}件のうち (重複畳み {_emit_stats.get('folded', 0)}件)")
         con.commit()
         con.close()
         # 送らなかった分は毎回全件を残件リストに再掲 (黙って落とさない)。

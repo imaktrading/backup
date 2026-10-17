@@ -218,7 +218,7 @@ def test_emit_closes_verified_rows_and_folds_duplicates(tmp_path):
     n = ps.emit_consolidated_request(
         con, "tcg", str(tmp_path), "2026-08-28",
         verify_fn=lambda r: ps.cert_number(r["item_id"]) == "155040105", stats=stats)
-    assert stats == {"verified_closed": 1, "folded": 0}, "解決済1件を閉じる"
+    assert stats == {"verified_closed": 1, "checked": 2, "folded": 0}, "解決済1件を閉じる (見直した母数も持つ・2026-10-17)"
     assert n == 1, "残るのは DON!! の1件 (dkey で既に1行に畳まれている)"
     body = (tmp_path / "2026-08-28_pdca_catalog_queue_tcg.md").read_text(encoding="utf-8")
     assert "cert155040105" not in body, "当日 catalog に在ると分かった行は送らない"

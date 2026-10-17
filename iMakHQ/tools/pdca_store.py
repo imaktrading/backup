@@ -582,12 +582,14 @@ def prune_stale_findings(con, today, max_age_days=21, sources=None):
 #   (例: "OP12-034 psa10 ペローナ SR [OP12-034](プロモ…)") で、resolver は product_id の
 #   完全一致しか見ていなかったため永久に外れる。実測: OP12-034 も CLF-001 も catalog に実在。
 #   → 突合用の候補を **文字列から取り出してから**照合する。
-_SETCODE_RE = _re.compile(r"\b([A-Z]{1,4}\d{1,2}[a-z]?-\d{1,4})\b", _re.I)
+# ★2026-10-17 (B-20261017-012): 英字の後の数字を任意に。CLF-016 / CLF-007 (英字-番号) が取れず、画像を入れた後も
+#   発行前の見直しが空振りして翌日また層Aに載った
+_SETCODE_RE = _re.compile(r"\b([A-Z]{1,4}\d{0,2}[a-z]?-\d{1,4})\b", _re.I)
 # ★2026-08-28: 変種つき product_id (`ST17-004_p1` `OP12-079_AN03`)。`_SETCODE_RE` は
 #   末尾 `\b` が `_` の前で成立せず **1件も拾えなかった**。queue の evidence/identity には
 #   候補 pid がそのまま書いてあるのに、resolver がそれを見ていなかった
 #   (実測: `('one_piece_tcg','cert155040105')` → False で永久に auto-close されない)。
-_PID_VARIANT_RE = _re.compile(r"\b([A-Z]{1,4}\d{1,2}[a-z]?-\d{1,4}(?:_[A-Za-z0-9]+)+)", _re.I)
+_PID_VARIANT_RE = _re.compile(r"\b([A-Z]{1,4}\d{0,2}[a-z]?-\d{1,4}(?:_[A-Za-z0-9]+)+)", _re.I)
 _PRINTNO_RE = _re.compile(r"\b(\d{2,3}/[A-Z0-9\-]{2,6})\b", _re.I)
 # ★2026-09-08 (提案1): 旧 regex は **数字のあとに英字が付く型**を拾えないだけでなく，
 #   `ST01` `OP09` `EB01` のような **2桁数字**も拾えていなかった
@@ -1003,6 +1005,7 @@ def emit_consolidated_request(con, category, out_dir, today, held_out=None, veri
     #   走行の頭で作った判定のまま送ると「もう在るもの」を聞くことになる。
     #   依頼書: hq/requests/2026-08-28_catalog_pdca_requeue_closed_items.md (3)
     _closed = 0
+    _checked = len(pend_all) if verify_fn is not None else 0
     if verify_fn is not None:
         _fresh = []
         for r in pend_all:
@@ -1020,6 +1023,7 @@ def emit_consolidated_request(con, category, out_dir, today, held_out=None, veri
     pend_all, _folded = dedupe_queue_items(pend_all)
     if stats is not None:
         stats["verified_closed"] = _closed
+        stats["checked"] = _checked
         stats["folded"] = _folded
     # identity 未解決 (出品IDのみ) は送らない = Catalog が着手不能な依頼を積まない。
     # 落とした分は held_out で呼出側へ返し、残件リストに毎回再掲する (silent drop 禁止)。
