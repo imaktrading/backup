@@ -181,7 +181,12 @@ def main(argv):
         # ★2026-10-05 ユーザー「200追加して」: 一度に全部 (3,474行) 入れると新規の目視が溢れるので件数で区切る。
         #   入れる前にメルカリで今も買えるかを確かめ、買える物だけを上から lim 件 (10/5 の抜き取りで 9割が買えた)
         _sold = []
-        add, skipped = pick_buyable(add, lim, sold_rows=_sold)
+        if "--no-check" in argv:
+            # ★2026-10-17 ユーザー「それは監視くんに任せたらいいのでは？」: 売り切れは HIGH に入れば監視くんが見るので、
+            #   ここでメルカリに1件ずつ聞かない。上から lim 件をそのまま足す
+            add, skipped = add[:lim], 0
+        else:
+            add, skipped = pick_buyable(add, lim, sold_rows=_sold)
         for i in _sold:
             n["flags"][i] = "候補外: 売り切れ"
         allowed = {i for i, _r in add}
