@@ -894,12 +894,17 @@
   // ★2026-09-18 ユーザー要望: ログをコピーすると走行が3本ぶん入ってしまう。
   //   欲しいのは **直前の1本だけ**。走行の始まりは「▶ 」で始まる行なので、
   //   最後の「▶ 」より前を消す / コピーもそこから下だけにする。
+  // ★2026-10-17 ユーザー「神風での走行ログのコピーボタンがちゃんと取れているか」: PSA 自動などは走行の途中にも
+  //   「▶ post_no_go_sentinel …」の段の行が出るので、最後の段だけしか写っていなかった。
+  //   走行の始まりの行は server.py が「▶ <名前>  版 <版>  (<命令>)」と書くので、それを先に探す (無ければ従来どおり ▶)
   function lastRunStart() {
-    var kids = $("log").childNodes;
+    var kids = $("log").childNodes, any = -1;
     for (var i = kids.length - 1; i >= 0; i--) {
-      if (/^▶/.test(kids[i].textContent || "")) return i;
+      var t = kids[i].textContent || "";
+      if (/^▶ .*  版 /.test(t)) return i;
+      if (any < 0 && /^▶/.test(t)) any = i;
     }
-    return -1;
+    return any;
   }
   function lastRunText() {
     var kids = $("log").childNodes, from = lastRunStart();
