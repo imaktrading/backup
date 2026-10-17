@@ -527,7 +527,10 @@ def render(plan, ms, mv, ai_text, ai_yen, ai_err, today, hv=None, of=None, ev=No
     out.append(f'<div class="small">月末の見込み {yen(ms["projection"])} で '
                f'<span class="{"up" if on_pace else "down"}">{"届くペース" if on_pace else "届かないペース"}</span>'
                f' (今月の分 + 残り{ms["remain"]}日 × 直近3か月の1日平均 {yen(ms["daily_avg"])}) ・ 1日 {yen(ms["need_day"])} 必要'
-               f' ・ 先月 {yen(ms["prev_profit"])} ・ 次の目標 月 {yen(plan["next_goal_profit_jpy"])}</div>')
+               f' ・ 先月 {yen(ms["prev_profit"])} ・ 次の目標 月 {yen(plan["next_goal_profit_jpy"])}'
+               # ★2026-10-17 ユーザー「来年４月には３０マン達成したいな」
+               + (f' ・ <b>{e(plan["long_goal_by"])} に 月 {yen(plan["long_goal_profit_jpy"])}</b>'
+                  if plan.get("long_goal_profit_jpy") and plan.get("long_goal_by") else "") + '</div>')
     for p in plan["pillars"]:
         out.append(f'<div class="o"><div class="oh"><span class="on">{p["no"]}</span>{e(p["name"])}</div>'
                    f'<div class="od">{e(p["desc"])}</div>')
