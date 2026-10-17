@@ -59,6 +59,20 @@ DUMP_DIR = ROOT / "debug"
 # 0523ea3a で参照だけ入って定義が無く、読めない出品に当たるたび NameError で落ちていた
 SKIP_UNREADABLE = True
 
+# ★2026-10-18 HQ依頼 (B-20261018-001): 10/17夜、Anthropicの残高切れが22:18に起きた後も
+# 「不鮮明」と同列に1件ずつ失敗扱いにして7時間半空回りした (1,955件課金エラー)。
+# 残高切れ・請求系の障害は検出した瞬間に走行全体を止める (他の vision_error とは別扱い)。
+_CREDIT_ERROR_SIGNATURES = ("credit balance", "insufficient_quota", "billing")
+
+
+class CreditExhaustedError(RuntimeError):
+    """有料APIの残高切れ等、 待っても直らない障害 (= 即座に走行を止める)."""
+
+
+def _is_credit_error(err: str) -> bool:
+    e = (err or "").lower()
+    return any(sig in e for sig in _CREDIT_ERROR_SIGNATURES)
+
 
 # Windows の既定コンソールは cp932。 収集も書込も終わった後に ログ 1 行の
 # UnicodeEncodeError で落ちると、 何件通ったのか分からなくなる (2026-08-17 に発生)。
@@ -102,7 +116,7 @@ def retry_urls_from(payload: dict, exclude: set | None = None) -> list[str]:
 
 def collect(args, dump_path=None, resume=None, urls_override=None,
             on_flush=None, should_pause=None, detail_fn=None, claimed=None,
-            collect_dropped=False, skip_urls=None) -> dict:
+            collect_dropped=False, skip_urls=None, pre_vision_excluded=None) -> dict:
     """収集 → 詳細 → Vision。
 
     ★途中で落ちても作業を捨てない (2026-08-17 の事故対策)。
@@ -133,6 +147,11 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
     **前**に飛ばす (2026-10-11 HQ依頼: 中間スプシ[トレジャー/キャラ]に既にある URL を
     回し直しで読み直していた反省。 呼出側が `load_keys_all_tabs` 等で取った既存キーを渡す)。
     `rej["already_in_sheet"]` で件数が残る (0件でも表示する)。
+
+    `pre_vision_excluded`: `set[str]` (URL そのもの) を渡すと、 **前回までに写真を読んで
+    対象外と確定した**分を同じ場所で飛ばす (`rej["previously_rejected"]`。 2026-10-18 HQ依頼
+    B-20261017-007追記②: 残高切れ等の障害 `vision_error` はこの控えに入れていないので
+    除外されない。 呼出側が永続キャッシュを読んで渡す)。
     """
     keywords = args.keywords or psa_search_terms.build_keywords(args.games)
     # 需要実証済 (ファネル分析 RESTOCK = 在庫切れ ∩ 需要あり) のカードを検索語に足す。
@@ -178,8 +197,12 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                       "fetch_fail": 0, "no_image": 0, "cert_unreadable": 0,
                       "vision_error": 0, "already_claimed_url": 0,
                       "already_claimed_cert": 0, "item_error": 0, "auction": 0,
-                      "already_in_sheet": 0}
+                      "already_in_sheet": 0, "previously_rejected": 0}
     vision_errors: list[str] = []
+    # ★2026-10-18 HQ依頼 (B-20261017-007追記②): 写真を読んだ後に対象外と確定した分の
+    # 控え (残高切れ等の障害は入れない)。 常時収集 (軽量: url→理由のみ)
+    post_vision_rejected: dict[str, str] = {}
+    pre_vision_excluded = set(pre_vision_excluded or ())
     # ★2026-10-17 HQ依頼 (B-20261017-007): 今月すでに使った分 (他走行含む) を先に測っておく。
     # `_process_one` は args 経由でこの値を見る (呼出の度に CSV を読み直さないため一度だけ計算)。
     monthly_cap = getattr(args, "monthly_cap_usd", 0) or 0
@@ -211,6 +234,7 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
             vision_usage[k] = vision_usage.get(k, 0) + v
         if dropped is not None:
             dropped.update(resume.get("dropped") or {})
+        post_vision_rejected.update(resume.get("post_vision_rejected") or {})
         search_crashed = list(resume.get("search_crashed_keywords") or [])
         _log(f"再開: 処理済 {len(done_urls)} URL / 既存候補 {len(cands)} 件 / "
              f"収集済の検索語 {len(by_keyword)} 語")
@@ -228,7 +252,8 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                "vision_errors": sorted(set(vision_errors)),
                "processed_urls": processed, "truncated": state["truncated"],
                "by_keyword": by_keyword, "collected_urls": state["urls"],
-               "vision_usage": vision_usage, "search_crashed_keywords": search_crashed}
+               "vision_usage": vision_usage, "search_crashed_keywords": search_crashed,
+               "post_vision_rejected": post_vision_rejected}
         if dropped is not None:
             payload["dropped"] = dropped
         _dump(payload, dump_path, quiet=True)
@@ -263,11 +288,26 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
                 rej["already_in_sheet"] += 1
                 processed.append(url)
                 continue
+            if pre_vision_excluded and url in pre_vision_excluded:
+                rej["previously_rejected"] += 1
+                processed.append(url)
+                continue
             try:
                 kept = _process_one(url, _get_driver, args, claimed, rej, vision_errors,
                                     failed=failed_urls, detail_fn=detail_fn, usage=vision_usage,
-                                    dropped=dropped)
+                                    dropped=dropped, post_vision_rejected=post_vision_rejected)
                 consecutive_errors_box[0] = 0
+            except CreditExhaustedError as e:
+                # ★2026-10-18 HQ依頼 (B-20261018-001): 待っても直らない障害。
+                # 1件の失敗として続けず、 その場で走行全体を止める (検索も残りはしない)。
+                # 止まった URL は failed_urls に残す (= --retry-failed-from-json で
+                # 残高を足した後にそのまま拾い直せる。 検索し直さなくて済む)
+                state["truncated"] = True
+                failed_urls.append(url)
+                _log(f"⛔ 有料APIの残高切れで止めた ({len(processed) + 1}件目・"
+                     f"写真読み{vision_usage.get('calls', 0)}件目): {e}")
+                _save()
+                return True
             except Exception as e:  # noqa: BLE001 - 1 件の失敗で走行全体を殺さない
                 rej["item_error"] += 1
                 failed_urls.append(url)
@@ -401,12 +441,15 @@ def collect(args, dump_path=None, resume=None, urls_override=None,
     _log(f"💰 写真読み: 読んだ{vision_usage.get('calls', 0)}件 / "
          f"読む前に外した{sum(rej.values())}件 (理由別={rej}) / "
          f"この回${run_cost:.2f} / 今月累計${mtd_total:.2f}")
+    _log(f"📘 写真を読んだ後に外した控え: {len(post_vision_rejected)}件 "
+         f"(次回は写真の前に除外・残高切れ等の障害は含まない)")
     result = {"candidates": cands, "unreadable": unreadable, "collect_reject": rej,
             "failed_urls": failed_urls,
             "vision_errors": sorted(set(vision_errors)),
             "processed_urls": processed, "truncated": state["truncated"],
             "by_keyword": by_keyword, "vision_usage": vision_usage,
-            "search_crashed_keywords": search_crashed}
+            "search_crashed_keywords": search_crashed,
+            "post_vision_rejected": post_vision_rejected}
     if dropped is not None:
         result["dropped"] = dropped
         _log(f"🥕 候補外も残した: {len(dropped)}件 (理由付き・捨てていない)")
@@ -514,7 +557,7 @@ def _record_dropped(dropped, url, reason, detail=None):
 
 
 def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=None, detail_fn=None,
-                  usage=None, dropped=None):
+                  usage=None, dropped=None, post_vision_rejected=None):
     """1 件を判定して 候補 dict を返す (対象外なら None)。 例外は呼出側で捕まえる.
 
     driver_getter: 呼ぶと Chrome driver を返す callable (未起動なら起動する。 lazy)。
@@ -525,6 +568,9 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
     failed: 取得できなかった URL を貯めるリスト (= 未判定。 件数だけでなく URL を残す)。
     dropped: {url: {...}} を渡すと、 候補にしなかった理由を捨てずに積む
     (2026-10-07 HQ依頼 🥕「拾った物は捨てない」)。
+    post_vision_rejected: {url: reason} を渡すと、 **写真を実際に読んだ後に**対象外と
+    分かった分だけを積む (= 残高切れ等の障害 `vision_error` は入れない。 次回は写真の前に
+    除外できる控えにする。 2026-10-18 HQ依頼 B-20261017-007追記②)。
     """
     detail = None
     q = None
@@ -641,7 +687,11 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
         usage["input_tokens"] = usage.get("input_tokens", 0) + (vision.get("input_tokens") or 0)
         usage["output_tokens"] = usage.get("output_tokens", 0) + (vision.get("output_tokens") or 0)
     if vision.get("error"):
-        # こちらの障害 (残高切れ / rate limit 等)。 出品しない点は同じだが、
+        # ★2026-10-18 HQ依頼 (B-20261018-001): 残高切れ・請求系は待っても直らない。
+        # 「不鮮明」1件の失敗として流さず、 その場で走行全体を止める (呼出側が捕まえる)
+        if _is_credit_error(vision["error"]):
+            raise CreditExhaustedError(vision["error"])
+        # こちらの障害 (rate limit 等)。 出品しない点は同じだが、
         # 黙って「不鮮明」に混ぜず 障害として最後に報告する
         rej["vision_error"] += 1
         vision_errors.append(vision["error"])
@@ -661,10 +711,14 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
                                                    label=vision.get("label") or ""):
                 rej["not_psa10_listing"] = rej.get("not_psa10_listing", 0) + 1
                 _record_dropped(dropped, url, "not_psa10_listing", detail)
+                if post_vision_rejected is not None:
+                    post_vision_rejected[url] = "not_psa10_listing"
                 return None
             return _build_candidate(url, detail, q, images, vision,
                                     cert_readable=False)
         _record_dropped(dropped, url, key, detail)
+        if post_vision_rejected is not None:
+            post_vision_rejected[url] = key
         return None
     # 同じ現物が別 URL で再出品されている場合は URL 突合では捕まらない。
     # cert は現物 1 枚に 1 つなので、 既知なら二重に押さえない
@@ -673,6 +727,8 @@ def _process_one(url, driver_getter, args, claimed, rej, vision_errors, failed=N
                                            grade=vision.get("grade") or ""):
         rej["not_psa10_listing"] = rej.get("not_psa10_listing", 0) + 1
         _record_dropped(dropped, url, "not_psa10_listing", detail)
+        if post_vision_rejected is not None:
+            post_vision_rejected[url] = "not_psa10_listing"
         return None
     if vision["cert"] in claimed["certs"]:
         rej["already_claimed_cert"] += 1

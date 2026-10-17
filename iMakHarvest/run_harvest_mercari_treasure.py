@@ -322,6 +322,12 @@ def _run(args) -> int:
     except Exception as e:  # noqa: BLE001 - 読めなくても収集は続ける
         _log(f"⚠️ 既存キーを読めず (途中書込は自タブ dedupe のみ): {type(e).__name__}")
 
+    # ★2026-10-18 HQ依頼 (B-20261017-007追記②): 前回までに写真を読んで対象外と確定した
+    # URL は、 今回は写真の前に外す (トレハン・キャラハン共有の控え)
+    from scrapers import vision_reject_cache  # noqa: PLC0415
+    pre_vision_excluded = vision_reject_cache.load_url_set()
+    _log(f"写真読み済の控え (対象外確定): {len(pre_vision_excluded)} 件 → 今回は読む前に外す")
+
     def _flush(new_cands, new_unreadable):
         """走行中の途中書込。 スプシ側のエラーで走行を殺さない
         (書けなかった分は written に入らないので最終書込で拾い直される)。
@@ -372,9 +378,14 @@ def _run(args) -> int:
         payload = psa10.collect(treasure_args, dump_path=dump_path, resume=resume,
                                 on_flush=_flush, urls_override=urls_override, detail_fn=_detail_fn,
                                 collect_dropped=collect_dropped, skip_urls=known,
+                                pre_vision_excluded=pre_vision_excluded,
                                 should_pause=_should_pause if args.max_candidates else None)
     finally:
         api_client.close()
+
+    new_post_vision = payload.get("post_vision_rejected") or {}
+    added_n = vision_reject_cache.merge_and_save(new_post_vision)
+    _log(f"写真を読んだ後に外した控えへ追加: {added_n} 件 (累計 {len(pre_vision_excluded) + added_n} 件)")
 
     kept = payload["candidates"]
     unreadable = payload.get("unreadable") or []
